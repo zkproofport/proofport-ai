@@ -13,3 +13,9 @@ coverage/
 
 # Docker
 .dockerignore
+
+# Rust prover (unused, bb CLI used instead)
+prover/
+
+# OMC state
+.omc/
