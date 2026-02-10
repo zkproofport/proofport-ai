@@ -1,0 +1,39 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: proofport-ai-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  ai:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: proofport-ai
+    ports:
+      - "4002:4002"
+    env_file:
+      - .env.development
+    environment:
+      REDIS_URL: redis://redis:6379
+      BB_PATH: /usr/local/bin/bb-wrapper
+      NARGO_PATH: /usr/local/bin/nargo
+      CIRCUITS_DIR: /app/circuits
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://0.0.0.0:4002/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  redis_data:
