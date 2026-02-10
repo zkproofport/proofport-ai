@@ -1,0 +1,26 @@
+export const COINBASE_ATTESTER_CONTRACT = '0x357458739F90461b99789350868CD7CF330Dd7EE';
+
+export const AUTHORIZED_SIGNERS = [
+  '0x952f32128AF084422539C4Ff96df5C525322E564',
+  '0x8844591D47F17bcA6F5dF8f6B64F4a739F1C0080',
+  '0x88fe64ea2e121f49bb77abea6c0a45e93638c3c5',
+  '0x44ace9abb148e8412ac4492e9a1ae6bd88226803',
+];
+
+export const VERIFIER_ADDRESSES: Record<string, Record<string, string>> = {
+  '84532': {
+    coinbase_attestation: '0x0036B61dBFaB8f3CfEEF77dD5D45F7EFBFE2035c',
+    coinbase_country_attestation: '0xdEe363585926c3c28327Efd1eDd01cf4559738cf',
+  },
+};
+
+export const ERC8004_ADDRESSES = {
+  mainnet: {
+    identity: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
+    reputation: '0x8004BAa17C55a88189AE136b182e5fdA19dE9b63',
+  },
+  sepolia: {
+    identity: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
+    reputation: '0x8004B663056A597Dffe9eCcC1965A193B7388713',
+  },
+};
