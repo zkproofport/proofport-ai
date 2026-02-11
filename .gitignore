@@ -3,6 +3,8 @@ dist/
 *.log
 .env
 .env.local
+.env.staging
+.env.production
 .DS_Store
 coverage/
 .vscode/
