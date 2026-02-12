@@ -25,7 +25,7 @@ export type AgentCard = {
     erc8004: {
       contractAddress: string;
       chainId: number;
-      tokenId: bigint | null;
+      tokenId: string | null;
     };
   };
 };
@@ -88,7 +88,7 @@ export function buildAgentCard(config: Config, tokenId?: bigint | null): AgentCa
       erc8004: {
         contractAddress: erc8004Identity,
         chainId,
-        tokenId: tokenId ?? null,
+        tokenId: tokenId !== null && tokenId !== undefined ? tokenId.toString() : null,
       },
     },
   };
