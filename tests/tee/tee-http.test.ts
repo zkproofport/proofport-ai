@@ -78,28 +78,20 @@ describe('TEE HTTP Endpoint', () => {
   });
 
   describe('TEE mode variations', () => {
-    it('should reflect TEE_MODE from environment', async () => {
+    it('should reflect TEE_MODE from environment', () => {
       const originalMode = process.env.TEE_MODE;
       process.env.TEE_MODE = 'local';
 
       const config2 = getTeeConfig();
 
-      const testApp = express();
-      testApp.get('/tee/status', (_req, res) => {
-        res.json({
-          mode: config2.mode,
-          attestationEnabled: config2.attestationEnabled,
-          available: config2.mode !== 'disabled',
-        });
-      });
+      expect(config2.mode).toBe('local');
 
-      const response = await request(testApp).get('/tee/status');
-
-      expect(response.status).toBe(200);
-      expect(response.body.mode).toBe('local');
-      expect(response.body.available).toBe(true);
-
-      process.env.TEE_MODE = originalMode;
+      // Restore
+      if (originalMode !== undefined) {
+        process.env.TEE_MODE = originalMode;
+      } else {
+        delete process.env.TEE_MODE;
+      }
     });
   });
 });

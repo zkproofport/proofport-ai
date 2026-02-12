@@ -3,11 +3,52 @@
  * Tests the Express app /tee/status endpoint
  */
 
-import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
 import { createApp } from '../../src/index.js';
 import type { Config } from '../../src/config/index.js';
+
+// Mock ioredis
+vi.mock('ioredis', () => {
+  const mockRedis = {
+    get: vi.fn().mockResolvedValue(null),
+    set: vi.fn().mockResolvedValue('OK'),
+    del: vi.fn().mockResolvedValue(1),
+    rpop: vi.fn().mockResolvedValue(null),
+    rpush: vi.fn().mockResolvedValue(1),
+    incr: vi.fn().mockResolvedValue(1),
+    expire: vi.fn().mockResolvedValue(1),
+    quit: vi.fn().mockResolvedValue('OK'),
+    status: 'ready',
+  };
+  return { default: vi.fn(() => mockRedis), Redis: vi.fn(() => mockRedis) };
+});
+
+// Mock ethers
+vi.mock('ethers', () => ({
+  ethers: {
+    JsonRpcProvider: vi.fn().mockImplementation(() => ({})),
+    Wallet: vi.fn().mockImplementation(() => ({ address: '0x' + '11'.repeat(20) })),
+    Contract: vi.fn().mockImplementation(() => ({})),
+    hexlify: vi.fn((b: any) => '0x00'),
+    encodeBytes32String: vi.fn((s: string) => '0x00'),
+  },
+}));
+
+// Mock circuit artifact manager
+vi.mock('../../src/circuit/artifactManager.js', () => ({
+  ensureArtifacts: vi.fn().mockResolvedValue(undefined),
+}));
+
+// Mock identity
+vi.mock('../../src/identity/autoRegister.js', () => ({
+  ensureAgentRegistered: vi.fn().mockResolvedValue(null),
+}));
+
+vi.mock('../../src/identity/reputation.js', () => ({
+  handleProofCompleted: vi.fn().mockResolvedValue(undefined),
+}));
 
 function makeTestConfig(overrides: Partial<Config> = {}): Config {
   return {
@@ -41,6 +82,10 @@ function makeTestConfig(overrides: Partial<Config> = {}): Config {
     teeAttestationEnabled: false,
     erc8004IdentityAddress: '',
     erc8004ReputationAddress: '',
+    settlementChainRpcUrl: '',
+    settlementPrivateKey: '',
+    settlementOperatorAddress: '',
+    settlementUsdcAddress: '',
     ...overrides,
   };
 }
