@@ -7,6 +7,7 @@ import { ethers } from 'ethers';
 import { CIRCUITS } from '../config/circuits.js';
 import { VERIFIER_ADDRESSES } from '../config/contracts.js';
 import { handleProofCompleted } from '../identity/reputation.js';
+import type { TeeProvider } from '../tee/types.js';
 
 export class TaskWorker {
   private intervalId: NodeJS.Timeout | null = null;
@@ -17,6 +18,7 @@ export class TaskWorker {
       taskStore: TaskStore;
       taskEventEmitter: TaskEventEmitter;
       config: Config;
+      teeProvider?: TeeProvider;
     }
   ) {}
 
@@ -137,19 +139,49 @@ export class TaskWorker {
       rpcUrls
     );
 
-    this.deps.taskEventEmitter.emitTaskProgress(
-      task.id,
-      'generating_proof',
-      'Running bb prove'
-    );
+    // Choose proof generation path based on TEE mode
+    let proofResult: { proof: string; publicInputs: string; proofWithInputs: string };
 
-    const bbProver = new BbProver({
-      bbPath: this.deps.config.bbPath,
-      nargoPath: this.deps.config.nargoPath,
-      circuitsDir: this.deps.config.circuitsDir,
-    });
+    if (this.deps.teeProvider && this.deps.config.teeMode !== 'disabled') {
+      this.deps.taskEventEmitter.emitTaskProgress(
+        task.id,
+        'generating_proof',
+        'Running proof in TEE enclave'
+      );
 
-    const proofResult = await bbProver.prove(circuitId, circuitParams);
+      // Convert circuit params to input strings for enclave
+      const inputStrings = [JSON.stringify(circuitParams)];
+
+      const teeResponse = await this.deps.teeProvider.prove(circuitId, inputStrings, task.id);
+
+      if (teeResponse.type === 'error') {
+        throw new Error(teeResponse.error || 'TEE proof generation failed');
+      }
+
+      if (teeResponse.type !== 'proof' || !teeResponse.proof) {
+        throw new Error('Invalid TEE response: expected proof type');
+      }
+
+      proofResult = {
+        proof: teeResponse.proof,
+        publicInputs: teeResponse.publicInputs?.[0] || '0x',
+        proofWithInputs: teeResponse.proof + (teeResponse.publicInputs?.[0] || '0x').slice(2),
+      };
+    } else {
+      this.deps.taskEventEmitter.emitTaskProgress(
+        task.id,
+        'generating_proof',
+        'Running bb prove'
+      );
+
+      const bbProver = new BbProver({
+        bbPath: this.deps.config.bbPath,
+        nargoPath: this.deps.config.nargoPath,
+        circuitsDir: this.deps.config.circuitsDir,
+      });
+
+      proofResult = await bbProver.prove(circuitId, circuitParams);
+    }
 
     const result = {
       proof: proofResult.proof,

@@ -513,4 +513,175 @@ describe('TaskWorker', () => {
 
     worker.stop();
   });
+
+  it('12. processTask with generate_proof routes through TEE when teeMode is not disabled', async () => {
+    const mockTeeProvider = {
+      mode: 'local' as const,
+      prove: vi.fn().mockResolvedValue({
+        type: 'proof',
+        requestId: 'task-tee-test',
+        proof: '0xteeproof',
+        publicInputs: ['0xinput1'],
+      }),
+      healthCheck: vi.fn(),
+      getAttestation: vi.fn(),
+    };
+
+    const teeConfig = {
+      ...mockConfig,
+      teeMode: 'local' as const,
+    };
+
+    const teeWorker = new TaskWorker({
+      taskStore: mockTaskStore,
+      taskEventEmitter: mockTaskEventEmitter,
+      config: teeConfig,
+      teeProvider: mockTeeProvider,
+    });
+
+    const task = {
+      id: 'task-tee-test',
+      status: 'submitted' as const,
+      skill: 'generate_proof',
+      params: {
+        address: '0xUser1111111111111111111111111111111111111',
+        signature: '0xsig123',
+        scope: 'test-scope',
+        circuitId: 'coinbase_attestation',
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    await teeWorker.processTask(task);
+
+    // Verify teeProvider.prove was called
+    expect(mockTeeProvider.prove).toHaveBeenCalledWith(
+      'coinbase_attestation',
+      [expect.any(String)], // JSON stringified circuit params
+      'task-tee-test'
+    );
+
+    // Verify BbProver was NOT called
+    expect(BbProver).not.toHaveBeenCalled();
+
+    // Verify task completed with TEE proof result
+    expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith(
+      'task-tee-test',
+      'completed',
+      expect.objectContaining({
+        proof: '0xteeproof',
+        publicInputs: '0xinput1',
+      })
+    );
+
+    // Verify correct progress message
+    expect(mockTaskEventEmitter.emitTaskProgress).toHaveBeenCalledWith(
+      'task-tee-test',
+      'generating_proof',
+      'Running proof in TEE enclave'
+    );
+  });
+
+  it('13. processTask with generate_proof uses BbProver when teeMode is disabled', async () => {
+    const disabledConfig = {
+      ...mockConfig,
+      teeMode: 'disabled' as const,
+    };
+
+    const disabledWorker = new TaskWorker({
+      taskStore: mockTaskStore,
+      taskEventEmitter: mockTaskEventEmitter,
+      config: disabledConfig,
+    });
+
+    const task = {
+      id: 'task-disabled-test',
+      status: 'submitted' as const,
+      skill: 'generate_proof',
+      params: {
+        address: '0xUser1111111111111111111111111111111111111',
+        signature: '0xsig123',
+        scope: 'test-scope',
+        circuitId: 'coinbase_attestation',
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    await disabledWorker.processTask(task);
+
+    // Verify BbProver WAS called
+    expect(BbProver).toHaveBeenCalledWith({
+      bbPath: mockConfig.bbPath,
+      nargoPath: mockConfig.nargoPath,
+      circuitsDir: mockConfig.circuitsDir,
+    });
+
+    // Verify task completed
+    expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith(
+      'task-disabled-test',
+      'completed',
+      expect.objectContaining({
+        proof: '0xproof123',
+      })
+    );
+
+    // Verify correct progress message
+    expect(mockTaskEventEmitter.emitTaskProgress).toHaveBeenCalledWith(
+      'task-disabled-test',
+      'generating_proof',
+      'Running bb prove'
+    );
+  });
+
+  it('14. processTask with generate_proof fails when TEE returns error', async () => {
+    const mockTeeProvider = {
+      mode: 'local' as const,
+      prove: vi.fn().mockResolvedValue({
+        type: 'error',
+        requestId: 'task-tee-err',
+        error: 'enclave unavailable',
+      }),
+      healthCheck: vi.fn(),
+      getAttestation: vi.fn(),
+    };
+
+    const teeConfig = {
+      ...mockConfig,
+      teeMode: 'local' as const,
+    };
+
+    const teeWorker = new TaskWorker({
+      taskStore: mockTaskStore,
+      taskEventEmitter: mockTaskEventEmitter,
+      config: teeConfig,
+      teeProvider: mockTeeProvider,
+    });
+
+    const task = {
+      id: 'task-tee-err',
+      status: 'submitted' as const,
+      skill: 'generate_proof',
+      params: {
+        address: '0xUser1111111111111111111111111111111111111',
+        signature: '0xsig123',
+        scope: 'test-scope',
+        circuitId: 'coinbase_attestation',
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    await teeWorker.processTask(task);
+
+    // Verify task status is 'failed' with the error message
+    expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith(
+      'task-tee-err',
+      'failed',
+      undefined,
+      'enclave unavailable'
+    );
+    expect(mockTaskEventEmitter.emitTaskStatus).toHaveBeenCalledWith('task-tee-err', 'failed');
+  });
 });

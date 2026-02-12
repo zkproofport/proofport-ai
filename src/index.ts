@@ -52,7 +52,7 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   const teeProvider = createTeeProvider(teeConfig);
 
   // Task worker setup
-  const taskWorker = new TaskWorker({ taskStore, taskEventEmitter, config });
+  const taskWorker = new TaskWorker({ taskStore, taskEventEmitter, config, teeProvider });
 
   // Settlement worker setup (only if payment mode is not disabled)
   let settlementWorker: SettlementWorker | null = null;
