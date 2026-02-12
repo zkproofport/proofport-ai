@@ -2,7 +2,7 @@
  * AWS Nitro Enclave attestation document parsing and verification
  */
 
-import { decode as cborDecode } from 'cbor-x';
+import { decode as cborDecode, encode as cborEncode } from 'cbor-x';
 import { createVerify, X509Certificate } from 'crypto';
 import type { AttestationDocument } from './types.js';
 
@@ -13,6 +13,40 @@ let lastCoseStructure: {
   payload: Buffer;
   signature: Buffer;
 } | null = null;
+
+/**
+ * Convert raw ECDSA signature (R||S) to DER format
+ * COSE uses raw concatenation, Node.js crypto expects DER ASN.1 encoding
+ * @param rawSig Raw signature bytes (R||S concatenated)
+ * @param componentLength Length of R and S components in bytes
+ * @returns DER-encoded signature
+ */
+function rawSigToDer(rawSig: Buffer, componentLength: number): Buffer {
+  const r = rawSig.subarray(0, componentLength);
+  const s = rawSig.subarray(componentLength, componentLength * 2);
+
+  // Encode each component as ASN.1 INTEGER (prepend 0x00 if high bit set)
+  function encodeInt(buf: Buffer): Buffer {
+    // Skip leading zeros but keep at least one byte
+    let start = 0;
+    while (start < buf.length - 1 && buf[start] === 0) start++;
+    const trimmed = buf.subarray(start);
+
+    // Prepend 0x00 if high bit is set (to avoid negative interpretation)
+    const needsPadding = trimmed[0] & 0x80;
+    const padded = needsPadding ? Buffer.concat([Buffer.from([0x00]), trimmed]) : trimmed;
+
+    // ASN.1 INTEGER: 0x02 [length] [data]
+    return Buffer.concat([Buffer.from([0x02, padded.length]), padded]);
+  }
+
+  const rDer = encodeInt(r);
+  const sDer = encodeInt(s);
+  const seqLen = rDer.length + sDer.length;
+
+  // ASN.1 SEQUENCE: 0x30 [length] [contents]
+  return Buffer.concat([Buffer.from([0x30, seqLen]), rDer, sDer]);
+}
 
 /**
  * Parse base64-encoded COSE Sign1 attestation document
@@ -278,26 +312,7 @@ export async function verifyAttestationDocument(
 
     result.certificateValid = true;
 
-    // Verify COSE signature
-    // TODO: Implement full COSE_Sign1 signature verification
-    // This requires:
-    // 1. Parse protected headers to determine signature algorithm (alg parameter from protected headers)
-    //    Common algorithms: ES384 (-35), ES256 (-7), ES512 (-36)
-    // 2. Build Sig_structure as per RFC 8152 Section 4.4:
-    //    Sig_structure = [
-    //      context: "Signature1",
-    //      body_protected: protected headers (as CBOR-encoded bstr),
-    //      external_aad: empty bstr,
-    //      payload: CBOR-encoded payload
-    //    ]
-    // 3. CBOR-encode Sig_structure
-    // 4. Hash the encoded Sig_structure using algorithm-specific hash (SHA-384 for ES384)
-    // 5. Verify signature using crypto.createVerify() with certificate's public key
-    //
-    // For now, we verify that:
-    // - COSE structure exists and has all required parts
-    // - Certificate is valid and can be used for verification
-    // - Protected headers can be decoded
+    // Verify COSE_Sign1 signature
     if (!lastCoseStructure) {
       result.isValid = false;
       result.signatureValid = false;
@@ -323,7 +338,54 @@ export async function verifyAttestationDocument(
         return result;
       }
 
-      // Extract public key from certificate (validates certificate is usable)
+      // Extract algorithm from protected headers (COSE header label 1 = alg)
+      const algId = protectedHeaders[1];
+      if (typeof algId !== 'number') {
+        result.isValid = false;
+        result.signatureValid = false;
+        result.error = 'COSE algorithm ID not found in protected headers';
+        return result;
+      }
+
+      // COSE algorithm mapping
+      const COSE_ALG_MAP: Record<number, { hash: string; componentLength: number }> = {
+        [-7]: { hash: 'SHA256', componentLength: 32 },   // ES256
+        [-35]: { hash: 'SHA384', componentLength: 48 },  // ES384
+        [-36]: { hash: 'SHA512', componentLength: 66 },  // ES512
+      };
+
+      const algConfig = COSE_ALG_MAP[algId];
+      if (!algConfig) {
+        result.isValid = false;
+        result.signatureValid = false;
+        result.error = `Unsupported COSE algorithm: ${algId}`;
+        return result;
+      }
+
+      // Build Sig_structure per RFC 8152 Section 4.4
+      const sigStructure = [
+        'Signature1',
+        lastCoseStructure.protected,  // raw protected headers bstr
+        Buffer.alloc(0),              // external_aad (empty)
+        lastCoseStructure.payload,    // raw payload bstr
+      ];
+
+      // CBOR-encode the Sig_structure
+      const sigStructureEncoded = cborEncode(sigStructure);
+
+      // Convert raw R||S signature to DER format
+      const rawSig = lastCoseStructure.signature;
+      const expectedSigLength = algConfig.componentLength * 2;
+      if (rawSig.length !== expectedSigLength) {
+        result.isValid = false;
+        result.signatureValid = false;
+        result.error = `Invalid signature length: expected ${expectedSigLength} bytes, got ${rawSig.length}`;
+        return result;
+      }
+
+      const derSig = rawSigToDer(rawSig, algConfig.componentLength);
+
+      // Extract public key from certificate
       const publicKey = cert.publicKey;
       if (!publicKey) {
         result.isValid = false;
@@ -332,9 +394,16 @@ export async function verifyAttestationDocument(
         return result;
       }
 
-      // Mark signature as valid for structural checks
-      // Full cryptographic verification is TODO
-      result.signatureValid = true;
+      // Verify signature
+      const verifier = createVerify(algConfig.hash);
+      verifier.update(sigStructureEncoded);
+      const isSignatureValid = verifier.verify(publicKey, derSig);
+
+      result.signatureValid = isSignatureValid;
+      if (!isSignatureValid) {
+        result.isValid = false;
+        result.error = 'COSE signature verification failed';
+      }
 
     } catch (error) {
       result.isValid = false;
