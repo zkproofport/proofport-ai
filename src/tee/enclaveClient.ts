@@ -2,6 +2,7 @@
  * Enclave client for communication with AWS Nitro Enclave via vsock
  */
 
+import { createHash } from 'crypto';
 import { connect, Socket } from 'net';
 import type { TeeConfig, TeeProvider, VsockRequest, VsockResponse, AttestationDocument } from './types.js';
 import { parseAttestationDocument } from './attestation.js';
@@ -72,6 +73,63 @@ export class EnclaveClient implements TeeProvider {
     }
 
     return this.lastAttestation;
+  }
+
+  async generateAttestation(proofHash: string, metadata?: Record<string, unknown>): Promise<import('./types.js').AttestationResult | null> {
+    if (!this.config.attestationEnabled) {
+      return null;
+    }
+
+    const timestamp = Date.now();
+
+    if (this.mode === 'local') {
+      // Simulated attestation for local development
+      const simulatedDoc = {
+        type: 'simulated',
+        mode: 'local' as const,
+        proofHash,
+        timestamp,
+        pcrs: {
+          0: 'simulated-pcr0-' + createHash('sha256').update('local-enclave-image').digest('hex').substring(0, 32),
+          1: 'simulated-pcr1-' + createHash('sha256').update('local-kernel').digest('hex').substring(0, 32),
+          2: 'simulated-pcr2-' + createHash('sha256').update('local-application').digest('hex').substring(0, 32),
+        },
+        metadata: metadata || {},
+      };
+
+      return {
+        document: Buffer.from(JSON.stringify(simulatedDoc)).toString('base64'),
+        mode: 'local',
+        proofHash,
+        timestamp,
+      };
+    }
+
+    // Nitro mode: request attestation from enclave
+    try {
+      const request = {
+        type: 'attestation' as const,
+        requestId: `att-${Date.now()}`,
+        proofHash,
+        metadata,
+      };
+
+      const response = await this.sendVsockRequest(request as any);
+
+      if (response.attestationDocument) {
+        return {
+          document: response.attestationDocument,
+          mode: 'nitro',
+          proofHash,
+          timestamp,
+        };
+      }
+
+      return null;
+    } catch (error) {
+      console.error('[TEE] Failed to get nitro attestation:', error);
+      return null;
+    }
   }
 
   private async sendVsockRequest(request: VsockRequest): Promise<VsockResponse> {

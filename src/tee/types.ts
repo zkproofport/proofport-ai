@@ -8,7 +8,8 @@
  * - local: Simulated TEE for development/testing (same prover, but with TEE interface)
  * - nitro: AWS Nitro Enclave (production)
  */
-export type TeeMode = 'disabled' | 'local' | 'nitro';
+export type TeeMode = 'auto' | 'disabled' | 'local' | 'nitro';
+export type ResolvedTeeMode = 'disabled' | 'local' | 'nitro';
 
 /**
  * TEE configuration
@@ -55,6 +56,16 @@ export interface VsockResponse {
 /**
  * Attestation document from Nitro Enclave
  */
+/**
+ * Attestation result attached to proof responses
+ */
+export interface AttestationResult {
+  document: string;          // base64-encoded attestation document
+  mode: ResolvedTeeMode;     // 'local' | 'nitro' | 'disabled'
+  proofHash: string;         // keccak256 of proof bytes
+  timestamp: number;         // Unix timestamp
+}
+
 export interface AttestationDocument {
   moduleId: string;
   digest: 'SHA384';
@@ -75,4 +86,5 @@ export interface TeeProvider {
   prove(circuitId: string, inputs: string[], requestId: string): Promise<VsockResponse>;
   healthCheck(): Promise<boolean>;
   getAttestation(): Promise<AttestationDocument | null>;
+  generateAttestation(proofHash: string, metadata?: Record<string, unknown>): Promise<AttestationResult | null>;
 }
