@@ -82,7 +82,7 @@ describe('A2A Integration Tests', () => {
           }),
         ]),
         authentication: {
-          schemes: ['x402'],
+          schemes: expect.arrayContaining([expect.objectContaining({ scheme: 'x402' })]),
         },
         identity: {
           erc8004: {

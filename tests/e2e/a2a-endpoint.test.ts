@@ -188,30 +188,25 @@ describe('A2A Endpoint E2E', () => {
   });
 
   describe('GET /.well-known/agent.json', () => {
-    it('should return Agent Card with correct structure', async () => {
+    it('should return OASF agent with correct structure', async () => {
       const response = await request(app).get('/.well-known/agent.json');
 
       expect(response.status).toBe(200);
       expect(response.headers['content-type']).toMatch(/application\/json/);
       expect(response.body).toMatchObject({
-        name: 'ZKProofport Prover Agent',
+        type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
+        name: 'ZKProofport',
         description: expect.any(String),
-        url: 'https://a2a.example.com',
-        version: '1.0.0',
-        capabilities: {
-          streaming: true,
-          pushNotifications: false,
-        },
-        skills: expect.any(Array),
-        authentication: {
-          schemes: ['x402'],
-        },
-        identity: expect.any(Object),
+        agentType: 'service',
+        tags: expect.any(Array),
+        services: expect.any(Array),
+        active: true,
+        supportedTrust: ['reputation'],
       });
     });
 
     it('should include ERC-8004 identity in agent card', async () => {
-      const response = await request(app).get('/.well-known/agent.json');
+      const response = await request(app).get('/.well-known/agent-card.json');
 
       expect(response.status).toBe(200);
       expect(response.body.identity).toMatchObject({
@@ -224,7 +219,7 @@ describe('A2A Endpoint E2E', () => {
     });
 
     it('should list skills matching MCP tools', async () => {
-      const response = await request(app).get('/.well-known/agent.json');
+      const response = await request(app).get('/.well-known/agent-card.json');
 
       expect(response.status).toBe(200);
       expect(response.body.skills).toEqual(
@@ -245,20 +240,20 @@ describe('A2A Endpoint E2E', () => {
       );
     });
 
-    it('should have all required Agent Card fields', async () => {
+    it('should have all required OASF fields', async () => {
       const response = await request(app).get('/.well-known/agent.json');
 
       expect(response.status).toBe(200);
-      const card = response.body;
+      const agent = response.body;
 
-      expect(card).toHaveProperty('name');
-      expect(card).toHaveProperty('description');
-      expect(card).toHaveProperty('url');
-      expect(card).toHaveProperty('version');
-      expect(card).toHaveProperty('capabilities');
-      expect(card).toHaveProperty('skills');
-      expect(card).toHaveProperty('authentication');
-      expect(card).toHaveProperty('identity');
+      expect(agent).toHaveProperty('type');
+      expect(agent).toHaveProperty('name');
+      expect(agent).toHaveProperty('description');
+      expect(agent).toHaveProperty('agentType');
+      expect(agent).toHaveProperty('tags');
+      expect(agent).toHaveProperty('services');
+      expect(agent).toHaveProperty('active');
+      expect(agent).toHaveProperty('supportedTrust');
     });
   });
 
@@ -530,7 +525,7 @@ describe('A2A Endpoint E2E', () => {
       // Test A2A Agent Card
       const agentCardResponse = await request(app).get('/.well-known/agent.json');
       expect(agentCardResponse.status).toBe(200);
-      expect(agentCardResponse.body.name).toBe('ZKProofport Prover Agent');
+      expect(agentCardResponse.body.name).toBe('ZKProofport');
 
       // Test A2A JSON-RPC
       const a2aResponse = await request(app)

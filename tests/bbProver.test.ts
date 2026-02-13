@@ -149,7 +149,8 @@ describe('BbProver', () => {
         call => call[0] === mockConfig.bbPath
       );
 
-      expect(bbCalls.length).toBe(1);
+      // 2 bb calls: prove + off-chain verify
+      expect(bbCalls.length).toBe(2);
       expect(bbCalls[0][1]).toEqual([
         'prove',
         '-b',
@@ -305,13 +306,14 @@ describe('BbProver', () => {
       const result = await prover.verify(
         'coinbase_attestation',
         '/path/to/proof',
+        '/path/to/public_inputs',
         '/path/to/vk'
       );
 
       expect(result).toBe(true);
       expect(childProcess.execFile).toHaveBeenCalledWith(
         mockConfig.bbPath,
-        ['verify', '-p', '/path/to/proof', '-k', '/path/to/vk', '--oracle_hash', 'keccak'],
+        ['verify', '-p', '/path/to/proof', '-i', '/path/to/public_inputs', '-k', '/path/to/vk', '--oracle_hash', 'keccak'],
         { timeout: 30000 },
         expect.any(Function)
       );
@@ -328,6 +330,7 @@ describe('BbProver', () => {
       const result = await prover.verify(
         'coinbase_attestation',
         '/path/to/proof',
+        '/path/to/public_inputs',
         '/path/to/vk'
       );
 

@@ -65,14 +65,18 @@ describe('artifactManager', () => {
 
       await downloadArtifacts(circuitsDir, repoBaseUrl);
 
-      // Should fetch 2 circuits × 2 files = 4 URLs
-      expect(mockFetch).toHaveBeenCalledTimes(4);
+      // 2 circuits × 3 files (json, vk, main.nr) + 7 coinbase-libs files = 13 URLs
+      expect(mockFetch).toHaveBeenCalledTimes(13);
 
       const calls = mockFetch.mock.calls.map(call => call[0]);
       expect(calls).toContain(`${repoBaseUrl}/coinbase-attestation/target/coinbase_attestation.json`);
       expect(calls).toContain(`${repoBaseUrl}/coinbase-attestation/target/vk/vk`);
+      expect(calls).toContain(`${repoBaseUrl}/coinbase-attestation/src/main.nr`);
       expect(calls).toContain(`${repoBaseUrl}/coinbase-country-attestation/target/coinbase_country_attestation.json`);
       expect(calls).toContain(`${repoBaseUrl}/coinbase-country-attestation/target/vk/vk`);
+      expect(calls).toContain(`${repoBaseUrl}/coinbase-country-attestation/src/main.nr`);
+      expect(calls).toContain(`${repoBaseUrl}/coinbase-libs/Nargo.toml`);
+      expect(calls).toContain(`${repoBaseUrl}/coinbase-libs/src/lib.nr`);
     });
 
     it('creates correct directory structure', async () => {
@@ -134,15 +138,24 @@ describe('artifactManager', () => {
     });
 
     it('skips download if artifacts exist', async () => {
-      // Pre-create artifacts
+      // Pre-create all artifacts (target, src, coinbase-libs)
       const circuit1Dir = path.join(circuitsDir, 'coinbase_attestation', 'target');
       const circuit2Dir = path.join(circuitsDir, 'coinbase_country_attestation', 'target');
+      const circuit1SrcDir = path.join(circuitsDir, 'coinbase_attestation', 'src');
+      const circuit2SrcDir = path.join(circuitsDir, 'coinbase_country_attestation', 'src');
+      const coinbaseLibsSrcDir = path.join(circuitsDir, 'coinbase-libs', 'src');
       await fs.mkdir(path.join(circuit1Dir, 'vk'), { recursive: true });
       await fs.mkdir(path.join(circuit2Dir, 'vk'), { recursive: true });
+      await fs.mkdir(circuit1SrcDir, { recursive: true });
+      await fs.mkdir(circuit2SrcDir, { recursive: true });
+      await fs.mkdir(coinbaseLibsSrcDir, { recursive: true });
       await fs.writeFile(path.join(circuit1Dir, 'coinbase_attestation.json'), '{}');
       await fs.writeFile(path.join(circuit1Dir, 'vk', 'vk'), '');
+      await fs.writeFile(path.join(circuit1SrcDir, 'main.nr'), '');
       await fs.writeFile(path.join(circuit2Dir, 'coinbase_country_attestation.json'), '{}');
       await fs.writeFile(path.join(circuit2Dir, 'vk', 'vk'), '');
+      await fs.writeFile(path.join(circuit2SrcDir, 'main.nr'), '');
+      await fs.writeFile(path.join(coinbaseLibsSrcDir, 'lib.nr'), '');
 
       const mockFetch = vi.mocked(global.fetch);
       mockFetch.mockResolvedValue({

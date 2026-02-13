@@ -8,7 +8,6 @@ describe('AgentReputation Unit Tests', () => {
 
       const config = {
         chainRpcUrl: 'https://sepolia.base.org',
-        privateKey: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
       } as AgentReputationConfig;
 
       expect(() => new AgentReputation(config)).toThrow(/reputationContractAddress.*required/i);
@@ -19,21 +18,9 @@ describe('AgentReputation Unit Tests', () => {
 
       const config = {
         reputationContractAddress: '0x8004B663056A597Dffe9eCcC1965A193B7388713',
-        privateKey: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
       } as AgentReputationConfig;
 
       expect(() => new AgentReputation(config)).toThrow(/chainRpcUrl.*required/i);
-    });
-
-    it('should throw if privateKey missing', async () => {
-      const { AgentReputation } = await import('../../src/identity/reputation.js');
-
-      const config = {
-        reputationContractAddress: '0x8004B663056A597Dffe9eCcC1965A193B7388713',
-        chainRpcUrl: 'https://sepolia.base.org',
-      } as AgentReputationConfig;
-
-      expect(() => new AgentReputation(config)).toThrow(/privateKey.*required/i);
     });
 
     it('should create instance with valid config', async () => {
@@ -42,14 +29,10 @@ describe('AgentReputation Unit Tests', () => {
       const config: AgentReputationConfig = {
         reputationContractAddress: '0x8004B663056A597Dffe9eCcC1965A193B7388713',
         chainRpcUrl: 'https://sepolia.base.org',
-        privateKey: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
       };
 
       const reputation = new AgentReputation(config);
       expect(reputation).toBeDefined();
-      expect(reputation.agentAddress).toBeDefined();
-      expect(typeof reputation.agentAddress).toBe('string');
-      expect(reputation.agentAddress).toMatch(/^0x[a-fA-F0-9]{40}$/);
     });
   });
 
@@ -62,56 +45,28 @@ describe('AgentReputation Unit Tests', () => {
   });
 
   describe('Method existence', () => {
-    it('should have incrementScore method', async () => {
+    it('should have getAverageScore method', async () => {
       const { AgentReputation } = await import('../../src/identity/reputation.js');
 
       const config: AgentReputationConfig = {
         reputationContractAddress: '0x8004B663056A597Dffe9eCcC1965A193B7388713',
         chainRpcUrl: 'https://sepolia.base.org',
-        privateKey: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
       };
 
       const reputation = new AgentReputation(config);
-      expect(typeof reputation.incrementScore).toBe('function');
+      expect(typeof reputation.getAverageScore).toBe('function');
     });
 
-    it('should have getScore method', async () => {
+    it('should have getFeedbackCount method', async () => {
       const { AgentReputation } = await import('../../src/identity/reputation.js');
 
       const config: AgentReputationConfig = {
         reputationContractAddress: '0x8004B663056A597Dffe9eCcC1965A193B7388713',
         chainRpcUrl: 'https://sepolia.base.org',
-        privateKey: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
       };
 
       const reputation = new AgentReputation(config);
-      expect(typeof reputation.getScore).toBe('function');
-    });
-
-    it('should have getReputationDetails method', async () => {
-      const { AgentReputation } = await import('../../src/identity/reputation.js');
-
-      const config: AgentReputationConfig = {
-        reputationContractAddress: '0x8004B663056A597Dffe9eCcC1965A193B7388713',
-        chainRpcUrl: 'https://sepolia.base.org',
-        privateKey: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
-      };
-
-      const reputation = new AgentReputation(config);
-      expect(typeof reputation.getReputationDetails).toBe('function');
-    });
-
-    it('should have agentAddress getter', async () => {
-      const { AgentReputation } = await import('../../src/identity/reputation.js');
-
-      const config: AgentReputationConfig = {
-        reputationContractAddress: '0x8004B663056A597Dffe9eCcC1965A193B7388713',
-        chainRpcUrl: 'https://sepolia.base.org',
-        privateKey: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
-      };
-
-      const reputation = new AgentReputation(config);
-      expect(reputation.agentAddress).toBeDefined();
+      expect(typeof reputation.getFeedbackCount).toBe('function');
     });
   });
 });

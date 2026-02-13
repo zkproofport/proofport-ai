@@ -184,7 +184,9 @@ describe('A2A Agent Card', () => {
       expect(card.authentication).toBeDefined();
       expect(card.authentication.schemes).toBeDefined();
       expect(Array.isArray(card.authentication.schemes)).toBe(true);
-      expect(card.authentication.schemes).toContain('x402');
+      expect(card.authentication.schemes).toEqual(
+        expect.arrayContaining([expect.objectContaining({ scheme: 'x402' })])
+      );
     });
 
     it('should use sepolia ERC-8004 address for development', async () => {

@@ -198,7 +198,9 @@ describe('Payment Integration Tests', () => {
     it('Agent Card remains accessible without payment', async () => {
       const response = await request(app).get('/.well-known/agent.json');
       expect(response.status).toBe(200);
-      expect(response.body.authentication.schemes).toContain('x402');
+      expect(response.body.authentication.schemes).toEqual(
+        expect.arrayContaining([expect.objectContaining({ scheme: 'x402' })])
+      );
     });
   });
 
