@@ -4,18 +4,17 @@
  */
 
 import { ethers } from 'ethers';
-import type { AgentReputationConfig, ReputationDetails } from './types.js';
+import type { AgentReputationConfig, ReputationScore } from './types.js';
 
 // ERC-8004 Reputation ABI (minimal interface)
 const REPUTATION_ABI = [
-  'function incrementScore(address agent) external',
-  'function getScore(address agent) external view returns (uint256)',
-  'function getReputationDetails(address agent) external view returns (uint256 score, uint256 totalTasks, uint256 successfulTasks, uint256 lastUpdated)',
+  'function giveFeedback(uint256 agentId, int128 value, uint8 valueDecimals, string tag1, string tag2, string endpoint, string feedbackURI, bytes32 feedbackHash) external',
+  'function getAverageScore(uint256 agentId) external view returns (int128 score, uint8 decimals)',
+  'function getFeedbackCount(uint256 agentId) external view returns (uint256)',
 ];
 
 export class AgentReputation {
   private contract: ethers.Contract;
-  private signer: ethers.Wallet;
 
   constructor(config: AgentReputationConfig) {
     if (!config.reputationContractAddress) {
@@ -24,114 +23,61 @@ export class AgentReputation {
     if (!config.chainRpcUrl) {
       throw new Error('AgentReputation: chainRpcUrl is required');
     }
-    if (!config.privateKey) {
-      throw new Error('AgentReputation: privateKey is required');
-    }
 
     const provider = new ethers.JsonRpcProvider(config.chainRpcUrl);
-    this.signer = new ethers.Wallet(config.privateKey, provider);
-    this.contract = new ethers.Contract(config.reputationContractAddress, REPUTATION_ABI, this.signer);
+    this.contract = new ethers.Contract(config.reputationContractAddress, REPUTATION_ABI, provider);
   }
 
   /**
-   * Increment reputation score for an agent
-   * @param agentAddress Agent address
-   * @returns Transaction hash
+   * Get average reputation score for an agent
+   * @param agentId Agent's ERC-721 token ID
+   * @returns Reputation score or null if no feedback exists
    */
-  async incrementScore(agentAddress: string): Promise<string> {
+  async getAverageScore(agentId: bigint): Promise<ReputationScore | null> {
     try {
-      const tx = await this.contract.incrementScore(agentAddress);
-      await tx.wait();
-      return tx.hash;
+      const [score, decimals] = await this.contract.getAverageScore(agentId);
+      if (score === 0n && decimals === 0) return null;
+      return { score: Number(score), decimals: Number(decimals) };
     } catch (error) {
       if (error instanceof Error) {
-        throw new Error(`Failed to increment reputation score: ${error.message}`);
+        throw new Error(`Failed to get average score: ${error.message}`);
       }
-      throw new Error('Failed to increment reputation score: unknown error');
+      throw new Error('Failed to get average score: unknown error');
     }
   }
 
   /**
-   * Get reputation score for an agent
-   * @param agentAddress Agent address
-   * @returns Reputation score
+   * Get total feedback count for an agent
+   * @param agentId Agent's ERC-721 token ID
+   * @returns Number of feedback entries
    */
-  async getScore(agentAddress: string): Promise<number> {
+  async getFeedbackCount(agentId: bigint): Promise<number> {
     try {
-      const score = await this.contract.getScore(agentAddress);
-      return Number(score);
+      const count = await this.contract.getFeedbackCount(agentId);
+      return Number(count);
     } catch (error) {
       if (error instanceof Error) {
-        throw new Error(`Failed to get reputation score: ${error.message}`);
+        throw new Error(`Failed to get feedback count: ${error.message}`);
       }
-      throw new Error('Failed to get reputation score: unknown error');
+      throw new Error('Failed to get feedback count: unknown error');
     }
-  }
-
-  /**
-   * Get full reputation details for an agent
-   * @param agentAddress Agent address
-   * @returns Reputation details or null if no reputation exists
-   */
-  async getReputationDetails(agentAddress: string): Promise<ReputationDetails | null> {
-    try {
-      const details = await this.contract.getReputationDetails(agentAddress);
-
-      // Return null if agent has no reputation (score = 0, totalTasks = 0)
-      if (details.score === 0n && details.totalTasks === 0n) {
-        return null;
-      }
-
-      return {
-        score: Number(details.score),
-        totalTasks: Number(details.totalTasks),
-        successfulTasks: Number(details.successfulTasks),
-        lastUpdated: Number(details.lastUpdated),
-      };
-    } catch (error) {
-      if (error instanceof Error) {
-        throw new Error(`Failed to get reputation details: ${error.message}`);
-      }
-      throw new Error('Failed to get reputation details: unknown error');
-    }
-  }
-
-  /**
-   * Get agent address (signer address)
-   */
-  get agentAddress(): string {
-    return this.signer.address;
   }
 }
 
 /**
- * Standalone function to increment reputation after successful proof generation
+ * Standalone function to handle reputation after successful proof generation
  *
  * This is called by taskWorker after a proof completes successfully.
  * Does NOT throw or fail the proof flow if reputation update fails.
  *
- * @param config - Application configuration
- * @param agentAddress - Agent address to increment reputation for
+ * @param _config - Application configuration (unused, kept for backward compatibility)
+ * @param _agentAddress - Agent address (unused, kept for backward compatibility)
  */
 export async function handleProofCompleted(
-  config: AgentReputationConfig,
-  agentAddress: string
+  _config: AgentReputationConfig,
+  _agentAddress: string
 ): Promise<void> {
-  // Check if ERC-8004 is configured
-  if (!config.reputationContractAddress) {
-    console.log('ERC-8004 Reputation not configured — skipping reputation update');
-    return;
-  }
-
-  try {
-    const reputation = new AgentReputation(config);
-    const txHash = await reputation.incrementScore(agentAddress);
-    console.log(`Reputation incremented for ${agentAddress} (tx: ${txHash})`);
-  } catch (error) {
-    if (error instanceof Error) {
-      console.error(`Failed to increment reputation for ${agentAddress}: ${error.message}`);
-    } else {
-      console.error(`Failed to increment reputation for ${agentAddress}: unknown error`);
-    }
-  }
+  // Self-feedback is blocked on ERC-8004 Reputation Registry.
+  // Reputation scores are managed externally via 8004scan feedback from other agents/users.
+  // This function is kept as a no-op placeholder for future integration.
 }

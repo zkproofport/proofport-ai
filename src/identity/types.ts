@@ -46,15 +46,13 @@ export interface AgentIdentityInfo {
 export interface AgentReputationConfig {
   reputationContractAddress: string;
   chainRpcUrl: string;
-  privateKey: string;
+  privateKey?: string; // Optional — only needed for write operations
 }
 
 /**
- * Agent reputation details
+ * Reputation score from ERC-8004
  */
-export interface ReputationDetails {
+export interface ReputationScore {
   score: number;
-  totalTasks: number;
-  successfulTasks: number;
-  lastUpdated: number;
+  decimals: number;
 }
