@@ -6,10 +6,14 @@ import { verifyProof } from './tools/verifyProof.js';
 import { getSupportedCircuits } from './tools/getCircuits.js';
 import type { RateLimiter } from '../redis/rateLimiter.js';
 import type { ProofCache } from '../redis/proofCache.js';
+import type { RedisClient } from '../redis/client.js';
+import type { TeeProvider } from '../tee/types.js';
 
 export interface McpServerDeps {
   rateLimiter?: RateLimiter;
   proofCache?: ProofCache;
+  redis?: RedisClient;
+  teeProvider?: TeeProvider;
 }
 
 /**
@@ -32,14 +36,23 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
   // ─── generate_proof ─────────────────────────────────────────────────
   server.tool(
     'generate_proof',
-    'Generate a zero-knowledge proof for a given circuit. Requires the user wallet address, signature over the signal hash, privacy scope, and circuit identifier.',
+    `Generate a zero-knowledge proof for a given circuit. This is a 2-step process when no signature is provided:
+
+Step 1: Call without signature/requestId → returns {status: "awaiting_signature", signingUrl, requestId}. Open the signingUrl in a browser and ask the user to connect their wallet and sign.
+
+Step 2: After the user signs, call again with the same scope/circuitId and the requestId from Step 1 → returns the generated proof with publicInputs, nullifier, and signalHash.
+
+If you already have a signature and address, provide them directly to skip the signing flow and generate the proof in a single call.
+
+The response includes a TEE attestation when running in a trusted execution environment (local simulation or AWS Nitro Enclave).`,
     {
-      address: z.string().describe('KYC wallet address (0x-prefixed, 20 bytes)'),
-      signature: z.string().describe('User signature over the signal hash (0x-prefixed, 65 bytes)'),
+      address: z.string().optional().describe('KYC wallet address (0x-prefixed, 20 bytes). Required when providing signature directly. Omit for web signing flow.'),
+      signature: z.string().optional().describe('User signature over the signal hash (0x-prefixed, 65 bytes). If omitted, a web signing request is created.'),
       scope: z.string().describe('Privacy scope string for nullifier computation'),
       circuitId: z.string().describe('Circuit identifier: coinbase_attestation or coinbase_country_attestation'),
       countryList: z.array(z.string()).optional().describe('Country codes for country attestation (e.g., ["US", "KR"])'),
       isIncluded: z.boolean().optional().describe('Whether to prove inclusion or exclusion from the country list'),
+      requestId: z.string().optional().describe('Signing request ID from Step 1. Provide this in Step 2 to resume proof generation after the user has signed.'),
     },
     async (args) => {
       try {
@@ -52,6 +65,7 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
             circuitId: args.circuitId,
             countryList: args.countryList,
             isIncluded: args.isIncluded,
+            requestId: args.requestId,
           },
           {
             easGraphqlEndpoint: config.easGraphqlEndpoint,
@@ -61,6 +75,10 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
             circuitsDir: config.circuitsDir,
             rateLimiter: deps.rateLimiter,
             proofCache: deps.proofCache,
+            redis: deps.redis,
+            signPageUrl: config.signPageUrl,
+            signingTtlSeconds: config.signingTtlSeconds,
+            teeProvider: deps.teeProvider,
           },
         );
 
