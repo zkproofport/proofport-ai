@@ -9,10 +9,11 @@ import type {
 // Minimal ABI for ERC-8004 Identity contract
 const IDENTITY_ABI = [
   'function register(string metadataURI) external returns (uint256 tokenId)',
-  'function tokenOfOwner(address owner) external view returns (uint256)',
+  'function setAgentURI(uint256 agentId, string newURI) external',
   'function tokenURI(uint256 tokenId) external view returns (string)',
   'function ownerOf(uint256 tokenId) external view returns (address)',
   'function balanceOf(address owner) external view returns (uint256)',
+  'event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)',
 ];
 
 /**
@@ -85,7 +86,7 @@ export class AgentRegistration {
   }
 
   /**
-   * Get agent registration info
+   * Get agent registration info by scanning Transfer events
    */
   async getRegistration(): Promise<AgentIdentityInfo | null> {
     const balance = await this.contract.balanceOf(this.signer.address);
@@ -94,16 +95,72 @@ export class AgentRegistration {
       return null;
     }
 
-    const tokenId = await this.contract.tokenOfOwner(this.signer.address);
+    // Find tokenId via Transfer events (contract doesn't have tokenOfOwner)
+    const tokenId = await this.findTokenId();
+    if (tokenId === null) {
+      // Fallback: registered but can't find tokenId
+      return {
+        tokenId: 0n,
+        owner: this.signer.address,
+        metadataUri: '',
+        isRegistered: true,
+      };
+    }
+
     const metadataUri = await this.contract.tokenURI(tokenId);
-    const owner = await this.contract.ownerOf(tokenId);
 
     return {
       tokenId,
-      owner,
+      owner: this.signer.address,
       metadataUri,
       isRegistered: true,
     };
+  }
+
+  /**
+   * Find tokenId by scanning Transfer events in chunks
+   */
+  private async findTokenId(): Promise<bigint | null> {
+    const addressPadded = ethers.zeroPadValue(this.signer.address, 32);
+    const transferFilter = this.contract.filters.Transfer(null, this.signer.address);
+
+    const currentBlock = await this.provider.getBlockNumber();
+    const chunkSize = 9999;
+
+    // Scan backwards in chunks (most recent first)
+    for (let toBlock = currentBlock; toBlock > 0; toBlock -= chunkSize) {
+      const fromBlock = Math.max(0, toBlock - chunkSize);
+      try {
+        const events = await this.contract.queryFilter(transferFilter, fromBlock, toBlock);
+        if (events.length > 0) {
+          // Return the most recent token
+          const lastEvent = events[events.length - 1];
+          const tokenId = BigInt((lastEvent as ethers.EventLog).args[2]);
+          return tokenId;
+        }
+      } catch {
+        // RPC error on this chunk, try next
+        continue;
+      }
+
+      // Only scan last 50k blocks max to avoid long startup
+      if (currentBlock - fromBlock > 50000) break;
+    }
+
+    return null;
+  }
+
+  /**
+   * Update the metadata URI for a registered agent
+   * @param tokenId Agent's ERC-721 token ID
+   * @param metadata New agent metadata
+   * @returns Transaction hash
+   */
+  async updateMetadata(tokenId: bigint, metadata: AgentMetadata): Promise<string> {
+    const metadataUri = createMetadataUri(metadata);
+    const tx = await this.contract.setAgentURI(tokenId, metadataUri);
+    await tx.wait();
+    return tx.hash;
   }
 
   /**
@@ -137,4 +194,20 @@ export function createMetadataUri(metadata: AgentMetadata): string {
   const base64 = Buffer.from(jsonString, 'utf-8').toString('base64');
 
   return `data:application/json;base64,${base64}`;
+}
+
+/**
+ * Parse metadata URI back to AgentMetadata object
+ */
+export function parseMetadataUri(uri: string): AgentMetadata | null {
+  try {
+    if (uri.startsWith('data:application/json;base64,')) {
+      const base64 = uri.slice('data:application/json;base64,'.length);
+      const json = Buffer.from(base64, 'base64').toString('utf-8');
+      return JSON.parse(json);
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
