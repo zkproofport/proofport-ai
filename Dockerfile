@@ -35,12 +35,23 @@ COPY src/ ./src/
 
 RUN npm run build
 
+# Stage 2.5: Sign Page Build (native arch)
+FROM node:20-alpine AS sign-page-builder
+RUN apk add --no-cache python3 make g++
+WORKDIR /app
+COPY sign-page/package*.json ./
+RUN npm ci
+COPY sign-page/ .
+ARG NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID
+ARG NEXT_PUBLIC_API_BASE_URL
+RUN npm run build
+
 # Stage 3: Production Runtime (native arch)
 FROM ubuntu:24.04
 
 # Install Node.js 20.x via NodeSource and build tools
 RUN apt-get update && \
-    apt-get install -y curl wget jq ca-certificates gnupg && \
+    apt-get install -y curl wget jq git ca-certificates gnupg && \
     curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
     apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/*
@@ -76,12 +87,16 @@ COPY --from=builder /app/dist ./dist
 # Create circuits directory
 RUN mkdir -p /app/circuits
 
+# Copy sign-page standalone build
+COPY --from=sign-page-builder /app/.next/standalone /app/sign-page
+COPY --from=sign-page-builder /app/.next/static /app/sign-page/.next/static
+
 # Environment variables
 ENV NODE_ENV=production
 ENV BB_PATH=/usr/local/bin/bb-wrapper
 ENV NARGO_PATH=/usr/local/bin/nargo
 ENV CIRCUITS_DIR=/app/circuits
 
-EXPOSE 4002
+EXPOSE 4002 3200
 
-CMD ["node", "dist/index.js"]
+CMD ["sh", "-c", "HOSTNAME=0.0.0.0 PORT=3200 node /app/sign-page/server.js & node dist/index.js"]

@@ -43,6 +43,7 @@ export class WebSigningProvider implements SigningProvider {
       address: request.address,
       signalHash: request.signalHash,
       scope: request.scope,
+      circuitId: '',
       status: 'pending',
       createdAt: now.toISOString(),
       expiresAt: expiresAt.toISOString(),
@@ -70,7 +71,7 @@ export class WebSigningProvider implements SigningProvider {
             clearInterval(checkInterval);
             resolve({
               signature: updatedRecord.signature,
-              address: updatedRecord.address,
+              address: updatedRecord.address!,
               method: 'web',
             });
           } else if (updatedRecord.status === 'expired') {
@@ -127,7 +128,7 @@ export function createSigningCallbackHandler(redis: RedisClient) {
       });
     }
 
-    if (address.toLowerCase() !== record.address.toLowerCase()) {
+    if (record.address && address.toLowerCase() !== record.address.toLowerCase()) {
       return res.status(400).json({
         success: false,
         error: 'Address mismatch',

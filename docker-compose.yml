@@ -15,9 +15,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: 9a54a0419fc6c86a2bde3d44c4f1615c
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:4002
     container_name: proofport-ai
     ports:
       - "4002:4002"
+      - "3200:3200"
     env_file:
       - .env.development
     environment:

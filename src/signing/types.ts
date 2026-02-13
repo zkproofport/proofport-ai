@@ -34,9 +34,10 @@ export interface SigningProvider {
 
 export interface SigningRequestRecord {
   id: string;              // UUID
-  address: string;         // Expected signer address
-  signalHash: string;      // Hash to sign
+  address?: string;        // Signer address (set when user connects wallet on sign-page)
+  signalHash?: string;     // Hash to sign (computed after address is known)
   scope: string;           // Nullifier scope
+  circuitId: string;       // Circuit identifier (needed to compute signalHash)
   status: 'pending' | 'completed' | 'expired';
   signature?: string;      // Filled when completed
   createdAt: string;       // ISO timestamp
