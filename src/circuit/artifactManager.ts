@@ -9,6 +9,16 @@ const CIRCUIT_META: Record<string, { repoDir: string; packageName: string }> = {
   coinbase_country_attestation: { repoDir: 'coinbase-country-attestation', packageName: 'coinbase_country_attestation' },
 };
 
+const COINBASE_LIBS_FILES = [
+  'Nargo.toml',
+  'src/lib.nr',
+  'src/ethereum.nr',
+  'src/merkle.nr',
+  'src/nullifier.nr',
+  'src/rlp.nr',
+  'src/eip1559_tx_parser.nr',
+];
+
 const DEFAULT_REPO_BASE_URL = 'https://raw.githubusercontent.com/zkproofport/circuits/main';
 
 /**
@@ -18,9 +28,11 @@ export async function downloadArtifacts(circuitsDir: string, repoBaseUrl: string
   for (const [circuitId, meta] of Object.entries(CIRCUIT_META)) {
     const targetDir = path.join(circuitsDir, circuitId, 'target');
     const vkDir = path.join(targetDir, 'vk');
+    const srcDir = path.join(circuitsDir, circuitId, 'src');
 
     // Create directories
     await fs.mkdir(vkDir, { recursive: true });
+    await fs.mkdir(srcDir, { recursive: true });
 
     // Download circuit JSON
     const jsonUrl = `${repoBaseUrl}/${meta.repoDir}/target/${meta.packageName}.json`;
@@ -31,6 +43,22 @@ export async function downloadArtifacts(circuitsDir: string, repoBaseUrl: string
     const vkUrl = `${repoBaseUrl}/${meta.repoDir}/target/vk/vk`;
     const vkPath = path.join(vkDir, 'vk');
     await downloadFile(vkUrl, vkPath, 'binary');
+
+    // Download source file
+    const mainNrUrl = `${repoBaseUrl}/${meta.repoDir}/src/main.nr`;
+    const mainNrPath = path.join(srcDir, 'main.nr');
+    await downloadFile(mainNrUrl, mainNrPath, 'text');
+  }
+
+  // Download coinbase-libs files (shared dependency)
+  const coinbaseLibsDir = path.join(circuitsDir, 'coinbase-libs');
+  const coinbaseLibsSrcDir = path.join(coinbaseLibsDir, 'src');
+  await fs.mkdir(coinbaseLibsSrcDir, { recursive: true });
+
+  for (const file of COINBASE_LIBS_FILES) {
+    const fileUrl = `${repoBaseUrl}/coinbase-libs/${file}`;
+    const filePath = path.join(coinbaseLibsDir, file);
+    await downloadFile(fileUrl, filePath, 'text');
   }
 }
 
@@ -45,14 +73,24 @@ export async function ensureArtifacts(circuitsDir: string, repoBaseUrl?: string)
   for (const [circuitId, meta] of Object.entries(CIRCUIT_META)) {
     const jsonPath = path.join(circuitsDir, circuitId, 'target', `${meta.packageName}.json`);
     const vkPath = path.join(circuitsDir, circuitId, 'target', 'vk', 'vk');
+    const mainNrPath = path.join(circuitsDir, circuitId, 'src', 'main.nr');
 
     try {
       await fs.access(jsonPath);
       await fs.access(vkPath);
+      await fs.access(mainNrPath);
     } catch {
       allExist = false;
       break;
     }
+  }
+
+  // Check coinbase-libs
+  const coinbaseLibsPath = path.join(circuitsDir, 'coinbase-libs', 'src', 'lib.nr');
+  try {
+    await fs.access(coinbaseLibsPath);
+  } catch {
+    allExist = false;
   }
 
   if (!allExist) {
@@ -89,13 +127,22 @@ export async function createWorkDir(circuitsDir: string, circuitId: string): Pro
     await fs.mkdir(vkDir, { recursive: true });
     await fs.mkdir(proofDir, { recursive: true });
 
-    // Write Nargo.toml
+    // Write Nargo.toml with real dependencies using absolute paths
     const nargoToml = `[package]
 name = "${meta.packageName}"
 type = "bin"
 compiler_version = ">= 1.0.0"
+
+[dependencies]
+keccak256 = { tag = "v0.1.1", git = "https://github.com/noir-lang/keccak256" }
+coinbase_libs = { path = "${path.join(circuitsDir, 'coinbase-libs')}" }
 `;
     await fs.writeFile(path.join(workDir, 'Nargo.toml'), nargoToml);
+
+    // Create symlink to src directory
+    const sharedSrcDir = path.join(circuitsDir, circuitId, 'src');
+    const workSrcDir = path.join(workDir, 'src');
+    await fs.symlink(sharedSrcDir, workSrcDir);
 
     // Create symlinks to shared artifacts
     const sharedArtifactDir = path.join(circuitsDir, circuitId, 'target');

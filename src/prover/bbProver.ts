@@ -89,17 +89,26 @@ export class BbProver {
         throw new Error(`bb prove failed: ${stderr}`);
       }
 
-      // 6. Read proof output
+      // 6. Off-chain verify before returning
+      const verifyProofPath = path.join(workDir, 'target', 'proof', 'proof');
+      const verifyPubInputsPath = path.join(workDir, 'target', 'proof', 'public_inputs');
+      const verifyVkPath = path.join(workDir, 'target', 'vk', 'vk');
+      const isValid = await this.verify(circuitId, verifyProofPath, verifyPubInputsPath, verifyVkPath);
+      if (!isValid) {
+        throw new Error('Off-chain proof verification failed');
+      }
+
+      // 7. Read proof output
       const proofPath = path.join(workDir, 'target', 'proof', 'proof');
       const proofBytes = await fs.readFile(proofPath);
       const proof = '0x' + proofBytes.toString('hex');
 
-      // 7. Read public inputs
+      // 8. Read public inputs
       const publicInputsPath = path.join(workDir, 'target', 'proof', 'public_inputs');
       const publicInputsBytes = await fs.readFile(publicInputsPath);
       const publicInputs = '0x' + publicInputsBytes.toString('hex');
 
-      // 8. Concatenate for on-chain submission
+      // 9. Concatenate for on-chain submission
       const proofWithInputs = proof + publicInputs.slice(2);
 
       return {
@@ -108,22 +117,23 @@ export class BbProver {
         proofWithInputs,
       };
     } finally {
-      // 9. Always clean up workDir
+      // 10. Always clean up workDir
       await cleanupWorkDir(workDir);
     }
   }
 
-  async verify(circuitId: string, proofPath: string, vkPath: string): Promise<boolean> {
+  async verify(circuitId: string, proofPath: string, publicInputsPath: string, vkPath: string): Promise<boolean> {
     try {
       await execFileAsync(
         this.config.bbPath,
-        ['verify', '-p', proofPath, '-k', vkPath, '--oracle_hash', 'keccak'],
+        ['verify', '-p', proofPath, '-i', publicInputsPath, '-k', vkPath, '--oracle_hash', 'keccak'],
         {
           timeout: 30000,
         }
       );
       return true;
-    } catch (error) {
+    } catch (error: any) {
+      console.error(`[bb verify] failed: ${error.stderr || error.message}`);
       return false;
     }
   }
