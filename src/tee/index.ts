@@ -14,7 +14,7 @@ export function getTeeConfig(): TeeConfig {
   const mode = (process.env.TEE_MODE || 'disabled') as TeeMode;
 
   // Validate mode
-  const validModes: TeeMode[] = ['disabled', 'local', 'nitro'];
+  const validModes: TeeMode[] = ['auto', 'disabled', 'local', 'nitro'];
   const teeMode = validModes.includes(mode) ? mode : 'disabled';
 
   const enclaveCid = process.env.ENCLAVE_CID ? parseInt(process.env.ENCLAVE_CID, 10) : undefined;
@@ -50,6 +50,10 @@ class DisabledProvider implements TeeProvider {
   async getAttestation(): Promise<AttestationDocument | null> {
     return null;
   }
+
+  async generateAttestation(): Promise<import('./types.js').AttestationResult | null> {
+    return null;
+  }
 }
 
 /**
@@ -66,7 +70,8 @@ export function createTeeProvider(config: TeeConfig): TeeProvider {
 }
 
 // Re-export types
-export type { TeeConfig, TeeProvider, TeeMode, AttestationDocument } from './types.js';
+export type { TeeConfig, TeeProvider, TeeMode, ResolvedTeeMode, AttestationResult, AttestationDocument } from './types.js';
+export { detectTeeEnvironment, resolveTeeMode } from './detect.js';
 export { EnclaveClient } from './enclaveClient.js';
 export { parseAttestationDocument, verifyAttestationDocument } from './attestation.js';
 export type {
@@ -84,3 +89,4 @@ export {
   generateBuildCommands,
   generateDockerfileContent,
 } from './enclaveBuilder.js';
+export { ensureAgentValidated } from './validationSubmitter.js';

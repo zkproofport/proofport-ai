@@ -14,12 +14,12 @@ function validatePaymentMode(value: string): 'disabled' | 'testnet' | 'mainnet' 
   return value as 'disabled' | 'testnet' | 'mainnet';
 }
 
-function validateTeeMode(value: string): 'disabled' | 'local' | 'nitro' {
-  const valid = ['disabled', 'local', 'nitro'] as const;
+function validateTeeMode(value: string): 'auto' | 'disabled' | 'local' | 'nitro' {
+  const valid = ['auto', 'disabled', 'local', 'nitro'] as const;
   if (!valid.includes(value as any)) {
     throw new Error(`TEE_MODE must be one of: ${valid.join(', ')} (got: ${value})`);
   }
-  return value as 'disabled' | 'local' | 'nitro';
+  return value as 'auto' | 'disabled' | 'local' | 'nitro';
 }
 
 export function loadConfig() {
@@ -64,6 +64,7 @@ export function loadConfig() {
     // ERC-8004 Identity (optional - only needed for on-chain registration)
     erc8004IdentityAddress: process.env.ERC8004_IDENTITY_ADDRESS || '',
     erc8004ReputationAddress: process.env.ERC8004_REPUTATION_ADDRESS || '',
+    erc8004ValidationAddress: process.env.ERC8004_VALIDATION_ADDRESS || '',
 
     // Settlement worker (optional - only needed when paymentMode !== 'disabled' and auto-settlement desired)
     settlementChainRpcUrl: process.env.SETTLEMENT_CHAIN_RPC_URL || '',
