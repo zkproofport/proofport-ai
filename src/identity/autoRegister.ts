@@ -52,7 +52,9 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
               currentMetadata.x402Support !== (config.paymentMode !== 'disabled') ||
               !currentMetadata.services ||
               currentMetadata.services.length === 0 ||
-              !currentMetadata.type
+              !currentMetadata.type ||
+              !currentMetadata.supportedTrusts ||
+              currentMetadata.supportedTrusts.length === 0
             );
             if (needsUpdate) {
               console.log('Agent metadata needs updating on-chain...');
@@ -67,6 +69,9 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
               }
               if (!currentMetadata.type) {
                 console.log('  type field missing');
+              }
+              if (!currentMetadata.supportedTrusts || currentMetadata.supportedTrusts.length === 0) {
+                console.log('  supportedTrusts field missing');
               }
 
               const metadata: AgentMetadata = {
@@ -100,6 +105,7 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
                     contract: config.erc8004IdentityAddress,
                   },
                 ],
+                supportedTrusts: ['tee-attestation'],
               };
 
               const txHash = await registration.updateMetadata(info.tokenId, metadata);
@@ -146,6 +152,7 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
         { name: 'A2A', endpoint: `${config.a2aBaseUrl}/.well-known/agent-card.json`, version: '0.3.0' },
       ],
       registrations: [],
+      supportedTrusts: ['tee-attestation'],
     };
 
     // Register on-chain

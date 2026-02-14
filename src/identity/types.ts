@@ -14,6 +14,7 @@ export interface AgentMetadata {
   type?: string;
   image?: string;
   registrations?: Array<{ chainId: string; tokenId: string; txHash: string; contract: string }>;
+  supportedTrusts?: string[];
 }
 
 /**

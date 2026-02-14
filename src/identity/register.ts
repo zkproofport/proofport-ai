@@ -209,6 +209,10 @@ export function createMetadataUri(metadata: AgentMetadata): string {
     json.registrations = metadata.registrations;
   }
 
+  if (metadata.supportedTrusts !== undefined) {
+    json.supportedTrusts = metadata.supportedTrusts;
+  }
+
   // Convert to base64
   const jsonString = JSON.stringify(json);
   const base64 = Buffer.from(jsonString, 'utf-8').toString('base64');
