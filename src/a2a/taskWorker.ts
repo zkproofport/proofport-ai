@@ -378,12 +378,27 @@ export class TaskWorker {
 
     const circuitId = params.circuitId as string;
     const proof = params.proof as string;
-    const publicInputs = params.publicInputs as string[];
-    const proofWithInputs = params.proofWithInputs as string | undefined;
+    const rawPublicInputs = params.publicInputs as string | string[] | undefined;
     const chainId = (params.chainId as string) || '84532';
 
-    if (!circuitId || ((!proof || !publicInputs) && !proofWithInputs)) {
-      throw new Error('Missing required parameters: circuitId and (proof + publicInputs)');
+    if (!circuitId || !proof || !rawPublicInputs) {
+      throw new Error('Missing required parameters: circuitId, proof, publicInputs');
+    }
+
+    // Handle both string and string[] formats for publicInputs
+    let publicInputsArray: string[];
+
+    if (typeof rawPublicInputs === 'string') {
+      // Single hex string from generate_proof — split into 32-byte (64 char) chunks
+      const hex = rawPublicInputs.startsWith('0x') ? rawPublicInputs.slice(2) : rawPublicInputs;
+      publicInputsArray = [];
+      for (let i = 0; i < hex.length; i += 64) {
+        publicInputsArray.push('0x' + hex.slice(i, i + 64));
+      }
+    } else if (Array.isArray(rawPublicInputs)) {
+      publicInputsArray = rawPublicInputs;
+    } else {
+      throw new Error('publicInputs must be a hex string or array of hex strings');
     }
 
     emitter.emitStatusUpdate(
@@ -420,14 +435,43 @@ export class TaskWorker {
     );
 
     let isValid: boolean;
-    if (proof && publicInputs) {
-      // Preferred: separate proof and publicInputs
-      const inputsAsBytes32 = publicInputs.map(input => input.startsWith('0x') ? input : `0x${input}`);
-      isValid = await verifierContract.verify(proof, inputsAsBytes32);
-    } else {
-      // Fallback: proofWithInputs needs to be split
-      // This is a legacy format — clients should send separate proof + publicInputs
-      throw new Error('proofWithInputs format is deprecated. Send proof and publicInputs separately.');
+    try {
+      if (publicInputsArray.length > 0) {
+        const inputsAsBytes32 = publicInputsArray.map(input => input.startsWith('0x') ? input : `0x${input}`);
+        isValid = await verifierContract.verify(proof, inputsAsBytes32);
+      } else {
+        throw new Error('No public inputs provided');
+      }
+    } catch (verifyError: any) {
+      // Contract revert or call error — return artifact with valid: false
+      const errorResult = {
+        valid: false,
+        circuitId,
+        verifierAddress,
+        chainId,
+        error: verifyError.message || String(verifyError),
+      };
+
+      const artifact: Artifact = {
+        id: randomUUID(),
+        mimeType: 'application/json',
+        parts: [{
+          kind: 'data',
+          mimeType: 'application/json',
+          data: errorResult,
+        }],
+      };
+
+      await this.deps.taskStore.addArtifact(task.id, artifact);
+      const updatedTask = await this.deps.taskStore.updateTaskStatus(task.id, 'completed');
+      emitter.emitArtifactUpdate(task.id, artifact);
+      emitter.emitStatusUpdate(
+        task.id,
+        { state: 'completed', timestamp: new Date().toISOString() },
+        true
+      );
+      emitter.emitTaskComplete(task.id, updatedTask);
+      return;
     }
 
     const result = {
