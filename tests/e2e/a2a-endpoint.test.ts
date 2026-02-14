@@ -384,7 +384,7 @@ describe('A2A Endpoint E2E', () => {
         .send({
           // Missing jsonrpc field
           id: 1,
-          method: 'tasks/send',
+          method: 'message/send',
           params: { skill: 'generate_proof' },
         });
 

@@ -178,18 +178,18 @@ export function buildSwaggerSpec(baseUrl: string) {
                     id: 'req-1',
                     method: 'message/send',
                     params: {
-                      content: {
+                      message: {
+                        role: 'user',
                         parts: [
                           {
-                            type: 'data',
+                            kind: 'data',
+                            mimeType: 'application/json',
                             data: {
                               skill: 'generate_proof',
-                              params: {
-                                address: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
-                                signature: '0x...',
-                                scope: 'zkproofport.app',
-                                circuitId: 'coinbase_attestation',
-                              },
+                              address: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
+                              signature: '0x...',
+                              scope: 'zkproofport.app',
+                              circuitId: 'coinbase_attestation',
                             },
                           },
                         ],
@@ -204,18 +204,18 @@ export function buildSwaggerSpec(baseUrl: string) {
                     id: 'req-2',
                     method: 'message/stream',
                     params: {
-                      content: {
+                      message: {
+                        role: 'user',
                         parts: [
                           {
-                            type: 'data',
+                            kind: 'data',
+                            mimeType: 'application/json',
                             data: {
                               skill: 'generate_proof',
-                              params: {
-                                address: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
-                                signature: '0x...',
-                                scope: 'zkproofport.app',
-                                circuitId: 'coinbase_attestation',
-                              },
+                              address: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
+                              signature: '0x...',
+                              scope: 'zkproofport.app',
+                              circuitId: 'coinbase_attestation',
                             },
                           },
                         ],
