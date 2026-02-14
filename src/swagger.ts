@@ -393,6 +393,282 @@ export function buildSwaggerSpec(baseUrl: string) {
         },
       },
     },
+    '/payment/status': {
+      get: {
+        summary: 'Payment mode status',
+        description: 'Returns payment mode configuration and network information',
+        tags: ['Status'],
+        responses: {
+          '200': {
+            description: 'Payment mode info',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    mode: { type: 'string', example: 'disabled' },
+                    network: { type: 'string', example: 'testnet' },
+                    requiresPayment: { type: 'boolean', example: false },
+                    description: { type: 'string', example: 'Payment disabled (free tier)' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/signing/status': {
+      get: {
+        summary: 'Signing provider status',
+        description: 'Returns enabled signing methods and configuration',
+        tags: ['Status'],
+        responses: {
+          '200': {
+            description: 'Signing provider status',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    providers: {
+                      type: 'object',
+                      properties: {
+                        privy: {
+                          type: 'object',
+                          properties: {
+                            enabled: { type: 'boolean' },
+                          },
+                        },
+                        web: {
+                          type: 'object',
+                          properties: {
+                            enabled: { type: 'boolean' },
+                            signPageUrl: { type: 'string', nullable: true },
+                          },
+                        },
+                        eip7702: {
+                          type: 'object',
+                          properties: {
+                            enabled: { type: 'boolean' },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/tee/status': {
+      get: {
+        summary: 'TEE mode status',
+        description: 'Returns TEE configuration and availability',
+        tags: ['Status'],
+        responses: {
+          '200': {
+            description: 'TEE mode info',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    mode: { type: 'string', example: 'disabled' },
+                    attestationEnabled: { type: 'boolean', example: false },
+                    available: { type: 'boolean', example: false },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/identity/status': {
+      get: {
+        summary: 'ERC-8004 identity status',
+        description: 'Returns ERC-8004 identity and reputation contract configuration',
+        tags: ['Status'],
+        responses: {
+          '200': {
+            description: 'ERC-8004 identity config',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    erc8004: {
+                      type: 'object',
+                      properties: {
+                        identityContract: { type: 'string', nullable: true },
+                        reputationContract: { type: 'string', nullable: true },
+                        configured: { type: 'boolean' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/api/signing/{requestId}': {
+      get: {
+        summary: 'Get signing request details',
+        description: 'Retrieves signing request information by request ID',
+        tags: ['Signing'],
+        parameters: [
+          {
+            name: 'requestId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+            description: 'Signing request ID',
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Signing request details',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    address: { type: 'string', nullable: true },
+                    signalHash: { type: 'string', nullable: true },
+                    scope: { type: 'string' },
+                    circuitId: { type: 'string' },
+                    status: { type: 'string' },
+                    expiresAt: { type: 'number' },
+                  },
+                },
+              },
+            },
+          },
+          '404': {
+            description: 'Request not found or expired',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    error: { type: 'string', example: 'Request not found or expired' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/api/signing/{requestId}/prepare': {
+      post: {
+        summary: 'Prepare signing request',
+        description: 'Computes signalHash from connected wallet address for an existing signing request',
+        tags: ['Signing'],
+        parameters: [
+          {
+            name: 'requestId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+            description: 'Signing request ID',
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['address'],
+                properties: {
+                  address: { type: 'string', description: 'Connected wallet address' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Signal hash computed successfully',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    signalHash: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          '400': {
+            description: 'Invalid request',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    error: { type: 'string', example: 'Missing address' },
+                  },
+                },
+              },
+            },
+          },
+          '404': {
+            description: 'Request not found or expired',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    error: { type: 'string', example: 'Request not found or expired' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/api/signing/callback/{requestId}': {
+      post: {
+        summary: 'Signing callback',
+        description: 'Receives signed transaction from the web signing page. Internal endpoint used by sign-page.',
+        tags: ['Signing'],
+        parameters: [
+          {
+            name: 'requestId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+            description: 'Signing request ID',
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Signature received',
+          },
+        },
+      },
+    },
+    '/api/signing/batch': {
+      post: {
+        summary: 'Batch signing via EIP-7702',
+        description: 'Submit batch signing request using EIP-7702 session keys.',
+        tags: ['Signing'],
+        responses: {
+          '200': {
+            description: 'Batch signing request submitted',
+          },
+        },
+      },
+    },
   },
   tags: [
     {
@@ -411,6 +687,14 @@ export function buildSwaggerSpec(baseUrl: string) {
     {
       name: 'Discovery',
       description: 'Agent discovery endpoints for A2A, OASF, and MCP',
+    },
+    {
+      name: 'Status',
+      description: 'Service status endpoints for payment, signing, TEE, and identity',
+    },
+    {
+      name: 'Signing',
+      description: 'Web signing flow endpoints for wallet-based signature collection',
     },
   ],
   components: {
