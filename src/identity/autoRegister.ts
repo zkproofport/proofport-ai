@@ -51,7 +51,8 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
               currentMetadata.agentUrl !== config.a2aBaseUrl ||
               currentMetadata.x402Support !== (config.paymentMode !== 'disabled') ||
               !currentMetadata.services ||
-              currentMetadata.services.length === 0
+              currentMetadata.services.length === 0 ||
+              !currentMetadata.type
             );
             if (needsUpdate) {
               console.log('Agent metadata needs updating on-chain...');
@@ -63,6 +64,9 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
               }
               if (!currentMetadata.services || currentMetadata.services.length === 0) {
                 console.log('  services array missing or empty');
+              }
+              if (!currentMetadata.type) {
+                console.log('  type field missing');
               }
 
               const metadata: AgentMetadata = {
@@ -81,10 +85,20 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
                 circuits: ['coinbase_attestation', 'coinbase_country_attestation'],
                 ...(config.teeMode !== 'disabled' && { tee: config.teeMode }),
                 x402Support: config.paymentMode !== 'disabled',
+                type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
+                image: `${config.a2aBaseUrl}/icon.png`,
                 services: [
                   { name: 'web', endpoint: config.a2aBaseUrl },
-                  { name: 'MCP', endpoint: `${config.a2aBaseUrl}/mcp` },
-                  { name: 'A2A', endpoint: `${config.a2aBaseUrl}/a2a` },
+                  { name: 'MCP', endpoint: `${config.a2aBaseUrl}/mcp`, version: '2025-11-25' },
+                  { name: 'A2A', endpoint: `${config.a2aBaseUrl}/.well-known/agent-card.json`, version: '0.3.0' },
+                ],
+                registrations: [
+                  {
+                    chainId: 'eip155:84532',
+                    tokenId: info.tokenId.toString(),
+                    txHash: '',
+                    contract: config.erc8004IdentityAddress,
+                  },
                 ],
               };
 
@@ -124,11 +138,14 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
       circuits: ['coinbase_attestation', 'coinbase_country_attestation'],
       ...(config.teeMode !== 'disabled' && { tee: config.teeMode }),
       x402Support: config.paymentMode !== 'disabled',
+      type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
+      image: `${config.a2aBaseUrl}/icon.png`,
       services: [
         { name: 'web', endpoint: config.a2aBaseUrl },
-        { name: 'MCP', endpoint: `${config.a2aBaseUrl}/mcp` },
-        { name: 'A2A', endpoint: `${config.a2aBaseUrl}/a2a` },
+        { name: 'MCP', endpoint: `${config.a2aBaseUrl}/mcp`, version: '2025-11-25' },
+        { name: 'A2A', endpoint: `${config.a2aBaseUrl}/.well-known/agent-card.json`, version: '0.3.0' },
       ],
+      registrations: [],
     };
 
     // Register on-chain

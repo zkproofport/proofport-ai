@@ -120,7 +120,7 @@ export function buildAgentCard(config: Config, tokenId?: bigint | null): AgentCa
  */
 export function buildMcpDiscovery(config: Config) {
   return {
-    protocolVersion: '2024-11-05',
+    protocolVersion: '2025-11-25',
     serverInfo: {
       name: 'zkproofport-prover',
       version: config.agentVersion,

@@ -6,6 +6,7 @@ vi.mock('../../src/identity/register.js', () => {
   const mockRegister = vi.fn();
   const mockIsRegistered = vi.fn();
   const mockGetRegistration = vi.fn();
+  const mockUpdateMetadata = vi.fn();
 
   class MockAgentRegistration {
     constructor(config: any) {
@@ -15,6 +16,7 @@ vi.mock('../../src/identity/register.js', () => {
     register = mockRegister;
     isRegistered = mockIsRegistered;
     getRegistration = mockGetRegistration;
+    updateMetadata = mockUpdateMetadata;
     get agentAddress() {
       return '0x1234567890123456789012345678901234567890';
     }
@@ -23,6 +25,14 @@ vi.mock('../../src/identity/register.js', () => {
   return {
     AgentRegistration: MockAgentRegistration,
     createMetadataUri: vi.fn((metadata) => `data:application/json;base64,${Buffer.from(JSON.stringify(metadata)).toString('base64')}`),
+    parseMetadataUri: vi.fn((uri) => {
+      if (uri.startsWith('data:application/json;base64,')) {
+        const base64 = uri.slice('data:application/json;base64,'.length);
+        const json = Buffer.from(base64, 'base64').toString('utf-8');
+        return JSON.parse(json);
+      }
+      return null;
+    }),
   };
 });
 
@@ -32,6 +42,7 @@ describe('ensureAgentRegistered', () => {
   let mockRegister: any;
   let mockIsRegistered: any;
   let mockGetRegistration: any;
+  let mockUpdateMetadata: any;
 
   const validConfig: Config = {
     erc8004IdentityAddress: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
@@ -59,6 +70,7 @@ describe('ensureAgentRegistered', () => {
     mockRegister = tempInstance.register;
     mockIsRegistered = tempInstance.isRegistered;
     mockGetRegistration = tempInstance.getRegistration;
+    mockUpdateMetadata = tempInstance.updateMetadata;
 
     const autoRegisterModule = await import('../../src/identity/autoRegister.js');
     ensureAgentRegistered = autoRegisterModule.ensureAgentRegistered;
@@ -165,11 +177,14 @@ describe('ensureAgentRegistered', () => {
         circuits: ['coinbase_attestation', 'coinbase_country_attestation'],
         tee: undefined,
         x402Support: true,
+        type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
+        image: 'https://ai.zkproofport.app/icon.png',
         services: [
           { name: 'web', endpoint: 'https://ai.zkproofport.app' },
-          { name: 'MCP', endpoint: 'https://ai.zkproofport.app/mcp' },
-          { name: 'A2A', endpoint: 'https://ai.zkproofport.app/a2a' },
+          { name: 'MCP', endpoint: 'https://ai.zkproofport.app/mcp', version: '2025-11-25' },
+          { name: 'A2A', endpoint: 'https://ai.zkproofport.app/.well-known/agent-card.json', version: '0.3.0' },
         ],
+        registrations: [],
       });
     });
 

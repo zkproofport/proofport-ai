@@ -1,5 +1,7 @@
 import express from 'express';
 import http from 'node:http';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import swaggerUi from 'swagger-ui-express';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { Config } from './config/index.js';
@@ -103,6 +105,10 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
       });
     }
   }
+
+  // Static files (icon.png for 8004scan agent image)
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  app.use(express.static(path.join(__dirname, '..', 'public')));
 
   app.use(express.json());
 

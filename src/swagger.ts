@@ -66,7 +66,7 @@ export const swaggerSpec = {
                     id: 1,
                     method: 'initialize',
                     params: {
-                      protocolVersion: '2025-03-26',
+                      protocolVersion: '2025-11-25',
                       capabilities: {},
                       clientInfo: { name: 'test', version: '1.0.0' },
                     },

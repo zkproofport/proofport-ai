@@ -10,7 +10,10 @@ export interface AgentMetadata {
   circuits: string[];
   tee?: string;
   x402Support?: boolean;
-  services?: Array<{ name: string; endpoint: string }>;
+  services?: Array<{ name: string; endpoint: string; version?: string }>;
+  type?: string;
+  image?: string;
+  registrations?: Array<{ chainId: string; tokenId: string; txHash: string; contract: string }>;
 }
 
 /**

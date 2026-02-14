@@ -197,6 +197,18 @@ export function createMetadataUri(metadata: AgentMetadata): string {
     json.services = metadata.services;
   }
 
+  if (metadata.type !== undefined) {
+    json.type = metadata.type;
+  }
+
+  if (metadata.image !== undefined) {
+    json.image = metadata.image;
+  }
+
+  if (metadata.registrations !== undefined) {
+    json.registrations = metadata.registrations;
+  }
+
   // Convert to base64
   const jsonString = JSON.stringify(json);
   const base64 = Buffer.from(jsonString, 'utf-8').toString('base64');
