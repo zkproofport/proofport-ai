@@ -321,8 +321,9 @@ describe('TaskWorker', () => {
       id: 'task-verify-456',
       skill: 'verify_proof',
       params: {
+        proof: '0xdeadbeef',
+        publicInputs: ['0x0000000000000000000000000000000000000000000000000000000000000001'],
         circuitId: 'coinbase_attestation',
-        proofWithInputs: '0xproof123public456',
         chainId: '84532',
       },
     });
@@ -370,8 +371,15 @@ describe('TaskWorker', () => {
     expect(ethers.JsonRpcProvider).toHaveBeenCalledWith(mockConfig.chainRpcUrl);
     expect(ethers.Contract).toHaveBeenCalledWith(
       '0xVerifier1111111111111111111111111111111111',
-      ['function verify(bytes calldata) external view returns (bool)'],
+      ['function verify(bytes calldata _proof, bytes32[] calldata _publicInputs) external view returns (bool)'],
       expect.any(Object)
+    );
+
+    // Verify Contract.verify was called with proof and publicInputs
+    const mockContract = vi.mocked(ethers.Contract).mock.results[0].value;
+    expect(mockContract.verify).toHaveBeenCalledWith(
+      '0xdeadbeef',
+      ['0x0000000000000000000000000000000000000000000000000000000000000001']
     );
   });
 

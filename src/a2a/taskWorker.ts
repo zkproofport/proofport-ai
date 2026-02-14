@@ -279,11 +279,13 @@ export class TaskWorker {
     );
 
     const circuitId = params.circuitId as string;
-    const proofWithInputs = params.proofWithInputs as string;
+    const proof = params.proof as string;
+    const publicInputs = params.publicInputs as string[];
+    const proofWithInputs = params.proofWithInputs as string | undefined;
     const chainId = (params.chainId as string) || '84532';
 
-    if (!circuitId || !proofWithInputs) {
-      throw new Error('Missing required parameters: circuitId, proofWithInputs');
+    if (!circuitId || ((!proof || !publicInputs) && !proofWithInputs)) {
+      throw new Error('Missing required parameters: circuitId and (proof + publicInputs)');
     }
 
     emitter.emitStatusUpdate(
@@ -315,11 +317,20 @@ export class TaskWorker {
     const provider = new ethers.JsonRpcProvider(this.deps.config.chainRpcUrl);
     const verifierContract = new ethers.Contract(
       verifierAddress,
-      ['function verify(bytes calldata) external view returns (bool)'],
+      ['function verify(bytes calldata _proof, bytes32[] calldata _publicInputs) external view returns (bool)'],
       provider
     );
 
-    const isValid = await verifierContract.verify(proofWithInputs);
+    let isValid: boolean;
+    if (proof && publicInputs) {
+      // Preferred: separate proof and publicInputs
+      const inputsAsBytes32 = publicInputs.map(input => input.startsWith('0x') ? input : `0x${input}`);
+      isValid = await verifierContract.verify(proof, inputsAsBytes32);
+    } else {
+      // Fallback: proofWithInputs needs to be split
+      // This is a legacy format — clients should send separate proof + publicInputs
+      throw new Error('proofWithInputs format is deprecated. Send proof and publicInputs separately.');
+    }
 
     const result = {
       valid: isValid,

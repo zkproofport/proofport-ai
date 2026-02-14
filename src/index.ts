@@ -188,7 +188,7 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   };
 
   // Payment-gated routes — single POST /a2a handles all A2A v0.3 JSON-RPC methods
-  app.post('/a2a', a2aPaymentMiddleware, createA2aHandler({ taskStore, taskEventEmitter }));
+  app.post('/a2a', a2aPaymentMiddleware, createA2aHandler({ taskStore, taskEventEmitter, paymentFacilitator }));
 
   // CORS for signing routes (sign-page on port 3200 → AI server on port 4002)
   app.use('/api/signing', (req, res, next) => {
