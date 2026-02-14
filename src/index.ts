@@ -28,6 +28,12 @@ import { ensureAgentRegistered } from './identity/autoRegister.js';
 import { computeSignalHash } from './input/inputBuilder.js';
 import { ethers } from 'ethers';
 import type { SigningRequestRecord } from './signing/types.js';
+import { createRestRoutes } from './api/restRoutes.js';
+import { createChatRoutes } from './chat/chatHandler.js';
+import type { LLMProvider } from './chat/llmProvider.js';
+import { OpenAIProvider } from './chat/openaiClient.js';
+import { GeminiProvider } from './chat/geminiClient.js';
+import { MultiLLMProvider } from './chat/multiProvider.js';
 
 /**
  * Create a reverse proxy middleware to forward requests to the internal Next.js sign-page.
@@ -190,6 +196,17 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   // Payment-gated routes — single POST /a2a handles all A2A v0.3 JSON-RPC methods
   app.post('/a2a', a2aPaymentMiddleware, createA2aHandler({ taskStore, taskEventEmitter, paymentFacilitator }));
 
+  // REST API routes with payment middleware on POST endpoints only
+  const restPaymentMiddleware = (req: any, res: any, next: any) => {
+    const isProofGeneration = req.path === '/proofs' && req.method === 'POST';
+    const isProofVerification = req.path === '/proofs/verify' && req.method === 'POST';
+    if (isProofGeneration || isProofVerification) {
+      return paymentMiddleware(req, res, next);
+    }
+    next();
+  };
+  app.use('/api/v1', restPaymentMiddleware, createRestRoutes({ taskStore, taskEventEmitter, redis, config }));
+
   // CORS for signing routes (sign-page on port 3200 → AI server on port 4002)
   app.use('/api/signing', (req, res, next) => {
     const origin = req.headers.origin;
@@ -297,6 +314,25 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   app.delete('/mcp', async (_req, res) => {
     res.status(405).json({ error: 'Session management not supported in stateless mode.' });
   });
+
+  // Chat endpoint (LLM-based natural language interface)
+  const llmProviders: LLMProvider[] = [];
+  if (config.openaiApiKey) {
+    llmProviders.push(new OpenAIProvider({ apiKey: config.openaiApiKey }));
+  }
+  if (config.geminiApiKey) {
+    llmProviders.push(new GeminiProvider({ apiKey: config.geminiApiKey }));
+  }
+
+  if (llmProviders.length > 0) {
+    const llmProvider = new MultiLLMProvider(llmProviders);
+    app.use('/api/v1', createChatRoutes({ redis, taskStore, taskEventEmitter, a2aBaseUrl: config.a2aBaseUrl, llmProvider }));
+    console.log(`[Chat] LLM chat endpoint enabled (providers: ${llmProviders.map(p => p.name).join(' -> ')})`);
+  } else {
+    app.post('/api/v1/chat', (_req, res) => {
+      res.status(503).json({ error: 'Chat not configured. Set OPENAI_API_KEY or GEMINI_API_KEY.' });
+    });
+  }
 
   // Proxy sign-page requests to internal Next.js server
   app.use('/s', createSignPageProxy());

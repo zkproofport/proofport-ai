@@ -72,6 +72,10 @@ export function loadConfig() {
     settlementPrivateKey: process.env.SETTLEMENT_PRIVATE_KEY || '',
     settlementOperatorAddress: process.env.SETTLEMENT_OPERATOR_ADDRESS || '',
     settlementUsdcAddress: process.env.SETTLEMENT_USDC_ADDRESS || '',
+
+    // Chat / LLM (optional)
+    openaiApiKey: process.env.OPENAI_API_KEY || '',
+    geminiApiKey: process.env.GEMINI_API_KEY || '',
   };
 }
 

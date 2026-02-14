@@ -39,25 +39,39 @@ export function createPaymentMiddleware(config: PaymentConfig): (req: Request, r
   const server = new x402ResourceServer(facilitatorClient)
     .register(network, new ExactEvmScheme());
 
-  // Create routes config
+  // Payment config shared by all routes
+  const paymentAccepts = [{
+    scheme: 'exact',
+    price: config.paymentProofPrice,
+    network,
+    payTo: config.paymentPayTo,
+  }];
+
+  // Create routes config — all payment-gated routes
   const routesConfig = {
     'POST /a2a': {
-      accepts: [{
-        scheme: 'exact',
-        price: config.paymentProofPrice,
-        network,
-        payTo: config.paymentPayTo,
-      }],
+      accepts: paymentAccepts,
       description: 'Generate ZK proof via A2A protocol',
     },
     'POST /mcp': {
-      accepts: [{
-        scheme: 'exact',
-        price: config.paymentProofPrice,
-        network,
-        payTo: config.paymentPayTo,
-      }],
+      accepts: paymentAccepts,
       description: 'Generate ZK proof via MCP protocol',
+    },
+    'POST /api/v1/proofs': {
+      accepts: paymentAccepts,
+      description: 'Generate ZK proof via REST API',
+    },
+    'POST /proofs': {
+      accepts: paymentAccepts,
+      description: 'Generate ZK proof via REST API (mounted)',
+    },
+    'POST /api/v1/proofs/verify': {
+      accepts: paymentAccepts,
+      description: 'Verify ZK proof via REST API',
+    },
+    'POST /proofs/verify': {
+      accepts: paymentAccepts,
+      description: 'Verify ZK proof via REST API (mounted)',
     },
   };
 

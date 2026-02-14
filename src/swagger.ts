@@ -516,6 +516,203 @@ export function buildSwaggerSpec(baseUrl: string) {
         },
       },
     },
+    '/api/v1/circuits': {
+      get: {
+        summary: 'List supported ZK circuits',
+        description: 'Returns all available zero-knowledge circuits with metadata, required inputs, and on-chain verifier addresses.',
+        tags: ['REST API'],
+        responses: {
+          '200': {
+            description: 'List of supported circuits',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    circuits: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/MCPToolGetCircuits/properties/circuits/items' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/api/v1/proofs': {
+      post: {
+        summary: 'Generate a ZK proof',
+        description: 'Generates a zero-knowledge proof. Three modes: (1) Web signing — send circuitId+scope, get signingUrl; (2) Resume — send requestId after user signed; (3) Direct — send address+signature for immediate proof.',
+        tags: ['REST API'],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/MCPToolGenerateProof' },
+              examples: {
+                webSigning: {
+                  summary: 'Web signing flow (step 1)',
+                  value: { circuitId: 'coinbase_attestation', scope: 'my-dapp.example.com' },
+                },
+                resume: {
+                  summary: 'Resume after signing (step 2)',
+                  value: { circuitId: 'coinbase_attestation', scope: 'my-dapp.example.com', requestId: '22d302e0-...' },
+                },
+                direct: {
+                  summary: 'Direct signing',
+                  value: { circuitId: 'coinbase_attestation', scope: 'my-dapp.example.com', address: '0xD6C7...', signature: '0x1234...' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Proof generated or signing request created',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    taskId: { type: 'string' },
+                    state: { type: 'string', enum: ['input-required', 'completed'] },
+                    signingUrl: { type: 'string', description: 'Present when state is input-required' },
+                    requestId: { type: 'string', description: 'Present when state is input-required' },
+                    proof: { type: 'string', description: 'Present when state is completed' },
+                    publicInputs: { type: 'string', description: 'Present when state is completed' },
+                    nullifier: { type: 'string', description: 'Present when state is completed' },
+                    signalHash: { type: 'string', description: 'Present when state is completed' },
+                  },
+                },
+              },
+            },
+          },
+          '400': { description: 'Invalid request parameters' },
+          '402': { description: 'Payment required (x402)' },
+        },
+      },
+    },
+    '/api/v1/proofs/{taskId}': {
+      get: {
+        summary: 'Check proof generation status',
+        description: 'Returns the current status of a proof generation task.',
+        tags: ['REST API'],
+        parameters: [
+          {
+            name: 'taskId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+            description: 'Task ID from generateProof',
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Task status',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    taskId: { type: 'string' },
+                    state: { type: 'string' },
+                    message: { type: 'string' },
+                    proof: { type: 'string' },
+                    publicInputs: { type: 'string' },
+                    nullifier: { type: 'string' },
+                    signalHash: { type: 'string' },
+                    signingUrl: { type: 'string' },
+                    requestId: { type: 'string' },
+                    error: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          '404': { description: 'Task not found' },
+        },
+      },
+    },
+    '/api/v1/proofs/verify': {
+      post: {
+        summary: 'Verify a ZK proof on-chain',
+        description: 'Verifies a zero-knowledge proof against the deployed on-chain verifier contract.',
+        tags: ['REST API'],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/MCPToolVerifyProof' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Verification result',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    valid: { type: 'boolean' },
+                    circuitId: { type: 'string' },
+                    verifierAddress: { type: 'string' },
+                    chainId: { type: 'string' },
+                    error: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          '400': { description: 'Invalid request parameters' },
+          '402': { description: 'Payment required (x402)' },
+        },
+      },
+    },
+    '/api/v1/chat': {
+      post: {
+        summary: 'LLM chat endpoint',
+        description: 'Natural language interface powered by Gemini. Supports conversation sessions and automatic function calling for proof generation/verification. Requires GEMINI_API_KEY to be configured.',
+        tags: ['Chat'],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['message'],
+                properties: {
+                  message: { type: 'string', description: 'User message in natural language', example: 'Generate a KYC proof for my-dapp.com' },
+                  sessionId: { type: 'string', description: 'Session ID for conversation continuity (auto-generated if omitted)' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Chat response',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    response: { type: 'string', description: 'LLM response text' },
+                    sessionId: { type: 'string', description: 'Session ID for subsequent messages' },
+                    skillResult: { type: 'object', description: 'Raw skill execution result (if a skill was called)' },
+                    signingUrl: { type: 'string', description: 'Signing URL (if proof generation initiated)' },
+                  },
+                },
+              },
+            },
+          },
+          '400': { description: 'Missing or invalid message' },
+          '503': { description: 'Chat not configured (GEMINI_API_KEY not set)' },
+        },
+      },
+    },
     '/api/signing/{requestId}': {
       get: {
         summary: 'Get signing request details',
@@ -695,6 +892,14 @@ export function buildSwaggerSpec(baseUrl: string) {
     {
       name: 'Signing',
       description: 'Web signing flow endpoints for wallet-based signature collection',
+    },
+    {
+      name: 'REST API',
+      description: 'REST API endpoints for GPT Actions and direct HTTP integration. Wraps the same proof generation/verification capabilities as A2A and MCP.',
+    },
+    {
+      name: 'Chat',
+      description: 'LLM-powered natural language chat interface with Gemini function calling. Supports session management for Telegram-like integrations.',
     },
   ],
   components: {
