@@ -589,9 +589,9 @@ describe('TaskWorker', () => {
     worker.stop();
   });
 
-  it('13. processTask with generate_proof routes through TEE when teeMode is not disabled', async () => {
+  it('13. processTask with generate_proof routes through TEE when teeMode is nitro', async () => {
     const mockTeeProvider = {
-      mode: 'local' as const,
+      mode: 'nitro' as const,
       prove: vi.fn().mockResolvedValue({
         type: 'proof',
         requestId: 'task-tee-test',
@@ -604,7 +604,7 @@ describe('TaskWorker', () => {
 
     const teeConfig = {
       ...mockConfig,
-      teeMode: 'local' as const,
+      teeMode: 'nitro' as const,
     };
 
     const teeWorker = new TaskWorker({
@@ -718,9 +718,9 @@ describe('TaskWorker', () => {
     );
   });
 
-  it('15. processTask with generate_proof fails when TEE returns error', async () => {
+  it('15. processTask with generate_proof fails when TEE returns error and teeMode is nitro', async () => {
     const mockTeeProvider = {
-      mode: 'local' as const,
+      mode: 'nitro' as const,
       prove: vi.fn().mockResolvedValue({
         type: 'error',
         requestId: 'task-tee-err',
@@ -732,7 +732,7 @@ describe('TaskWorker', () => {
 
     const teeConfig = {
       ...mockConfig,
-      teeMode: 'local' as const,
+      teeMode: 'nitro' as const,
     };
 
     const teeWorker = new TaskWorker({

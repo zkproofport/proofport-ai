@@ -262,7 +262,7 @@ export class TaskWorker {
     // Choose proof generation path based on TEE mode
     let proofResult: { proof: string; publicInputs: string; proofWithInputs: string };
 
-    if (this.deps.teeProvider && this.deps.config.teeMode !== 'disabled') {
+    if (this.deps.teeProvider && this.deps.config.teeMode === 'nitro') {
       emitter.emitStatusUpdate(
         task.id,
         {
