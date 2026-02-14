@@ -1,0 +1,500 @@
+openapi: 3.1.0
+info:
+  title: ZKProofport Prover Agent
+  version: 1.0.0
+  description: |
+    Zero-knowledge proof generation and verification for Coinbase attestations.
+    Generates privacy-preserving proofs using Noir circuits and verifies them on-chain (Base network).
+
+    ## Proof Generation Flow (Web Signing)
+    1. `POST /api/v1/proofs` with `circuitId` + `scope` (no address/signature) → returns `signingUrl`
+    2. User opens `signingUrl` in browser, connects wallet, signs
+    3. `POST /api/v1/proofs` with `requestId` from step 1 → returns proof result
+
+    ## Proof Generation Flow (Direct Signing)
+    1. `POST /api/v1/proofs` with `circuitId` + `scope` + `address` + `signature` → returns proof result directly
+servers:
+  - url: https://stg-ai.zkproofport.app
+    description: Staging (Base Sepolia testnet)
+  - url: https://ai.zkproofport.app
+    description: Production (Base Mainnet)
+
+paths:
+  /api/v1/circuits:
+    get:
+      operationId: getSupportedCircuits
+      summary: List supported ZK circuits
+      description: Returns all available zero-knowledge circuits with metadata, required inputs, and on-chain verifier addresses.
+      tags: [Circuits]
+      responses:
+        '200':
+          description: List of supported circuits
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  circuits:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Circuit'
+              example:
+                circuits:
+                  - id: coinbase_attestation
+                    displayName: Coinbase KYC
+                    description: Prove KYC attestation from Coinbase without revealing identity
+                    requiredInputs: [address, signature, scope]
+                    verifierAddress: '0x0036B61dBFaB8f3CfEEF77dD5D45F7EFBFE2035c'
+                  - id: coinbase_country_attestation
+                    displayName: Coinbase Country
+                    description: Prove country of residence from Coinbase attestation
+                    requiredInputs: [address, signature, scope, countryList, isIncluded]
+                    verifierAddress: '0xdEe363585926c3c28327Efd1eDd01cf4559738cf'
+
+  /api/v1/proofs:
+    post:
+      operationId: generateProof
+      summary: Generate a ZK proof
+      description: |
+        Generates a zero-knowledge proof for the specified circuit.
+
+        **Two modes of operation:**
+
+        ### Mode 1: Web Signing (recommended for end users)
+        Send only `circuitId` and `scope`. The response will include a `signingUrl` where the user
+        connects their wallet and signs. After signing, call this endpoint again with the `requestId`
+        to retrieve the generated proof.
+
+        ### Mode 2: Direct Signing
+        Send `circuitId`, `scope`, `address`, and `signature` together. The proof is generated
+        and returned immediately. Requires the user to have already signed the signal hash off-band.
+
+        ### Mode 3: Resume after Web Signing
+        Send only `requestId` (from Mode 1 step 1). The server checks if the user has signed,
+        then generates and returns the proof.
+      tags: [Proofs]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateProofRequest'
+            examples:
+              webSigning:
+                summary: 'Step 1: Create signing request (web signing flow)'
+                value:
+                  circuitId: coinbase_attestation
+                  scope: my-dapp.example.com
+              resumeWithRequestId:
+                summary: 'Step 2: Resume after user signed'
+                value:
+                  circuitId: coinbase_attestation
+                  scope: my-dapp.example.com
+                  requestId: 22d302e0-0b7a-4840-aad6-2150acd1b92f
+              directSigning:
+                summary: Direct signing (address + signature provided)
+                value:
+                  circuitId: coinbase_attestation
+                  scope: my-dapp.example.com
+                  address: '0xD6C714247037E5201B7e3dEC97a3ab59a9d2F739'
+                  signature: '0x1234...abcd'
+              countryAttestation:
+                summary: Country attestation with country list
+                value:
+                  circuitId: coinbase_country_attestation
+                  scope: my-dapp.example.com
+                  address: '0xD6C714247037E5201B7e3dEC97a3ab59a9d2F739'
+                  signature: '0x1234...abcd'
+                  countryList: ['US', 'KR', 'JP']
+                  isIncluded: true
+      responses:
+        '200':
+          description: Proof generated or signing request created
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/SigningRequestResponse'
+                  - $ref: '#/components/schemas/ProofResponse'
+              examples:
+                signingRequest:
+                  summary: Signing request created (user needs to sign)
+                  value:
+                    taskId: task-uuid-123
+                    state: input-required
+                    signingUrl: https://stg-ai.zkproofport.app/s/22d302e0-0b7a-4840-aad6-2150acd1b92f
+                    requestId: 22d302e0-0b7a-4840-aad6-2150acd1b92f
+                    message: Please sign at the signing URL to continue
+                proofResult:
+                  summary: Proof generated successfully
+                  value:
+                    taskId: task-uuid-456
+                    state: completed
+                    proof: '0x1a2b3c...'
+                    publicInputs: '0x58ee6e...'
+                    nullifier: '0x963dcd...'
+                    signalHash: '0x58ee6e...'
+        '400':
+          description: Invalid request parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '402':
+          description: Payment required (x402 USDC micropayment)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentRequired'
+
+  /api/v1/proofs/{taskId}:
+    get:
+      operationId: getProofStatus
+      summary: Check proof generation status
+      description: |
+        Returns the current status of a proof generation task. Use this to poll for completion
+        after creating a signing request or when proof generation takes time.
+
+        Task states: `submitted`, `running`, `input-required`, `completed`, `failed`, `canceled`
+      tags: [Proofs]
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Task ID returned from generateProof
+      responses:
+        '200':
+          description: Task status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskStatus'
+              examples:
+                running:
+                  summary: Proof generation in progress
+                  value:
+                    taskId: task-uuid-456
+                    state: running
+                    message: Running bb prove
+                completed:
+                  summary: Proof generated
+                  value:
+                    taskId: task-uuid-456
+                    state: completed
+                    proof: '0x1a2b3c...'
+                    publicInputs: '0x58ee6e...'
+                    nullifier: '0x963dcd...'
+                    signalHash: '0x58ee6e...'
+                inputRequired:
+                  summary: Waiting for user signature
+                  value:
+                    taskId: task-uuid-456
+                    state: input-required
+                    signingUrl: https://stg-ai.zkproofport.app/s/22d302e0-...
+                    requestId: 22d302e0-...
+                    message: Waiting for user to sign
+        '404':
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/proofs/verify:
+    post:
+      operationId: verifyProof
+      summary: Verify a ZK proof on-chain
+      description: |
+        Verifies a zero-knowledge proof against the deployed on-chain verifier contract.
+        Returns whether the proof is valid and the transaction details.
+      tags: [Proofs]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyProofRequest'
+            example:
+              circuitId: coinbase_attestation
+              proof: '0x1a2b3c...'
+              publicInputs:
+                - '0x0000000000000000000000000000000000000000000000000000000000000001'
+                - '0x58ee6ed81cdec8c277567cd55bf75b1e94a4a4fef9a892319c285a94134391ba'
+      responses:
+        '200':
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerifyResponse'
+              examples:
+                valid:
+                  summary: Proof is valid
+                  value:
+                    valid: true
+                    circuitId: coinbase_attestation
+                    verifierAddress: '0x0036B61dBFaB8f3CfEEF77dD5D45F7EFBFE2035c'
+                    chainId: '84532'
+                invalid:
+                  summary: Proof is invalid
+                  value:
+                    valid: false
+                    error: 'Proof verification failed on-chain'
+                    circuitId: coinbase_attestation
+                    verifierAddress: '0x0036B61dBFaB8f3CfEEF77dD5D45F7EFBFE2035c'
+                    chainId: '84532'
+        '400':
+          description: Invalid request parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '402':
+          description: Payment required (x402 USDC micropayment)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentRequired'
+
+  /health:
+    get:
+      operationId: healthCheck
+      summary: Health check
+      description: Returns server health status including TEE mode and payment configuration.
+      tags: [System]
+      responses:
+        '200':
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: healthy
+                  service:
+                    type: string
+                    example: proofport-ai
+                  mode:
+                    type: string
+                    description: Payment mode (disabled, testnet, mainnet)
+                    example: testnet
+                  tee:
+                    type: string
+                    description: TEE mode (disabled, local, nitro)
+                    example: nitro
+
+components:
+  schemas:
+    Circuit:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Canonical circuit identifier
+          enum: [coinbase_attestation, coinbase_country_attestation]
+        displayName:
+          type: string
+          description: Human-readable name
+        description:
+          type: string
+        requiredInputs:
+          type: array
+          items:
+            type: string
+          description: Required input fields for proof generation
+        verifierAddress:
+          type: string
+          description: On-chain verifier contract address (0x-prefixed)
+
+    GenerateProofRequest:
+      type: object
+      required: [circuitId, scope]
+      properties:
+        circuitId:
+          type: string
+          description: Circuit to generate proof for
+          enum: [coinbase_attestation, coinbase_country_attestation]
+        scope:
+          type: string
+          description: Privacy scope string for nullifier computation. Use your app domain (e.g. "my-dapp.example.com")
+        address:
+          type: string
+          description: KYC wallet address (0x-prefixed). Omit for web signing flow.
+        signature:
+          type: string
+          description: User signature over the signal hash (0x-prefixed, 65 bytes). Omit for web signing flow.
+        requestId:
+          type: string
+          description: Signing request ID from a previous web signing step. Use to resume after user signed.
+        countryList:
+          type: array
+          items:
+            type: string
+          description: ISO country codes (required for coinbase_country_attestation)
+          example: ['US', 'KR']
+        isIncluded:
+          type: boolean
+          description: true = prove user IS in country list, false = prove user is NOT in country list
+
+    SigningRequestResponse:
+      type: object
+      properties:
+        taskId:
+          type: string
+        state:
+          type: string
+          enum: [input-required]
+        signingUrl:
+          type: string
+          format: uri
+          description: URL for the user to open in browser to connect wallet and sign
+        requestId:
+          type: string
+          description: Use this requestId to resume proof generation after signing
+        message:
+          type: string
+
+    ProofResponse:
+      type: object
+      properties:
+        taskId:
+          type: string
+        state:
+          type: string
+          enum: [completed]
+        proof:
+          type: string
+          description: Generated proof bytes (0x-prefixed hex)
+        publicInputs:
+          type: string
+          description: Public inputs (0x-prefixed hex)
+        nullifier:
+          type: string
+          description: Nullifier hash — unique per (address, scope, circuit). Prevents double-proving.
+        signalHash:
+          type: string
+          description: Signal hash computed from circuit inputs
+
+    TaskStatus:
+      type: object
+      properties:
+        taskId:
+          type: string
+        state:
+          type: string
+          enum: [submitted, running, input-required, completed, failed, canceled]
+        message:
+          type: string
+          description: Human-readable status message
+        signingUrl:
+          type: string
+          format: uri
+          description: Present when state is input-required
+        requestId:
+          type: string
+          description: Present when state is input-required
+        proof:
+          type: string
+          description: Present when state is completed
+        publicInputs:
+          type: string
+          description: Present when state is completed
+        nullifier:
+          type: string
+          description: Present when state is completed
+        signalHash:
+          type: string
+          description: Present when state is completed
+        error:
+          type: string
+          description: Present when state is failed
+
+    VerifyProofRequest:
+      type: object
+      required: [circuitId, proof, publicInputs]
+      properties:
+        circuitId:
+          type: string
+          enum: [coinbase_attestation, coinbase_country_attestation]
+        proof:
+          type: string
+          description: Proof bytes (0x-prefixed hex)
+        publicInputs:
+          type: array
+          items:
+            type: string
+          description: Public inputs as bytes32 hex strings
+        chainId:
+          type: string
+          description: Chain ID for verification (default 84532 for Base Sepolia)
+          default: '84532'
+
+    VerifyResponse:
+      type: object
+      properties:
+        valid:
+          type: boolean
+          description: Whether the proof is valid on-chain
+        circuitId:
+          type: string
+        verifierAddress:
+          type: string
+          description: Verifier contract that was called
+        chainId:
+          type: string
+        error:
+          type: string
+          description: Error message if verification failed
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error message
+
+    PaymentRequired:
+      type: object
+      properties:
+        error:
+          type: string
+          example: Payment required
+        x402:
+          type: object
+          description: x402 payment details
+          properties:
+            payTo:
+              type: string
+              description: USDC recipient address
+            amount:
+              type: string
+              description: Price per call
+              example: '$0.10'
+            network:
+              type: string
+              example: base-sepolia
+            token:
+              type: string
+              example: USDC
+
+  securitySchemes:
+    x402:
+      type: apiKey
+      in: header
+      name: X-PAYMENT
+      description: |
+        x402 micropayment protocol. Include USDC payment proof in the X-PAYMENT header.
+        Payment is $0.10 USDC per proof generation/verification call on Base Sepolia.
+        See https://www.x402.org for protocol details.
+
+tags:
+  - name: Circuits
+    description: Discover available ZK circuits and their metadata
+  - name: Proofs
+    description: Generate and verify zero-knowledge proofs
+  - name: System
+    description: Server health and status
