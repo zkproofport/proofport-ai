@@ -15,7 +15,7 @@ import { ProofCache } from './redis/proofCache.js';
 import { getAgentCardHandler, getMcpDiscoveryHandler, getOasfAgentHandler } from './a2a/agentCard.js';
 import { createA2aHandler } from './a2a/taskHandler.js';
 import { TaskStore } from './a2a/taskStore.js';
-import { TaskEventEmitter, createStreamHandler } from './a2a/streaming.js';
+import { TaskEventEmitter } from './a2a/streaming.js';
 import { createPaymentMiddleware } from './payment/x402Middleware.js';
 import { PaymentFacilitator } from './payment/facilitator.js';
 import { SettlementWorker } from './payment/settlementWorker.js';
@@ -174,10 +174,8 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   app.get('/.well-known/agent.json', getOasfAgentHandler(config, agentTokenId));
   app.get('/.well-known/agent-card.json', getAgentCardHandler(config, agentTokenId));
   app.get('/.well-known/mcp.json', getMcpDiscoveryHandler(config));
-  app.get('/a2a/stream/:taskId', createStreamHandler(taskEventEmitter));
-
-  // Payment-gated routes
-  app.post('/a2a', paymentMiddleware, createA2aHandler({ taskStore }));
+  // Payment-gated routes — single POST /a2a handles all A2A v0.3 JSON-RPC methods
+  app.post('/a2a', paymentMiddleware, createA2aHandler({ taskStore, taskEventEmitter }));
 
   // CORS for signing routes (sign-page on port 3200 → AI server on port 4002)
   app.use('/api/signing', (req, res, next) => {

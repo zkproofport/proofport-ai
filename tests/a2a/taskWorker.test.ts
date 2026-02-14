@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { TaskWorker } from '../../src/a2a/taskWorker.js';
-import { TaskStore } from '../../src/a2a/taskStore.js';
+import { TaskStore, type A2aTask, type Artifact } from '../../src/a2a/taskStore.js';
 import { TaskEventEmitter } from '../../src/a2a/streaming.js';
 import type { Config } from '../../src/config/index.js';
 
@@ -109,6 +109,21 @@ import { CIRCUITS } from '../../src/config/circuits.js';
 import { VERIFIER_ADDRESSES } from '../../src/config/contracts.js';
 import { createRedisClient } from '../../src/redis/client.js';
 
+function makeA2aTask(overrides: Partial<A2aTask> = {}): A2aTask {
+  return {
+    id: 'task-default',
+    contextId: 'ctx-1',
+    status: { state: 'queued', timestamp: new Date().toISOString() },
+    skill: 'generate_proof',
+    params: {},
+    history: [],
+    artifacts: [],
+    metadata: {},
+    kind: 'task',
+    ...overrides,
+  };
+}
+
 describe('TaskWorker', () => {
   let worker: TaskWorker;
   let mockTaskStore: TaskStore;
@@ -140,6 +155,7 @@ describe('TaskWorker', () => {
       proverPrivateKey: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
       paymentMode: 'disabled' as const,
       a2aBaseUrl: 'https://a2a.example.com',
+      websiteUrl: 'https://zkproofport.com',
       agentVersion: '1.0.0',
       paymentPayTo: '',
       paymentFacilitatorUrl: '',
@@ -155,6 +171,7 @@ describe('TaskWorker', () => {
       teeAttestationEnabled: false,
       erc8004IdentityAddress: '',
       erc8004ReputationAddress: '0xReputation1111111111111111111111111111111',
+      erc8004ValidationAddress: '',
       settlementChainRpcUrl: '',
       settlementPrivateKey: '',
       settlementOperatorAddress: '',
@@ -169,21 +186,20 @@ describe('TaskWorker', () => {
 
     // Mock TaskStore methods
     vi.spyOn(mockTaskStore, 'getTask').mockResolvedValue(null);
-    vi.spyOn(mockTaskStore, 'updateTaskStatus').mockImplementation(async (id, status, result, error) => ({
-      id,
-      status,
-      skill: 'generate_proof',
-      params: {},
-      result,
-      error,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    }));
+    vi.spyOn(mockTaskStore, 'updateTaskStatus').mockImplementation(async (id, state, statusMessage?) => {
+      return makeA2aTask({
+        id,
+        status: { state, message: statusMessage, timestamp: new Date().toISOString() },
+      });
+    });
+    vi.spyOn(mockTaskStore, 'addArtifact').mockImplementation(async (id, artifact) => {
+      return makeA2aTask({ id, artifacts: [artifact] });
+    });
 
     // Mock TaskEventEmitter methods
-    vi.spyOn(mockTaskEventEmitter, 'emitTaskStatus');
-    vi.spyOn(mockTaskEventEmitter, 'emitTaskProgress');
-    vi.spyOn(mockTaskEventEmitter, 'emitTaskArtifact');
+    vi.spyOn(mockTaskEventEmitter, 'emitStatusUpdate');
+    vi.spyOn(mockTaskEventEmitter, 'emitArtifactUpdate');
+    vi.spyOn(mockTaskEventEmitter, 'emitTaskComplete');
   });
 
   afterEach(() => {
@@ -196,9 +212,7 @@ describe('TaskWorker', () => {
 
   it('2. start() begins polling interval', () => {
     worker.start();
-
     expect(vi.getTimerCount()).toBeGreaterThan(0);
-
     worker.stop();
   });
 
@@ -206,32 +220,24 @@ describe('TaskWorker', () => {
     worker.start();
     const timerCount = vi.getTimerCount();
     expect(timerCount).toBeGreaterThan(0);
-
     worker.stop();
-
-    // Timer should be cleared (worker should only have stopped its own interval)
     expect(vi.getTimerCount()).toBeLessThan(timerCount);
   });
 
   it('4. start() when already running does nothing', () => {
     const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-
     worker.start();
     const timerCount = vi.getTimerCount();
-
     worker.start();
-
     expect(vi.getTimerCount()).toBe(timerCount);
     expect(consoleLogSpy).toHaveBeenCalledWith('TaskWorker already running');
-
     worker.stop();
     consoleLogSpy.mockRestore();
   });
 
-  it('5. processTask with generate_proof skill - transitions submitted→working→completed, emits events', async () => {
-    const task = {
+  it('5. processTask with generate_proof - transitions queued->running->completed, emits events', async () => {
+    const task = makeA2aTask({
       id: 'task-generate-123',
-      status: 'submitted' as const,
       skill: 'generate_proof',
       params: {
         address: '0xUser1111111111111111111111111111111111111',
@@ -239,44 +245,55 @@ describe('TaskWorker', () => {
         scope: 'test-scope',
         circuitId: 'coinbase_attestation',
       },
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+    });
 
     await worker.processTask(task);
 
     // Verify status transitions
-    expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith('task-generate-123', 'working');
-    expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith(
+    expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith('task-generate-123', 'running');
+    expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith('task-generate-123', 'completed');
+
+    // Verify addArtifact was called with proper Artifact
+    expect(mockTaskStore.addArtifact).toHaveBeenCalledWith(
       'task-generate-123',
-      'completed',
       expect.objectContaining({
-        proof: '0xproof123',
-        publicInputs: '0xpublic456',
-        proofWithInputs: '0xproof123public456',
-        nullifier: expect.any(String),
-        signalHash: expect.any(String),
+        id: expect.any(String),
+        mimeType: 'application/json',
+        parts: [expect.objectContaining({
+          kind: 'data',
+          mimeType: 'application/json',
+          data: expect.objectContaining({
+            proof: '0xproof123',
+            publicInputs: '0xpublic456',
+            proofWithInputs: '0xproof123public456',
+            nullifier: expect.any(String),
+            signalHash: expect.any(String),
+          }),
+        })],
       })
     );
 
-    // Verify events
-    expect(mockTaskEventEmitter.emitTaskStatus).toHaveBeenCalledWith('task-generate-123', 'working');
-    expect(mockTaskEventEmitter.emitTaskProgress).toHaveBeenCalledWith(
+    // Verify emitter events
+    expect(mockTaskEventEmitter.emitStatusUpdate).toHaveBeenCalledWith(
       'task-generate-123',
-      'building_inputs',
-      'Constructing circuit parameters'
+      expect.objectContaining({ state: 'running' }),
+      false
     );
-    expect(mockTaskEventEmitter.emitTaskProgress).toHaveBeenCalledWith(
+    expect(mockTaskEventEmitter.emitStatusUpdate).toHaveBeenCalledWith(
       'task-generate-123',
-      'generating_proof',
-      'Running bb prove'
+      expect.objectContaining({ state: 'completed' }),
+      true
     );
-    expect(mockTaskEventEmitter.emitTaskStatus).toHaveBeenCalledWith('task-generate-123', 'completed');
-    expect(mockTaskEventEmitter.emitTaskArtifact).toHaveBeenCalledWith(
+    expect(mockTaskEventEmitter.emitArtifactUpdate).toHaveBeenCalledWith(
       'task-generate-123',
       expect.objectContaining({
-        proof: '0xproof123',
+        id: expect.any(String),
+        mimeType: 'application/json',
       })
+    );
+    expect(mockTaskEventEmitter.emitTaskComplete).toHaveBeenCalledWith(
+      'task-generate-123',
+      expect.objectContaining({ id: 'task-generate-123' })
     );
 
     // Verify BbProver was called
@@ -299,43 +316,55 @@ describe('TaskWorker', () => {
     );
   });
 
-  it('6. processTask with verify_proof skill - calls on-chain verifier', async () => {
-    const task = {
+  it('6. processTask with verify_proof - calls on-chain verifier', async () => {
+    const task = makeA2aTask({
       id: 'task-verify-456',
-      status: 'submitted' as const,
       skill: 'verify_proof',
       params: {
         circuitId: 'coinbase_attestation',
         proofWithInputs: '0xproof123public456',
         chainId: '84532',
       },
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+    });
 
     await worker.processTask(task);
 
     // Verify status transitions
-    expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith('task-verify-456', 'working');
-    expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith(
+    expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith('task-verify-456', 'running');
+    expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith('task-verify-456', 'completed');
+
+    // Verify addArtifact was called with verification result
+    expect(mockTaskStore.addArtifact).toHaveBeenCalledWith(
       'task-verify-456',
-      'completed',
       expect.objectContaining({
-        valid: true,
-        circuitId: 'coinbase_attestation',
-        verifierAddress: '0xVerifier1111111111111111111111111111111111',
-        chainId: '84532',
+        mimeType: 'application/json',
+        parts: [expect.objectContaining({
+          kind: 'data',
+          data: expect.objectContaining({
+            valid: true,
+            circuitId: 'coinbase_attestation',
+            verifierAddress: '0xVerifier1111111111111111111111111111111111',
+            chainId: '84532',
+          }),
+        })],
       })
     );
 
-    // Verify events
-    expect(mockTaskEventEmitter.emitTaskStatus).toHaveBeenCalledWith('task-verify-456', 'working');
-    expect(mockTaskEventEmitter.emitTaskProgress).toHaveBeenCalledWith(
+    // Verify emitter events
+    expect(mockTaskEventEmitter.emitStatusUpdate).toHaveBeenCalledWith(
       'task-verify-456',
-      'verifying',
-      'Calling on-chain verifier'
+      expect.objectContaining({ state: 'running' }),
+      false
     );
-    expect(mockTaskEventEmitter.emitTaskStatus).toHaveBeenCalledWith('task-verify-456', 'completed');
+    expect(mockTaskEventEmitter.emitStatusUpdate).toHaveBeenCalledWith(
+      'task-verify-456',
+      expect.objectContaining({ state: 'completed' }),
+      true
+    );
+    expect(mockTaskEventEmitter.emitTaskComplete).toHaveBeenCalledWith(
+      'task-verify-456',
+      expect.objectContaining({ id: 'task-verify-456' })
+    );
 
     // Verify ethers Contract was created
     expect(ethers.JsonRpcProvider).toHaveBeenCalledWith(mockConfig.chainRpcUrl);
@@ -347,72 +376,101 @@ describe('TaskWorker', () => {
   });
 
   it('7. processTask with get_supported_circuits - returns circuit list', async () => {
-    const task = {
+    const task = makeA2aTask({
       id: 'task-circuits-789',
-      status: 'submitted' as const,
       skill: 'get_supported_circuits',
-      params: {
-        chainId: '84532',
-      },
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+      params: { chainId: '84532' },
+    });
 
     await worker.processTask(task);
 
     // Verify status transitions
-    expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith('task-circuits-789', 'working');
-    expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith(
+    expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith('task-circuits-789', 'running');
+    expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith('task-circuits-789', 'completed');
+
+    // Verify addArtifact was called with circuits list
+    expect(mockTaskStore.addArtifact).toHaveBeenCalledWith(
       'task-circuits-789',
-      'completed',
       expect.objectContaining({
-        circuits: expect.arrayContaining([
-          expect.objectContaining({
-            id: 'coinbase_attestation',
-            displayName: 'Coinbase KYC',
-            verifierAddress: '0xVerifier1111111111111111111111111111111111',
+        mimeType: 'application/json',
+        parts: [expect.objectContaining({
+          kind: 'data',
+          data: expect.objectContaining({
+            circuits: expect.arrayContaining([
+              expect.objectContaining({
+                id: 'coinbase_attestation',
+                displayName: 'Coinbase KYC',
+                verifierAddress: '0xVerifier1111111111111111111111111111111111',
+              }),
+              expect.objectContaining({
+                id: 'coinbase_country_attestation',
+                displayName: 'Coinbase Country',
+                verifierAddress: '0xVerifier2222222222222222222222222222222222',
+              }),
+            ]),
+            chainId: '84532',
           }),
-          expect.objectContaining({
-            id: 'coinbase_country_attestation',
-            displayName: 'Coinbase Country',
-            verifierAddress: '0xVerifier2222222222222222222222222222222222',
-          }),
-        ]),
-        chainId: '84532',
+        })],
       })
     );
 
-    // Verify events
-    expect(mockTaskEventEmitter.emitTaskStatus).toHaveBeenCalledWith('task-circuits-789', 'working');
-    expect(mockTaskEventEmitter.emitTaskStatus).toHaveBeenCalledWith('task-circuits-789', 'completed');
+    // Verify emitter events
+    expect(mockTaskEventEmitter.emitStatusUpdate).toHaveBeenCalledWith(
+      'task-circuits-789',
+      expect.objectContaining({ state: 'running' }),
+      false
+    );
+    expect(mockTaskEventEmitter.emitStatusUpdate).toHaveBeenCalledWith(
+      'task-circuits-789',
+      expect.objectContaining({ state: 'completed' }),
+      true
+    );
+    expect(mockTaskEventEmitter.emitTaskComplete).toHaveBeenCalledWith(
+      'task-circuits-789',
+      expect.objectContaining({ id: 'task-circuits-789' })
+    );
   });
 
-  it('8. processTask with unknown skill - transitions to failed', async () => {
-    const task = {
+  it('8. processTask with unknown skill - transitions to failed with error message', async () => {
+    const task = makeA2aTask({
       id: 'task-unknown-999',
-      status: 'submitted' as const,
       skill: 'unknown_skill',
       params: {},
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+    });
+
+    // getTask is called after updateTaskStatus to emit final task event
+    vi.mocked(mockTaskStore.getTask).mockResolvedValueOnce(
+      makeA2aTask({ id: 'task-unknown-999', status: { state: 'failed', timestamp: new Date().toISOString() } })
+    );
 
     await worker.processTask(task);
 
-    // Verify failure
+    // Verify failure: updateTaskStatus called with (id, 'failed', statusMessage)
     expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith(
       'task-unknown-999',
       'failed',
-      undefined,
-      'Unknown skill: unknown_skill'
+      expect.objectContaining({
+        role: 'agent',
+        parts: [{ kind: 'text', text: 'Unknown skill: unknown_skill' }],
+        timestamp: expect.any(String),
+      })
     );
-    expect(mockTaskEventEmitter.emitTaskStatus).toHaveBeenCalledWith('task-unknown-999', 'failed');
+
+    expect(mockTaskEventEmitter.emitStatusUpdate).toHaveBeenCalledWith(
+      'task-unknown-999',
+      expect.objectContaining({ state: 'failed' }),
+      true
+    );
+
+    expect(mockTaskEventEmitter.emitTaskComplete).toHaveBeenCalledWith(
+      'task-unknown-999',
+      expect.any(Object)
+    );
   });
 
   it('9. processTask calls handleProofCompleted after successful generate_proof', async () => {
-    const task = {
+    const task = makeA2aTask({
       id: 'task-reputation-111',
-      status: 'submitted' as const,
       skill: 'generate_proof',
       params: {
         address: '0xUser1111111111111111111111111111111111111',
@@ -420,13 +478,10 @@ describe('TaskWorker', () => {
         scope: 'test-scope',
         circuitId: 'coinbase_attestation',
       },
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+    });
 
     await worker.processTask(task);
 
-    // Verify handleProofCompleted was called (non-blocking)
     expect(handleProofCompleted).toHaveBeenCalledWith(
       expect.objectContaining({
         reputationContractAddress: mockConfig.erc8004ReputationAddress,
@@ -449,10 +504,30 @@ describe('TaskWorker', () => {
     worker.stop();
   });
 
-  it('11. pollAndProcess skips when already processing', async () => {
-    const task = {
+  it('11. pollAndProcess skips tasks not in queued state', async () => {
+    const task = makeA2aTask({
+      id: 'task-running-skip',
+      status: { state: 'running', timestamp: new Date().toISOString() },
+    });
+
+    vi.mocked(mockRedis.rpop).mockResolvedValueOnce('task-running-skip');
+    vi.mocked(mockTaskStore.getTask).mockResolvedValueOnce(task);
+
+    const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    worker.start();
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining('not in queued state'));
+    expect(mockTaskStore.updateTaskStatus).not.toHaveBeenCalled();
+
+    worker.stop();
+    consoleWarnSpy.mockRestore();
+  });
+
+  it('12. pollAndProcess skips when already processing', async () => {
+    const task = makeA2aTask({
       id: 'task-concurrent-222',
-      status: 'submitted' as const,
       skill: 'generate_proof',
       params: {
         address: '0xUser1111111111111111111111111111111111111',
@@ -460,17 +535,13 @@ describe('TaskWorker', () => {
         scope: 'test-scope',
         circuitId: 'coinbase_attestation',
       },
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+    });
 
-    // First rpop returns a task
     vi.mocked(mockRedis.rpop)
       .mockResolvedValueOnce('task-concurrent-222')
       .mockResolvedValueOnce('task-concurrent-333');
     vi.mocked(mockTaskStore.getTask).mockResolvedValue(task);
 
-    // Make the first process take a long time
     let resolveFirstProcess: () => void;
     const firstProcessPromise = new Promise<void>((resolve) => {
       resolveFirstProcess = resolve;
@@ -498,23 +569,19 @@ describe('TaskWorker', () => {
 
     worker.start();
 
-    // First poll cycle starts
+    await vi.advanceTimersByTimeAsync(2000);
     await vi.advanceTimersByTimeAsync(2000);
 
-    // Second poll cycle - should skip because first is still processing
-    await vi.advanceTimersByTimeAsync(2000);
-
-    // Only one rpop should have happened
+    // Only one rpop should have been called
     expect(mockRedis.rpop).toHaveBeenCalledTimes(1);
 
-    // Resolve the first process
     resolveFirstProcess!();
     await vi.advanceTimersByTimeAsync(100);
 
     worker.stop();
   });
 
-  it('12. processTask with generate_proof routes through TEE when teeMode is not disabled', async () => {
+  it('13. processTask with generate_proof routes through TEE when teeMode is not disabled', async () => {
     const mockTeeProvider = {
       mode: 'local' as const,
       prove: vi.fn().mockResolvedValue({
@@ -539,9 +606,8 @@ describe('TaskWorker', () => {
       teeProvider: mockTeeProvider,
     });
 
-    const task = {
+    const task = makeA2aTask({
       id: 'task-tee-test',
-      status: 'submitted' as const,
       skill: 'generate_proof',
       params: {
         address: '0xUser1111111111111111111111111111111111111',
@@ -549,41 +615,53 @@ describe('TaskWorker', () => {
         scope: 'test-scope',
         circuitId: 'coinbase_attestation',
       },
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+    });
 
     await teeWorker.processTask(task);
 
     // Verify teeProvider.prove was called
     expect(mockTeeProvider.prove).toHaveBeenCalledWith(
       'coinbase_attestation',
-      [expect.any(String)], // JSON stringified circuit params
+      [expect.any(String)],
       'task-tee-test'
     );
 
     // Verify BbProver was NOT called
     expect(BbProver).not.toHaveBeenCalled();
 
-    // Verify task completed with TEE proof result
-    expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith(
+    // Verify task completed
+    expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith('task-tee-test', 'completed');
+
+    // Verify addArtifact called with TEE proof result
+    expect(mockTaskStore.addArtifact).toHaveBeenCalledWith(
       'task-tee-test',
-      'completed',
       expect.objectContaining({
-        proof: '0xteeproof',
-        publicInputs: '0xinput1',
+        mimeType: 'application/json',
+        parts: [expect.objectContaining({
+          kind: 'data',
+          data: expect.objectContaining({
+            proof: '0xteeproof',
+            publicInputs: '0xinput1',
+          }),
+        })],
       })
     );
 
-    // Verify correct progress message
-    expect(mockTaskEventEmitter.emitTaskProgress).toHaveBeenCalledWith(
+    // Verify correct progress message about TEE
+    expect(mockTaskEventEmitter.emitStatusUpdate).toHaveBeenCalledWith(
       'task-tee-test',
-      'generating_proof',
-      'Running proof in TEE enclave'
+      expect.objectContaining({
+        state: 'running',
+        message: expect.objectContaining({
+          role: 'agent',
+          parts: [{ kind: 'text', text: 'Running proof in TEE enclave' }],
+        }),
+      }),
+      false
     );
   });
 
-  it('13. processTask with generate_proof uses BbProver when teeMode is disabled', async () => {
+  it('14. processTask with generate_proof uses BbProver when teeMode is disabled', async () => {
     const disabledConfig = {
       ...mockConfig,
       teeMode: 'disabled' as const,
@@ -595,9 +673,8 @@ describe('TaskWorker', () => {
       config: disabledConfig,
     });
 
-    const task = {
+    const task = makeA2aTask({
       id: 'task-disabled-test',
-      status: 'submitted' as const,
       skill: 'generate_proof',
       params: {
         address: '0xUser1111111111111111111111111111111111111',
@@ -605,9 +682,7 @@ describe('TaskWorker', () => {
         scope: 'test-scope',
         circuitId: 'coinbase_attestation',
       },
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+    });
 
     await disabledWorker.processTask(task);
 
@@ -619,23 +694,23 @@ describe('TaskWorker', () => {
     });
 
     // Verify task completed
-    expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith(
-      'task-disabled-test',
-      'completed',
-      expect.objectContaining({
-        proof: '0xproof123',
-      })
-    );
+    expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith('task-disabled-test', 'completed');
 
-    // Verify correct progress message
-    expect(mockTaskEventEmitter.emitTaskProgress).toHaveBeenCalledWith(
+    // Verify correct progress message about bb
+    expect(mockTaskEventEmitter.emitStatusUpdate).toHaveBeenCalledWith(
       'task-disabled-test',
-      'generating_proof',
-      'Running bb prove'
+      expect.objectContaining({
+        state: 'running',
+        message: expect.objectContaining({
+          role: 'agent',
+          parts: [{ kind: 'text', text: 'Running bb prove' }],
+        }),
+      }),
+      false
     );
   });
 
-  it('14. processTask with generate_proof fails when TEE returns error', async () => {
+  it('15. processTask with generate_proof fails when TEE returns error', async () => {
     const mockTeeProvider = {
       mode: 'local' as const,
       prove: vi.fn().mockResolvedValue({
@@ -659,9 +734,8 @@ describe('TaskWorker', () => {
       teeProvider: mockTeeProvider,
     });
 
-    const task = {
+    const task = makeA2aTask({
       id: 'task-tee-err',
-      status: 'submitted' as const,
       skill: 'generate_proof',
       params: {
         address: '0xUser1111111111111111111111111111111111111',
@@ -669,19 +743,57 @@ describe('TaskWorker', () => {
         scope: 'test-scope',
         circuitId: 'coinbase_attestation',
       },
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+    });
+
+    // getTask is called after updateTaskStatus to emit final task event
+    vi.mocked(mockTaskStore.getTask).mockResolvedValueOnce(
+      makeA2aTask({ id: 'task-tee-err', status: { state: 'failed', timestamp: new Date().toISOString() } })
+    );
 
     await teeWorker.processTask(task);
 
-    // Verify task status is 'failed' with the error message
+    // Verify task failed with error message
     expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith(
       'task-tee-err',
       'failed',
-      undefined,
-      'enclave unavailable'
+      expect.objectContaining({
+        role: 'agent',
+        parts: [{ kind: 'text', text: 'enclave unavailable' }],
+        timestamp: expect.any(String),
+      })
     );
-    expect(mockTaskEventEmitter.emitTaskStatus).toHaveBeenCalledWith('task-tee-err', 'failed');
+
+    expect(mockTaskEventEmitter.emitStatusUpdate).toHaveBeenCalledWith(
+      'task-tee-err',
+      expect.objectContaining({ state: 'failed' }),
+      true
+    );
+
+    expect(mockTaskEventEmitter.emitTaskComplete).toHaveBeenCalledWith(
+      'task-tee-err',
+      expect.any(Object)
+    );
+  });
+
+  it('16. processTask with generate_proof fails on missing required params', async () => {
+    const task = makeA2aTask({
+      id: 'task-missing-params',
+      skill: 'generate_proof',
+      params: {
+        address: '0xabc',
+        // missing signature, scope, circuitId
+      },
+    });
+
+    await worker.processTask(task);
+
+    expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith(
+      'task-missing-params',
+      'failed',
+      expect.objectContaining({
+        role: 'agent',
+        parts: [{ kind: 'text', text: expect.stringContaining('Missing required parameters') }],
+      })
+    );
   });
 });

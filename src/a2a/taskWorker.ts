@@ -1,4 +1,5 @@
-import { TaskStore, type A2aTask } from './taskStore.js';
+import { randomUUID } from 'crypto';
+import { TaskStore, type A2aTask, type Artifact } from './taskStore.js';
 import { TaskEventEmitter } from './streaming.js';
 import type { Config } from '../config/index.js';
 import { BbProver } from '../prover/bbProver.js';
@@ -66,8 +67,8 @@ export class TaskWorker {
         return;
       }
 
-      if (task.status !== 'submitted') {
-        console.warn(`Task ${taskId} is not in submitted state (${task.status})`);
+      if (task.status.state !== 'queued') {
+        console.warn(`Task ${taskId} is not in queued state (${task.status.state})`);
         return;
       }
 
@@ -78,7 +79,7 @@ export class TaskWorker {
   }
 
   async processTask(task: A2aTask): Promise<void> {
-    const { skill, params } = task;
+    const { skill } = task;
 
     try {
       if (skill === 'generate_proof') {
@@ -92,21 +93,34 @@ export class TaskWorker {
       }
     } catch (error: any) {
       console.error(`Task ${task.id} failed:`, error);
-      await this.deps.taskStore.updateTaskStatus(
+      const errorMessage = error.message || String(error);
+      await this.deps.taskStore.updateTaskStatus(task.id, 'failed', {
+        role: 'agent',
+        parts: [{ kind: 'text', text: errorMessage }],
+        timestamp: new Date().toISOString(),
+      });
+      this.deps.taskEventEmitter.emitStatusUpdate(
         task.id,
-        'failed',
-        undefined,
-        error.message || String(error)
+        { state: 'failed', timestamp: new Date().toISOString() },
+        true
       );
-      this.deps.taskEventEmitter.emitTaskStatus(task.id, 'failed');
+      const failedTask = await this.deps.taskStore.getTask(task.id);
+      if (failedTask) {
+        this.deps.taskEventEmitter.emitTaskComplete(task.id, failedTask);
+      }
     }
   }
 
   private async processGenerateProof(task: A2aTask): Promise<void> {
     const { params } = task;
+    const emitter = this.deps.taskEventEmitter;
 
-    await this.deps.taskStore.updateTaskStatus(task.id, 'working');
-    this.deps.taskEventEmitter.emitTaskStatus(task.id, 'working');
+    await this.deps.taskStore.updateTaskStatus(task.id, 'running');
+    emitter.emitStatusUpdate(
+      task.id,
+      { state: 'running', timestamp: new Date().toISOString() },
+      false
+    );
 
     const address = params.address as string;
     const signature = params.signature as string;
@@ -119,10 +133,18 @@ export class TaskWorker {
       throw new Error('Missing required parameters: address, signature, scope, circuitId');
     }
 
-    this.deps.taskEventEmitter.emitTaskProgress(
+    emitter.emitStatusUpdate(
       task.id,
-      'building_inputs',
-      'Constructing circuit parameters'
+      {
+        state: 'running',
+        message: {
+          role: 'agent',
+          parts: [{ kind: 'text', text: 'Constructing circuit parameters' }],
+          timestamp: new Date().toISOString(),
+        },
+        timestamp: new Date().toISOString(),
+      },
+      false
     );
 
     const rpcUrls = [this.deps.config.baseRpcUrl];
@@ -143,10 +165,18 @@ export class TaskWorker {
     let proofResult: { proof: string; publicInputs: string; proofWithInputs: string };
 
     if (this.deps.teeProvider && this.deps.config.teeMode !== 'disabled') {
-      this.deps.taskEventEmitter.emitTaskProgress(
+      emitter.emitStatusUpdate(
         task.id,
-        'generating_proof',
-        'Running proof in TEE enclave'
+        {
+          state: 'running',
+          message: {
+            role: 'agent',
+            parts: [{ kind: 'text', text: 'Running proof in TEE enclave' }],
+            timestamp: new Date().toISOString(),
+          },
+          timestamp: new Date().toISOString(),
+        },
+        false
       );
 
       // Convert circuit params to input strings for enclave
@@ -168,10 +198,18 @@ export class TaskWorker {
         proofWithInputs: teeResponse.proof + (teeResponse.publicInputs?.[0] || '0x').slice(2),
       };
     } else {
-      this.deps.taskEventEmitter.emitTaskProgress(
+      emitter.emitStatusUpdate(
         task.id,
-        'generating_proof',
-        'Running bb prove'
+        {
+          state: 'running',
+          message: {
+            role: 'agent',
+            parts: [{ kind: 'text', text: 'Running bb prove' }],
+            timestamp: new Date().toISOString(),
+          },
+          timestamp: new Date().toISOString(),
+        },
+        false
       );
 
       const bbProver = new BbProver({
@@ -191,9 +229,26 @@ export class TaskWorker {
       signalHash: ethers.hexlify(circuitParams.signalHash),
     };
 
-    await this.deps.taskStore.updateTaskStatus(task.id, 'completed', result);
-    this.deps.taskEventEmitter.emitTaskStatus(task.id, 'completed');
-    this.deps.taskEventEmitter.emitTaskArtifact(task.id, result);
+    // Build artifact
+    const artifact: Artifact = {
+      id: randomUUID(),
+      mimeType: 'application/json',
+      parts: [{
+        kind: 'data',
+        mimeType: 'application/json',
+        data: result,
+      }],
+    };
+
+    await this.deps.taskStore.addArtifact(task.id, artifact);
+    const updatedTask = await this.deps.taskStore.updateTaskStatus(task.id, 'completed');
+    emitter.emitArtifactUpdate(task.id, artifact);
+    emitter.emitStatusUpdate(
+      task.id,
+      { state: 'completed', timestamp: new Date().toISOString() },
+      true
+    );
+    emitter.emitTaskComplete(task.id, updatedTask);
 
     // Increment reputation after successful proof (non-blocking)
     if (this.deps.config.erc8004ReputationAddress) {
@@ -214,9 +269,14 @@ export class TaskWorker {
 
   private async processVerifyProof(task: A2aTask): Promise<void> {
     const { params } = task;
+    const emitter = this.deps.taskEventEmitter;
 
-    await this.deps.taskStore.updateTaskStatus(task.id, 'working');
-    this.deps.taskEventEmitter.emitTaskStatus(task.id, 'working');
+    await this.deps.taskStore.updateTaskStatus(task.id, 'running');
+    emitter.emitStatusUpdate(
+      task.id,
+      { state: 'running', timestamp: new Date().toISOString() },
+      false
+    );
 
     const circuitId = params.circuitId as string;
     const proofWithInputs = params.proofWithInputs as string;
@@ -226,10 +286,18 @@ export class TaskWorker {
       throw new Error('Missing required parameters: circuitId, proofWithInputs');
     }
 
-    this.deps.taskEventEmitter.emitTaskProgress(
+    emitter.emitStatusUpdate(
       task.id,
-      'verifying',
-      'Calling on-chain verifier'
+      {
+        state: 'running',
+        message: {
+          role: 'agent',
+          parts: [{ kind: 'text', text: 'Calling on-chain verifier' }],
+          timestamp: new Date().toISOString(),
+        },
+        timestamp: new Date().toISOString(),
+      },
+      false
     );
 
     const circuit = CIRCUITS[circuitId as keyof typeof CIRCUITS];
@@ -260,14 +328,37 @@ export class TaskWorker {
       chainId,
     };
 
-    await this.deps.taskStore.updateTaskStatus(task.id, 'completed', result);
-    this.deps.taskEventEmitter.emitTaskStatus(task.id, 'completed');
-    this.deps.taskEventEmitter.emitTaskArtifact(task.id, result);
+    // Build artifact
+    const artifact: Artifact = {
+      id: randomUUID(),
+      mimeType: 'application/json',
+      parts: [{
+        kind: 'data',
+        mimeType: 'application/json',
+        data: result,
+      }],
+    };
+
+    await this.deps.taskStore.addArtifact(task.id, artifact);
+    const updatedTask = await this.deps.taskStore.updateTaskStatus(task.id, 'completed');
+    emitter.emitArtifactUpdate(task.id, artifact);
+    emitter.emitStatusUpdate(
+      task.id,
+      { state: 'completed', timestamp: new Date().toISOString() },
+      true
+    );
+    emitter.emitTaskComplete(task.id, updatedTask);
   }
 
   private async processGetSupportedCircuits(task: A2aTask): Promise<void> {
-    await this.deps.taskStore.updateTaskStatus(task.id, 'working');
-    this.deps.taskEventEmitter.emitTaskStatus(task.id, 'working');
+    const emitter = this.deps.taskEventEmitter;
+
+    await this.deps.taskStore.updateTaskStatus(task.id, 'running');
+    emitter.emitStatusUpdate(
+      task.id,
+      { state: 'running', timestamp: new Date().toISOString() },
+      false
+    );
 
     const chainId = (task.params.chainId as string) || '84532';
     const chainVerifiers = VERIFIER_ADDRESSES[chainId] || {};
@@ -284,8 +375,25 @@ export class TaskWorker {
 
     const result = { circuits, chainId };
 
-    await this.deps.taskStore.updateTaskStatus(task.id, 'completed', result);
-    this.deps.taskEventEmitter.emitTaskStatus(task.id, 'completed');
-    this.deps.taskEventEmitter.emitTaskArtifact(task.id, result);
+    // Build artifact
+    const artifact: Artifact = {
+      id: randomUUID(),
+      mimeType: 'application/json',
+      parts: [{
+        kind: 'data',
+        mimeType: 'application/json',
+        data: result,
+      }],
+    };
+
+    await this.deps.taskStore.addArtifact(task.id, artifact);
+    const updatedTask = await this.deps.taskStore.updateTaskStatus(task.id, 'completed');
+    emitter.emitArtifactUpdate(task.id, artifact);
+    emitter.emitStatusUpdate(
+      task.id,
+      { state: 'completed', timestamp: new Date().toISOString() },
+      true
+    );
+    emitter.emitTaskComplete(task.id, updatedTask);
   }
 }

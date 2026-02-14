@@ -4,7 +4,7 @@ import request from 'supertest';
 import { getAgentCardHandler } from '../../src/a2a/agentCard.js';
 import { createA2aHandler } from '../../src/a2a/taskHandler.js';
 import { TaskStore } from '../../src/a2a/taskStore.js';
-import { TaskEventEmitter, createStreamHandler } from '../../src/a2a/streaming.js';
+import { TaskEventEmitter } from '../../src/a2a/streaming.js';
 import type { Config } from '../../src/config/index.js';
 
 describe('A2A Integration Tests', () => {
@@ -23,12 +23,40 @@ describe('A2A Integration Tests', () => {
     mockConfig = {
       nodeEnv: 'test',
       port: 3100,
+      proverUrl: '',
+      bbPath: 'bb',
+      nargoPath: 'nargo',
       circuitsDir: '/tmp/circuits',
       circuitsRepoUrl: 'https://github.com/example/circuits',
       redisUrl: 'redis://localhost:6379',
-      paymentMode: 'none',
+      baseRpcUrl: 'https://base.example.com',
+      easGraphqlEndpoint: 'https://eas.example.com',
+      chainRpcUrl: 'https://chain.example.com',
+      nullifierRegistryAddress: '0x1234567890123456789012345678901234567890',
+      proverPrivateKey: '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
+      paymentMode: 'disabled',
       a2aBaseUrl: 'https://test.example.com',
+      websiteUrl: 'https://zkproofport.app',
       agentVersion: '1.0.0',
+      paymentPayTo: '',
+      paymentFacilitatorUrl: '',
+      paymentProofPrice: '$0.10',
+      privyAppId: '',
+      privyApiSecret: '',
+      privyApiUrl: '',
+      signPageUrl: '',
+      signingTtlSeconds: 300,
+      teeMode: 'disabled',
+      enclaveCid: undefined,
+      enclavePort: 5000,
+      teeAttestationEnabled: false,
+      erc8004IdentityAddress: '',
+      erc8004ReputationAddress: '',
+      erc8004ValidationAddress: '',
+      settlementChainRpcUrl: '',
+      settlementPrivateKey: '',
+      settlementOperatorAddress: '',
+      settlementUsdcAddress: '',
     } as Config;
 
     // Mock Redis client
@@ -50,9 +78,8 @@ describe('A2A Integration Tests', () => {
     taskEventEmitter = new TaskEventEmitter();
 
     // Mount A2A routes
-    app.get('/.well-known/agent.json', getAgentCardHandler(mockConfig));
-    app.post('/a2a', createA2aHandler({ taskStore }));
-    app.get('/a2a/stream/:taskId', createStreamHandler(taskEventEmitter));
+    app.get('/.well-known/agent-card.json', getAgentCardHandler(mockConfig));
+    app.post('/a2a', createA2aHandler({ taskStore, taskEventEmitter }));
 
     // Add MCP route for coexistence test
     app.post('/mcp', (_req, res) => {
@@ -60,9 +87,9 @@ describe('A2A Integration Tests', () => {
     });
   });
 
-  describe('GET /.well-known/agent.json', () => {
+  describe('GET /.well-known/agent-card.json', () => {
     it('returns valid Agent Card with Content-Type application/json', async () => {
-      const response = await request(app).get('/.well-known/agent.json');
+      const response = await request(app).get('/.well-known/agent-card.json');
 
       expect(response.status).toBe(200);
       expect(response.headers['content-type']).toMatch(/application\/json/);
@@ -71,18 +98,27 @@ describe('A2A Integration Tests', () => {
         description: expect.any(String),
         url: 'https://test.example.com',
         version: '1.0.0',
+        protocolVersion: '0.3.0',
+        preferredTransport: 'JSONRPC',
+        provider: {
+          organization: 'ZKProofport',
+          url: 'https://zkproofport.app',
+        },
         capabilities: {
           streaming: true,
           pushNotifications: false,
+          stateTransitionHistory: true,
         },
         skills: expect.arrayContaining([
           expect.objectContaining({
             id: 'generate_proof',
             name: 'Generate ZK Proof',
+            tags: expect.any(Array),
+            examples: expect.any(Array),
           }),
         ]),
-        authentication: {
-          schemes: expect.arrayContaining([expect.objectContaining({ scheme: 'x402' })]),
+        securitySchemes: {
+          x402: { scheme: 'x402', description: expect.any(String) },
         },
         identity: {
           erc8004: {
@@ -96,16 +132,24 @@ describe('A2A Integration Tests', () => {
   });
 
   describe('POST /a2a', () => {
-    it('returns task result for valid tasks/send request', async () => {
+    it('returns task for valid tasks/get request', async () => {
+      // First create a task directly via taskStore
+      const userMessage = {
+        role: 'user' as const,
+        parts: [{ kind: 'data' as const, mimeType: 'application/json', data: { skill: 'generate_proof', circuitId: 'coinbase_attestation' } }],
+        timestamp: new Date().toISOString(),
+      };
+      const task = await taskStore.createTask('generate_proof', { circuitId: 'coinbase_attestation' }, userMessage);
+
+      // Now retrieve it via tasks/get
       const response = await request(app)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
           id: 1,
-          method: 'tasks/send',
+          method: 'tasks/get',
           params: {
-            skill: 'generate_proof',
-            circuitId: 'coinbase_attestation',
+            id: task.id,
           },
         });
 
@@ -114,8 +158,12 @@ describe('A2A Integration Tests', () => {
         jsonrpc: '2.0',
         id: 1,
         result: {
-          id: expect.any(String),
-          status: 'submitted',
+          id: task.id,
+          status: {
+            state: 'queued',
+          },
+          skill: 'generate_proof',
+          kind: 'task',
         },
       });
     });
@@ -136,41 +184,20 @@ describe('A2A Integration Tests', () => {
         id: 1,
         error: {
           code: -32601,
-          message: 'Method not found',
+          message: expect.stringContaining('Method not found'),
         },
       });
     });
 
-    it('returns error for missing skill in tasks/send', async () => {
+    it('returns error for tasks/cancel on non-existent task', async () => {
       const response = await request(app)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
           id: 1,
-          method: 'tasks/send',
-          params: {},
-        });
-
-      expect(response.status).toBe(200);
-      expect(response.body).toMatchObject({
-        jsonrpc: '2.0',
-        id: 1,
-        error: {
-          code: -32602,
-          message: 'Invalid params: skill is required',
-        },
-      });
-    });
-
-    it('returns error for invalid skill value', async () => {
-      const response = await request(app)
-        .post('/a2a')
-        .send({
-          jsonrpc: '2.0',
-          id: 1,
-          method: 'tasks/send',
+          method: 'tasks/cancel',
           params: {
-            skill: 'invalid_skill',
+            id: 'non-existent-task-id',
           },
         });
 
@@ -179,44 +206,13 @@ describe('A2A Integration Tests', () => {
         jsonrpc: '2.0',
         id: 1,
         error: {
-          code: -32602,
-          message: expect.stringContaining('Invalid skill'),
+          code: -32001,
+          message: 'Task not found',
         },
       });
     });
   });
 
-  describe('GET /a2a/stream/:taskId', () => {
-    it('sets SSE headers for valid taskId', (done) => {
-      const req = request(app).get('/a2a/stream/test-task-123');
-
-      req.on('response', (res) => {
-        // Check SSE headers are set
-        expect(res.headers['content-type']).toBe('text/event-stream');
-        expect(res.headers['cache-control']).toBe('no-cache');
-        expect(res.headers['connection']).toBe('keep-alive');
-
-        // Abort the request after verifying headers
-        req.abort();
-        done();
-      });
-
-      req.on('error', (err: any) => {
-        // Abort error is expected
-        if (err.code === 'ECONNRESET' || err.message.includes('aborted')) {
-          return;
-        }
-        done(err);
-      });
-    });
-
-    it('returns 404 for missing taskId', async () => {
-      // Test the route pattern by calling without taskId
-      const response = await request(app).get('/a2a/stream/');
-
-      expect(response.status).toBe(404);
-    });
-  });
 
   describe('Route Coexistence', () => {
     it('A2A and MCP routes both respond correctly', async () => {
@@ -232,19 +228,26 @@ describe('A2A Integration Tests', () => {
       });
 
       // Test A2A Agent Card route
-      const agentCardResponse = await request(app).get('/.well-known/agent.json');
+      const agentCardResponse = await request(app).get('/.well-known/agent-card.json');
 
       expect(agentCardResponse.status).toBe(200);
       expect(agentCardResponse.body.name).toBe('ZKProofport Prover Agent');
 
-      // Test A2A JSON-RPC route
+      // Test A2A JSON-RPC route (use tasks/get which is non-blocking)
+      const userMessage = {
+        role: 'user' as const,
+        parts: [{ kind: 'text' as const, text: 'verify proof' }],
+        timestamp: new Date().toISOString(),
+      };
+      const task = await taskStore.createTask('verify_proof', {}, userMessage);
+
       const a2aResponse = await request(app)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
           id: 1,
-          method: 'tasks/send',
-          params: { skill: 'verify_proof' },
+          method: 'tasks/get',
+          params: { id: task.id },
         });
 
       expect(a2aResponse.status).toBe(200);

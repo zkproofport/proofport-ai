@@ -209,16 +209,30 @@ describe('A2A Endpoint E2E', () => {
       const response = await request(app).get('/.well-known/agent-card.json');
 
       expect(response.status).toBe(200);
-      expect(response.body.identity).toMatchObject({
-        erc8004: {
-          contractAddress: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
-          chainId: expect.any(Number),
-          tokenId: '123456',
+      expect(response.body).toMatchObject({
+        protocolVersion: '0.3.0',
+        preferredTransport: 'JSONRPC',
+        provider: {
+          organization: 'ZKProofport',
+          url: 'https://zkproofport.app',
+        },
+        capabilities: {
+          stateTransitionHistory: true,
+        },
+        securitySchemes: {
+          x402: { scheme: 'x402', description: expect.any(String) },
+        },
+        identity: {
+          erc8004: {
+            contractAddress: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
+            chainId: expect.any(Number),
+            tokenId: '123456',
+          },
         },
       });
     });
 
-    it('should list skills matching MCP tools', async () => {
+    it('should list skills with tags and examples', async () => {
       const response = await request(app).get('/.well-known/agent-card.json');
 
       expect(response.status).toBe(200);
@@ -227,14 +241,20 @@ describe('A2A Endpoint E2E', () => {
           expect.objectContaining({
             id: 'generate_proof',
             name: 'Generate ZK Proof',
+            tags: expect.any(Array),
+            examples: expect.any(Array),
           }),
           expect.objectContaining({
             id: 'verify_proof',
             name: 'Verify ZK Proof',
+            tags: expect.any(Array),
+            examples: expect.any(Array),
           }),
           expect.objectContaining({
             id: 'get_supported_circuits',
             name: 'Get Supported Circuits',
+            tags: expect.any(Array),
+            examples: expect.any(Array),
           }),
         ])
       );
@@ -258,78 +278,26 @@ describe('A2A Endpoint E2E', () => {
   });
 
   describe('POST /a2a (JSON-RPC)', () => {
-    it('should accept tasks/send for generate_proof', async () => {
+    it('should accept tasks/get for querying task status', async () => {
       const response = await request(app)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
           id: 1,
-          method: 'tasks/send',
+          method: 'tasks/get',
           params: {
-            skill: 'generate_proof',
-            circuitId: 'coinbase_attestation',
-            address: '0x' + '11'.repeat(20),
-            signature: '0x' + '22'.repeat(65),
-            scope: 'test-scope',
+            id: 'test-task-id-123',
           },
         });
 
       expect(response.status).toBe(200);
+      // Will return task not found error since we didn't create the task
       expect(response.body).toMatchObject({
         jsonrpc: '2.0',
         id: 1,
-        result: {
-          id: expect.any(String),
-          status: 'submitted',
-        },
-      });
-    });
-
-    it('should accept tasks/send for verify_proof', async () => {
-      const response = await request(app)
-        .post('/a2a')
-        .send({
-          jsonrpc: '2.0',
-          id: 2,
-          method: 'tasks/send',
-          params: {
-            skill: 'verify_proof',
-            circuitId: 'coinbase_attestation',
-            proof: '0x' + '33'.repeat(100),
-            publicInputs: '0x' + '44'.repeat(50),
-          },
-        });
-
-      expect(response.status).toBe(200);
-      expect(response.body).toMatchObject({
-        jsonrpc: '2.0',
-        id: 2,
-        result: {
-          id: expect.any(String),
-          status: 'submitted',
-        },
-      });
-    });
-
-    it('should accept tasks/send for get_supported_circuits', async () => {
-      const response = await request(app)
-        .post('/a2a')
-        .send({
-          jsonrpc: '2.0',
-          id: 3,
-          method: 'tasks/send',
-          params: {
-            skill: 'get_supported_circuits',
-          },
-        });
-
-      expect(response.status).toBe(200);
-      expect(response.body).toMatchObject({
-        jsonrpc: '2.0',
-        id: 3,
-        result: {
-          id: expect.any(String),
-          status: 'submitted',
+        error: {
+          code: -32001,
+          message: 'Task not found',
         },
       });
     });
@@ -350,18 +318,18 @@ describe('A2A Endpoint E2E', () => {
         id: 1,
         error: {
           code: -32601,
-          message: 'Method not found',
+          message: expect.stringContaining('Method not found'),
         },
       });
     });
 
-    it('should return JSON-RPC error for missing skill param', async () => {
+    it('should return JSON-RPC error for missing message param in message/send', async () => {
       const response = await request(app)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
           id: 1,
-          method: 'tasks/send',
+          method: 'message/send',
           params: {},
         });
 
@@ -371,20 +339,31 @@ describe('A2A Endpoint E2E', () => {
         id: 1,
         error: {
           code: -32602,
-          message: expect.stringContaining('skill is required'),
+          message: expect.stringContaining('message with role'),
         },
       });
     });
 
-    it('should return JSON-RPC error for invalid skill value', async () => {
+    it('should return JSON-RPC error for invalid skill value in message', async () => {
       const response = await request(app)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
           id: 1,
-          method: 'tasks/send',
+          method: 'message/send',
           params: {
-            skill: 'nonexistent_skill',
+            message: {
+              role: 'user',
+              parts: [
+                {
+                  kind: 'data',
+                  mimeType: 'application/json',
+                  data: {
+                    skill: 'nonexistent_skill',
+                  },
+                },
+              ],
+            },
           },
         });
 
@@ -420,33 +399,6 @@ describe('A2A Endpoint E2E', () => {
     });
   });
 
-  describe('GET /a2a/stream/:taskId', () => {
-    it('should return SSE content-type header', (done) => {
-      const req = request(app).get('/a2a/stream/test-task-id-123');
-
-      req.on('response', (res: any) => {
-        expect(res.headers['content-type']).toBe('text/event-stream');
-        expect(res.headers['cache-control']).toBe('no-cache');
-        expect(res.headers['connection']).toBe('keep-alive');
-
-        req.abort();
-        done();
-      });
-
-      req.on('error', (err: any) => {
-        if (err.code === 'ECONNRESET' || err.message.includes('aborted')) {
-          return;
-        }
-        done(err);
-      });
-    });
-
-    it('should return 404 for missing taskId', async () => {
-      const response = await request(app).get('/a2a/stream/');
-
-      expect(response.status).toBe(404);
-    });
-  });
 
   describe('Status Endpoints', () => {
     it('GET /health should return healthy status', async () => {
@@ -522,22 +474,28 @@ describe('A2A Endpoint E2E', () => {
 
   describe('Route Coexistence', () => {
     it('A2A and MCP routes both respond correctly', async () => {
-      // Test A2A Agent Card
-      const agentCardResponse = await request(app).get('/.well-known/agent.json');
-      expect(agentCardResponse.status).toBe(200);
-      expect(agentCardResponse.body.name).toBe('ZKProofport');
+      // Test OASF Agent Card
+      const oasfResponse = await request(app).get('/.well-known/agent.json');
+      expect(oasfResponse.status).toBe(200);
+      expect(oasfResponse.body.name).toBe('ZKProofport');
 
-      // Test A2A JSON-RPC
+      // Test A2A Agent Card
+      const agentCardResponse = await request(app).get('/.well-known/agent-card.json');
+      expect(agentCardResponse.status).toBe(200);
+      expect(agentCardResponse.body.name).toBe('ZKProofport Prover Agent');
+      expect(agentCardResponse.body.preferredTransport).toBe('JSONRPC');
+
+      // Test A2A JSON-RPC (use tasks/get which is non-blocking)
       const a2aResponse = await request(app)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
           id: 1,
-          method: 'tasks/send',
-          params: { skill: 'get_supported_circuits' },
+          method: 'tasks/get',
+          params: { id: 'non-existent-id' },
         });
       expect(a2aResponse.status).toBe(200);
-      expect(a2aResponse.body.result).toBeDefined();
+      expect(a2aResponse.body).toHaveProperty('error');
 
       // Test MCP JSON-RPC
       const mcpResponse = await request(app)

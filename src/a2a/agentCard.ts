@@ -8,20 +8,26 @@ export type AgentCard = {
   url: string;
   version: string;
   protocolVersion: string;
+  preferredTransport: string;
+  provider: {
+    organization: string;
+    url: string;
+  };
   capabilities: {
     streaming: boolean;
     pushNotifications: boolean;
+    stateTransitionHistory?: boolean;
   };
   skills: Array<{
     id: string;
     name: string;
     description: string;
+    tags: string[];
+    examples?: string[];
     inputModes: string[];
     outputModes: string[];
   }>;
-  authentication: {
-    schemes: Array<{ scheme: string; description: string }>;
-  };
+  securitySchemes?: Record<string, { scheme: string; description: string }>;
   defaultInputModes: string[];
   defaultOutputModes: string[];
   identity: {
@@ -63,15 +69,27 @@ export function buildAgentCard(config: Config, tokenId?: bigint | null): AgentCa
     url: config.a2aBaseUrl,
     version: config.agentVersion,
     protocolVersion: '0.3.0',
+    preferredTransport: 'JSONRPC',
+    provider: {
+      organization: 'ZKProofport',
+      url: 'https://zkproofport.app',
+    },
     capabilities: {
       streaming: true,
       pushNotifications: false,
+      stateTransitionHistory: true,
     },
     skills: [
       {
         id: 'generate_proof',
         name: 'Generate ZK Proof',
         description: 'Generate a zero-knowledge proof for Coinbase KYC or country attestation',
+        tags: ['zk-proof', 'privacy', 'coinbase', 'attestation', 'noir'],
+        examples: [
+          'Generate a KYC proof for my Coinbase account',
+          'Create a country attestation proof for US residency',
+          'Prove Coinbase verification without revealing identity',
+        ],
         inputModes: ['application/json'],
         outputModes: ['application/json'],
       },
@@ -79,6 +97,11 @@ export function buildAgentCard(config: Config, tokenId?: bigint | null): AgentCa
         id: 'verify_proof',
         name: 'Verify ZK Proof',
         description: 'Verify a zero-knowledge proof against on-chain verifier contract',
+        tags: ['verification', 'on-chain', 'smart-contract'],
+        examples: [
+          'Verify this proof on Base Sepolia',
+          'Check if a KYC proof is valid on-chain',
+        ],
         inputModes: ['application/json'],
         outputModes: ['application/json'],
       },
@@ -86,12 +109,17 @@ export function buildAgentCard(config: Config, tokenId?: bigint | null): AgentCa
         id: 'get_supported_circuits',
         name: 'Get Supported Circuits',
         description: 'List all supported ZK circuits with metadata',
+        tags: ['circuits', 'metadata', 'discovery'],
+        examples: [
+          'What circuits do you support?',
+          'List available proof types',
+        ],
         inputModes: ['application/json'],
         outputModes: ['application/json'],
       },
     ],
-    authentication: {
-      schemes: [{ scheme: 'x402', description: 'x402 micropayments' }],
+    securitySchemes: {
+      x402: { scheme: 'x402', description: 'x402 micropayments via USDC on Base' },
     },
     defaultInputModes: ['application/json'],
     defaultOutputModes: ['application/json'],

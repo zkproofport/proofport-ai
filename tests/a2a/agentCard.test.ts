@@ -2,35 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Config } from '../../src/config';
 import { ERC8004_ADDRESSES } from '../../src/config/contracts';
 
-// Mock types for the implementation
-type AgentCard = {
-  name: string;
-  description: string;
-  url: string;
-  version: string;
-  capabilities: {
-    streaming: boolean;
-    pushNotifications: boolean;
-  };
-  skills: Array<{
-    id: string;
-    name: string;
-    description: string;
-    inputModes: string[];
-    outputModes: string[];
-  }>;
-  authentication: {
-    schemes: string[];
-  };
-  identity: {
-    erc8004: {
-      contractAddress: string;
-      chainId: number;
-      tokenId: null;
-    };
-  };
-};
-
 type RequestHandler = (req: any, res: any) => void | Promise<void>;
 
 describe('A2A Agent Card', () => {
@@ -53,7 +24,27 @@ describe('A2A Agent Card', () => {
       proverPrivateKey: '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
       paymentMode: 'disabled',
       a2aBaseUrl: 'https://ai-dev.zkproofport.app',
+      websiteUrl: 'https://zkproofport.app',
       agentVersion: '1.2.3',
+      paymentPayTo: '',
+      paymentFacilitatorUrl: '',
+      paymentProofPrice: '$0.10',
+      privyAppId: '',
+      privyApiSecret: '',
+      privyApiUrl: '',
+      signPageUrl: '',
+      signingTtlSeconds: 300,
+      teeMode: 'disabled',
+      enclaveCid: undefined,
+      enclavePort: 5000,
+      teeAttestationEnabled: false,
+      erc8004IdentityAddress: '',
+      erc8004ReputationAddress: '',
+      erc8004ValidationAddress: '',
+      settlementChainRpcUrl: '',
+      settlementPrivateKey: '',
+      settlementOperatorAddress: '',
+      settlementUsdcAddress: '',
     };
   });
 
@@ -68,9 +59,12 @@ describe('A2A Agent Card', () => {
       expect(card).toHaveProperty('description');
       expect(card).toHaveProperty('url');
       expect(card).toHaveProperty('version');
+      expect(card).toHaveProperty('protocolVersion');
+      expect(card).toHaveProperty('preferredTransport');
+      expect(card).toHaveProperty('provider');
       expect(card).toHaveProperty('capabilities');
       expect(card).toHaveProperty('skills');
-      expect(card).toHaveProperty('authentication');
+      expect(card).toHaveProperty('securitySchemes');
       expect(card).toHaveProperty('identity');
     });
 
@@ -79,6 +73,22 @@ describe('A2A Agent Card', () => {
       const card = buildAgentCard(mockConfig);
 
       expect(card.name).toBe('ZKProofport Prover Agent');
+    });
+
+    it('should have preferredTransport set to JSONRPC', async () => {
+      const { buildAgentCard } = await import('../../src/a2a/agentCard');
+      const card = buildAgentCard(mockConfig);
+
+      expect(card.preferredTransport).toBe('JSONRPC');
+    });
+
+    it('should have provider with organization and url', async () => {
+      const { buildAgentCard } = await import('../../src/a2a/agentCard');
+      const card = buildAgentCard(mockConfig);
+
+      expect(card.provider).toBeDefined();
+      expect(card.provider.organization).toBe('ZKProofport');
+      expect(card.provider.url).toBe('https://zkproofport.app');
     });
 
     it('should use config.a2aBaseUrl for url field', async () => {
@@ -144,7 +154,7 @@ describe('A2A Agent Card', () => {
       expect(getCircuitsSkill?.outputModes).toContain('application/json');
     });
 
-    it('should have all required skill fields', async () => {
+    it('should have all required skill fields including tags and examples', async () => {
       const { buildAgentCard } = await import('../../src/a2a/agentCard');
       const card = buildAgentCard(mockConfig);
 
@@ -152,11 +162,15 @@ describe('A2A Agent Card', () => {
         expect(skill).toHaveProperty('id');
         expect(skill).toHaveProperty('name');
         expect(skill).toHaveProperty('description');
+        expect(skill).toHaveProperty('tags');
+        expect(skill).toHaveProperty('examples');
         expect(skill).toHaveProperty('inputModes');
         expect(skill).toHaveProperty('outputModes');
         expect(typeof skill.id).toBe('string');
         expect(typeof skill.name).toBe('string');
         expect(typeof skill.description).toBe('string');
+        expect(Array.isArray(skill.tags)).toBe(true);
+        expect(Array.isArray(skill.examples)).toBe(true);
         expect(Array.isArray(skill.inputModes)).toBe(true);
         expect(Array.isArray(skill.outputModes)).toBe(true);
       }
@@ -177,16 +191,22 @@ describe('A2A Agent Card', () => {
       expect(card.capabilities.pushNotifications).toBe(false);
     });
 
-    it('should have authentication.schemes containing x402', async () => {
+    it('should have capabilities.stateTransitionHistory set to true', async () => {
       const { buildAgentCard } = await import('../../src/a2a/agentCard');
       const card = buildAgentCard(mockConfig);
 
-      expect(card.authentication).toBeDefined();
-      expect(card.authentication.schemes).toBeDefined();
-      expect(Array.isArray(card.authentication.schemes)).toBe(true);
-      expect(card.authentication.schemes).toEqual(
-        expect.arrayContaining([expect.objectContaining({ scheme: 'x402' })])
-      );
+      expect(card.capabilities.stateTransitionHistory).toBe(true);
+    });
+
+    it('should have securitySchemes containing x402', async () => {
+      const { buildAgentCard } = await import('../../src/a2a/agentCard');
+      const card = buildAgentCard(mockConfig);
+
+      expect(card.securitySchemes).toBeDefined();
+      expect(card.securitySchemes.x402).toBeDefined();
+      expect(card.securitySchemes.x402.scheme).toBe('x402');
+      expect(card.securitySchemes.x402.description).toBeDefined();
+      expect(typeof card.securitySchemes.x402.description).toBe('string');
     });
 
     it('should use sepolia ERC-8004 address for development', async () => {

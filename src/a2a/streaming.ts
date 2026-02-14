@@ -1,111 +1,76 @@
 import { EventEmitter } from 'events';
-import type { Request, Response, RequestHandler } from 'express';
+import type { Response } from 'express';
+import type { A2aTask, TaskStatus, Artifact } from './taskStore.js';
 
-interface TaskEvent {
-  type: string;
+// A2A v0.3 streaming event types
+export interface StatusUpdateEvent {
   taskId: string;
-  timestamp: string;
-  [key: string]: unknown;
+  status: TaskStatus;
+  final: boolean;
 }
 
-interface TaskStatusEvent extends TaskEvent {
-  type: 'task.status';
-  status: string;
+export interface ArtifactUpdateEvent {
+  taskId: string;
+  artifact: Artifact;
 }
 
-interface TaskProgressEvent extends TaskEvent {
-  type: 'task.progress';
-  step: string;
-  detail?: string;
-}
-
-interface TaskArtifactEvent extends TaskEvent {
-  type: 'task.artifact';
-  artifact: Record<string, unknown>;
-}
+export type StreamingResult =
+  | { task: A2aTask }
+  | { statusUpdate: StatusUpdateEvent }
+  | { artifactUpdate: ArtifactUpdateEvent };
 
 export class TaskEventEmitter extends EventEmitter {
-  /**
-   * Emit a task status change event
-   */
-  emitTaskStatus(taskId: string, status: string): void {
-    const event: TaskStatusEvent = {
-      type: 'task.status',
-      taskId,
-      status,
-      timestamp: new Date().toISOString(),
-    };
-    this.emit(`task:${taskId}`, event);
+  emitStatusUpdate(taskId: string, status: TaskStatus, final: boolean): void {
+    const event: StatusUpdateEvent = { taskId, status, final };
+    this.emit(`task:${taskId}`, { type: 'statusUpdate', data: event });
   }
 
-  /**
-   * Emit a task progress update event
-   */
-  emitTaskProgress(taskId: string, step: string, detail?: string): void {
-    const event: TaskProgressEvent = {
-      type: 'task.progress',
-      taskId,
-      step,
-      detail,
-      timestamp: new Date().toISOString(),
-    };
-    this.emit(`task:${taskId}`, event);
+  emitArtifactUpdate(taskId: string, artifact: Artifact): void {
+    const event: ArtifactUpdateEvent = { taskId, artifact };
+    this.emit(`task:${taskId}`, { type: 'artifactUpdate', data: event });
   }
 
-  /**
-   * Emit a task artifact (proof result) event
-   */
-  emitTaskArtifact(taskId: string, artifact: Record<string, unknown>): void {
-    const event: TaskArtifactEvent = {
-      type: 'task.artifact',
-      taskId,
-      artifact,
-      timestamp: new Date().toISOString(),
-    };
-    this.emit(`task:${taskId}`, event);
+  emitTaskComplete(taskId: string, task: A2aTask): void {
+    this.emit(`task:${taskId}`, { type: 'task', data: task });
   }
 
-  /**
-   * Remove all listeners for a specific task
-   */
   removeTaskListeners(taskId: string): void {
     this.removeAllListeners(`task:${taskId}`);
   }
 }
 
 /**
- * Create an Express handler for SSE streaming of task events
+ * Write an SSE stream for a task. Used by both message/stream and tasks/resubscribe.
  */
-export function createStreamHandler(emitter: TaskEventEmitter): RequestHandler {
-  return (req: Request, res: Response, next) => {
-    const { taskId } = req.params;
+export function attachSseStream(
+  res: Response,
+  emitter: TaskEventEmitter,
+  taskId: string,
+  jsonRpcId: string | number
+): void {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
 
-    if (!taskId) {
-      res.status(404).json({ error: 'Task ID is required' });
-      return;
-    }
+  res.write(':keepalive\n\n');
 
-    // Set SSE headers
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-
-    // Send initial keepalive comment
-    res.write(':keepalive\n\n');
-
-    // Create event listener for this task
-    const eventListener = (event: TaskEvent) => {
-      // Format as SSE: event: <type>\ndata: <json>\n\n
-      const sseData = `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
-      res.write(sseData);
+  const eventListener = (event: { type: string; data: unknown }) => {
+    const response = {
+      jsonrpc: '2.0' as const,
+      id: jsonRpcId,
+      result: { [event.type]: event.data },
     };
+    res.write(`data: ${JSON.stringify(response)}\n\n`);
 
-    // Register listener for this specific task
-    emitter.on(`task:${taskId}`, eventListener);
-
-    // Clean up on client disconnect
-    res.on('close', () => {
-      emitter.removeListener(`task:${taskId}`, eventListener);
-    });
+    // Close stream on final task event
+    if (event.type === 'task') {
+      res.end();
+    }
   };
+
+  emitter.on(`task:${taskId}`, eventListener);
+
+  res.on('close', () => {
+    emitter.removeListener(`task:${taskId}`, eventListener);
+  });
 }
