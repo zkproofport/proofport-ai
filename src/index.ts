@@ -17,6 +17,7 @@ import { createA2aHandler } from './a2a/taskHandler.js';
 import { TaskStore } from './a2a/taskStore.js';
 import { TaskEventEmitter } from './a2a/streaming.js';
 import { createPaymentMiddleware } from './payment/x402Middleware.js';
+import { createPaymentRecordingMiddleware } from './payment/recordingMiddleware.js';
 import { PaymentFacilitator } from './payment/facilitator.js';
 import { SettlementWorker } from './payment/settlementWorker.js';
 import { validatePaymentConfig, getPaymentModeConfig } from './payment/freeTier.js';
@@ -84,6 +85,10 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   // Payment setup
   const paymentFacilitator = new PaymentFacilitator(redis, { ttlSeconds: 86400 });
   const paymentMiddleware = createPaymentMiddleware(config);
+  const paymentRecordingMiddleware = createPaymentRecordingMiddleware({
+    paymentMode: config.paymentMode,
+    facilitator: paymentFacilitator,
+  });
   const paymentModeConfig = getPaymentModeConfig(config.paymentMode);
 
   // TEE setup
@@ -188,7 +193,9 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   const a2aPaymentMiddleware = (req: any, res: any, next: any) => {
     const method = req.body?.method;
     if (method === 'message/send' || method === 'message/stream') {
-      return paymentMiddleware(req, res, next);
+      return paymentMiddleware(req, res, () => {
+        paymentRecordingMiddleware(req, res, next);
+      });
     }
     next();
   };
@@ -201,11 +208,13 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
     const isProofGeneration = req.path === '/proofs' && req.method === 'POST';
     const isProofVerification = req.path === '/proofs/verify' && req.method === 'POST';
     if (isProofGeneration || isProofVerification) {
-      return paymentMiddleware(req, res, next);
+      return paymentMiddleware(req, res, () => {
+        paymentRecordingMiddleware(req, res, next);
+      });
     }
     next();
   };
-  app.use('/api/v1', restPaymentMiddleware, createRestRoutes({ taskStore, taskEventEmitter, redis, config }));
+  app.use('/api/v1', restPaymentMiddleware, createRestRoutes({ taskStore, taskEventEmitter, redis, config, paymentFacilitator }));
 
   // CORS for signing routes (sign-page on port 3200 → AI server on port 4002)
   app.use('/api/signing', (req, res, next) => {
@@ -296,7 +305,9 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   const mcpPaymentMiddleware = (req: any, res: any, next: any) => {
     const method = req.body?.method;
     if (method === 'tools/call') {
-      return paymentMiddleware(req, res, next);
+      return paymentMiddleware(req, res, () => {
+        paymentRecordingMiddleware(req, res, next);
+      });
     }
     next();
   };

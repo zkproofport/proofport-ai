@@ -9,12 +9,14 @@ import type { SigningRequestRecord } from '../signing/types.js';
 import type { RedisClient } from '../redis/client.js';
 import { computeSignalHash } from '../input/inputBuilder.js';
 import type { Config } from '../config/index.js';
+import type { PaymentFacilitator } from '../payment/facilitator.js';
 
 export interface RestRoutesDeps {
   taskStore: TaskStore;
   taskEventEmitter: TaskEventEmitter;
   redis: RedisClient;
   config: Config;
+  paymentFacilitator?: PaymentFacilitator;
 }
 
 interface Circuit {
@@ -249,6 +251,24 @@ export function createRestRoutes(deps: RestRoutesDeps): Router {
         };
 
         const task = await taskStore.createTask('generate_proof', skillParams, userMessage);
+
+        // Record payment if present
+        if (deps.paymentFacilitator) {
+          const paymentInfo = (req as any).x402Payment;
+          if (paymentInfo) {
+            try {
+              await deps.paymentFacilitator.recordPayment({
+                taskId: task.id,
+                payerAddress: paymentInfo.payerAddress,
+                amount: paymentInfo.amount,
+                network: paymentInfo.network,
+              });
+            } catch (error) {
+              console.error(`Failed to record payment for task ${task.id}:`, error);
+            }
+          }
+        }
+
         const completedTask = await waitForTaskCompletion(task.id, taskStore, taskEventEmitter, 120000);
         const taskData = completedTask as any;
 
@@ -325,6 +345,24 @@ export function createRestRoutes(deps: RestRoutesDeps): Router {
       };
 
       const task = await taskStore.createTask('generate_proof', skillParams, userMessage);
+
+      // Record payment if present
+      if (deps.paymentFacilitator) {
+        const paymentInfo = (req as any).x402Payment;
+        if (paymentInfo) {
+          try {
+            await deps.paymentFacilitator.recordPayment({
+              taskId: task.id,
+              payerAddress: paymentInfo.payerAddress,
+              amount: paymentInfo.amount,
+              network: paymentInfo.network,
+            });
+          } catch (error) {
+            console.error(`Failed to record payment for task ${task.id}:`, error);
+          }
+        }
+      }
+
       const completedTask = await waitForTaskCompletion(task.id, taskStore, taskEventEmitter, 120000);
       const taskData = completedTask as any;
 
