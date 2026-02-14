@@ -66,8 +66,8 @@ export class AgentRegistration {
       throw new Error('No logs found in transaction receipt');
     }
 
-    // The second topic in the first log should be the tokenId (indexed parameter)
-    const tokenIdHex = receipt.logs[0].topics[1];
+    // The fourth topic in the first log should be the tokenId (third indexed parameter in Transfer event)
+    const tokenIdHex = receipt.logs[0].topics[3];
     const tokenId = BigInt(tokenIdHex);
 
     return {
