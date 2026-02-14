@@ -266,9 +266,98 @@ Events:
 | `/a2a/stream/:taskId` | GET | None | SSE stream for task updates |
 | `/api/signing/callback/:requestId` | POST | None | Receive signature from web signing page |
 | `/api/signing/batch` | POST | None | Batch signing callback (EIP-7702) |
+| `/api/v1/chat` | POST | None | LLM chat interface (Gemini-powered) |
 | `/mcp` | POST | x402 | MCP tool endpoint (payment-gated) |
 | `/docs` | GET | None | Swagger UI documentation |
 | `/openapi.json` | GET | None | OpenAPI spec (JSON) |
+
+## Chat Endpoint (Natural Language Interface)
+
+proofport-ai provides an LLM-powered chat interface for natural language interaction with proof generation and verification. This is useful for Telegram bots, web chat interfaces, or any conversational AI application.
+
+### Configuration
+
+```bash
+GEMINI_API_KEY=your-gemini-api-key  # Optional — if not set, chat endpoint returns 503
+```
+
+**Free Tier:** Gemini 2.0 Flash provides 15 RPM, 1500 RPD, 1M TPM with no cost.
+
+### Endpoint
+
+**POST `/api/v1/chat`**
+
+**Request:**
+```json
+{
+  "message": "I need a Coinbase KYC proof for myapp.com",
+  "sessionId": "uuid-session-id"  // Optional — auto-generated if omitted
+}
+```
+
+**Response:**
+```json
+{
+  "response": "I'll help you generate a Coinbase KYC proof. Since you haven't provided your wallet signature yet, I've created a signing request. Please open this URL in your browser to connect your wallet and sign...",
+  "sessionId": "uuid-session-id",
+  "skillResult": {
+    "status": "awaiting_signature",
+    "signingUrl": "https://sign.zkproofport.app/s/abc123",
+    "requestId": "abc123",
+    "message": "..."
+  },
+  "signingUrl": "https://sign.zkproofport.app/s/abc123"
+}
+```
+
+### How It Works
+
+1. **User sends natural language message** — "I want a KYC proof for my app"
+2. **Gemini extracts intent** — Identifies `generate_proof` skill with `circuitId` and `scope`
+3. **Function calling loop** — Gemini calls the skill via function calling, waits for result
+4. **Task execution** — Chat handler creates A2A task, waits for completion (same worker as A2A endpoint)
+5. **Natural language response** — Gemini formats the result in conversational text
+
+### Session Management
+
+- **Session TTL:** 1 hour in Redis
+- **History limit:** Last 20 messages kept
+- **Session ID:** Auto-generated UUID if not provided, returned in response
+- **Conversation context:** Full conversation history passed to Gemini for context-aware responses
+
+### Function Calling
+
+The chat endpoint uses Gemini's function calling feature to execute skills:
+
+- **generate_proof** — Generate ZK proof (creates web signing request if no signature)
+- **verify_proof** — Verify proof on-chain
+- **get_supported_circuits** — List available circuits
+
+### Example Conversations
+
+**Simple proof generation:**
+```
+User: "Generate a Coinbase KYC proof for example.com"
+Agent: "I'll create a signing request. Please open [URL] to sign with your wallet."
+```
+
+**Verification:**
+```
+User: "Verify this proof: 0x... with public inputs: [...]"
+Agent: "I've verified the proof on-chain. The proof is valid and was verified by contract 0x..."
+```
+
+**Discovery:**
+```
+User: "What proofs can you generate?"
+Agent: "I can generate two types of zero-knowledge proofs:
+1. Coinbase KYC — Prove you passed Coinbase KYC without revealing identity
+2. Coinbase Country — Prove your country of residence matches Coinbase attestation"
+```
+
+### Rate Limiting
+
+The chat endpoint has no function call limit per request (max 3 function calls to prevent infinite loops). Session-based rate limiting can be added via Redis if needed.
 
 ## Payment Integration (x402)
 
@@ -545,6 +634,12 @@ Proves holder's KYC country matches attestation.
 | `ENCLAVE_CID` | Conditional | — | Nitro Enclave CID (required when TEE_MODE=nitro) |
 | `ENCLAVE_PORT` | No | `5000` | Nitro Enclave port |
 | `TEE_ATTESTATION` | No | `false` | Enable attestation verification |
+
+### Chat / LLM Configuration
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `GEMINI_API_KEY` | No | (empty) | Gemini API key for chat endpoint (if not set, chat returns 503) |
 
 ## Docker Compose Services
 

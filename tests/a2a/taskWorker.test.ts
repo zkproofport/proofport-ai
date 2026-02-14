@@ -718,6 +718,66 @@ describe('TaskWorker', () => {
     );
   });
 
+  it('14b. processTask with generate_proof uses BbProver when teeMode is local (not TEE)', async () => {
+    const mockTeeProvider = {
+      mode: 'local' as const,
+      prove: vi.fn(),
+      healthCheck: vi.fn(),
+      getAttestation: vi.fn(),
+    };
+
+    const localConfig = {
+      ...mockConfig,
+      teeMode: 'local' as const,
+    };
+
+    const localWorker = new TaskWorker({
+      taskStore: mockTaskStore,
+      taskEventEmitter: mockTaskEventEmitter,
+      config: localConfig,
+      teeProvider: mockTeeProvider,
+    });
+
+    const task = makeA2aTask({
+      id: 'task-local-test',
+      skill: 'generate_proof',
+      params: {
+        address: '0xUser1111111111111111111111111111111111111',
+        signature: '0xsig123',
+        scope: 'test-scope',
+        circuitId: 'coinbase_attestation',
+      },
+    });
+
+    await localWorker.processTask(task);
+
+    // TEE provider should NOT be called in local mode
+    expect(mockTeeProvider.prove).not.toHaveBeenCalled();
+
+    // BbProver SHOULD be called
+    expect(BbProver).toHaveBeenCalledWith({
+      bbPath: mockConfig.bbPath,
+      nargoPath: mockConfig.nargoPath,
+      circuitsDir: mockConfig.circuitsDir,
+    });
+
+    // Verify task completed
+    expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith('task-local-test', 'completed');
+
+    // Verify correct progress message about bb (not TEE)
+    expect(mockTaskEventEmitter.emitStatusUpdate).toHaveBeenCalledWith(
+      'task-local-test',
+      expect.objectContaining({
+        state: 'running',
+        message: expect.objectContaining({
+          role: 'agent',
+          parts: [{ kind: 'text', text: 'Running bb prove' }],
+        }),
+      }),
+      false
+    );
+  });
+
   it('15. processTask with generate_proof fails when TEE returns error and teeMode is nitro', async () => {
     const mockTeeProvider = {
       mode: 'nitro' as const,
