@@ -326,6 +326,16 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
     res.status(405).json({ error: 'Session management not supported in stateless mode.' });
   });
 
+  // Chat payment middleware (POST /chat triggers proof operations)
+  const chatPaymentMiddleware = (req: any, res: any, next: any) => {
+    if (req.path === '/chat' && req.method === 'POST') {
+      return paymentMiddleware(req, res, () => {
+        paymentRecordingMiddleware(req, res, next);
+      });
+    }
+    next();
+  };
+
   // Chat endpoint (LLM-based natural language interface)
   const llmProviders: LLMProvider[] = [];
   if (config.openaiApiKey) {
@@ -337,7 +347,7 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
 
   if (llmProviders.length > 0) {
     const llmProvider = new MultiLLMProvider(llmProviders);
-    app.use('/api/v1', createChatRoutes({ redis, taskStore, taskEventEmitter, a2aBaseUrl: config.a2aBaseUrl, llmProvider }));
+    app.use('/api/v1', chatPaymentMiddleware, createChatRoutes({ redis, taskStore, taskEventEmitter, a2aBaseUrl: config.a2aBaseUrl, llmProvider }));
     console.log(`[Chat] LLM chat endpoint enabled (providers: ${llmProviders.map(p => p.name).join(' -> ')})`);
   } else {
     app.post('/api/v1/chat', (_req, res) => {
