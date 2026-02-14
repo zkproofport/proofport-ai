@@ -5,20 +5,24 @@
  * 8004scan displays a green TEE badge for this agent.
  *
  * Flow:
- * 1. Generate attestation (local simulation or real Nitro)
- * 2. Call validationRequest() on ValidationRegistry (agent as requester)
- * 3. Call validationResponse() on ValidationRegistry (self-validate on testnet)
+ * 1. Resolve the correct tokenId for the ValidationRegistry's Identity contract
+ *    (registers on it if different from our primary Identity contract)
+ * 2. Generate attestation (local simulation or real Nitro)
+ * 3. Call validationRequest() on ValidationRegistry (agent as requester)
+ * 4. Call validationResponse() on ValidationRegistry (self-validate on testnet)
  */
 
 import { ethers } from 'ethers';
 import type { Config } from '../config/index.js';
 import type { TeeProvider } from './types.js';
+import { AgentRegistration } from '../identity/register.js';
 
 const VALIDATION_REGISTRY_ABI = [
+  'function getIdentityRegistry() external view returns (address)',
   'function validationRequest(address validatorAddress, uint256 agentId, string requestURI, bytes32 requestHash) external',
-  'function validationResponse(bytes32 requestHash, uint8 response, string responseURI, bytes32 responseHash, string tag) external',
+  'function validationResponse(bytes32 requestHash, uint8 response, string responseURI, bytes32 responseHash, bytes32 tag) external',
   'function getAgentValidations(uint256 agentId) external view returns (bytes32[])',
-  'function getValidationStatus(bytes32 requestHash) external view returns (address validatorAddress, uint256 agentId, uint8 response, bytes32 responseHash, string tag, uint256 lastUpdate)',
+  'function getValidationStatus(bytes32 requestHash) external view returns (address validatorAddress, uint256 agentId, uint8 response, bytes32 responseHash, bytes32 tag, uint256 lastUpdate)',
 ];
 
 const TEE_TAG = 'tee-attestation';
@@ -34,6 +38,10 @@ export interface ValidationConfig {
  *
  * On testnet, the agent self-validates (same address is both agent owner and validator).
  * On mainnet, an external validator should be used instead.
+ *
+ * If the ValidationRegistry references a different Identity contract than the one
+ * we originally registered on, we automatically register on that contract too
+ * and use the resulting tokenId for validation.
  */
 export async function ensureAgentValidated(
   config: Config,
@@ -59,14 +67,52 @@ export async function ensureAgentValidated(
       signer
     );
 
+    // Resolve the correct tokenId for this ValidationRegistry
+    const registryIdentity: string = await contract.getIdentityRegistry();
+    let validationTokenId = agentTokenId;
+
+    if (registryIdentity.toLowerCase() !== config.erc8004IdentityAddress.toLowerCase()) {
+      console.log(`[TEE Validation] ValidationRegistry uses different Identity contract`);
+      console.log(`  Registry Identity: ${registryIdentity}`);
+      console.log(`  Our Identity: ${config.erc8004IdentityAddress}`);
+      console.log(`[TEE Validation] Registering on ValidationRegistry's Identity contract...`);
+
+      const validationRegistration = new AgentRegistration({
+        identityContractAddress: registryIdentity,
+        reputationContractAddress: config.erc8004ReputationAddress,
+        chainRpcUrl: config.chainRpcUrl,
+        privateKey: config.proverPrivateKey,
+      });
+
+      const isRegistered = await validationRegistration.isRegistered();
+      if (isRegistered) {
+        const info = await validationRegistration.getRegistration();
+        if (info) {
+          validationTokenId = info.tokenId;
+          console.log(`[TEE Validation] Already registered on ValidationRegistry's Identity (tokenId: ${validationTokenId})`);
+        }
+      } else {
+        const result = await validationRegistration.register({
+          name: 'ZKProofport Prover Agent',
+          description: 'Zero-knowledge proof generation and verification for Coinbase attestations',
+          agentUrl: config.a2aBaseUrl,
+          capabilities: ['proof_generation', 'proof_verification'],
+          protocols: ['mcp', 'a2a'],
+          circuits: ['coinbase_attestation', 'coinbase_country_attestation'],
+        });
+        validationTokenId = result.tokenId;
+        console.log(`[TEE Validation] Registered on ValidationRegistry's Identity (tokenId: ${validationTokenId}, tx: ${result.transactionHash})`);
+      }
+    }
+
     // Check if already validated
-    const existingValidations: string[] = await contract.getAgentValidations(agentTokenId);
+    const existingValidations: string[] = await contract.getAgentValidations(validationTokenId);
 
     for (const hash of existingValidations) {
       try {
         const status = await contract.getValidationStatus(hash);
-        // status[2] is the response (uint8), status[4] is the tag (string)
-        if (Number(status[2]) > 0 && status[4] === TEE_TAG) {
+        // status[2] is the response (uint8), status[4] is the tag (bytes32)
+        if (Number(status[2]) > 0 && status[4] === ethers.encodeBytes32String(TEE_TAG)) {
           console.log(`[TEE Validation] Agent already has TEE validation (requestHash: ${hash})`);
           return;
         }
@@ -79,7 +125,7 @@ export async function ensureAgentValidated(
     // Generate attestation
     console.log('[TEE Validation] Generating TEE attestation...');
     const proofHash = ethers.keccak256(
-      ethers.toUtf8Bytes(`agent:${agentTokenId}:${Date.now()}`)
+      ethers.toUtf8Bytes(`agent:${validationTokenId}:${Date.now()}`)
     );
     const attestation = await teeProvider.generateAttestation(proofHash);
 
@@ -91,7 +137,7 @@ export async function ensureAgentValidated(
     // Build request data
     const requestData = {
       type: 'tee-attestation',
-      agentId: agentTokenId.toString(),
+      agentId: validationTokenId.toString(),
       attestation: {
         document: attestation.document,
         mode: attestation.mode,
@@ -109,7 +155,7 @@ export async function ensureAgentValidated(
     console.log('[TEE Validation] Submitting validationRequest to ValidationRegistry...');
     const reqTx = await contract.validationRequest(
       signer.address, // self-validate: use own address as validator
-      agentTokenId,
+      validationTokenId,
       requestURI,
       requestHash
     );
@@ -134,7 +180,7 @@ export async function ensureAgentValidated(
       100, // score: 100 = fully validated
       responseURI,
       responseHash,
-      TEE_TAG
+      ethers.encodeBytes32String(TEE_TAG)
     );
     await resTx.wait();
     console.log(`[TEE Validation] validationResponse submitted (tx: ${resTx.hash})`);
