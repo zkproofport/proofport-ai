@@ -219,7 +219,7 @@ export function buildOasfAgent(config: Config, tokenId?: bigint | null) {
     services: [
       {
         name: 'web',
-        endpoint: config.a2aBaseUrl,
+        endpoint: config.websiteUrl,
         version: config.agentVersion,
       },
       {

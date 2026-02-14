@@ -41,6 +41,7 @@ export function loadConfig() {
     proverPrivateKey: getRequiredEnv('PROVER_PRIVATE_KEY'),
     paymentMode,
     a2aBaseUrl: getRequiredEnv('A2A_BASE_URL'),
+    websiteUrl: process.env.WEBSITE_URL || 'https://zkproofport.com',
     agentVersion: process.env.AGENT_VERSION || '1.0.0',
 
     // x402 Payment (required when paymentMode !== 'disabled')

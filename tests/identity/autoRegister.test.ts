@@ -50,6 +50,7 @@ describe('ensureAgentRegistered', () => {
     chainRpcUrl: 'https://sepolia.base.org',
     proverPrivateKey: '0x1234567890123456789012345678901234567890123456789012345678901234',
     a2aBaseUrl: 'https://ai.zkproofport.app',
+    websiteUrl: 'https://zkproofport.com',
     port: 4002,
     nodeEnv: 'development',
     circuitsPath: './circuits',
@@ -180,7 +181,7 @@ describe('ensureAgentRegistered', () => {
         type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
         image: 'https://ai.zkproofport.app/icon.png',
         services: [
-          { name: 'web', endpoint: 'https://ai.zkproofport.app' },
+          { name: 'web', endpoint: 'https://zkproofport.com' },
           { name: 'MCP', endpoint: 'https://ai.zkproofport.app/mcp', version: '2025-11-25' },
           { name: 'A2A', endpoint: 'https://ai.zkproofport.app/.well-known/agent-card.json', version: '0.3.0' },
         ],

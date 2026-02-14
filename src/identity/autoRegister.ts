@@ -93,7 +93,7 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
                 type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
                 image: `${config.a2aBaseUrl}/icon.png`,
                 services: [
-                  { name: 'web', endpoint: config.a2aBaseUrl },
+                  { name: 'web', endpoint: config.websiteUrl },
                   { name: 'MCP', endpoint: `${config.a2aBaseUrl}/mcp`, version: '2025-11-25' },
                   { name: 'A2A', endpoint: `${config.a2aBaseUrl}/.well-known/agent-card.json`, version: '0.3.0' },
                 ],
@@ -147,7 +147,7 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
       type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
       image: `${config.a2aBaseUrl}/icon.png`,
       services: [
-        { name: 'web', endpoint: config.a2aBaseUrl },
+        { name: 'web', endpoint: config.websiteUrl },
         { name: 'MCP', endpoint: `${config.a2aBaseUrl}/mcp`, version: '2025-11-25' },
         { name: 'A2A', endpoint: `${config.a2aBaseUrl}/.well-known/agent-card.json`, version: '0.3.0' },
       ],
