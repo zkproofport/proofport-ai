@@ -3,12 +3,13 @@ import { TaskStore, type A2aTask, type Artifact } from './taskStore.js';
 import { TaskEventEmitter } from './streaming.js';
 import type { Config } from '../config/index.js';
 import { BbProver } from '../prover/bbProver.js';
-import { computeCircuitParams } from '../input/inputBuilder.js';
+import { computeCircuitParams, computeSignalHash } from '../input/inputBuilder.js';
 import { ethers } from 'ethers';
 import { CIRCUITS } from '../config/circuits.js';
 import { VERIFIER_ADDRESSES } from '../config/contracts.js';
 import { handleProofCompleted } from '../identity/reputation.js';
 import type { TeeProvider } from '../tee/types.js';
+import type { SigningRequestRecord } from '../signing/types.js';
 
 export class TaskWorker {
   private intervalId: NodeJS.Timeout | null = null;
@@ -122,15 +123,112 @@ export class TaskWorker {
       false
     );
 
-    const address = params.address as string;
-    const signature = params.signature as string;
+    const address = params.address as string | undefined;
+    const signature = params.signature as string | undefined;
+    const requestId = params.requestId as string | undefined;
     const scope = params.scope as string;
     const circuitId = params.circuitId as string;
     const countryList = params.countryList as string[] | undefined;
     const isIncluded = params.isIncluded as boolean | undefined;
 
-    if (!address || !signature || !scope || !circuitId) {
-      throw new Error('Missing required parameters: address, signature, scope, circuitId');
+    if (!scope || !circuitId) {
+      throw new Error('Missing required parameters: scope, circuitId');
+    }
+
+    // ─── Resolve address + signature (3 modes) ─────────────────────────
+    let resolvedAddress: string;
+    let resolvedSignature: string;
+
+    if (signature) {
+      // Mode 1: Direct signature provided — address required
+      if (!address) {
+        throw new Error('Address is required when providing a signature directly.');
+      }
+      resolvedAddress = address;
+      resolvedSignature = signature;
+    } else if (requestId) {
+      // Mode 3: Resume with requestId — get address + signature from Redis
+      const redis = (this.deps.taskStore as any).redis;
+      if (!redis) {
+        throw new Error('Redis is required for web signing flow');
+      }
+      const key = `signing:${requestId}`;
+      const data = await redis.get(key);
+      if (!data) {
+        throw new Error('Signing request not found or expired');
+      }
+      const record: SigningRequestRecord = JSON.parse(data);
+      if (record.status !== 'completed' || !record.signature || !record.address) {
+        throw new Error(
+          `Signing request is not yet completed (status: ${record.status}). ` +
+          `Please wait for the user to sign at the signing page.`
+        );
+      }
+      resolvedAddress = record.address;
+      resolvedSignature = record.signature;
+      // Clean up used signing request
+      await redis.del(key);
+    } else {
+      // Mode 2: No signature, no requestId — create web signing request
+      if (!this.deps.config.signPageUrl) {
+        throw new Error(
+          'Web signing is not configured. Either provide a signature directly, ' +
+          'or configure SIGN_PAGE_URL for web signing.'
+        );
+      }
+
+      const redis = (this.deps.taskStore as any).redis;
+      if (!redis) {
+        throw new Error('Redis is required for web signing flow');
+      }
+
+      const newRequestId = randomUUID();
+      const ttl = this.deps.config.signingTtlSeconds || 300;
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + ttl * 1000);
+
+      const record: SigningRequestRecord = {
+        id: newRequestId,
+        scope,
+        circuitId,
+        status: 'pending',
+        createdAt: now.toISOString(),
+        expiresAt: expiresAt.toISOString(),
+      };
+
+      const key = `signing:${newRequestId}`;
+      await redis.set(key, JSON.stringify(record), 'EX', ttl);
+
+      const signingUrl = `${this.deps.config.signPageUrl.replace(/\/$/, '')}/s/${newRequestId}`;
+
+      // Build artifact with awaiting_signature status
+      const artifact: Artifact = {
+        id: randomUUID(),
+        mimeType: 'application/json',
+        parts: [{
+          kind: 'data',
+          mimeType: 'application/json',
+          data: {
+            status: 'awaiting_signature',
+            signingUrl,
+            requestId: newRequestId,
+            message:
+              `Signature required. Please ask the user to open the signing URL and connect their wallet to sign. ` +
+              `Then call generate_proof again with requestId: "${newRequestId}".`,
+          },
+        }],
+      };
+
+      await this.deps.taskStore.addArtifact(task.id, artifact);
+      const updatedTask = await this.deps.taskStore.updateTaskStatus(task.id, 'completed');
+      emitter.emitArtifactUpdate(task.id, artifact);
+      emitter.emitStatusUpdate(
+        task.id,
+        { state: 'completed', timestamp: new Date().toISOString() },
+        true
+      );
+      emitter.emitTaskComplete(task.id, updatedTask);
+      return;
     }
 
     emitter.emitStatusUpdate(
@@ -150,8 +248,8 @@ export class TaskWorker {
     const rpcUrls = [this.deps.config.baseRpcUrl];
     const circuitParams = await computeCircuitParams(
       {
-        address,
-        signature,
+        address: resolvedAddress,
+        signature: resolvedSignature,
         scope,
         circuitId: circuitId as any,
         countryList,
