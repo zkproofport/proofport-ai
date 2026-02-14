@@ -163,6 +163,13 @@ describe('ensureAgentRegistered', () => {
         ],
         protocols: ['mcp', 'a2a', 'x402'],
         circuits: ['coinbase_attestation', 'coinbase_country_attestation'],
+        tee: undefined,
+        x402Support: true,
+        services: [
+          { name: 'web', endpoint: 'https://ai.zkproofport.app' },
+          { name: 'MCP', endpoint: 'https://ai.zkproofport.app/mcp' },
+          { name: 'A2A', endpoint: 'https://ai.zkproofport.app/a2a' },
+        ],
       });
     });
 

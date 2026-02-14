@@ -47,9 +47,23 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
         if (info.metadataUri) {
           try {
             const currentMetadata = parseMetadataUri(info.metadataUri);
-            if (currentMetadata && currentMetadata.agentUrl !== config.a2aBaseUrl) {
-              console.log(`Agent metadata URL mismatch: on-chain="${currentMetadata.agentUrl}", current="${config.a2aBaseUrl}"`);
-              console.log('Updating on-chain metadata...');
+            const needsUpdate = currentMetadata && (
+              currentMetadata.agentUrl !== config.a2aBaseUrl ||
+              currentMetadata.x402Support !== (config.paymentMode !== 'disabled') ||
+              !currentMetadata.services ||
+              currentMetadata.services.length === 0
+            );
+            if (needsUpdate) {
+              console.log('Agent metadata needs updating on-chain...');
+              if (currentMetadata.agentUrl !== config.a2aBaseUrl) {
+                console.log(`  URL mismatch: on-chain="${currentMetadata.agentUrl}", current="${config.a2aBaseUrl}"`);
+              }
+              if (currentMetadata.x402Support !== (config.paymentMode !== 'disabled')) {
+                console.log(`  x402Support mismatch: on-chain=${currentMetadata.x402Support}, current=${config.paymentMode !== 'disabled'}`);
+              }
+              if (!currentMetadata.services || currentMetadata.services.length === 0) {
+                console.log('  services array missing or empty');
+              }
 
               const metadata: AgentMetadata = {
                 name: 'ZKProofport Prover Agent',
@@ -66,6 +80,12 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
                 protocols: ['mcp', 'a2a', 'x402'],
                 circuits: ['coinbase_attestation', 'coinbase_country_attestation'],
                 ...(config.teeMode !== 'disabled' && { tee: config.teeMode }),
+                x402Support: config.paymentMode !== 'disabled',
+                services: [
+                  { name: 'web', endpoint: config.a2aBaseUrl },
+                  { name: 'MCP', endpoint: `${config.a2aBaseUrl}/mcp` },
+                  { name: 'A2A', endpoint: `${config.a2aBaseUrl}/a2a` },
+                ],
               };
 
               const txHash = await registration.updateMetadata(info.tokenId, metadata);
@@ -103,6 +123,12 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
       protocols: ['mcp', 'a2a', 'x402'],
       circuits: ['coinbase_attestation', 'coinbase_country_attestation'],
       ...(config.teeMode !== 'disabled' && { tee: config.teeMode }),
+      x402Support: config.paymentMode !== 'disabled',
+      services: [
+        { name: 'web', endpoint: config.a2aBaseUrl },
+        { name: 'MCP', endpoint: `${config.a2aBaseUrl}/mcp` },
+        { name: 'A2A', endpoint: `${config.a2aBaseUrl}/a2a` },
+      ],
     };
 
     // Register on-chain

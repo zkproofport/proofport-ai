@@ -175,7 +175,7 @@ export class AgentRegistration {
  * Create data URI for agent metadata
  */
 export function createMetadataUri(metadata: AgentMetadata): string {
-  // Create JSON object (omit tee if undefined)
+  // Create JSON object (omit optional fields if undefined)
   const json: any = {
     name: metadata.name,
     description: metadata.description,
@@ -187,6 +187,14 @@ export function createMetadataUri(metadata: AgentMetadata): string {
 
   if (metadata.tee !== undefined) {
     json.tee = metadata.tee;
+  }
+
+  if (metadata.x402Support !== undefined) {
+    json.x402Support = metadata.x402Support;
+  }
+
+  if (metadata.services !== undefined) {
+    json.services = metadata.services;
   }
 
   // Convert to base64

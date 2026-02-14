@@ -9,6 +9,8 @@ export interface AgentMetadata {
   protocols: string[];
   circuits: string[];
   tee?: string;
+  x402Support?: boolean;
+  services?: Array<{ name: string; endpoint: string }>;
 }
 
 /**
