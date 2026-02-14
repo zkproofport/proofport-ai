@@ -3,6 +3,7 @@ dist/
 *.log
 .env
 .env.local
+.env.development
 .env.staging
 .env.production
 .DS_Store
