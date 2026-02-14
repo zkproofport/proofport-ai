@@ -158,7 +158,7 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
     res.json({
       providers: {
         privy: { enabled: !!config.privyAppId && !!config.privyApiSecret },
-        web: { enabled: !!config.signPageUrl, signPageUrl: config.signPageUrl || null },
+        web: { enabled: !!config.signPageUrl },
         eip7702: { enabled: true },
       },
     });
@@ -193,6 +193,18 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   const a2aPaymentMiddleware = (req: any, res: any, next: any) => {
     const method = req.body?.method;
     if (method === 'message/send' || method === 'message/stream') {
+      // Skip payment for get_supported_circuits (read-only, no proof generation)
+      const message = req.body?.params?.message;
+      if (message) {
+        const parts = message.parts || [];
+        const isCircuitQuery = parts.some((p: any) =>
+          p.kind === 'data' && p.data?.skill === 'get_supported_circuits'
+        );
+        if (isCircuitQuery) {
+          next();
+          return;
+        }
+      }
       return paymentMiddleware(req, res, () => {
         paymentRecordingMiddleware(req, res, next);
       });
@@ -219,7 +231,12 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   // CORS for signing routes (sign-page on port 3200 → AI server on port 4002)
   app.use('/api/signing', (req, res, next) => {
     const origin = req.headers.origin;
-    if (origin) {
+    const allowedOrigins = [
+      'http://127.0.0.1:3200',
+      'http://localhost:3200',
+      config.signPageUrl,
+    ].filter(Boolean);
+    if (origin && allowedOrigins.includes(origin)) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type');

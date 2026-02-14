@@ -102,6 +102,19 @@ export function createSigningCallbackHandler(redis: RedisClient) {
     const { requestId } = req.params;
     const { signature, address } = req.body;
 
+    // Rate limiting: max 5 attempts per request
+    const attemptsKey = `signing:attempts:${requestId}`;
+    const attempts = await redis.incr(attemptsKey);
+    if (attempts === 1) {
+      await redis.expire(attemptsKey, 300); // 5 min TTL
+    }
+    if (attempts > 5) {
+      return res.status(429).json({
+        success: false,
+        error: 'Too many signing attempts for this request',
+      });
+    }
+
     const key = `signing:${requestId}`;
     const data = await redis.get(key);
 
@@ -118,6 +131,14 @@ export function createSigningCallbackHandler(redis: RedisClient) {
       return res.status(404).json({
         success: false,
         error: 'Request not found or expired',
+      });
+    }
+
+    // Require prepare step first
+    if (!record.signalHash) {
+      return res.status(400).json({
+        success: false,
+        error: 'Signing request not prepared. Call POST /api/signing/:requestId/prepare first.',
       });
     }
 

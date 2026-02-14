@@ -126,10 +126,22 @@ export function createBatchSigningHandler(redis: RedisClient) {
         return;
       }
 
+      if (body.signatures.length > 50) {
+        res.status(400).json({ error: 'signatures must be an array with at most 50 items' });
+        return;
+      }
+
       for (const entry of body.signatures) {
-        if (!entry.signalHash || !entry.signature) {
+        if (
+          !entry.signalHash ||
+          !entry.signature ||
+          typeof entry.signalHash !== 'string' ||
+          typeof entry.signature !== 'string' ||
+          entry.signalHash.trim() === '' ||
+          entry.signature.trim() === ''
+        ) {
           res.status(400).json({
-            error: 'Each signature entry must have signalHash and signature fields',
+            error: 'Each signature entry must have signalHash and signature as non-empty strings',
           });
           return;
         }

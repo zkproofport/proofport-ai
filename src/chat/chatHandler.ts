@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { randomUUID } from 'crypto';
+import { randomUUID, randomBytes, createHash } from 'crypto';
 import type { RedisClient } from '../redis/client.js';
 import type { TaskStore } from '../a2a/taskStore.js';
 import type { TaskEventEmitter } from '../a2a/streaming.js';
@@ -12,13 +12,20 @@ import type { SigningRequestRecord } from '../signing/types.js';
 interface ChatRequest {
   message: string;
   sessionId?: string;
+  sessionSecret?: string;
 }
 
 interface ChatResponse {
   response: string;
   sessionId: string;
+  sessionSecret?: string;
   skillResult?: unknown;
   signingUrl?: string;
+}
+
+interface SessionData {
+  secretHash: string;
+  history: LLMMessage[];
 }
 
 interface ChatHandlerDeps {
@@ -38,24 +45,54 @@ export function createChatRoutes(deps: ChatHandlerDeps): Router {
 
   router.post('/chat', async (req, res) => {
     try {
-      const { message, sessionId: providedSessionId } = req.body as ChatRequest;
+      const { message, sessionId: providedSessionId, sessionSecret: providedSecret } = req.body as ChatRequest;
 
       if (!message || typeof message !== 'string') {
         res.status(400).json({ error: 'Missing or invalid message field' });
         return;
       }
 
+      const isNewSession = !providedSessionId;
       const sessionId = providedSessionId || randomUUID();
       const sessionKey = `chat:session:${sessionId}`;
 
-      // Load conversation history
-      const historyData = await deps.redis.get(sessionKey);
-      const history: LLMMessage[] = historyData ? JSON.parse(historyData) : [];
+      let history: LLMMessage[];
+      let sessionSecret: string | undefined;
+      let secretHash: string;
+
+      if (isNewSession) {
+        sessionSecret = randomBytes(32).toString('hex');
+        secretHash = createHash('sha256').update(sessionSecret).digest('hex');
+        history = [];
+      } else {
+        if (!providedSecret) {
+          res.status(401).json({ error: 'sessionSecret is required to continue a session' });
+          return;
+        }
+
+        const sessionDataRaw = await deps.redis.get(sessionKey);
+        if (!sessionDataRaw) {
+          res.status(404).json({ error: 'Session not found or expired' });
+          return;
+        }
+
+        const sessionData: SessionData = JSON.parse(sessionDataRaw);
+        const providedHash = createHash('sha256').update(providedSecret).digest('hex');
+
+        if (providedHash !== sessionData.secretHash) {
+          res.status(403).json({ error: 'Invalid sessionSecret' });
+          return;
+        }
+
+        secretHash = sessionData.secretHash;
+        history = sessionData.history;
+      }
 
       // Add user message to history
       history.push({ role: 'user', content: message });
 
       let functionCallCount = 0;
+      let proofCallCount = 0;
       let finalResponse: string | undefined;
       let lastSkillResult: unknown;
       let signingUrl: string | undefined;
@@ -74,7 +111,20 @@ export function createChatRoutes(deps: ChatHandlerDeps): Router {
           const toolResults: Array<{ name: string; result: unknown }> = [];
 
           for (const tc of llmResponse.toolCalls) {
-            const skillResult = await executeSkill(tc.name, tc.args, deps);
+            let skillResult: unknown;
+
+            // Limit proof operations to 1 per chat request
+            if (tc.name === 'generate_proof' || tc.name === 'verify_proof') {
+              if (proofCallCount >= 1) {
+                skillResult = { error: 'Only one proof operation allowed per chat request. Please send a new message.' };
+              } else {
+                proofCallCount++;
+                skillResult = await executeSkill(tc.name, tc.args, deps);
+              }
+            } else {
+              skillResult = await executeSkill(tc.name, tc.args, deps);
+            }
+
             lastSkillResult = skillResult;
 
             if (typeof skillResult === 'object' && skillResult !== null && 'signingUrl' in skillResult) {
@@ -115,12 +165,21 @@ export function createChatRoutes(deps: ChatHandlerDeps): Router {
       const trimmedHistory = history.slice(-MAX_HISTORY_MESSAGES);
 
       // Save updated conversation history to Redis
-      await deps.redis.set(sessionKey, JSON.stringify(trimmedHistory), 'EX', SESSION_TTL_SECONDS);
+      const sessionDataToSave: SessionData = {
+        secretHash,
+        history: trimmedHistory,
+      };
+
+      await deps.redis.set(sessionKey, JSON.stringify(sessionDataToSave), 'EX', SESSION_TTL_SECONDS);
 
       const response: ChatResponse = {
         response: finalResponse,
         sessionId,
       };
+
+      if (sessionSecret) {
+        response.sessionSecret = sessionSecret;
+      }
 
       if (lastSkillResult !== undefined) {
         response.skillResult = lastSkillResult;
