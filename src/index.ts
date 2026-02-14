@@ -8,7 +8,7 @@ import type { Config } from './config/index.js';
 import { loadConfig } from './config/index.js';
 import { ensureArtifacts } from './circuit/artifactManager.js';
 import { createMcpServer } from './mcp/server.js';
-import { swaggerSpec } from './swagger.js';
+import { buildSwaggerSpec } from './swagger.js';
 import { createRedisClient } from './redis/client.js';
 import { RateLimiter } from './redis/rateLimiter.js';
 import { ProofCache } from './redis/proofCache.js';
@@ -58,6 +58,9 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   validatePaymentConfig(config);
 
   const app = express();
+
+  // Build swagger spec with dynamic base URL
+  const swaggerSpec = buildSwaggerSpec(config.a2aBaseUrl);
 
   // Redis setup
   const redis = createRedisClient(config.redisUrl);
@@ -174,8 +177,18 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   app.get('/.well-known/agent.json', getOasfAgentHandler(config, agentTokenId));
   app.get('/.well-known/agent-card.json', getAgentCardHandler(config, agentTokenId));
   app.get('/.well-known/mcp.json', getMcpDiscoveryHandler(config));
+
+  // Payment gate only for message/send and message/stream (proof generation)
+  const a2aPaymentMiddleware = (req: any, res: any, next: any) => {
+    const method = req.body?.method;
+    if (method === 'message/send' || method === 'message/stream') {
+      return paymentMiddleware(req, res, next);
+    }
+    next();
+  };
+
   // Payment-gated routes — single POST /a2a handles all A2A v0.3 JSON-RPC methods
-  app.post('/a2a', paymentMiddleware, createA2aHandler({ taskStore, taskEventEmitter }));
+  app.post('/a2a', a2aPaymentMiddleware, createA2aHandler({ taskStore, taskEventEmitter }));
 
   // CORS for signing routes (sign-page on port 3200 → AI server on port 4002)
   app.use('/api/signing', (req, res, next) => {

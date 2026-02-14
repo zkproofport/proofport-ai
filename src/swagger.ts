@@ -1,17 +1,18 @@
-export const swaggerSpec = {
-  openapi: '3.0.3',
-  info: {
-    title: 'ZKProofport AI - MCP Prover Server',
-    version: '0.1.0',
-    description:
-      'Agent-native ZK proof infrastructure. Provides MCP (Model Context Protocol) tools for zero-knowledge proof generation and verification using Noir circuits + bb CLI.',
-  },
-  servers: [
-    {
-      url: 'http://localhost:4002',
-      description: 'Local Docker',
+export function buildSwaggerSpec(baseUrl: string) {
+  return {
+    openapi: '3.0.3',
+    info: {
+      title: 'ZKProofport AI - MCP Prover Server',
+      version: '0.1.0',
+      description:
+        'Agent-native ZK proof infrastructure. Provides MCP (Model Context Protocol) tools for zero-knowledge proof generation and verification using Noir circuits + bb CLI.',
     },
-  ],
+    servers: [
+      {
+        url: baseUrl,
+        description: 'API Server',
+      },
+    ],
   paths: {
     '/health': {
       get: {
@@ -146,6 +147,252 @@ export const swaggerSpec = {
         },
       },
     },
+    '/a2a': {
+      post: {
+        summary: 'A2A v0.3 JSON-RPC endpoint',
+        description:
+          'Handles all A2A protocol v0.3 methods via JSON-RPC 2.0. Methods: message/send (blocking), message/stream (SSE), tasks/get, tasks/cancel, tasks/resubscribe. Payment (x402) required only for message/send and message/stream.',
+        tags: ['A2A'],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['jsonrpc', 'method'],
+                properties: {
+                  jsonrpc: { type: 'string', enum: ['2.0'] },
+                  id: { type: 'string' },
+                  method: {
+                    type: 'string',
+                    enum: ['message/send', 'message/stream', 'tasks/get', 'tasks/cancel', 'tasks/resubscribe'],
+                  },
+                  params: { type: 'object' },
+                },
+              },
+              examples: {
+                messageSend: {
+                  summary: 'message/send — Send message and block until completion',
+                  value: {
+                    jsonrpc: '2.0',
+                    id: 'req-1',
+                    method: 'message/send',
+                    params: {
+                      content: {
+                        parts: [
+                          {
+                            type: 'data',
+                            data: {
+                              skill: 'generate_proof',
+                              params: {
+                                address: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
+                                signature: '0x...',
+                                scope: 'zkproofport.app',
+                                circuitId: 'coinbase_attestation',
+                              },
+                            },
+                          },
+                        ],
+                      },
+                    },
+                  },
+                },
+                messageStream: {
+                  summary: 'message/stream — Send message and return SSE stream',
+                  value: {
+                    jsonrpc: '2.0',
+                    id: 'req-2',
+                    method: 'message/stream',
+                    params: {
+                      content: {
+                        parts: [
+                          {
+                            type: 'data',
+                            data: {
+                              skill: 'generate_proof',
+                              params: {
+                                address: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
+                                signature: '0x...',
+                                scope: 'zkproofport.app',
+                                circuitId: 'coinbase_attestation',
+                              },
+                            },
+                          },
+                        ],
+                      },
+                    },
+                  },
+                },
+                tasksGet: {
+                  summary: 'tasks/get — Get task by ID with optional history',
+                  value: {
+                    jsonrpc: '2.0',
+                    id: 'req-3',
+                    method: 'tasks/get',
+                    params: {
+                      taskId: 'task-123',
+                      historyLength: 10,
+                    },
+                  },
+                },
+                tasksCancel: {
+                  summary: 'tasks/cancel — Cancel a running task',
+                  value: {
+                    jsonrpc: '2.0',
+                    id: 'req-4',
+                    method: 'tasks/cancel',
+                    params: {
+                      taskId: 'task-123',
+                    },
+                  },
+                },
+                tasksResubscribe: {
+                  summary: 'tasks/resubscribe — Resubscribe to task events',
+                  value: {
+                    jsonrpc: '2.0',
+                    id: 'req-5',
+                    method: 'tasks/resubscribe',
+                    params: {
+                      taskId: 'task-123',
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'A2A JSON-RPC response',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    jsonrpc: { type: 'string' },
+                    id: { type: 'string' },
+                    result: { type: 'object' },
+                  },
+                },
+              },
+            },
+          },
+          '402': {
+            description: 'Payment required (x402)',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    error: { type: 'string' },
+                    paymentRequired: { type: 'boolean' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/.well-known/agent.json': {
+      get: {
+        summary: 'OASF Agent Discovery',
+        description: 'Returns OASF-compliant agent identity with ERC-8004 on-chain identity reference',
+        tags: ['Discovery'],
+        responses: {
+          '200': {
+            description: 'Agent identity document',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    name: { type: 'string' },
+                    version: { type: 'string' },
+                    identity: {
+                      type: 'object',
+                      properties: {
+                        chainId: { type: 'number' },
+                        identityContract: { type: 'string' },
+                        tokenId: { type: 'string' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/.well-known/agent-card.json': {
+      get: {
+        summary: 'A2A Agent Card',
+        description: 'Returns A2A v0.3 agent capabilities and endpoints',
+        tags: ['Discovery'],
+        responses: {
+          '200': {
+            description: 'Agent card',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    name: { type: 'string' },
+                    version: { type: 'string' },
+                    capabilities: {
+                      type: 'object',
+                      properties: {
+                        mcp: { type: 'boolean' },
+                        a2a: { type: 'boolean' },
+                        payment: {
+                          type: 'array',
+                          items: { type: 'string' },
+                        },
+                      },
+                    },
+                    endpoints: {
+                      type: 'object',
+                      properties: {
+                        jsonrpc: { type: 'string' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/.well-known/mcp.json': {
+      get: {
+        summary: 'MCP Discovery',
+        description: 'Returns MCP protocol endpoint and available tools',
+        tags: ['Discovery'],
+        responses: {
+          '200': {
+            description: 'MCP discovery document',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    protocol: { type: 'string' },
+                    version: { type: 'string' },
+                    endpoint: { type: 'string' },
+                    tools: {
+                      type: 'array',
+                      items: { type: 'string' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
   },
   tags: [
     {
@@ -156,6 +403,14 @@ export const swaggerSpec = {
       name: 'MCP',
       description:
         'Model Context Protocol endpoints. Tools: generate_proof, verify_proof, get_supported_circuits',
+    },
+    {
+      name: 'A2A',
+      description: 'Agent-to-Agent Protocol v0.3 — JSON-RPC 2.0 methods for task management and proof generation',
+    },
+    {
+      name: 'Discovery',
+      description: 'Agent discovery endpoints for A2A, OASF, and MCP',
     },
   ],
   components: {
@@ -243,4 +498,5 @@ export const swaggerSpec = {
       },
     },
   },
-};
+  };
+}
