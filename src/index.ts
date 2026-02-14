@@ -275,8 +275,15 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   app.post('/api/signing/callback/:requestId', createSigningCallbackHandler(redis));
   app.post('/api/signing/batch', createBatchSigningHandler(redis));
 
-  // MCP StreamableHTTP endpoint (stateless mode, payment-gated)
-  app.post('/mcp', paymentMiddleware, async (req, res) => {
+  // MCP StreamableHTTP endpoint (stateless mode, payment only on tools/call)
+  const mcpPaymentMiddleware = (req: any, res: any, next: any) => {
+    const method = req.body?.method;
+    if (method === 'tools/call') {
+      return paymentMiddleware(req, res, next);
+    }
+    next();
+  };
+  app.post('/mcp', mcpPaymentMiddleware, async (req, res) => {
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     const server = createMcpServer({ rateLimiter, proofCache, redis, teeProvider });
     await server.connect(transport);
