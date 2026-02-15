@@ -15,12 +15,25 @@ interface ChatRequest {
   sessionSecret?: string;
 }
 
+interface PaymentInfo {
+  required: boolean;
+  cost: string;
+  currency: string;
+  network: string;
+  chainId: number;
+  usdcAddress: string;
+  payTo: string;
+  protocol: string;
+  description: string;
+}
+
 interface ChatResponse {
   response: string;
   sessionId: string;
   sessionSecret?: string;
   skillResult?: unknown;
   signingUrl?: string;
+  paymentInfo?: PaymentInfo;
 }
 
 interface SessionData {
@@ -96,6 +109,7 @@ export function createChatRoutes(deps: ChatHandlerDeps): Router {
       let finalResponse: string | undefined;
       let lastSkillResult: unknown;
       let signingUrl: string | undefined;
+      let usedPaidTool = false;
 
       // Function calling loop
       while (functionCallCount < MAX_FUNCTION_CALLS) {
@@ -113,8 +127,9 @@ export function createChatRoutes(deps: ChatHandlerDeps): Router {
           for (const tc of llmResponse.toolCalls) {
             let skillResult: unknown;
 
-            // Limit proof operations to 1 per chat request
+            // Track paid tool usage and limit proof operations to 1 per chat request
             if (tc.name === 'generate_proof' || tc.name === 'verify_proof') {
+              usedPaidTool = true;
               if (proofCallCount >= 1) {
                 skillResult = { error: 'Only one proof operation allowed per chat request. Please send a new message.' };
               } else {
@@ -187,6 +202,20 @@ export function createChatRoutes(deps: ChatHandlerDeps): Router {
 
       if (signingUrl) {
         response.signingUrl = signingUrl;
+      }
+
+      if (usedPaidTool) {
+        response.paymentInfo = {
+          required: true,
+          cost: '$0.10',
+          currency: 'USDC',
+          network: 'Base Sepolia',
+          chainId: 84532,
+          usdcAddress: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+          payTo: '0x5A3E649208Ae15ec52496c1Ae23b2Ff89Ac02f0c',
+          protocol: 'x402',
+          description: 'Proof generation/verification requires x402 USDC payment. Use REST/MCP/A2A endpoints with PAYMENT-SIGNATURE header for programmatic payment.',
+        };
       }
 
       res.json(response);

@@ -73,14 +73,6 @@ export function createPaymentMiddleware(config: PaymentConfig): (req: Request, r
       accepts: paymentAccepts,
       description: 'Verify ZK proof via REST API (mounted)',
     },
-    'POST /api/v1/chat': {
-      accepts: paymentAccepts,
-      description: 'Generate ZK proof via Chat API',
-    },
-    'POST /chat': {
-      accepts: paymentAccepts,
-      description: 'Generate ZK proof via Chat API (mounted)',
-    },
   };
 
   // Return x402 payment middleware
