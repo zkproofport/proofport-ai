@@ -2,6 +2,13 @@
 
 Agent-native ZK proof infrastructure for ZKProofport. A self-contained microservice that generates and verifies zero-knowledge proofs using the Model Context Protocol (MCP) and Agent-to-Agent (A2A) communication protocols.
 
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Integration Guide](docs/integration-guide.md) | Complete guide for Claude MCP, GPT Actions, Google ADK, Telegram/Discord, x402 payment |
+| [E2E Test Report](docs/e2e-test-report-2026-02-15.md) | Staging environment E2E test results (20/20 pass) |
+
 ## Architecture Overview
 
 proofport-ai is a **standalone service** that runs independently from the main proofport infrastructure. It provides:
@@ -266,7 +273,7 @@ Events:
 | `/a2a/stream/:taskId` | GET | None | SSE stream for task updates |
 | `/api/signing/callback/:requestId` | POST | None | Receive signature from web signing page |
 | `/api/signing/batch` | POST | None | Batch signing callback (EIP-7702) |
-| `/api/v1/chat` | POST | None | LLM chat interface (Gemini-powered) |
+| `/api/v1/chat` | POST | x402 | LLM chat interface (Gemini-powered, payment-gated) |
 | `/mcp` | POST | x402 | MCP tool endpoint (payment-gated) |
 | `/docs` | GET | None | Swagger UI documentation |
 | `/openapi.json` | GET | None | OpenAPI spec (JSON) |

@@ -140,14 +140,16 @@ Facilitator: `https://www.x402.org/facilitator` (Base Sepolia)
 | **REST** | N/A | 402 | 200 (input-required) |
 | **MCP** | 402 (모두 gated) | 402 | 200 (SSE response) |
 | **A2A** | 200 (exempted) | 402 | 200 (completed) |
-| **Chat** | Free (LLM routes) | Free (LLM routes) | 200 (conversational) |
+| **Chat** | 402 (x402 gated) | 402 (x402 gated) | 200 (conversational) |
+
+> **Update (2026-02-15):** Chat API에 x402 결제가 적용되었습니다 (`POST /chat` + `POST /api/v1/chat`를 routesConfig에 추가). 이전에는 routesConfig에 미등록되어 결제 없이 통과했던 버그가 수정되었습니다.
 
 ---
 
 ## 알려진 차이점 (Known Differences)
 
 1. **MCP gating**: MCP는 모든 `tools/call`을 x402로 gating합니다. A2A와 달리 per-tool exemption이 없습니다.
-2. **Chat endpoint**: Chat 엔드포인트는 free입니다. LLM이 내부적으로 paid tools을 호출할지 결정합니다.
+2. **Chat endpoint**: Chat 엔드포인트도 x402 결제가 필요합니다 (2026-02-15 수정). `routesConfig`에 `POST /chat` + `POST /api/v1/chat` 추가되었습니다.
 3. **A2A exemption**: A2A는 명시적 per-skill exemption을 가집니다. `data.skill === 'get_supported_circuits'`만 free입니다.
 
 ---

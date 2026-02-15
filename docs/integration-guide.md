@@ -825,6 +825,9 @@ ZKProofport는 자연어를 이해하고 내부적으로 적절한 ZK 도구로 
 
 **Endpoint:** `POST /api/v1/chat`
 **Content-Type:** `application/json`
+**결제:** x402 필요 ($0.10 USDC) — 다른 유료 엔드포인트와 동일
+
+> **Note:** Chat API도 x402 결제가 필요합니다. Telegram/Discord 봇 서버는 자체 지불자 지갑을 보유하고 x402 결제를 자동 처리해야 합니다. x402 설정 방법은 [Section 5](#5-x402-payment-integration)를 참조하세요.
 
 ### 4.2 Chat API 상세 정보
 
@@ -876,11 +879,39 @@ POST /api/v1/chat
 
 ### 4.3 Telegram Bot Integration (Node.js)
 
+> **중요:** Chat API는 x402 결제가 필요합니다. 봇 서버에서 자체 지불자 지갑으로 결제를 자동 처리합니다.
+
 ```javascript
 import TelegramBot from 'node-telegram-bot-api';
+import { ExactEvmScheme } from '@x402/evm';
+import { x402Client, x402HTTPClient } from '@x402/fetch';
+import { createWalletClient, http } from 'viem';
+import { privateKeyToAccount } from 'viem/accounts';
+import { baseSepolia } from 'viem/chains';
 
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
 const CHAT_URL = 'https://stg-ai.zkproofport.app/api/v1/chat';
+
+// x402 결제 클라이언트 설정 (봇 서버의 지불자 지갑)
+const account = privateKeyToAccount(process.env.PAYER_PRIVATE_KEY);
+const walletClient = createWalletClient({ account, chain: baseSepolia, transport: http() });
+const signer = { address: account.address, signTypedData: (args) => walletClient.signTypedData(args) };
+const x402client = new x402Client();
+x402client.register('eip155:84532', new ExactEvmScheme(signer));
+const httpClient = new x402HTTPClient(x402client);
+
+// x402 결제 자동 처리 fetch 래퍼
+async function payingFetch(url, options) {
+  const resp = await fetch(url, options);
+  if (resp.status !== 402) return resp;
+
+  const getHeader = (name) => resp.headers.get(name);
+  const paymentRequired = httpClient.getPaymentRequiredResponse(getHeader, {});
+  const paymentPayload = await x402client.createPaymentPayload(paymentRequired);
+  const headers = httpClient.encodePaymentSignatureHeader(paymentPayload);
+
+  return fetch(url, { ...options, headers: { ...options.headers, ...headers } });
+}
 
 // Telegram 채팅 ID별 세션 저장
 const sessions = new Map();
@@ -901,7 +932,7 @@ bot.onText(/(.+)/, async (msg, match) => {
       body.sessionSecret = session.sessionSecret;
     }
 
-    const resp = await fetch(CHAT_URL, {
+    const resp = await payingFetch(CHAT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
@@ -910,7 +941,7 @@ bot.onText(/(.+)/, async (msg, match) => {
     if (resp.status === 404 || resp.status === 401) {
       // 세션 만료, 새로 시작
       sessions.delete(chatId);
-      const newResp = await fetch(CHAT_URL, {
+      const newResp = await payingFetch(CHAT_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: userMessage })
@@ -959,10 +990,28 @@ bot.onText(/\/reset/, (msg) => {
 });
 ```
 
+**필수 환경변수:**
+```bash
+TELEGRAM_BOT_TOKEN=your-telegram-bot-token
+PAYER_PRIVATE_KEY=0x_your_private_key  # USDC 잔액 필요 (Base Sepolia)
+```
+
+**필수 패키지:**
+```bash
+npm install node-telegram-bot-api @x402/evm @x402/fetch viem
+```
+
 ### 4.4 Discord Bot Integration (discord.js)
+
+> **중요:** Chat API는 x402 결제가 필요합니다. Telegram 봇과 동일한 `payingFetch` 패턴을 사용합니다.
 
 ```javascript
 import { Client, GatewayIntentBits } from 'discord.js';
+import { ExactEvmScheme } from '@x402/evm';
+import { x402Client, x402HTTPClient } from '@x402/fetch';
+import { createWalletClient, http } from 'viem';
+import { privateKeyToAccount } from 'viem/accounts';
+import { baseSepolia } from 'viem/chains';
 
 const client = new Client({
   intents: [
@@ -974,6 +1023,24 @@ const client = new Client({
 
 const CHAT_URL = 'https://stg-ai.zkproofport.app/api/v1/chat';
 const sessions = new Map();
+
+// x402 결제 클라이언트 (Section 4.3과 동일한 패턴)
+const account = privateKeyToAccount(process.env.PAYER_PRIVATE_KEY);
+const walletClient = createWalletClient({ account, chain: baseSepolia, transport: http() });
+const signer = { address: account.address, signTypedData: (args) => walletClient.signTypedData(args) };
+const x402client = new x402Client();
+x402client.register('eip155:84532', new ExactEvmScheme(signer));
+const httpClient = new x402HTTPClient(x402client);
+
+async function payingFetch(url, options) {
+  const resp = await fetch(url, options);
+  if (resp.status !== 402) return resp;
+  const getHeader = (name) => resp.headers.get(name);
+  const paymentRequired = httpClient.getPaymentRequiredResponse(getHeader, {});
+  const paymentPayload = await x402client.createPaymentPayload(paymentRequired);
+  const headers = httpClient.encodePaymentSignatureHeader(paymentPayload);
+  return fetch(url, { ...options, headers: { ...options.headers, ...headers } });
+}
 
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
@@ -991,7 +1058,7 @@ client.on('messageCreate', async (message) => {
       body.sessionSecret = session.sessionSecret;
     }
 
-    const resp = await fetch(CHAT_URL, {
+    const resp = await payingFetch(CHAT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
@@ -1000,7 +1067,7 @@ client.on('messageCreate', async (message) => {
     if (resp.status === 404 || resp.status === 401) {
       // 세션 만료, 새로 시작
       sessions.delete(userId);
-      const newResp = await fetch(CHAT_URL, {
+      const newResp = await payingFetch(CHAT_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: userMessage })
@@ -1042,12 +1109,27 @@ client.on('ready', () => {
 client.login(process.env.DISCORD_BOT_TOKEN);
 ```
 
+**필수 환경변수:**
+```bash
+DISCORD_BOT_TOKEN=your-discord-bot-token
+PAYER_PRIVATE_KEY=0x_your_private_key  # USDC 잔액 필요 (Base Sepolia)
+```
+
+**필수 패키지:**
+```bash
+npm install discord.js @x402/evm @x402/fetch viem
+```
+
 ### 4.5 Custom Web Chatbot (React)
+
+> **중요:** Chat API는 x402 결제가 필요합니다. 프론트엔드에서 직접 x402 결제를 처리하거나, 백엔드 프록시를 통해 처리해야 합니다. 아래 예제는 백엔드 프록시를 사용하는 방식입니다 (프론트엔드에서는 private key 노출 위험).
 
 ```tsx
 import { useState, useRef } from 'react';
 
-const CHAT_URL = 'https://stg-ai.zkproofport.app/api/v1/chat';
+// 주의: 실제 서비스에서는 백엔드 프록시를 통해 x402 결제를 처리하세요
+// 프론트엔드에서 직접 private key를 사용하면 안 됩니다
+const CHAT_URL = '/api/chat-proxy'; // 백엔드 프록시 엔드포인트 (x402 결제 처리)
 
 export function ZKChat() {
   const [messages, setMessages] = useState([]);
@@ -1144,7 +1226,19 @@ export function ZKChat() {
 
 ### 5.1 개요
 
-유료 엔드포인트 (generate_proof, verify_proof)는 x402 결제 프로토콜 (HTTP 402)을 사용합니다. 결제 금액은 Base Sepolia (테스트넷) 또는 Base Mainnet (프로덕션)에서 요청당 $0.10 USDC입니다.
+유료 엔드포인트는 x402 결제 프로토콜 (HTTP 402)을 사용합니다. 결제 금액은 Base Sepolia (테스트넷) 또는 Base Mainnet (프로덕션)에서 요청당 $0.10 USDC입니다.
+
+**x402 결제가 필요한 엔드포인트:**
+
+| 엔드포인트 | 프로토콜 | x402 결제 | 비고 |
+|-----------|---------|-----------|------|
+| `POST /a2a` (generate_proof) | A2A | 필요 | get_supported_circuits만 무료 |
+| `POST /mcp` (tools/call) | MCP | 필요 | 모든 tool call에 적용 |
+| `POST /api/v1/proofs` | REST | 필요 | 증명 생성 |
+| `POST /api/v1/proofs/verify` | REST | 필요 | 증명 검증 |
+| `POST /api/v1/chat` | Chat | 필요 | 대화형 인터페이스 |
+| `GET /api/v1/circuits` | REST | 무료 | 회로 목록 조회 |
+| `GET /health` | REST | 무료 | 상태 확인 |
 
 ### 5.2 x402 Client 설정 (Node.js)
 
@@ -1433,6 +1527,8 @@ console.log(data);
 - `GET /api/v1/circuits` — 항상 무료
 - `GET /health` — 항상 무료
 - A2A `get_supported_circuits` — 항상 무료 (결제 면제)
+
+> **Note:** Chat API (`POST /api/v1/chat`)는 x402 결제가 필요합니다. REST, MCP, A2A의 증명 생성/검증과 동일한 결제 게이트가 적용됩니다.
 
 ### 디버깅 팁
 
