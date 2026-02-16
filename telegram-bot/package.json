@@ -1,0 +1,24 @@
+{
+  "name": "proofport-telegram-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot interface for ZKProofport Prover Agent — generate and verify zero-knowledge proofs via natural language",
+  "type": "module",
+  "main": "bot.mjs",
+  "scripts": {
+    "start": "node bot.mjs"
+  },
+  "keywords": [
+    "telegram-bot",
+    "zero-knowledge",
+    "zk-proofs",
+    "zkproofport",
+    "ai-agent"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "node-telegram-bot-api": "^0.66.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
