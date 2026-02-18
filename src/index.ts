@@ -402,6 +402,66 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
     });
   }
 
+  // Verification page for QR code scanning
+  app.get('/v/:proofId', (req, res) => {
+    const { proofId } = req.params;
+    const apiUrl = `${config.a2aBaseUrl}/api/v1/verify/${proofId}`;
+    res.setHeader('Content-Type', 'text/html');
+    res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>proveragent.eth — Proof Verification</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0a0a0a;color:#f0f0f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1rem}
+.card{background:#1a1a1a;border:1px solid #333;border-radius:12px;padding:2rem;max-width:480px;width:100%}
+h1{font-size:1.25rem;font-weight:600;margin-bottom:.5rem;text-align:center}
+.subtitle{color:#999;font-size:.875rem;text-align:center;margin-bottom:1.5rem}
+.status{padding:1rem;border-radius:8px;margin-bottom:1rem;font-size:.875rem}
+.loading{background:#1a2a3a;border:1px solid #2a4a5a;color:#93c5fd}
+.valid{background:#1a3a2a;border:1px solid #2a5a3a;color:#4ade80}
+.invalid{background:#3a1a1a;border:1px solid #5a2a2a;color:#f87171}
+.error{background:#3a1a1a;border:1px solid #5a2a2a;color:#f87171}
+.field{margin-bottom:.75rem}
+.label{color:#999;font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.25rem}
+.value{font-family:'Courier New',monospace;font-size:.8rem;color:#93c5fd;word-break:break-all}
+.badge{display:inline-block;padding:.25rem .75rem;border-radius:20px;font-weight:600;font-size:1rem}
+.badge-valid{background:#166534;color:#4ade80}
+.badge-invalid{background:#7f1d1d;color:#f87171}
+.privacy{text-align:center;color:#4ade80;font-size:.875rem;margin-top:1rem}
+</style>
+</head>
+<body>
+<div class="card">
+<h1>proveragent.eth</h1>
+<p class="subtitle">On-chain ZK Proof Verification</p>
+<div id="result"><div class="status loading">Verifying proof on-chain...</div></div>
+</div>
+<script>
+(async()=>{
+const el=document.getElementById('result');
+try{
+const r=await fetch('${apiUrl}');
+const d=await r.json();
+if(!r.ok){el.innerHTML='<div class="status error">'+d.error+'</div>';return}
+el.innerHTML=
+'<div class="status '+(d.isValid?'valid':'invalid')+'">'+
+'<span class="badge '+(d.isValid?'badge-valid':'badge-invalid')+'">'+(d.isValid?'\\u2713 VALID':'\\u2717 INVALID')+'</span>'+
+'</div>'+
+'<div class="field"><div class="label">Circuit</div><div class="value">'+d.circuitId+'</div></div>'+
+'<div class="field"><div class="label">Nullifier</div><div class="value">'+d.nullifier+'</div></div>'+
+'<div class="field"><div class="label">Verifier Contract</div><div class="value">'+d.verifierAddress+'</div></div>'+
+'<div class="field"><div class="label">Chain</div><div class="value">Base Sepolia ('+d.chainId+')</div></div>'+
+'<div class="privacy">0 bytes of personal data exposed</div>';
+}catch(e){el.innerHTML='<div class="status error">Failed to verify: '+e.message+'</div>'}
+})();
+</script>
+</body>
+</html>`);
+  });
+
   // Proxy sign-page requests to internal Next.js server
   app.use('/s', createSignPageProxy());
   app.use('/_next', createSignPageProxy());

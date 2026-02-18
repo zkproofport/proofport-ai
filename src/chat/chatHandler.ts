@@ -8,6 +8,7 @@ import { CHAT_TOOLS } from './tools.js';
 import { SYSTEM_PROMPT } from './systemPrompt.js';
 import { getSupportedCircuits } from '../mcp/tools/getCircuits.js';
 import type { SigningRequestRecord } from '../signing/types.js';
+import { storeProofResult, type StoredProofResult } from '../redis/proofResultStore.js';
 
 export class PaymentRequiredError extends Error {
   constructor() {
@@ -353,7 +354,8 @@ export async function executeSkill(
       if (!paymentVerified && deps.paymentRequiredHeader) {
         throw new PaymentRequiredError();
       }
-      return await createAndPollTask(skillName, skillParams, deps);
+      const result = await createAndPollTask(skillName, skillParams, deps);
+      return await enrichProofResult(result, circuitId as string, deps);
     }
 
     const skillParams: Record<string, unknown> = { address, signature, scope, circuitId };
@@ -364,7 +366,8 @@ export async function executeSkill(
     if (!paymentVerified && deps.paymentRequiredHeader) {
       throw new PaymentRequiredError();
     }
-    return await createAndPollTask(skillName, skillParams, deps);
+    const result = await createAndPollTask(skillName, skillParams, deps);
+    return await enrichProofResult(result, circuitId as string, deps);
   }
 
   if (skillName === 'verify_proof') {
@@ -372,4 +375,44 @@ export async function executeSkill(
   }
 
   throw new Error(`Unknown skill: ${skillName}`);
+}
+
+/**
+ * After proof generation, store the result in Redis and add a verifyUrl.
+ * Returns the original result enriched with proofId and verifyUrl.
+ */
+async function enrichProofResult(
+  result: unknown,
+  circuitId: string,
+  deps: ChatHandlerDeps,
+): Promise<unknown> {
+  if (
+    typeof result !== 'object' || result === null ||
+    !('proof' in result) || !('publicInputs' in result)
+  ) {
+    return result;
+  }
+
+  const proofResult = result as Record<string, unknown>;
+
+  try {
+    const proofId = await storeProofResult(deps.redis, {
+      proof: proofResult.proof as string,
+      publicInputs: proofResult.publicInputs as string,
+      circuitId,
+      nullifier: (proofResult.nullifier as string) || '',
+      signalHash: (proofResult.signalHash as string) || '',
+    });
+
+    const verifyUrl = `${deps.a2aBaseUrl}/v/${proofId}`;
+
+    return {
+      ...proofResult,
+      proofId,
+      verifyUrl,
+    };
+  } catch (error) {
+    console.error('[Chat] Failed to store proof result:', error);
+    return result;
+  }
 }

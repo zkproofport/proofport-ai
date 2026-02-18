@@ -10,6 +10,8 @@ import type { RedisClient } from '../redis/client.js';
 import { computeSignalHash } from '../input/inputBuilder.js';
 import type { Config } from '../config/index.js';
 import type { PaymentFacilitator } from '../payment/facilitator.js';
+import { storeProofResult, getProofResult } from '../redis/proofResultStore.js';
+import { verifyOnChain } from '../prover/verifier.js';
 
 export interface RestRoutesDeps {
   taskStore: TaskStore;
@@ -280,10 +282,31 @@ export function createRestRoutes(deps: RestRoutesDeps): Router {
         }
 
         const proofData = extractProofFromTask(taskData);
+
+        // Store proof result and generate verifyUrl
+        let verifyUrl: string | undefined;
+        let proofId: string | undefined;
+        if (proofData.proof && proofData.publicInputs) {
+          try {
+            proofId = await storeProofResult(redis, {
+              proof: proofData.proof,
+              publicInputs: proofData.publicInputs,
+              circuitId,
+              nullifier: proofData.nullifier || '',
+              signalHash: proofData.signalHash || '',
+            });
+            verifyUrl = `${config.a2aBaseUrl}/v/${proofId}`;
+          } catch (err) {
+            console.error('[REST] Failed to store proof result:', err);
+          }
+        }
+
         res.json({
           taskId: taskData.id,
           state: taskData.status.state,
           ...proofData,
+          ...(proofId && { proofId }),
+          ...(verifyUrl && { verifyUrl }),
         });
         return;
       }
@@ -374,10 +397,31 @@ export function createRestRoutes(deps: RestRoutesDeps): Router {
       }
 
       const proofData = extractProofFromTask(taskData);
+
+      // Store proof result and generate verifyUrl
+      let verifyUrl: string | undefined;
+      let proofId: string | undefined;
+      if (proofData.proof && proofData.publicInputs) {
+        try {
+          proofId = await storeProofResult(redis, {
+            proof: proofData.proof,
+            publicInputs: proofData.publicInputs,
+            circuitId,
+            nullifier: proofData.nullifier || '',
+            signalHash: proofData.signalHash || '',
+          });
+          verifyUrl = `${config.a2aBaseUrl}/v/${proofId}`;
+        } catch (err) {
+          console.error('[REST] Failed to store proof result:', err);
+        }
+      }
+
       res.json({
         taskId: taskData.id,
         state: taskData.status.state,
         ...proofData,
+        ...(proofId && { proofId }),
+        ...(verifyUrl && { verifyUrl }),
       });
     } catch (error) {
       console.error('Proof generation error:', error);
@@ -555,6 +599,61 @@ export function createRestRoutes(deps: RestRoutesDeps): Router {
       console.error('Verification error:', error);
       res.status(500).json({
         error: error instanceof Error ? error.message : 'Internal server error',
+      });
+    }
+  });
+
+  /**
+   * GET /api/v1/verify/:proofId
+   * Verify a stored proof on-chain by proofId (QR code / link verification)
+   */
+  router.get('/verify/:proofId', async (req: Request, res: Response) => {
+    const { proofId } = req.params;
+
+    try {
+      const stored = await getProofResult(redis, proofId);
+
+      if (!stored) {
+        res.status(404).json({ error: 'Proof not found or expired' });
+        return;
+      }
+
+      const chainId = '84532'; // Base Sepolia
+      const chainVerifiers = VERIFIER_ADDRESSES[chainId];
+      if (!chainVerifiers || !chainVerifiers[stored.circuitId]) {
+        res.status(400).json({ error: `No verifier deployed for circuit "${stored.circuitId}" on chain "${chainId}"` });
+        return;
+      }
+
+      // Parse publicInputs — stored as JSON string of array
+      let publicInputs: string[];
+      try {
+        const parsed = JSON.parse(stored.publicInputs);
+        publicInputs = Array.isArray(parsed) ? parsed : [stored.publicInputs];
+      } catch {
+        publicInputs = [stored.publicInputs];
+      }
+
+      const result = await verifyOnChain({
+        proof: stored.proof,
+        publicInputs,
+        circuitId: stored.circuitId,
+        chainId,
+        rpcUrl: config.baseRpcUrl,
+      });
+
+      res.json({
+        proofId,
+        circuitId: stored.circuitId,
+        nullifier: stored.nullifier,
+        isValid: result.isValid,
+        verifierAddress: result.verifierAddress,
+        chainId,
+      });
+    } catch (error) {
+      console.error('[Verify] Error:', error);
+      res.status(500).json({
+        error: error instanceof Error ? error.message : 'Verification failed',
       });
     }
   });
