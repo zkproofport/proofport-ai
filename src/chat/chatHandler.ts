@@ -47,6 +47,7 @@ export interface ChatHandlerDeps {
 
 const MAX_FUNCTION_CALLS = 3;
 const SESSION_TTL_SECONDS = 3600;
+const MAX_SESSION_MESSAGES = 100;
 
 export function createChatRoutes(deps: ChatHandlerDeps): Router {
   const router = Router();
@@ -94,6 +95,16 @@ export function createChatRoutes(deps: ChatHandlerDeps): Router {
 
         secretHash = sessionData.secretHash;
         history = sessionData.history;
+      }
+
+      if (history.length >= MAX_SESSION_MESSAGES) {
+        res.status(400).json({
+          error: 'Session message limit reached. Please start a new session.',
+          code: 'SESSION_LIMIT_REACHED',
+          messageCount: history.length,
+          limit: MAX_SESSION_MESSAGES,
+        });
+        return;
       }
 
       // Add user message to history
