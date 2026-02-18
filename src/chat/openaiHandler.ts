@@ -74,11 +74,58 @@ function convertMessages(messages: OpenAIMessage[]): { systemPrompt: string; his
   return { systemPrompt, history };
 }
 
+/**
+ * Build proofport DSL extension block from skill result.
+ * Filters raw proof data, keeps only summary fields + QR URLs.
+ */
+function buildDslBlock(lastSkillResult: unknown, signingUrl: string | undefined): string {
+  const extension: Record<string, unknown> = {};
+
+  if (lastSkillResult !== undefined) {
+    if (typeof lastSkillResult === 'object' && lastSkillResult !== null) {
+      const sr = lastSkillResult as Record<string, unknown>;
+      const filtered: Record<string, unknown> = {};
+      const SUMMARY_FIELDS = [
+        'state', 'proofId', 'verifyUrl', 'paymentReceiptUrl', 'paymentTxHash',
+        'nullifier', 'signalHash', 'signingUrl', 'requestId',
+        'amount', 'network', 'message', 'error', 'valid',
+        'circuitId', 'verifierAddress', 'chainId',
+      ];
+      for (const key of SUMMARY_FIELDS) {
+        if (sr[key] !== undefined) filtered[key] = sr[key];
+      }
+
+      if (sr.verifyUrl) {
+        filtered.qrImageUrl = `https://quickchart.io/qr?text=${encodeURIComponent(sr.verifyUrl as string)}&size=300&dark=4ade80&light=1a1a1a`;
+      }
+      if (sr.paymentReceiptUrl) {
+        filtered.receiptQrImageUrl = `https://quickchart.io/qr?text=${encodeURIComponent(sr.paymentReceiptUrl as string)}&size=300&dark=4ade80&light=1a1a1a`;
+      }
+
+      extension.skillResult = filtered;
+    } else {
+      extension.skillResult = lastSkillResult;
+    }
+  }
+  if (signingUrl) extension.signingUrl = signingUrl;
+
+  if (Object.keys(extension).length > 0) {
+    return '\n\n```proofport\n' + JSON.stringify(extension, null, 2) + '\n```';
+  }
+  return '';
+}
+
+/**
+ * Run the LLM chat loop with tool execution.
+ * When onStream is provided, intermediate LLM content (step descriptions before tool calls)
+ * and final content are streamed incrementally via the callback.
+ */
 async function runChatLoop(
   history: LLMMessage[],
   systemPrompt: string,
   deps: ChatHandlerDeps,
   paymentVerified: boolean,
+  onStream?: (content: string) => void,
 ): Promise<{ response: string }> {
   let functionCallCount = 0;
   let proofCallCount = 0;
@@ -91,6 +138,12 @@ async function runChatLoop(
 
     if (llmResponse.toolCalls && llmResponse.toolCalls.length > 0) {
       functionCallCount++;
+
+      // Stream intermediate content immediately (step descriptions before tool execution)
+      if (llmResponse.content && onStream) {
+        onStream(llmResponse.content);
+      }
+
       history.push({ role: 'assistant', toolCalls: llmResponse.toolCalls, content: llmResponse.content });
 
       const toolResults: Array<{ id?: string; name: string; result: unknown }> = [];
@@ -122,8 +175,12 @@ async function runChatLoop(
       continue;
     }
 
+    // Final response (no tool calls)
     if (llmResponse.content) {
       finalResponse = llmResponse.content;
+      if (onStream) {
+        onStream(llmResponse.content);
+      }
     }
 
     history.push({ role: 'assistant', content: llmResponse.content || '' });
@@ -132,51 +189,22 @@ async function runChatLoop(
 
   if (functionCallCount >= MAX_FUNCTION_CALLS && !finalResponse) {
     finalResponse = 'I apologize, but I reached the maximum number of function calls. Please try again.';
+    if (onStream) onStream(finalResponse);
   }
 
   if (!finalResponse) {
     finalResponse = 'I apologize, but I was unable to generate a response.';
+    if (onStream) onStream(finalResponse);
   }
 
-  // Build proofport DSL extension (filtered — no raw proof data)
-  const extension: Record<string, unknown> = {};
-
-  if (lastSkillResult !== undefined) {
-    if (typeof lastSkillResult === 'object' && lastSkillResult !== null) {
-      // Filter out raw proof data — only include summary fields
-      const sr = lastSkillResult as Record<string, unknown>;
-      const filtered: Record<string, unknown> = {};
-      const SUMMARY_FIELDS = [
-        'state', 'proofId', 'verifyUrl', 'paymentReceiptUrl', 'paymentTxHash',
-        'nullifier', 'signalHash', 'signingUrl', 'requestId',
-        'amount', 'network', 'message', 'error', 'valid',
-        'circuitId', 'verifierAddress', 'chainId',
-      ];
-      for (const key of SUMMARY_FIELDS) {
-        if (sr[key] !== undefined) filtered[key] = sr[key];
-      }
-
-      // Generate QR image URLs
-      if (sr.verifyUrl) {
-        filtered.qrImageUrl = `https://quickchart.io/qr?text=${encodeURIComponent(sr.verifyUrl as string)}&size=300&dark=4ade80&light=1a1a1a`;
-      }
-      if (sr.paymentReceiptUrl) {
-        filtered.receiptQrImageUrl = `https://quickchart.io/qr?text=${encodeURIComponent(sr.paymentReceiptUrl as string)}&size=300&dark=4ade80&light=1a1a1a`;
-      }
-
-      extension.skillResult = filtered;
-    } else {
-      extension.skillResult = lastSkillResult;
-    }
-  }
-  if (signingUrl) extension.signingUrl = signingUrl;
-
-  let fullResponse = finalResponse;
-  if (Object.keys(extension).length > 0) {
-    fullResponse += '\n\n```proofport\n' + JSON.stringify(extension, null, 2) + '\n```';
+  // Build and stream DSL block
+  const dslBlock = buildDslBlock(lastSkillResult, signingUrl);
+  if (dslBlock) {
+    if (onStream) onStream(dslBlock);
+    finalResponse += dslBlock;
   }
 
-  return { response: fullResponse };
+  return { response: finalResponse };
 }
 
 export function createOpenAIRoutes(deps: ChatHandlerDeps): Router {
@@ -298,31 +326,37 @@ export function createOpenAIRoutes(deps: ChatHandlerDeps): Router {
         // Otherwise: pure stateless, no session
       }
 
-      // Run chat loop BEFORE setting up SSE (allows 402 return before streaming starts)
-      const { response } = await runChatLoop(history, systemPrompt, deps, paymentVerified);
-
-      // Save session if session mode is active
-      if (sessionId && secretHash) {
-        const rolledHistory = trimHistory(history, MAX_HISTORY_MESSAGES);
-        const sessionDataToSave: SessionData = {
-          secretHash,
-          history: rolledHistory,
-        };
-        const sessionKey = `chat:session:${sessionId}`;
-        await deps.redis.set(sessionKey, JSON.stringify(sessionDataToSave), 'EX', SESSION_TTL_SECONDS);
-      }
-
       // Set session headers ONCE before response body
       if (sessionId) res.setHeader('X-Session-Id', sessionId);
       if (sessionSecret) res.setHeader('X-Session-Secret', sessionSecret);
 
+      const saveSession = async () => {
+        if (sessionId && secretHash) {
+          const rolledHistory = trimHistory(history, MAX_HISTORY_MESSAGES);
+          const sessionDataToSave: SessionData = { secretHash, history: rolledHistory };
+          const sessionKey = `chat:session:${sessionId}`;
+          await deps.redis.set(sessionKey, JSON.stringify(sessionDataToSave), 'EX', SESSION_TTL_SECONDS);
+        }
+      };
+
       if (body.stream) {
-        // SSE streaming response
+        // Real SSE streaming — set up BEFORE running chat loop
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
         res.setHeader('X-Accel-Buffering', 'no');
         res.flushHeaders();
+
+        // Helper to write an SSE content chunk
+        const writeSseContent = (content: string) => {
+          res.write(`data: ${JSON.stringify({
+            id: completionId,
+            object: 'chat.completion.chunk',
+            created,
+            model,
+            choices: [{ index: 0, delta: { content }, finish_reason: null }],
+          })}\n\n`);
+        };
 
         // Send initial role chunk
         res.write(`data: ${JSON.stringify({
@@ -333,31 +367,61 @@ export function createOpenAIRoutes(deps: ChatHandlerDeps): Router {
           choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }],
         })}\n\n`);
 
-        // Stream content word by word
-        const words = response.split(/(\s+)/);
-        for (const word of words) {
-          if (!word) continue;
+        // Heartbeat to keep connection alive during long tool executions
+        const heartbeat = setInterval(() => { res.write(': heartbeat\n\n'); }, 15000);
+
+        try {
+          // Stream callback: sends each LLM content piece as SSE chunks line-by-line
+          const onStream = (content: string) => {
+            const lines = content.split('\n');
+            for (let i = 0; i < lines.length; i++) {
+              const chunk = i < lines.length - 1 ? lines[i] + '\n' : lines[i];
+              if (chunk) writeSseContent(chunk);
+            }
+          };
+
+          await runChatLoop(history, systemPrompt, deps, paymentVerified, onStream);
+          await saveSession();
+
+          // Send final chunk with finish_reason
           res.write(`data: ${JSON.stringify({
             id: completionId,
             object: 'chat.completion.chunk',
             created,
             model,
-            choices: [{ index: 0, delta: { content: word }, finish_reason: null }],
+            choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
           })}\n\n`);
+          res.write('data: [DONE]\n\n');
+          res.end();
+        } catch (error) {
+          // Send error as SSE event (can't change HTTP status after headers flushed)
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          const errorType = error instanceof PaymentRequiredError ? 'payment_required' : 'server_error';
+          res.write(`data: ${JSON.stringify({
+            id: completionId,
+            object: 'chat.completion.chunk',
+            created,
+            model,
+            choices: [{ index: 0, delta: { content: `\n\nError: ${errorMessage}` }, finish_reason: null }],
+            ...(errorType === 'payment_required' ? { error: { type: 'payment_required', code: 'payment_required' } } : {}),
+          })}\n\n`);
+          res.write(`data: ${JSON.stringify({
+            id: completionId,
+            object: 'chat.completion.chunk',
+            created,
+            model,
+            choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+          })}\n\n`);
+          res.write('data: [DONE]\n\n');
+          res.end();
+        } finally {
+          clearInterval(heartbeat);
         }
-
-        // Send final chunk with finish_reason
-        res.write(`data: ${JSON.stringify({
-          id: completionId,
-          object: 'chat.completion.chunk',
-          created,
-          model,
-          choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
-        })}\n\n`);
-        res.write('data: [DONE]\n\n');
-        res.end();
       } else {
-        // Non-streaming response (pure OpenAI format)
+        // Non-streaming: run chat loop, then return complete response
+        const { response } = await runChatLoop(history, systemPrompt, deps, paymentVerified);
+        await saveSession();
+
         res.json({
           id: completionId,
           object: 'chat.completion',
@@ -381,6 +445,7 @@ export function createOpenAIRoutes(deps: ChatHandlerDeps): Router {
         });
       }
     } catch (error) {
+      // Non-streaming error handling (streaming errors handled above)
       if (error instanceof PaymentRequiredError && deps.paymentRequiredHeader) {
         res.setHeader('PAYMENT-REQUIRED', deps.paymentRequiredHeader);
         res.status(402).json({
