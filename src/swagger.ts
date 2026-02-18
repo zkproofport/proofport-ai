@@ -2,7 +2,7 @@ export function buildSwaggerSpec(baseUrl: string) {
   return {
     openapi: '3.0.3',
     info: {
-      title: 'ZKProofport AI - MCP Prover Server',
+      title: 'proveragent.eth - ZK Proof Generation Agent',
       version: '0.1.0',
       description:
         'Agent-native ZK proof infrastructure. Provides MCP (Model Context Protocol) tools for zero-knowledge proof generation and verification using Noir circuits + bb CLI.',
@@ -668,6 +668,43 @@ export function buildSwaggerSpec(baseUrl: string) {
           },
           '400': { description: 'Invalid request parameters' },
           '402': { description: 'Payment required (x402)' },
+        },
+      },
+    },
+    '/api/v1/verify/{proofId}': {
+      get: {
+        summary: 'Verify a stored proof on-chain by proofId',
+        description: 'Retrieves a stored proof result and verifies it on-chain. Used by QR code scanning after proof generation.',
+        tags: ['REST API'],
+        parameters: [
+          {
+            name: 'proofId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+            description: 'Proof ID returned from proof generation',
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Verification result',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    proofId: { type: 'string' },
+                    circuitId: { type: 'string' },
+                    nullifier: { type: 'string' },
+                    isValid: { type: 'boolean' },
+                    verifierAddress: { type: 'string' },
+                    chainId: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          '404': { description: 'Proof not found or expired' },
         },
       },
     },
