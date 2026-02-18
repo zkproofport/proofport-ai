@@ -22,11 +22,13 @@ export class MultiLLMProvider implements LLMProvider {
         return response;
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
-        console.warn(`[Chat] ${provider.name} failed: ${lastError.message}, trying next...`);
+        const errorMsg = lastError.message.replace(/\n/g, ' ');
+        console.warn(`[Chat] ${provider.name} failed: ${errorMsg}, trying next...`);
         continue;
       }
     }
 
-    throw new Error(`All LLM providers failed. Last error: ${lastError?.message}`);
+    const finalMsg = lastError?.message?.replace(/\n/g, ' ');
+    throw new Error(`All LLM providers failed. Last error: ${finalMsg}`);
   }
 }

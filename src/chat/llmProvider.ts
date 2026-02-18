@@ -1,8 +1,8 @@
 export interface LLMMessage {
   role: 'user' | 'assistant';
   content?: string;
-  toolCalls?: Array<{ name: string; args: Record<string, unknown> }>;
-  toolResults?: Array<{ name: string; result: unknown }>;
+  toolCalls?: Array<{ id?: string; name: string; args: Record<string, unknown> }>;
+  toolResults?: Array<{ id?: string; name: string; result: unknown }>;
 }
 
 export interface LLMTool {
@@ -17,7 +17,7 @@ export interface LLMTool {
 
 export interface LLMResponse {
   content?: string;
-  toolCalls?: Array<{ name: string; args: Record<string, unknown> }>;
+  toolCalls?: Array<{ id?: string; name: string; args: Record<string, unknown> }>;
 }
 
 export interface LLMProvider {

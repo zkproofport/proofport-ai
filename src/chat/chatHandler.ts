@@ -49,6 +49,25 @@ const MAX_FUNCTION_CALLS = 3;
 const SESSION_TTL_SECONDS = 3600;
 const MAX_HISTORY_MESSAGES = 20;
 
+function trimHistory(history: LLMMessage[], maxMessages: number): LLMMessage[] {
+  if (history.length <= maxMessages) return history;
+
+  let startIdx = history.length - maxMessages;
+
+  while (startIdx < history.length) {
+    const msg = history[startIdx];
+    if (msg.role === 'user' && msg.toolResults && msg.toolResults.length > 0) {
+      startIdx--;
+      continue;
+    }
+    break;
+  }
+
+  if (startIdx < 0) startIdx = 0;
+
+  return history.slice(startIdx);
+}
+
 export function createChatRoutes(deps: ChatHandlerDeps): Router {
   const router = Router();
 
@@ -118,7 +137,7 @@ export function createChatRoutes(deps: ChatHandlerDeps): Router {
           // Add assistant message with tool calls to history
           history.push({ role: 'assistant', toolCalls: llmResponse.toolCalls, content: llmResponse.content });
 
-          const toolResults: Array<{ name: string; result: unknown }> = [];
+          const toolResults: Array<{ id?: string; name: string; result: unknown }> = [];
 
           for (const tc of llmResponse.toolCalls) {
             let skillResult: unknown;
@@ -141,7 +160,7 @@ export function createChatRoutes(deps: ChatHandlerDeps): Router {
               signingUrl = (skillResult as { signingUrl: string }).signingUrl;
             }
 
-            toolResults.push({ name: tc.name, result: skillResult });
+            toolResults.push({ id: tc.id, name: tc.name, result: skillResult });
           }
 
           // Add tool results to history
@@ -172,7 +191,7 @@ export function createChatRoutes(deps: ChatHandlerDeps): Router {
       }
 
       // Keep only last N messages to prevent context overflow
-      const trimmedHistory = history.slice(-MAX_HISTORY_MESSAGES);
+      const trimmedHistory = trimHistory(history, MAX_HISTORY_MESSAGES);
 
       // Save updated conversation history to Redis
       const sessionDataToSave: SessionData = {

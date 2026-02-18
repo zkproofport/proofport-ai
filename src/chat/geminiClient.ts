@@ -148,7 +148,7 @@ function fromGeminiResponse(geminiMsg: GeminiMessage): LLMResponse {
 
   if (functionCallPart) {
     result.toolCalls = [
-      { name: functionCallPart.functionCall.name, args: functionCallPart.functionCall.args },
+      { id: `gemini_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, name: functionCallPart.functionCall.name, args: functionCallPart.functionCall.args },
     ];
   }
 

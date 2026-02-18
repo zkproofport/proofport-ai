@@ -54,7 +54,7 @@ function toOpenAIMessages(messages: LLMMessage[], systemPrompt: string): OpenAIM
           result.push({
             role: 'tool',
             content: JSON.stringify(tr.result),
-            tool_call_id: tr.name,
+            tool_call_id: tr.id || tr.name,
           });
         }
       } else {
@@ -66,7 +66,7 @@ function toOpenAIMessages(messages: LLMMessage[], systemPrompt: string): OpenAIM
           role: 'assistant',
           content: msg.content || null,
           tool_calls: msg.toolCalls.map((tc) => ({
-            id: tc.name,
+            id: tc.id || tc.name,
             type: 'function' as const,
             function: { name: tc.name, arguments: JSON.stringify(tc.args) },
           })),
@@ -136,6 +136,7 @@ export class OpenAIProvider implements LLMProvider {
 
     if (choice.message.tool_calls && choice.message.tool_calls.length > 0) {
       result.toolCalls = choice.message.tool_calls.map((tc) => ({
+        id: tc.id,
         name: tc.function.name,
         args: JSON.parse(tc.function.arguments),
       }));
