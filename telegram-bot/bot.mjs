@@ -56,6 +56,24 @@ function parseResponse(data) {
   return { content, errorMessage };
 }
 
+/**
+ * Extract and strip ```proofport DSL block from content.
+ * Returns { text, data } where text is the clean display text
+ * and data is the parsed JSON from the DSL block (or null).
+ */
+function extractProofportBlock(content) {
+  const match = content.match(/\n?\n?```proofport\n([\s\S]*?)\n```\s*$/);
+  if (!match) return { text: content, data: null };
+
+  const text = content.slice(0, match.index).trimEnd();
+  try {
+    const data = JSON.parse(match[1]);
+    return { text, data };
+  } catch {
+    return { text, data: null };
+  }
+}
+
 // ─── Helper: Split and send long messages (Telegram 4096 char limit) ─
 async function sendLongMessage(chatId, text, options = {}) {
   const MAX_LEN = 4000;
@@ -142,7 +160,10 @@ bot.onText(/\/circuits/, async (msg) => {
       });
     }
 
-    await sendLongMessage(chatId, parsed.content || parsed.errorMessage || JSON.stringify(result.data, null, 2));
+    const { text: displayText } = extractProofportBlock(
+      parsed.content || parsed.errorMessage || JSON.stringify(result.data, null, 2)
+    );
+    await sendLongMessage(chatId, displayText);
   } catch (error) {
     bot.sendMessage(chatId, `Error: ${error.message}`);
   }
@@ -180,9 +201,40 @@ bot.on('message', async (msg) => {
       console.log(`[${chatId}] New session created: ${result.headers.sessionId}`);
     }
 
-    // Send response (proofport DSL block appears as a code block in Telegram text)
-    const responseText = parsed.content || parsed.errorMessage || JSON.stringify(result.data, null, 2);
-    await sendLongMessage(chatId, responseText);
+    // Extract proofport DSL block (strip from display, use for rendering)
+    const { text: displayText, data: proofportData } = extractProofportBlock(
+      parsed.content || parsed.errorMessage || JSON.stringify(result.data, null, 2)
+    );
+
+    // Send clean text (without DSL block)
+    await sendLongMessage(chatId, displayText);
+
+    // Render QR images from proofport data
+    if (proofportData?.skillResult) {
+      const sr = proofportData.skillResult;
+
+      // Verify QR code
+      if (sr.qrImageUrl) {
+        try {
+          await bot.sendPhoto(chatId, sr.qrImageUrl, {
+            caption: `Verify on-chain: ${sr.verifyUrl || ''}`,
+          });
+        } catch (e) {
+          console.error(`[${chatId}] QR send failed:`, e.message);
+        }
+      }
+
+      // Payment receipt QR code
+      if (sr.receiptQrImageUrl) {
+        try {
+          await bot.sendPhoto(chatId, sr.receiptQrImageUrl, {
+            caption: `Payment receipt: ${sr.paymentReceiptUrl || ''}`,
+          });
+        } catch (e) {
+          console.error(`[${chatId}] Receipt QR failed:`, e.message);
+        }
+      }
+    }
 
   } catch (error) {
     console.error(`[${chatId}] Error:`, error);

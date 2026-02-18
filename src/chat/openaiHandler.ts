@@ -138,9 +138,37 @@ async function runChatLoop(
     finalResponse = 'I apologize, but I was unable to generate a response.';
   }
 
-  // Embed structured data as a proofport DSL block in the response text
+  // Build proofport DSL extension (filtered — no raw proof data)
   const extension: Record<string, unknown> = {};
-  if (lastSkillResult !== undefined) extension.skillResult = lastSkillResult;
+
+  if (lastSkillResult !== undefined) {
+    if (typeof lastSkillResult === 'object' && lastSkillResult !== null) {
+      // Filter out raw proof data — only include summary fields
+      const sr = lastSkillResult as Record<string, unknown>;
+      const filtered: Record<string, unknown> = {};
+      const SUMMARY_FIELDS = [
+        'state', 'proofId', 'verifyUrl', 'paymentReceiptUrl', 'paymentTxHash',
+        'nullifier', 'signalHash', 'signingUrl', 'requestId',
+        'amount', 'network', 'message', 'error', 'valid',
+        'circuitId', 'verifierAddress', 'chainId',
+      ];
+      for (const key of SUMMARY_FIELDS) {
+        if (sr[key] !== undefined) filtered[key] = sr[key];
+      }
+
+      // Generate QR image URLs
+      if (sr.verifyUrl) {
+        filtered.qrImageUrl = `https://quickchart.io/qr?text=${encodeURIComponent(sr.verifyUrl as string)}&size=300&dark=4ade80&light=1a1a1a`;
+      }
+      if (sr.paymentReceiptUrl) {
+        filtered.receiptQrImageUrl = `https://quickchart.io/qr?text=${encodeURIComponent(sr.paymentReceiptUrl as string)}&size=300&dark=4ade80&light=1a1a1a`;
+      }
+
+      extension.skillResult = filtered;
+    } else {
+      extension.skillResult = lastSkillResult;
+    }
+  }
   if (signingUrl) extension.signingUrl = signingUrl;
 
   let fullResponse = finalResponse;
