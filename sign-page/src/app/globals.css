@@ -76,6 +76,14 @@ button {
   padding: 0.75rem;
   margin-bottom: 1.5rem;
   font-size: 0.875rem;
+  overflow-wrap: break-word;
+  word-break: break-all;
+}
+
+.address {
+  font-family: 'Courier New', monospace;
+  font-size: 0.8rem;
+  color: #93c5fd;
 }
 
 .success {

@@ -164,7 +164,7 @@ export default function SigningPage() {
             <div className="info">
               <strong>Connected:</strong>
               <br />
-              {address}
+              <span className="address">{address}</span>
             </div>
 
             {status === 'preparing' && (
