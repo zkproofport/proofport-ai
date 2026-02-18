@@ -2,37 +2,58 @@ import TelegramBot from 'node-telegram-bot-api';
 
 // ─── Configuration ───────────────────────────────────────────────────────
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const CHAT_API_URL = process.env.CHAT_API_URL || 'https://stg-ai.zkproofport.app/api/v1/chat';
+const CHAT_API_URL = process.env.CHAT_API_URL || 'https://stg-ai.zkproofport.app/v1/chat/completions';
 
 if (!BOT_TOKEN) {
-  console.error('❌ TELEGRAM_BOT_TOKEN environment variable is not set.');
+  console.error('TELEGRAM_BOT_TOKEN environment variable is not set.');
   process.exit(1);
 }
 
-console.log('🤖 proveragent.eth Telegram Bot starting...');
-console.log(`📡 Chat API: ${CHAT_API_URL}`);
+console.log('proveragent.eth Telegram Bot starting...');
+console.log(`Chat API: ${CHAT_API_URL}`);
 
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
 // ─── Session Store (chatId → { sessionId, sessionSecret }) ───────────
 const sessions = new Map();
 
-// ─── Helper: Call Chat API ───────────────────────────────────────────
+// ─── Helper: Call Chat API (OpenAI-compatible format) ────────────────
 async function callChatAPI(message, session) {
-  const body = { message };
-
+  const headers = { 'Content-Type': 'application/json' };
   if (session) {
-    body.sessionId = session.sessionId;
-    body.sessionSecret = session.sessionSecret;
+    headers['X-Session-Id'] = session.sessionId;
+    headers['X-Session-Secret'] = session.sessionSecret;
   }
+
+  const body = {
+    messages: [{ role: 'user', content: message }],
+    model: 'zkproofport',
+  };
 
   const resp = await fetch(CHAT_API_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(body),
   });
 
-  return { status: resp.status, data: await resp.json() };
+  return {
+    status: resp.status,
+    data: await resp.json(),
+    headers: {
+      sessionId: resp.headers.get('x-session-id'),
+      sessionSecret: resp.headers.get('x-session-secret'),
+    },
+  };
+}
+
+/**
+ * Extract response text and error from pure OpenAI-compatible response format.
+ * Session info is now in HTTP response headers, not the body.
+ */
+function parseResponse(data) {
+  const content = data.choices?.[0]?.message?.content || '';
+  const errorMessage = data.error?.message || null;
+  return { content, errorMessage };
 }
 
 // ─── Helper: Split and send long messages (Telegram 4096 char limit) ─
@@ -64,21 +85,21 @@ async function sendLongMessage(chatId, text, options = {}) {
 
 // ─── /start command ──────────────────────────────────────────────────
 bot.onText(/\/start/, (msg) => {
-  const welcome = `🔐 *proveragent.eth*
+  const welcome = `*proveragent.eth*
 
 Zero-knowledge proof generation and verification agent.
 
 *Available commands:*
-/circuits — List supported circuits
-/reset — Reset session
-/status — Check server status
+/circuits - List supported circuits
+/reset - Reset session
+/status - Check server status
 
 *Try asking in natural language:*
-• "What proofs can you generate?"
-• "Generate a Coinbase KYC proof"
-• "Verify my proof"
+- "What proofs can you generate?"
+- "Generate a Coinbase KYC proof"
+- "Verify my proof"
 
-Send a message to get started! 🚀`;
+Send a message to get started!`;
 
   bot.sendMessage(msg.chat.id, welcome, { parse_mode: 'Markdown' });
 });
@@ -86,22 +107,22 @@ Send a message to get started! 🚀`;
 // ─── /reset command ──────────────────────────────────────────────────
 bot.onText(/\/reset/, (msg) => {
   sessions.delete(msg.chat.id);
-  bot.sendMessage(msg.chat.id, '🔄 Session reset. Send a new message to start a fresh session.');
+  bot.sendMessage(msg.chat.id, 'Session reset. Send a new message to start a fresh session.');
 });
 
 // ─── /status command (server health check) ───────────────────────────
 bot.onText(/\/status/, async (msg) => {
   const chatId = msg.chat.id;
   try {
-    const baseUrl = CHAT_API_URL.replace('/api/v1/chat', '');
+    const baseUrl = CHAT_API_URL.replace('/v1/chat/completions', '');
     const resp = await fetch(`${baseUrl}/health`);
     const data = await resp.json();
-    const statusText = `✅ *Server Status: Healthy*
-• URL: \`${baseUrl}\`
-• Payment Mode: \`${data.paymentMode || 'unknown'}\``;
+    const statusText = `*Server Status: Healthy*
+- URL: \`${baseUrl}\`
+- Payment Mode: \`${data.paymentMode || 'unknown'}\``;
     bot.sendMessage(chatId, statusText, { parse_mode: 'Markdown' });
   } catch (error) {
-    bot.sendMessage(chatId, `❌ Server unreachable: ${error.message}`);
+    bot.sendMessage(chatId, `Server unreachable: ${error.message}`);
   }
 });
 
@@ -111,18 +132,19 @@ bot.onText(/\/circuits/, async (msg) => {
   await bot.sendChatAction(chatId, 'typing');
 
   try {
-    const { data } = await callChatAPI('List all supported circuits', sessions.get(chatId));
+    const result = await callChatAPI('List all supported circuits', sessions.get(chatId));
+    const parsed = parseResponse(result.data);
 
-    if (data.sessionSecret) {
+    if (result.headers.sessionSecret) {
       sessions.set(chatId, {
-        sessionId: data.sessionId,
-        sessionSecret: data.sessionSecret,
+        sessionId: result.headers.sessionId,
+        sessionSecret: result.headers.sessionSecret,
       });
     }
 
-    await sendLongMessage(chatId, data.response || JSON.stringify(data, null, 2));
+    await sendLongMessage(chatId, parsed.content || parsed.errorMessage || JSON.stringify(result.data, null, 2));
   } catch (error) {
-    bot.sendMessage(chatId, `❌ Error: ${error.message}`);
+    bot.sendMessage(chatId, `Error: ${error.message}`);
   }
 });
 
@@ -134,68 +156,37 @@ bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const userMessage = msg.text;
 
-  // Send immediate progress message based on message content
-  const messageLower = userMessage.toLowerCase();
-  let progressMessage = '⏳ Processing...';
-
-  if (messageLower.includes('서명') || messageLower.includes('sign')) {
-    progressMessage = '⏳ Checking signing status...';
-  } else if (messageLower.includes('결제') || messageLower.includes('완료') ||
-             messageLower.includes('pay') || messageLower.includes('paid') ||
-             messageLower.includes('done')) {
-    progressMessage = '⏳ Processing payment and generating proof... This may take up to a minute.';
-  }
-
-  await bot.sendMessage(chatId, progressMessage);
+  await bot.sendChatAction(chatId, 'typing');
 
   try {
     let session = sessions.get(chatId);
     let result = await callChatAPI(userMessage, session);
 
     // Session expired or auth failure → retry with new session
-    if (result.status === 404 || result.status === 401 || result.status === 403) {
+    if (result.status === 404 || result.status === 403) {
       console.log(`[${chatId}] Session expired, creating new session...`);
       sessions.delete(chatId);
       result = await callChatAPI(userMessage, null);
     }
 
-    const data = result.data;
+    const parsed = parseResponse(result.data);
 
-    // Save session (sessionSecret is returned on first response)
-    if (data.sessionSecret) {
+    // Save session (sessionSecret is returned in response headers on first response)
+    if (result.headers.sessionSecret) {
       sessions.set(chatId, {
-        sessionId: data.sessionId,
-        sessionSecret: data.sessionSecret,
+        sessionId: result.headers.sessionId,
+        sessionSecret: result.headers.sessionSecret,
       });
-      console.log(`[${chatId}] New session created: ${data.sessionId}`);
+      console.log(`[${chatId}] New session created: ${result.headers.sessionId}`);
     }
 
-    // Send response
-    let responseText = data.response || data.error || JSON.stringify(data, null, 2);
-
-    // Append signing URL if present
-    if (data.signingUrl) {
-      responseText += `\n\n🔗 *Signing page:* ${data.signingUrl}`;
-    }
-
+    // Send response (proofport DSL block appears as a code block in Telegram text)
+    const responseText = parsed.content || parsed.errorMessage || JSON.stringify(result.data, null, 2);
     await sendLongMessage(chatId, responseText);
-
-    // Send QR code image if verifyUrl is present in skillResult
-    const verifyUrl = data.skillResult?.verifyUrl;
-    if (verifyUrl) {
-      try {
-        const qrUrl = `https://quickchart.io/qr?text=${encodeURIComponent(verifyUrl)}&size=300&dark=4ade80&light=1a1a1a`;
-        await bot.sendPhoto(chatId, qrUrl, {
-          caption: `🔍 Scan to verify on-chain\n${verifyUrl}`,
-        });
-      } catch (qrError) {
-        console.error(`[${chatId}] QR send failed:`, qrError.message);
-      }
-    }
 
   } catch (error) {
     console.error(`[${chatId}] Error:`, error);
-    bot.sendMessage(chatId, `❌ An error occurred: ${error.message}\n\nTry /reset to start a fresh session.`);
+    bot.sendMessage(chatId, `An error occurred: ${error.message}\n\nTry /reset to start a fresh session.`);
   }
 });
 
@@ -204,4 +195,4 @@ bot.on('polling_error', (error) => {
   console.error('Polling error:', error.code, error.message);
 });
 
-console.log('✅ Bot is listening for messages...');
+console.log('Bot is listening for messages...');

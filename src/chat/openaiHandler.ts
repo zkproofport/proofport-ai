@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
-import { randomUUID } from 'crypto';
+import { randomUUID, randomBytes, createHash } from 'crypto';
 import type { LLMMessage } from './llmProvider.js';
 import { CHAT_TOOLS } from './tools.js';
 import { SYSTEM_PROMPT } from './systemPrompt.js';
@@ -8,6 +8,8 @@ import { executeSkill, PaymentRequiredError, type ChatHandlerDeps } from './chat
 
 const MAX_FUNCTION_CALLS = 3;
 const MODEL_NAME = 'zkproofport';
+const SESSION_TTL_SECONDS = 3600;
+const MAX_HISTORY_MESSAGES = 50;
 
 interface OpenAIMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -22,9 +24,37 @@ interface ChatCompletionRequest {
   max_tokens?: number;
 }
 
-interface ProofportExtension {
-  skillResult?: unknown;
-  signingUrl?: string;
+interface SessionData {
+  secretHash: string;
+  history: LLMMessage[];
+}
+
+/**
+ * Boundary-aware history trimming that preserves tool call/result pairs.
+ * Skips orphaned tool results and incomplete tool call sequences when rolling.
+ */
+function trimHistory(history: LLMMessage[], maxMessages: number): LLMMessage[] {
+  if (history.length <= maxMessages) return history;
+
+  let startIdx = history.length - maxMessages;
+
+  // Walk forward to find a safe boundary — skip orphaned tool results
+  while (startIdx < history.length) {
+    const msg = history[startIdx];
+    // tool results need a preceding assistant(toolCalls) — skip them
+    if (msg.role === 'user' && msg.toolResults && msg.toolResults.length > 0) {
+      startIdx++;
+      continue;
+    }
+    // assistant with toolCalls needs its following tool results — skip it too
+    if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
+      startIdx++;
+      continue;
+    }
+    break;
+  }
+
+  return history.slice(startIdx);
 }
 
 function convertMessages(messages: OpenAIMessage[]): { systemPrompt: string; history: LLMMessage[] } {
@@ -49,7 +79,7 @@ async function runChatLoop(
   systemPrompt: string,
   deps: ChatHandlerDeps,
   paymentVerified: boolean,
-): Promise<{ response: string; extension?: ProofportExtension }> {
+): Promise<{ response: string }> {
   let functionCallCount = 0;
   let proofCallCount = 0;
   let finalResponse: string | undefined;
@@ -63,7 +93,7 @@ async function runChatLoop(
       functionCallCount++;
       history.push({ role: 'assistant', toolCalls: llmResponse.toolCalls, content: llmResponse.content });
 
-      const toolResults: Array<{ name: string; result: unknown }> = [];
+      const toolResults: Array<{ id?: string; name: string; result: unknown }> = [];
 
       for (const tc of llmResponse.toolCalls) {
         let skillResult: unknown;
@@ -85,7 +115,7 @@ async function runChatLoop(
           signingUrl = (skillResult as { signingUrl: string }).signingUrl;
         }
 
-        toolResults.push({ name: tc.name, result: skillResult });
+        toolResults.push({ id: tc.id, name: tc.name, result: skillResult });
       }
 
       history.push({ role: 'user', toolResults });
@@ -108,14 +138,17 @@ async function runChatLoop(
     finalResponse = 'I apologize, but I was unable to generate a response.';
   }
 
-  const extension: ProofportExtension = {};
+  // Embed structured data as a proofport DSL block in the response text
+  const extension: Record<string, unknown> = {};
   if (lastSkillResult !== undefined) extension.skillResult = lastSkillResult;
   if (signingUrl) extension.signingUrl = signingUrl;
 
-  return {
-    response: finalResponse,
-    extension: Object.keys(extension).length > 0 ? extension : undefined,
-  };
+  let fullResponse = finalResponse;
+  if (Object.keys(extension).length > 0) {
+    fullResponse += '\n\n```proofport\n' + JSON.stringify(extension, null, 2) + '\n```';
+  }
+
+  return { response: fullResponse };
 }
 
 export function createOpenAIRoutes(deps: ChatHandlerDeps): Router {
@@ -137,6 +170,7 @@ export function createOpenAIRoutes(deps: ChatHandlerDeps): Router {
   });
 
   // POST /v1/chat/completions — OpenAI-compatible chat completions
+  // Session management via X-Session-Id / X-Session-Secret HTTP headers
   router.post('/chat/completions', async (req: Request, res: Response) => {
     try {
       const body = req.body as ChatCompletionRequest;
@@ -152,14 +186,107 @@ export function createOpenAIRoutes(deps: ChatHandlerDeps): Router {
         return;
       }
 
-      const { systemPrompt, history } = convertMessages(body.messages);
       const completionId = `chatcmpl-${randomUUID()}`;
       const created = Math.floor(Date.now() / 1000);
       const model = body.model || MODEL_NAME;
       const paymentVerified = !!(req as any).paymentVerified;
 
+      // --- Session management (via HTTP headers) ---
+      const providedSessionId = req.headers['x-session-id'] as string | undefined;
+      const providedSecret = req.headers['x-session-secret'] as string | undefined;
+
+      let history: LLMMessage[];
+      let systemPrompt: string;
+      let sessionId: string | undefined;
+      let sessionSecret: string | undefined;
+      let secretHash: string | undefined;
+
+      if (providedSessionId) {
+        // Continuing an existing session
+        if (!providedSecret) {
+          res.status(403).json({
+            error: {
+              message: 'X-Session-Secret header is required to continue a session',
+              type: 'invalid_request_error',
+              code: 'missing_session_secret',
+            },
+          });
+          return;
+        }
+
+        const sessionKey = `chat:session:${providedSessionId}`;
+        const sessionDataRaw = await deps.redis.get(sessionKey);
+        if (!sessionDataRaw) {
+          res.status(404).json({
+            error: {
+              message: 'Session not found or expired',
+              type: 'invalid_request_error',
+              code: 'session_not_found',
+            },
+          });
+          return;
+        }
+
+        const sessionData: SessionData = JSON.parse(sessionDataRaw);
+        const providedHash = createHash('sha256').update(providedSecret).digest('hex');
+
+        if (providedHash !== sessionData.secretHash) {
+          res.status(403).json({
+            error: {
+              message: 'Invalid session secret',
+              type: 'invalid_request_error',
+              code: 'invalid_session_secret',
+            },
+          });
+          return;
+        }
+
+        // Load history from session, append only the LAST user message from messages array
+        history = sessionData.history;
+        secretHash = sessionData.secretHash;
+        sessionId = providedSessionId;
+
+        const lastUserMsg = [...body.messages].reverse().find(m => m.role === 'user');
+        if (lastUserMsg) {
+          history.push({ role: 'user', content: lastUserMsg.content || '' });
+        }
+
+        // Extract system prompt from messages if provided
+        const systemMsg = body.messages.find(m => m.role === 'system');
+        systemPrompt = systemMsg ? `${SYSTEM_PROMPT}\n\n${systemMsg.content || ''}` : SYSTEM_PROMPT;
+      } else {
+        // Stateless mode OR auto-create session
+        const converted = convertMessages(body.messages);
+        history = converted.history;
+        systemPrompt = converted.systemPrompt;
+
+        // Auto-create session if there's exactly 1 user message (first turn)
+        const userMessages = body.messages.filter(m => m.role === 'user');
+        if (userMessages.length === 1) {
+          sessionId = randomUUID();
+          sessionSecret = randomBytes(32).toString('hex');
+          secretHash = createHash('sha256').update(sessionSecret).digest('hex');
+        }
+        // Otherwise: pure stateless, no session
+      }
+
       // Run chat loop BEFORE setting up SSE (allows 402 return before streaming starts)
-      const { response, extension } = await runChatLoop(history, systemPrompt, deps, paymentVerified);
+      const { response } = await runChatLoop(history, systemPrompt, deps, paymentVerified);
+
+      // Save session if session mode is active
+      if (sessionId && secretHash) {
+        const rolledHistory = trimHistory(history, MAX_HISTORY_MESSAGES);
+        const sessionDataToSave: SessionData = {
+          secretHash,
+          history: rolledHistory,
+        };
+        const sessionKey = `chat:session:${sessionId}`;
+        await deps.redis.set(sessionKey, JSON.stringify(sessionDataToSave), 'EX', SESSION_TTL_SECONDS);
+      }
+
+      // Set session headers ONCE before response body
+      if (sessionId) res.setHeader('X-Session-Id', sessionId);
+      if (sessionSecret) res.setHeader('X-Session-Secret', sessionSecret);
 
       if (body.stream) {
         // SSE streaming response
@@ -192,22 +319,18 @@ export function createOpenAIRoutes(deps: ChatHandlerDeps): Router {
         }
 
         // Send final chunk with finish_reason
-        const finalChunk: Record<string, unknown> = {
+        res.write(`data: ${JSON.stringify({
           id: completionId,
           object: 'chat.completion.chunk',
           created,
           model,
           choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
-        };
-        if (extension) {
-          finalChunk.x_proofport = extension;
-        }
-        res.write(`data: ${JSON.stringify(finalChunk)}\n\n`);
+        })}\n\n`);
         res.write('data: [DONE]\n\n');
         res.end();
       } else {
-        // Non-streaming response
-        const completionResponse: Record<string, unknown> = {
+        // Non-streaming response (pure OpenAI format)
+        res.json({
           id: completionId,
           object: 'chat.completion',
           created,
@@ -227,13 +350,7 @@ export function createOpenAIRoutes(deps: ChatHandlerDeps): Router {
             completion_tokens: 0,
             total_tokens: 0,
           },
-        };
-
-        if (extension) {
-          completionResponse.x_proofport = extension;
-        }
-
-        res.json(completionResponse);
+        });
       }
     } catch (error) {
       if (error instanceof PaymentRequiredError && deps.paymentRequiredHeader) {

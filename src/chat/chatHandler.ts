@@ -1,39 +1,17 @@
-import { Router } from 'express';
-import { randomUUID, randomBytes, createHash } from 'crypto';
+import { randomUUID } from 'crypto';
 import type { RedisClient } from '../redis/client.js';
 import type { TaskStore } from '../a2a/taskStore.js';
 import type { TaskEventEmitter } from '../a2a/streaming.js';
-import type { LLMProvider, LLMMessage } from './llmProvider.js';
-import { CHAT_TOOLS } from './tools.js';
-import { SYSTEM_PROMPT } from './systemPrompt.js';
+import type { LLMProvider } from './llmProvider.js';
 import { getSupportedCircuits } from '../mcp/tools/getCircuits.js';
 import type { SigningRequestRecord } from '../signing/types.js';
-import { storeProofResult, type StoredProofResult } from '../redis/proofResultStore.js';
+import { storeProofResult } from '../redis/proofResultStore.js';
 
 export class PaymentRequiredError extends Error {
   constructor() {
     super('Payment required for proof generation');
     this.name = 'PaymentRequiredError';
   }
-}
-
-interface ChatRequest {
-  message: string;
-  sessionId?: string;
-  sessionSecret?: string;
-}
-
-interface ChatResponse {
-  response: string;
-  sessionId: string;
-  sessionSecret?: string;
-  skillResult?: unknown;
-  signingUrl?: string;
-}
-
-interface SessionData {
-  secretHash: string;
-  history: LLMMessage[];
 }
 
 export interface ChatHandlerDeps {
@@ -43,204 +21,6 @@ export interface ChatHandlerDeps {
   a2aBaseUrl: string;
   llmProvider: LLMProvider;
   paymentRequiredHeader?: string | null;
-}
-
-const MAX_FUNCTION_CALLS = 3;
-const SESSION_TTL_SECONDS = 3600;
-const MAX_HISTORY_MESSAGES = 50;
-
-function trimHistory(history: LLMMessage[], maxMessages: number): LLMMessage[] {
-  if (history.length <= maxMessages) return history;
-
-  let startIdx = history.length - maxMessages;
-
-  // Walk forward to find a safe boundary — skip orphaned tool results
-  while (startIdx < history.length) {
-    const msg = history[startIdx];
-    // tool results need a preceding assistant(toolCalls) — skip them
-    if (msg.role === 'user' && msg.toolResults && msg.toolResults.length > 0) {
-      startIdx++;
-      continue;
-    }
-    // assistant with toolCalls needs its following tool results — skip it too
-    if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
-      startIdx++;
-      continue;
-    }
-    break;
-  }
-
-  return history.slice(startIdx);
-}
-
-export function createChatRoutes(deps: ChatHandlerDeps): Router {
-  const router = Router();
-
-  router.post('/chat', async (req, res) => {
-    try {
-      const { message, sessionId: providedSessionId, sessionSecret: providedSecret } = req.body as ChatRequest;
-
-      if (!message || typeof message !== 'string') {
-        res.status(400).json({ error: 'Missing or invalid message field' });
-        return;
-      }
-
-      const isNewSession = !providedSessionId;
-      const sessionId = providedSessionId || randomUUID();
-      const sessionKey = `chat:session:${sessionId}`;
-
-      let history: LLMMessage[];
-      let sessionSecret: string | undefined;
-      let secretHash: string;
-
-      if (isNewSession) {
-        sessionSecret = randomBytes(32).toString('hex');
-        secretHash = createHash('sha256').update(sessionSecret).digest('hex');
-        history = [];
-      } else {
-        if (!providedSecret) {
-          res.status(401).json({ error: 'sessionSecret is required to continue a session' });
-          return;
-        }
-
-        const sessionDataRaw = await deps.redis.get(sessionKey);
-        if (!sessionDataRaw) {
-          res.status(404).json({ error: 'Session not found or expired' });
-          return;
-        }
-
-        const sessionData: SessionData = JSON.parse(sessionDataRaw);
-        const providedHash = createHash('sha256').update(providedSecret).digest('hex');
-
-        if (providedHash !== sessionData.secretHash) {
-          res.status(403).json({ error: 'Invalid sessionSecret' });
-          return;
-        }
-
-        secretHash = sessionData.secretHash;
-        history = sessionData.history;
-      }
-
-      // Add user message to history
-      history.push({ role: 'user', content: message });
-
-      let functionCallCount = 0;
-      let proofCallCount = 0;
-      let finalResponse: string | undefined;
-      let lastSkillResult: unknown;
-      let signingUrl: string | undefined;
-      const paymentVerified = !!(req as any).paymentVerified;
-
-      // Function calling loop
-      while (functionCallCount < MAX_FUNCTION_CALLS) {
-        const llmResponse = await deps.llmProvider.chat(history, SYSTEM_PROMPT, CHAT_TOOLS);
-
-        // Check if model returned tool calls
-        if (llmResponse.toolCalls && llmResponse.toolCalls.length > 0) {
-          functionCallCount++;
-
-          // Add assistant message with tool calls to history
-          history.push({ role: 'assistant', toolCalls: llmResponse.toolCalls, content: llmResponse.content });
-
-          const toolResults: Array<{ id?: string; name: string; result: unknown }> = [];
-
-          for (const tc of llmResponse.toolCalls) {
-            let skillResult: unknown;
-
-            // Limit proof operations to 1 per chat request
-            if (tc.name === 'generate_proof' || tc.name === 'verify_proof') {
-              if (proofCallCount >= 1) {
-                skillResult = { error: 'Only one proof operation allowed per chat request. Please send a new message.' };
-              } else {
-                proofCallCount++;
-                skillResult = await executeSkill(tc.name, tc.args, deps, paymentVerified);
-              }
-            } else {
-              skillResult = await executeSkill(tc.name, tc.args, deps);
-            }
-
-            lastSkillResult = skillResult;
-
-            if (typeof skillResult === 'object' && skillResult !== null && 'signingUrl' in skillResult) {
-              signingUrl = (skillResult as { signingUrl: string }).signingUrl;
-            }
-
-            toolResults.push({ id: tc.id, name: tc.name, result: skillResult });
-          }
-
-          // Add tool results to history
-          history.push({ role: 'user', toolResults });
-
-          // Continue loop to get text response
-          continue;
-        }
-
-        // No tool calls — extract text response
-        if (llmResponse.content) {
-          finalResponse = llmResponse.content;
-        }
-
-        // Add assistant text to history
-        history.push({ role: 'assistant', content: llmResponse.content || '' });
-
-        // Exit loop
-        break;
-      }
-
-      if (functionCallCount >= MAX_FUNCTION_CALLS && !finalResponse) {
-        finalResponse = 'I apologize, but I reached the maximum number of function calls. Please try again.';
-      }
-
-      if (!finalResponse) {
-        finalResponse = 'I apologize, but I was unable to generate a response.';
-      }
-
-      // Rolling trim — keeps tool call pairs intact
-      const rolledHistory = trimHistory(history, MAX_HISTORY_MESSAGES);
-
-      // Save conversation history to Redis
-      const sessionDataToSave: SessionData = {
-        secretHash,
-        history: rolledHistory,
-      };
-
-      await deps.redis.set(sessionKey, JSON.stringify(sessionDataToSave), 'EX', SESSION_TTL_SECONDS);
-
-      const response: ChatResponse = {
-        response: finalResponse,
-        sessionId,
-      };
-
-      if (sessionSecret) {
-        response.sessionSecret = sessionSecret;
-      }
-
-      if (lastSkillResult !== undefined) {
-        response.skillResult = lastSkillResult;
-      }
-
-      if (signingUrl) {
-        response.signingUrl = signingUrl;
-      }
-
-      res.json(response);
-    } catch (error) {
-      if (error instanceof PaymentRequiredError && deps.paymentRequiredHeader) {
-        res.setHeader('PAYMENT-REQUIRED', deps.paymentRequiredHeader);
-        res.status(402).json({
-          error: 'Payment required',
-          paymentRequired: true,
-          description: 'Proof generation requires x402 USDC payment. Retry with PAYMENT-SIGNATURE header.',
-        });
-        return;
-      }
-      console.error('[Chat] Error:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      res.status(500).json({ error: `Chat failed: ${errorMessage}` });
-    }
-  });
-
-  return router;
 }
 
 export async function createAndPollTask(

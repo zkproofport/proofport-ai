@@ -31,7 +31,6 @@ import { computeSignalHash } from './input/inputBuilder.js';
 import { ethers } from 'ethers';
 import type { SigningRequestRecord } from './signing/types.js';
 import { createRestRoutes } from './api/restRoutes.js';
-import { createChatRoutes } from './chat/chatHandler.js';
 import { createOpenAIRoutes } from './chat/openaiHandler.js';
 import type { LLMProvider } from './chat/llmProvider.js';
 import { OpenAIProvider } from './chat/openaiClient.js';
@@ -389,18 +388,25 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
       next();
     };
 
-    app.use('/api/v1', chatPaymentVerifier, createChatRoutes(chatDeps));
     app.use('/v1', chatPaymentVerifier, createOpenAIRoutes(chatDeps));
     console.log(`[Chat] LLM chat endpoint enabled (providers: ${llmProviders.map(p => p.name).join(' -> ')})`);
     console.log('[OpenAI] Compatible endpoint enabled at /v1/chat/completions');
   } else {
-    app.post('/api/v1/chat', (_req, res) => {
-      res.status(503).json({ error: 'Chat not configured. Set OPENAI_API_KEY or GEMINI_API_KEY.' });
-    });
     app.post('/v1/chat/completions', (_req, res) => {
       res.status(503).json({ error: { message: 'Chat not configured. Set OPENAI_API_KEY or GEMINI_API_KEY.', type: 'server_error', code: 'not_configured' } });
     });
   }
+
+  // Deprecated endpoint — redirect clients to the unified OpenAI-compatible endpoint
+  app.post('/api/v1/chat', (_req, res) => {
+    res.status(410).json({
+      error: {
+        message: 'This endpoint has been removed. Use POST /v1/chat/completions (OpenAI-compatible format) instead.',
+        type: 'gone',
+        code: 'endpoint_removed',
+      },
+    });
+  });
 
   // Verification page for QR code scanning
   app.get('/v/:proofId', (req, res) => {

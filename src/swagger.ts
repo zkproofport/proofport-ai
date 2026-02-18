@@ -708,21 +708,59 @@ export function buildSwaggerSpec(baseUrl: string) {
         },
       },
     },
-    '/api/v1/chat': {
+    '/v1/chat/completions': {
       post: {
-        summary: 'LLM chat endpoint',
-        description: 'Natural language interface powered by Gemini. Supports conversation sessions and automatic function calling for proof generation/verification. Requires GEMINI_API_KEY to be configured.',
+        summary: 'OpenAI-compatible chat completions',
+        description: 'OpenAI Chat Completions API-compatible endpoint. Supports natural language interaction with automatic function calling for ZK proof generation/verification. Session management via HTTP headers (X-Session-Id / X-Session-Secret). Structured data (proof results, signing URLs) embedded in assistant content as a fenced ```proofport DSL block.',
         tags: ['Chat'],
+        parameters: [
+          {
+            name: 'X-Session-Id',
+            in: 'header',
+            schema: { type: 'string' },
+            description: 'Session ID for conversation continuity. Auto-generated on first request and returned in response headers.',
+          },
+          {
+            name: 'X-Session-Secret',
+            in: 'header',
+            schema: { type: 'string' },
+            description: 'Session secret (required when continuing an existing session). Returned in response headers on session creation.',
+          },
+        ],
         requestBody: {
           required: true,
           content: {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['message'],
+                required: ['messages'],
                 properties: {
-                  message: { type: 'string', description: 'User message in natural language', example: 'Generate a KYC proof for my-dapp.com' },
-                  sessionId: { type: 'string', description: 'Session ID for conversation continuity (auto-generated if omitted)' },
+                  messages: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      required: ['role', 'content'],
+                      properties: {
+                        role: { type: 'string', enum: ['system', 'user', 'assistant'] },
+                        content: { type: 'string' },
+                      },
+                    },
+                    description: 'OpenAI-compatible message array',
+                  },
+                  model: { type: 'string', default: 'zkproofport' },
+                  stream: { type: 'boolean', default: false, description: 'Enable SSE streaming' },
+                  temperature: { type: 'number' },
+                  max_tokens: { type: 'number' },
+                },
+              },
+              examples: {
+                simple: {
+                  summary: 'Simple question',
+                  value: { messages: [{ role: 'user', content: 'What proofs can you generate?' }], model: 'zkproofport' },
+                },
+                proofGeneration: {
+                  summary: 'Proof generation request',
+                  value: { messages: [{ role: 'user', content: 'Generate a Coinbase KYC proof for scope zkproofport.app' }], model: 'zkproofport' },
                 },
               },
             },
@@ -730,23 +768,55 @@ export function buildSwaggerSpec(baseUrl: string) {
         },
         responses: {
           '200': {
-            description: 'Chat response',
+            description: 'Chat completion response (standard OpenAI format)',
+            headers: {
+              'X-Session-Id': { schema: { type: 'string' }, description: 'Session ID (returned on first request)' },
+              'X-Session-Secret': { schema: { type: 'string' }, description: 'Session secret (returned only on session creation)' },
+            },
             content: {
               'application/json': {
                 schema: {
                   type: 'object',
                   properties: {
-                    response: { type: 'string', description: 'LLM response text' },
-                    sessionId: { type: 'string', description: 'Session ID for subsequent messages' },
-                    skillResult: { type: 'object', description: 'Raw skill execution result (if a skill was called)' },
-                    signingUrl: { type: 'string', description: 'Signing URL (if proof generation initiated)' },
+                    id: { type: 'string', example: 'chatcmpl-abc123' },
+                    object: { type: 'string', example: 'chat.completion' },
+                    created: { type: 'number' },
+                    model: { type: 'string', example: 'zkproofport' },
+                    choices: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          index: { type: 'number' },
+                          message: {
+                            type: 'object',
+                            properties: {
+                              role: { type: 'string', example: 'assistant' },
+                              content: { type: 'string', description: 'Response text. May include a fenced ```proofport block with structured JSON data (proof results, signing URLs, etc.).' },
+                            },
+                          },
+                          finish_reason: { type: 'string', example: 'stop' },
+                        },
+                      },
+                    },
+                    usage: {
+                      type: 'object',
+                      properties: {
+                        prompt_tokens: { type: 'number' },
+                        completion_tokens: { type: 'number' },
+                        total_tokens: { type: 'number' },
+                      },
+                    },
                   },
                 },
               },
             },
           },
-          '400': { description: 'Missing or invalid message' },
-          '503': { description: 'Chat not configured (GEMINI_API_KEY not set)' },
+          '400': { description: 'Invalid request (missing or empty messages)' },
+          '402': { description: 'Payment required (x402)' },
+          '403': { description: 'Invalid or missing session secret' },
+          '404': { description: 'Session not found or expired' },
+          '503': { description: 'Chat not configured (no LLM API key set)' },
         },
       },
     },
@@ -936,7 +1006,7 @@ export function buildSwaggerSpec(baseUrl: string) {
     },
     {
       name: 'Chat',
-      description: 'LLM-powered natural language chat interface with Gemini function calling. Supports session management for Telegram-like integrations.',
+      description: 'OpenAI Chat Completions-compatible endpoint. Session via X-Session-Id/X-Session-Secret headers. Structured data in content via ```proofport DSL block.',
     },
   ],
   components: {
