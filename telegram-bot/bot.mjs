@@ -134,8 +134,19 @@ bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const userMessage = msg.text;
 
-  // Show typing indicator
-  await bot.sendChatAction(chatId, 'typing');
+  // Send immediate progress message based on message content
+  const messageLower = userMessage.toLowerCase();
+  let progressMessage = '⏳ Processing...';
+
+  if (messageLower.includes('서명') || messageLower.includes('sign')) {
+    progressMessage = '⏳ Checking signing status...';
+  } else if (messageLower.includes('결제') || messageLower.includes('완료') ||
+             messageLower.includes('pay') || messageLower.includes('paid') ||
+             messageLower.includes('done')) {
+    progressMessage = '⏳ Processing payment and generating proof... This may take up to a minute.';
+  }
+
+  await bot.sendMessage(chatId, progressMessage);
 
   try {
     let session = sessions.get(chatId);

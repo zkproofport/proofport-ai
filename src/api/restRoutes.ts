@@ -653,7 +653,7 @@ export function createRestRoutes(deps: RestRoutesDeps): Router {
         publicInputs,
         circuitId: stored.circuitId,
         chainId,
-        rpcUrl: config.baseRpcUrl,
+        rpcUrl: config.chainRpcUrl,
       });
 
       res.json({
