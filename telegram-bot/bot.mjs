@@ -9,7 +9,7 @@ if (!BOT_TOKEN) {
   process.exit(1);
 }
 
-console.log('🤖 ZKProofport Telegram Bot starting...');
+console.log('🤖 proveragent.eth Telegram Bot starting...');
 console.log(`📡 Chat API: ${CHAT_API_URL}`);
 
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
@@ -64,9 +64,9 @@ async function sendLongMessage(chatId, text, options = {}) {
 
 // ─── /start command ──────────────────────────────────────────────────
 bot.onText(/\/start/, (msg) => {
-  const welcome = `🔐 *ZKProofport Prover Agent Bot*
+  const welcome = `🔐 *proveragent.eth*
 
-An AI agent that generates and verifies zero-knowledge proofs.
+Zero-knowledge proof generation and verification agent.
 
 *Available commands:*
 /circuits — List supported circuits

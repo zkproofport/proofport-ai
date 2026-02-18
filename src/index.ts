@@ -462,6 +462,214 @@ el.innerHTML=
 </html>`);
   });
 
+  // Payment info endpoint (payment page fetches details)
+  app.get('/api/payment/:requestId', async (req, res) => {
+    const { requestId } = req.params;
+    const key = `signing:${requestId}`;
+    const data = await redis.get(key);
+
+    if (!data) {
+      res.status(404).json({ error: 'Request not found or expired' });
+      return;
+    }
+
+    const record: SigningRequestRecord = JSON.parse(data);
+    const isTestnet = config.paymentMode === 'testnet';
+    const chainId = isTestnet ? 84532 : 8453;
+    const usdcAddress = isTestnet
+      ? '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+      : '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+    const priceStr = (config.paymentProofPrice || '$0.10').replace('$', '');
+    const amount = String(Math.round(parseFloat(priceStr) * 1_000_000));
+
+    res.json({
+      requestId,
+      circuitId: record.circuitId,
+      scope: record.scope,
+      paymentStatus: record.paymentStatus || null,
+      payTo: config.paymentPayTo,
+      amount,
+      priceDisplay: config.paymentProofPrice || '$0.10',
+      usdcAddress,
+      chainId,
+      chainName: isTestnet ? 'Base Sepolia' : 'Base',
+    });
+  });
+
+  // Payment confirmation (called by payment page after tx)
+  app.post('/api/payment/confirm/:requestId', async (req, res) => {
+    const { requestId } = req.params;
+    const { txHash } = req.body;
+
+    if (!txHash || typeof txHash !== 'string') {
+      res.status(400).json({ error: 'Missing txHash' });
+      return;
+    }
+
+    const key = `signing:${requestId}`;
+    const data = await redis.get(key);
+
+    if (!data) {
+      res.status(404).json({ error: 'Request not found or expired' });
+      return;
+    }
+
+    const record: SigningRequestRecord = JSON.parse(data);
+
+    if (record.paymentStatus === 'completed') {
+      res.json({ status: 'already_completed' });
+      return;
+    }
+
+    record.paymentStatus = 'completed';
+    record.paymentTxHash = txHash;
+
+    const ttl = await redis.ttl(key);
+    await redis.set(key, JSON.stringify(record), 'EX', ttl > 0 ? ttl : 300);
+
+    console.log(`[Payment] Confirmed for ${requestId}: ${txHash}`);
+    res.json({ status: 'confirmed' });
+  });
+
+  // Payment page for USDC transfer
+  app.get('/pay/:requestId', (req, res) => {
+    const { requestId } = req.params;
+    const infoUrl = `${config.a2aBaseUrl}/api/payment/${requestId}`;
+    const confirmUrl = `${config.a2aBaseUrl}/api/payment/confirm/${requestId}`;
+    res.setHeader('Content-Type', 'text/html');
+    res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>proveragent.eth — Payment</title>
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.1/dist/ethers.umd.min.js"><\/script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0a0a0a;color:#f0f0f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1rem}
+.card{background:#1a1a1a;border:1px solid #333;border-radius:12px;padding:2rem;max-width:480px;width:100%}
+h1{font-size:1.25rem;font-weight:600;margin-bottom:.5rem;text-align:center}
+.subtitle{color:#999;font-size:.875rem;text-align:center;margin-bottom:1.5rem}
+.field{margin-bottom:.75rem}
+.label{color:#999;font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.25rem}
+.value{font-family:'Courier New',monospace;font-size:.8rem;color:#93c5fd;word-break:break-all}
+.price{font-size:2rem;font-weight:700;text-align:center;color:#4ade80;margin:1rem 0}
+.btn{display:block;width:100%;padding:.875rem;border:none;border-radius:8px;font-size:1rem;font-weight:600;cursor:pointer;margin-top:1rem;transition:opacity .2s}
+.btn-pay{background:#2563eb;color:#fff}
+.btn-pay:hover{opacity:.9}
+.btn-pay:disabled{opacity:.5;cursor:not-allowed}
+.status{padding:1rem;border-radius:8px;margin-top:1rem;font-size:.875rem;text-align:center}
+.loading{background:#1a2a3a;border:1px solid #2a4a5a;color:#93c5fd}
+.success{background:#1a3a2a;border:1px solid #2a5a3a;color:#4ade80}
+.error{background:#3a1a1a;border:1px solid #5a2a2a;color:#f87171}
+.done{background:#1a3a2a;border:1px solid #2a5a3a;color:#4ade80}
+.spinner{display:inline-block;width:16px;height:16px;border:2px solid #93c5fd;border-top-color:transparent;border-radius:50%;animation:spin 1s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="card">
+<h1>proveragent.eth</h1>
+<p class="subtitle">ZK Proof Generation Payment</p>
+<div id="content"><div class="status loading"><span class="spinner"></span>Loading...</div></div>
+</div>
+<script>
+const INFO_URL='${infoUrl}';
+const CONFIRM_URL='${confirmUrl}';
+const ERC20_ABI=['function transfer(address to, uint256 amount) returns (bool)','function balanceOf(address) view returns (uint256)'];
+
+let payInfo=null;
+
+async function init(){
+  const el=document.getElementById('content');
+  try{
+    const r=await fetch(INFO_URL);
+    if(!r.ok){const d=await r.json();el.innerHTML='<div class="status error">'+d.error+'</div>';return}
+    payInfo=await r.json();
+
+    if(payInfo.paymentStatus==='completed'){
+      el.innerHTML='<div class="status done">\\u2713 Payment already completed</div><p style="text-align:center;color:#999;margin-top:1rem;font-size:.875rem">Return to the chat and tell the agent to proceed.</p>';
+      return;
+    }
+
+    el.innerHTML=
+      '<div class="field"><div class="label">Circuit</div><div class="value">'+payInfo.circuitId+'</div></div>'+
+      '<div class="field"><div class="label">Network</div><div class="value">'+payInfo.chainName+'</div></div>'+
+      '<div class="price">'+payInfo.priceDisplay+' USDC</div>'+
+      '<button class="btn btn-pay" id="payBtn" onclick="handlePay()">Connect Wallet & Pay</button>'+
+      '<div id="payStatus"></div>';
+  }catch(e){el.innerHTML='<div class="status error">Failed to load: '+e.message+'</div>'}
+}
+
+async function handlePay(){
+  const btn=document.getElementById('payBtn');
+  const st=document.getElementById('payStatus');
+  btn.disabled=true;
+  btn.textContent='Connecting...';
+
+  try{
+    if(!window.ethereum){
+      st.innerHTML='<div class="status error">No wallet detected. Please open this page in a browser with MetaMask or a Web3 wallet.</div>';
+      btn.disabled=false;btn.textContent='Connect Wallet & Pay';
+      return;
+    }
+
+    const provider=new ethers.BrowserProvider(window.ethereum);
+    const signer=await provider.getSigner();
+    const network=await provider.getNetwork();
+
+    // Switch chain if needed
+    const targetChainHex='0x'+payInfo.chainId.toString(16);
+    if(Number(network.chainId)!==payInfo.chainId){
+      btn.textContent='Switching network...';
+      try{
+        await window.ethereum.request({method:'wallet_switchEthereumChain',params:[{chainId:targetChainHex}]});
+      }catch(switchErr){
+        if(switchErr.code===4902){
+          await window.ethereum.request({method:'wallet_addEthereumChain',params:[{
+            chainId:targetChainHex,
+            chainName:payInfo.chainName,
+            nativeCurrency:{name:'ETH',symbol:'ETH',decimals:18},
+            rpcUrls:[payInfo.chainId===84532?'https://sepolia.base.org':'https://mainnet.base.org'],
+            blockExplorerUrls:[payInfo.chainId===84532?'https://sepolia.basescan.org':'https://basescan.org']
+          }]});
+        }else throw switchErr;
+      }
+    }
+
+    btn.textContent='Sending USDC...';
+    st.innerHTML='<div class="status loading"><span class="spinner"></span>Confirm the transaction in your wallet</div>';
+
+    const usdc=new ethers.Contract(payInfo.usdcAddress,ERC20_ABI,signer);
+    const tx=await usdc.transfer(payInfo.payTo,BigInt(payInfo.amount));
+
+    st.innerHTML='<div class="status loading"><span class="spinner"></span>Waiting for confirmation...</div>';
+    btn.textContent='Confirming...';
+    await tx.wait(1);
+
+    // Notify backend
+    st.innerHTML='<div class="status loading"><span class="spinner"></span>Confirming payment...</div>';
+    await fetch(CONFIRM_URL,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({txHash:tx.hash})
+    });
+
+    btn.style.display='none';
+    st.innerHTML='<div class="status success">\\u2713 Payment confirmed!</div><p style="text-align:center;color:#999;margin-top:1rem;font-size:.875rem">Return to the chat and tell the agent to proceed.</p>';
+  }catch(e){
+    console.error(e);
+    st.innerHTML='<div class="status error">'+e.message+'</div>';
+    btn.disabled=false;btn.textContent='Connect Wallet & Pay';
+  }
+}
+
+init();
+<\/script>
+</body>
+</html>`);
+  });
+
   // Proxy sign-page requests to internal Next.js server
   app.use('/s', createSignPageProxy());
   app.use('/_next', createSignPageProxy());

@@ -78,7 +78,26 @@ Present the signing URL clearly:
 When the user says they've signed, call generate_proof with the requestId.
 
 - If signing is still pending: "Signing not yet completed. Please open the signing URL and complete the process."
-- If signing is completed but payment is needed: The system will return HTTP 402. The calling application handles payment automatically on retry.
+- If result has \`state: "payment-required"\`: Payment is needed before proof generation. Present the payment URL:
+
+\`\`\`
+> Step 2/5: Payment Required
+>
+> Open this link to pay $0.10 USDC:
+> [paymentUrl from result]
+>
+> Network: Base Sepolia
+> Amount: $0.10 USDC
+>
+> After payment, tell me and I'll generate your proof.
+\`\`\`
+
+### Phase 3.5: Resume After Payment
+
+When the user says they've paid, call generate_proof again with the same requestId (and circuitId, scope, etc.).
+
+- If payment is confirmed: proof generation proceeds automatically to Phase 4.
+- If payment not yet confirmed: "Payment not yet confirmed. Please complete the payment on the payment page."
 
 ### Phase 4: Proof Generation Result
 

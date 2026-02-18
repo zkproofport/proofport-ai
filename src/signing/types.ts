@@ -42,4 +42,6 @@ export interface SigningRequestRecord {
   signature?: string;      // Filled when completed
   createdAt: string;       // ISO timestamp
   expiresAt: string;       // ISO timestamp (TTL)
+  paymentStatus?: 'pending' | 'completed';  // x402 payment tracking
+  paymentTxHash?: string;                   // On-chain tx hash when paid
 }

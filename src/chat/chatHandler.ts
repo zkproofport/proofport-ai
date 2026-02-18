@@ -351,8 +351,27 @@ export async function executeSkill(
         skillParams.isIncluded = isIncluded;
       }
 
+      // Payment check: if payment is required and not yet completed, return payment page URL
       if (!paymentVerified && deps.paymentRequiredHeader) {
-        throw new PaymentRequiredError();
+        if (record.paymentStatus === 'completed') {
+          // Payment already done — proceed
+        } else {
+          // Mark as payment-pending and return payment URL
+          if (!record.paymentStatus) {
+            record.paymentStatus = 'pending';
+            const ttl = await deps.redis.ttl(key);
+            await deps.redis.set(key, JSON.stringify(record), 'EX', ttl > 0 ? ttl : 300);
+          }
+          const paymentUrl = `${deps.a2aBaseUrl}/pay/${requestId}`;
+          return {
+            state: 'payment-required',
+            paymentUrl,
+            requestId,
+            amount: '$0.10 USDC',
+            network: 'Base Sepolia',
+            message: 'Please complete USDC payment to generate the proof.',
+          };
+        }
       }
       const result = await createAndPollTask(skillName, skillParams, deps);
       return await enrichProofResult(result, circuitId as string, deps);
