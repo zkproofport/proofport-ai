@@ -19,6 +19,11 @@ const COINBASE_LIBS_FILES = [
   'src/eip1559_tx_parser.nr',
 ];
 
+const KECCAK256_FILES = [
+  'Nargo.toml',
+  'src/lib.nr',
+];
+
 const DEFAULT_REPO_BASE_URL = 'https://raw.githubusercontent.com/zkproofport/circuits/main';
 
 /**
@@ -60,6 +65,18 @@ export async function downloadArtifacts(circuitsDir: string, repoBaseUrl: string
     const filePath = path.join(coinbaseLibsDir, file);
     await downloadFile(fileUrl, filePath, 'text');
   }
+
+  // Download keccak256 library (v0.1.1 tag)
+  const keccak256Dir = path.join(circuitsDir, 'keccak256');
+  const keccak256SrcDir = path.join(keccak256Dir, 'src');
+  await fs.mkdir(keccak256SrcDir, { recursive: true });
+
+  const keccak256BaseUrl = 'https://raw.githubusercontent.com/noir-lang/keccak256/v0.1.1';
+  for (const file of KECCAK256_FILES) {
+    const fileUrl = `${keccak256BaseUrl}/${file}`;
+    const filePath = path.join(keccak256Dir, file);
+    await downloadFile(fileUrl, filePath, 'text');
+  }
 }
 
 /**
@@ -89,6 +106,14 @@ export async function ensureArtifacts(circuitsDir: string, repoBaseUrl?: string)
   const coinbaseLibsPath = path.join(circuitsDir, 'coinbase-libs', 'src', 'lib.nr');
   try {
     await fs.access(coinbaseLibsPath);
+  } catch {
+    allExist = false;
+  }
+
+  // Check keccak256
+  const keccak256Path = path.join(circuitsDir, 'keccak256', 'src', 'lib.nr');
+  try {
+    await fs.access(keccak256Path);
   } catch {
     allExist = false;
   }
@@ -134,7 +159,7 @@ type = "bin"
 compiler_version = ">= 1.0.0"
 
 [dependencies]
-keccak256 = { tag = "v0.1.1", git = "https://github.com/noir-lang/keccak256" }
+keccak256 = { path = "${path.join(circuitsDir, 'keccak256')}" }
 coinbase_libs = { path = "${path.join(circuitsDir, 'coinbase-libs')}" }
 `;
     await fs.writeFile(path.join(workDir, 'Nargo.toml'), nargoToml);
