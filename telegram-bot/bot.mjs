@@ -169,6 +169,19 @@ bot.on('message', async (msg) => {
 
     await sendLongMessage(chatId, responseText);
 
+    // Send QR code image if verifyUrl is present in skillResult
+    const verifyUrl = data.skillResult?.verifyUrl;
+    if (verifyUrl) {
+      try {
+        const qrUrl = `https://quickchart.io/qr?text=${encodeURIComponent(verifyUrl)}&size=300&dark=4ade80&light=1a1a1a`;
+        await bot.sendPhoto(chatId, qrUrl, {
+          caption: `🔍 Scan to verify on-chain\n${verifyUrl}`,
+        });
+      } catch (qrError) {
+        console.error(`[${chatId}] QR send failed:`, qrError.message);
+      }
+    }
+
   } catch (error) {
     console.error(`[${chatId}] Error:`, error);
     bot.sendMessage(chatId, `❌ An error occurred: ${error.message}\n\nTry /reset to start a fresh session.`);

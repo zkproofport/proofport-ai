@@ -13,6 +13,20 @@ import type { PaymentFacilitator } from '../payment/facilitator.js';
 import { storeProofResult, getProofResult } from '../redis/proofResultStore.js';
 import { verifyOnChain } from '../prover/verifier.js';
 
+/**
+ * Split a hex string into an array of bytes32 (32-byte / 64 hex char) elements.
+ * bb outputs publicInputs as concatenated field elements.
+ */
+function splitHexToBytes32(hex: string): string[] {
+  const clean = hex.startsWith('0x') ? hex.slice(2) : hex;
+  if (clean.length === 0) return [];
+  const chunks: string[] = [];
+  for (let i = 0; i < clean.length; i += 64) {
+    chunks.push('0x' + clean.slice(i, i + 64).padEnd(64, '0'));
+  }
+  return chunks;
+}
+
 export interface RestRoutesDeps {
   taskStore: TaskStore;
   taskEventEmitter: TaskEventEmitter;
@@ -625,13 +639,13 @@ export function createRestRoutes(deps: RestRoutesDeps): Router {
         return;
       }
 
-      // Parse publicInputs — stored as JSON string of array
+      // Parse publicInputs — stored as hex string of concatenated bytes32 values
       let publicInputs: string[];
       try {
         const parsed = JSON.parse(stored.publicInputs);
-        publicInputs = Array.isArray(parsed) ? parsed : [stored.publicInputs];
+        publicInputs = Array.isArray(parsed) ? parsed : splitHexToBytes32(stored.publicInputs);
       } catch {
-        publicInputs = [stored.publicInputs];
+        publicInputs = splitHexToBytes32(stored.publicInputs);
       }
 
       const result = await verifyOnChain({
