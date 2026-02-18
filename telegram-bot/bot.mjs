@@ -74,11 +74,41 @@ function extractProofportBlock(content) {
   }
 }
 
+/**
+ * Clean display text for Telegram:
+ * - Strips generic ``` code block fences
+ * - Converts [text](url) markdown links to plain: "text: url" or just url
+ * - Collapses excessive blank lines (3+ → 2)
+ */
+function cleanDisplayText(text) {
+  let cleaned = text;
+
+  // Strip generic code block fences (``` and ```)
+  cleaned = cleaned.replace(/^```\s*\n/gm, '');
+  cleaned = cleaned.replace(/\n```\s*$/gm, '');
+  cleaned = cleaned.replace(/\n```\n/g, '\n');
+
+  // Convert markdown links [text](url) to plain format
+  cleaned = cleaned.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, text, url) => {
+    // If text is the same as url, just show url
+    if (text === url) return url;
+    // Otherwise show "text: url"
+    return `${text}: ${url}`;
+  });
+
+  // Collapse 3+ consecutive blank lines to 2
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+
+  return cleaned.trim();
+}
+
 // ─── Helper: Split and send long messages (Telegram 4096 char limit) ─
 async function sendLongMessage(chatId, text, options = {}) {
   const MAX_LEN = 4000;
+  const finalOptions = { disable_web_page_preview: true, ...options };
+
   if (text.length <= MAX_LEN) {
-    return bot.sendMessage(chatId, text, options);
+    return bot.sendMessage(chatId, text, finalOptions);
   }
 
   // Split long messages into multiple chunks
@@ -97,7 +127,7 @@ async function sendLongMessage(chatId, text, options = {}) {
   }
 
   for (const chunk of chunks) {
-    await bot.sendMessage(chatId, chunk, options);
+    await bot.sendMessage(chatId, chunk, finalOptions);
   }
 }
 
@@ -125,7 +155,7 @@ Send a message to get started!`;
 // ─── /reset command ──────────────────────────────────────────────────
 bot.onText(/\/reset/, (msg) => {
   sessions.delete(msg.chat.id);
-  bot.sendMessage(msg.chat.id, 'Session reset. Send a new message to start a fresh session.');
+  bot.sendMessage(msg.chat.id, 'Session reset. Send a new message to start a fresh session.', { disable_web_page_preview: true });
 });
 
 // ─── /status command (server health check) ───────────────────────────
@@ -138,9 +168,9 @@ bot.onText(/\/status/, async (msg) => {
     const statusText = `*Server Status: Healthy*
 - URL: \`${baseUrl}\`
 - Payment Mode: \`${data.paymentMode || 'unknown'}\``;
-    bot.sendMessage(chatId, statusText, { parse_mode: 'Markdown' });
+    bot.sendMessage(chatId, statusText, { parse_mode: 'Markdown', disable_web_page_preview: true });
   } catch (error) {
-    bot.sendMessage(chatId, `Server unreachable: ${error.message}`);
+    bot.sendMessage(chatId, `Server unreachable: ${error.message}`, { disable_web_page_preview: true });
   }
 });
 
@@ -163,9 +193,10 @@ bot.onText(/\/circuits/, async (msg) => {
     const { text: displayText } = extractProofportBlock(
       parsed.content || parsed.errorMessage || JSON.stringify(result.data, null, 2)
     );
-    await sendLongMessage(chatId, displayText);
+    const cleanedText = cleanDisplayText(displayText);
+    await sendLongMessage(chatId, cleanedText);
   } catch (error) {
-    bot.sendMessage(chatId, `Error: ${error.message}`);
+    bot.sendMessage(chatId, `Error: ${error.message}`, { disable_web_page_preview: true });
   }
 });
 
@@ -206,8 +237,9 @@ bot.on('message', async (msg) => {
       parsed.content || parsed.errorMessage || JSON.stringify(result.data, null, 2)
     );
 
-    // Send clean text (without DSL block)
-    await sendLongMessage(chatId, displayText);
+    // Send clean text (without DSL block, cleaned for Telegram)
+    const cleanedText = cleanDisplayText(displayText);
+    await sendLongMessage(chatId, cleanedText);
 
     // Render QR images from proofport data
     if (proofportData?.skillResult) {
@@ -238,7 +270,7 @@ bot.on('message', async (msg) => {
 
   } catch (error) {
     console.error(`[${chatId}] Error:`, error);
-    bot.sendMessage(chatId, `An error occurred: ${error.message}\n\nTry /reset to start a fresh session.`);
+    bot.sendMessage(chatId, `An error occurred: ${error.message}\n\nTry /reset to start a fresh session.`, { disable_web_page_preview: true });
   }
 });
 
