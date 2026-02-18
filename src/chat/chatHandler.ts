@@ -377,8 +377,20 @@ export async function executeSkill(
           };
         }
       }
+
+      // Save payment transaction hash from signing record
+      const paymentTxHash = record.paymentTxHash;
+
       const result = await createAndPollTask(skillName, skillParams, deps);
-      return await enrichProofResult(result, resolvedCircuitId as string, deps);
+      const enriched = await enrichProofResult(result, resolvedCircuitId as string, deps);
+
+      // Add payment receipt if available
+      if (paymentTxHash && typeof enriched === 'object' && enriched !== null) {
+        (enriched as Record<string, unknown>).paymentTxHash = paymentTxHash;
+        (enriched as Record<string, unknown>).paymentReceiptUrl = `https://sepolia.basescan.org/tx/${paymentTxHash}`;
+      }
+
+      return enriched;
     }
 
     const skillParams: Record<string, unknown> = { address, signature, scope, circuitId };

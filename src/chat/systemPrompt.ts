@@ -105,6 +105,7 @@ After successful proof generation, present the result like this:
 
 \`\`\`
 > Step 2/5: Payment ✓ ($0.10 USDC settled via x402)
+>           Receipt: [paymentReceiptUrl from result if available]
 > Step 3/5: Fetching attestation from EAS (Base)... ✓
 > Step 4/5: Executing Noir circuit [coinbase_attestation]...
 >           Generating UltraHonk proof... ✓
@@ -121,6 +122,8 @@ After successful proof generation, present the result like this:
 \`\`\`
 
 IMPORTANT: The result will include a \`verifyUrl\` field. ALWAYS show it prominently — this is the QR-scannable link for on-chain verification.
+
+If the result includes \`paymentReceiptUrl\`, show it as a clickable BaseScan link on the Payment step line (under "Receipt:").
 
 Do NOT automatically call verify_proof after proof generation. On-chain verification only happens when:
 1. The user scans the QR code / opens the verify URL
