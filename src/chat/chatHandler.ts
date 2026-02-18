@@ -340,13 +340,17 @@ export async function executeSkill(
         throw new Error('Signing request missing signature or address');
       }
 
+      // Use scope/circuitId from signing record if not provided in args
+      const resolvedScope = scope || record.scope;
+      const resolvedCircuitId = circuitId || record.circuitId;
+
       const skillParams: Record<string, unknown> = {
         address: record.address,
         signature: record.signature,
-        scope,
-        circuitId,
+        scope: resolvedScope,
+        circuitId: resolvedCircuitId,
       };
-      if (circuitId === 'coinbase_country_attestation') {
+      if (resolvedCircuitId === 'coinbase_country_attestation') {
         skillParams.countryList = countryList;
         skillParams.isIncluded = isIncluded;
       }
@@ -374,7 +378,7 @@ export async function executeSkill(
         }
       }
       const result = await createAndPollTask(skillName, skillParams, deps);
-      return await enrichProofResult(result, circuitId as string, deps);
+      return await enrichProofResult(result, resolvedCircuitId as string, deps);
     }
 
     const skillParams: Record<string, unknown> = { address, signature, scope, circuitId };
