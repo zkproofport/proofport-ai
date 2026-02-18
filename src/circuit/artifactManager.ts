@@ -22,6 +22,8 @@ const COINBASE_LIBS_FILES = [
 const KECCAK256_FILES = [
   'Nargo.toml',
   'src/lib.nr',
+  'src/keccak256.nr',
+  'src/keccak256/tests.nr',
 ];
 
 const DEFAULT_REPO_BASE_URL = 'https://raw.githubusercontent.com/zkproofport/circuits/main';
@@ -68,8 +70,7 @@ export async function downloadArtifacts(circuitsDir: string, repoBaseUrl: string
 
   // Download keccak256 library (v0.1.1 tag)
   const keccak256Dir = path.join(circuitsDir, 'keccak256');
-  const keccak256SrcDir = path.join(keccak256Dir, 'src');
-  await fs.mkdir(keccak256SrcDir, { recursive: true });
+  await fs.mkdir(path.join(keccak256Dir, 'src', 'keccak256'), { recursive: true });
 
   const keccak256BaseUrl = 'https://raw.githubusercontent.com/noir-lang/keccak256/v0.1.1';
   for (const file of KECCAK256_FILES) {
