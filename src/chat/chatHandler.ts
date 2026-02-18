@@ -47,7 +47,31 @@ export interface ChatHandlerDeps {
 
 const MAX_FUNCTION_CALLS = 3;
 const SESSION_TTL_SECONDS = 3600;
-const MAX_SESSION_MESSAGES = 100;
+const MAX_HISTORY_MESSAGES = 50;
+
+function trimHistory(history: LLMMessage[], maxMessages: number): LLMMessage[] {
+  if (history.length <= maxMessages) return history;
+
+  let startIdx = history.length - maxMessages;
+
+  // Walk forward to find a safe boundary — skip orphaned tool results
+  while (startIdx < history.length) {
+    const msg = history[startIdx];
+    // tool results need a preceding assistant(toolCalls) — skip them
+    if (msg.role === 'user' && msg.toolResults && msg.toolResults.length > 0) {
+      startIdx++;
+      continue;
+    }
+    // assistant with toolCalls needs its following tool results — skip it too
+    if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
+      startIdx++;
+      continue;
+    }
+    break;
+  }
+
+  return history.slice(startIdx);
+}
 
 export function createChatRoutes(deps: ChatHandlerDeps): Router {
   const router = Router();
@@ -95,16 +119,6 @@ export function createChatRoutes(deps: ChatHandlerDeps): Router {
 
         secretHash = sessionData.secretHash;
         history = sessionData.history;
-      }
-
-      if (history.length >= MAX_SESSION_MESSAGES) {
-        res.status(400).json({
-          error: 'Session message limit reached. Please start a new session.',
-          code: 'SESSION_LIMIT_REACHED',
-          messageCount: history.length,
-          limit: MAX_SESSION_MESSAGES,
-        });
-        return;
       }
 
       // Add user message to history
@@ -181,10 +195,13 @@ export function createChatRoutes(deps: ChatHandlerDeps): Router {
         finalResponse = 'I apologize, but I was unable to generate a response.';
       }
 
-      // Save full conversation history to Redis
+      // Rolling trim — keeps tool call pairs intact
+      const rolledHistory = trimHistory(history, MAX_HISTORY_MESSAGES);
+
+      // Save conversation history to Redis
       const sessionDataToSave: SessionData = {
         secretHash,
-        history,
+        history: rolledHistory,
       };
 
       await deps.redis.set(sessionKey, JSON.stringify(sessionDataToSave), 'EX', SESSION_TTL_SECONDS);
