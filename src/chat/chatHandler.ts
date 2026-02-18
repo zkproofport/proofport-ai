@@ -9,22 +9,17 @@ import { SYSTEM_PROMPT } from './systemPrompt.js';
 import { getSupportedCircuits } from '../mcp/tools/getCircuits.js';
 import type { SigningRequestRecord } from '../signing/types.js';
 
+export class PaymentRequiredError extends Error {
+  constructor() {
+    super('Payment required for proof generation');
+    this.name = 'PaymentRequiredError';
+  }
+}
+
 interface ChatRequest {
   message: string;
   sessionId?: string;
   sessionSecret?: string;
-}
-
-interface PaymentInfo {
-  required: boolean;
-  cost: string;
-  currency: string;
-  network: string;
-  chainId: number;
-  usdcAddress: string;
-  payTo: string;
-  protocol: string;
-  description: string;
 }
 
 interface ChatResponse {
@@ -33,7 +28,6 @@ interface ChatResponse {
   sessionSecret?: string;
   skillResult?: unknown;
   signingUrl?: string;
-  paymentInfo?: PaymentInfo;
 }
 
 interface SessionData {
@@ -41,12 +35,13 @@ interface SessionData {
   history: LLMMessage[];
 }
 
-interface ChatHandlerDeps {
+export interface ChatHandlerDeps {
   redis: RedisClient;
   taskStore: TaskStore;
   taskEventEmitter: TaskEventEmitter;
   a2aBaseUrl: string;
   llmProvider: LLMProvider;
+  paymentRequiredHeader?: string | null;
 }
 
 const MAX_FUNCTION_CALLS = 3;
@@ -109,7 +104,7 @@ export function createChatRoutes(deps: ChatHandlerDeps): Router {
       let finalResponse: string | undefined;
       let lastSkillResult: unknown;
       let signingUrl: string | undefined;
-      let usedPaidTool = false;
+      const paymentVerified = !!(req as any).paymentVerified;
 
       // Function calling loop
       while (functionCallCount < MAX_FUNCTION_CALLS) {
@@ -127,14 +122,13 @@ export function createChatRoutes(deps: ChatHandlerDeps): Router {
           for (const tc of llmResponse.toolCalls) {
             let skillResult: unknown;
 
-            // Track paid tool usage and limit proof operations to 1 per chat request
+            // Limit proof operations to 1 per chat request
             if (tc.name === 'generate_proof' || tc.name === 'verify_proof') {
-              usedPaidTool = true;
               if (proofCallCount >= 1) {
                 skillResult = { error: 'Only one proof operation allowed per chat request. Please send a new message.' };
               } else {
                 proofCallCount++;
-                skillResult = await executeSkill(tc.name, tc.args, deps);
+                skillResult = await executeSkill(tc.name, tc.args, deps, paymentVerified);
               }
             } else {
               skillResult = await executeSkill(tc.name, tc.args, deps);
@@ -204,22 +198,17 @@ export function createChatRoutes(deps: ChatHandlerDeps): Router {
         response.signingUrl = signingUrl;
       }
 
-      if (usedPaidTool) {
-        response.paymentInfo = {
-          required: true,
-          cost: '$0.10',
-          currency: 'USDC',
-          network: 'Base Sepolia',
-          chainId: 84532,
-          usdcAddress: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-          payTo: '0x5A3E649208Ae15ec52496c1Ae23b2Ff89Ac02f0c',
-          protocol: 'x402',
-          description: 'Proof generation/verification requires x402 USDC payment. Use REST/MCP/A2A endpoints with PAYMENT-SIGNATURE header for programmatic payment.',
-        };
-      }
-
       res.json(response);
     } catch (error) {
+      if (error instanceof PaymentRequiredError && deps.paymentRequiredHeader) {
+        res.setHeader('PAYMENT-REQUIRED', deps.paymentRequiredHeader);
+        res.status(402).json({
+          error: 'Payment required',
+          paymentRequired: true,
+          description: 'Proof generation requires x402 USDC payment. Retry with PAYMENT-SIGNATURE header.',
+        });
+        return;
+      }
       console.error('[Chat] Error:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       res.status(500).json({ error: `Chat failed: ${errorMessage}` });
@@ -229,7 +218,7 @@ export function createChatRoutes(deps: ChatHandlerDeps): Router {
   return router;
 }
 
-async function createAndPollTask(
+export async function createAndPollTask(
   skillName: string,
   skillParams: Record<string, unknown>,
   deps: ChatHandlerDeps
@@ -297,10 +286,11 @@ async function createAndPollTask(
   throw new Error('Task execution timeout');
 }
 
-async function executeSkill(
+export async function executeSkill(
   skillName: string,
   args: Record<string, unknown>,
-  deps: ChatHandlerDeps
+  deps: ChatHandlerDeps,
+  paymentVerified = false,
 ): Promise<unknown> {
   if (skillName === 'get_supported_circuits') {
     return getSupportedCircuits();
@@ -360,6 +350,9 @@ async function executeSkill(
         skillParams.isIncluded = isIncluded;
       }
 
+      if (!paymentVerified && deps.paymentRequiredHeader) {
+        throw new PaymentRequiredError();
+      }
       return await createAndPollTask(skillName, skillParams, deps);
     }
 
@@ -367,6 +360,9 @@ async function executeSkill(
     if (circuitId === 'coinbase_country_attestation') {
       skillParams.countryList = countryList;
       skillParams.isIncluded = isIncluded;
+    }
+    if (!paymentVerified && deps.paymentRequiredHeader) {
+      throw new PaymentRequiredError();
     }
     return await createAndPollTask(skillName, skillParams, deps);
   }

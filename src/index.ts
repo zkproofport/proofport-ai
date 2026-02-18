@@ -12,11 +12,12 @@ import { buildSwaggerSpec } from './swagger.js';
 import { createRedisClient } from './redis/client.js';
 import { RateLimiter } from './redis/rateLimiter.js';
 import { ProofCache } from './redis/proofCache.js';
+import { CleanupWorker } from './redis/cleanupWorker.js';
 import { getAgentCardHandler, getMcpDiscoveryHandler, getOasfAgentHandler } from './a2a/agentCard.js';
 import { createA2aHandler } from './a2a/taskHandler.js';
 import { TaskStore } from './a2a/taskStore.js';
 import { TaskEventEmitter } from './a2a/streaming.js';
-import { createPaymentMiddleware } from './payment/x402Middleware.js';
+import { createPaymentMiddleware, buildPaymentRequiredHeaderValue } from './payment/x402Middleware.js';
 import { createPaymentRecordingMiddleware } from './payment/recordingMiddleware.js';
 import { PaymentFacilitator } from './payment/facilitator.js';
 import { SettlementWorker } from './payment/settlementWorker.js';
@@ -31,6 +32,7 @@ import { ethers } from 'ethers';
 import type { SigningRequestRecord } from './signing/types.js';
 import { createRestRoutes } from './api/restRoutes.js';
 import { createChatRoutes } from './chat/chatHandler.js';
+import { createOpenAIRoutes } from './chat/openaiHandler.js';
 import type { LLMProvider } from './chat/llmProvider.js';
 import { OpenAIProvider } from './chat/openaiClient.js';
 import { GeminiProvider } from './chat/geminiClient.js';
@@ -81,6 +83,9 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   // A2A setup
   const taskStore = new TaskStore(redis, 86400);
   const taskEventEmitter = new TaskEventEmitter();
+
+  // Cleanup worker setup
+  const cleanupWorker = new CleanupWorker(redis);
 
   // Payment setup
   const paymentFacilitator = new PaymentFacilitator(redis, { ttlSeconds: 86400 });
@@ -197,10 +202,10 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
       const message = req.body?.params?.message;
       if (message) {
         const parts = message.parts || [];
-        const isCircuitQuery = parts.some((p: any) =>
-          p.kind === 'data' && p.data?.skill === 'get_supported_circuits'
+        const isFreeSkill = parts.some((p: any) =>
+          p.kind === 'data' && (p.data?.skill === 'get_supported_circuits' || p.data?.skill === 'verify_proof')
         );
-        if (isCircuitQuery) {
+        if (isFreeSkill) {
           next();
           return;
         }
@@ -215,11 +220,10 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   // Payment-gated routes — single POST /a2a handles all A2A v0.3 JSON-RPC methods
   app.post('/a2a', a2aPaymentMiddleware, createA2aHandler({ taskStore, taskEventEmitter, paymentFacilitator }));
 
-  // REST API routes with payment middleware on POST endpoints only
+  // REST API routes with payment middleware on proof generation only (verify is free)
   const restPaymentMiddleware = (req: any, res: any, next: any) => {
     const isProofGeneration = req.path === '/proofs' && req.method === 'POST';
-    const isProofVerification = req.path === '/proofs/verify' && req.method === 'POST';
-    if (isProofGeneration || isProofVerification) {
+    if (isProofGeneration) {
       return paymentMiddleware(req, res, () => {
         paymentRecordingMiddleware(req, res, next);
       });
@@ -318,10 +322,16 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   app.post('/api/signing/callback/:requestId', createSigningCallbackHandler(redis));
   app.post('/api/signing/batch', createBatchSigningHandler(redis));
 
-  // MCP StreamableHTTP endpoint (stateless mode, payment only on tools/call)
+  // MCP StreamableHTTP endpoint (stateless mode, payment only on paid tools/call)
   const mcpPaymentMiddleware = (req: any, res: any, next: any) => {
     const method = req.body?.method;
     if (method === 'tools/call') {
+      // Skip payment for free tools (read-only or verification)
+      const toolName = req.body?.params?.name;
+      if (toolName === 'get_supported_circuits' || toolName === 'verify_proof') {
+        next();
+        return;
+      }
       return paymentMiddleware(req, res, () => {
         paymentRecordingMiddleware(req, res, next);
       });
@@ -344,8 +354,7 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   });
 
   // Chat endpoint (LLM-based natural language interface)
-  // Note: Chat is free — payment awareness is handled by LLM system prompt
-  // and paymentInfo is returned in response when paid tools are invoked
+  // Payment enforced via PaymentRequiredError — same x402 flow as REST/MCP/A2A
   const llmProviders: LLMProvider[] = [];
   if (config.openaiApiKey) {
     llmProviders.push(new OpenAIProvider({ apiKey: config.openaiApiKey }));
@@ -356,11 +365,40 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
 
   if (llmProviders.length > 0) {
     const llmProvider = new MultiLLMProvider(llmProviders);
-    app.use('/api/v1', createChatRoutes({ redis, taskStore, taskEventEmitter, a2aBaseUrl: config.a2aBaseUrl, llmProvider }));
+    const paymentRequiredHeader = buildPaymentRequiredHeaderValue(
+      config,
+      `${config.a2aBaseUrl}/v1/chat/completions`,
+      'ZK proof generation/verification via chat',
+    );
+    const chatDeps = {
+      redis, taskStore, taskEventEmitter, a2aBaseUrl: config.a2aBaseUrl, llmProvider,
+      paymentRequiredHeader,
+    };
+
+    // Conditional payment verifier: only runs x402 verification when PAYMENT-SIGNATURE is present
+    const chatPaymentVerifier = (req: any, res: any, next: any) => {
+      const hasPayment = req.headers['payment-signature'] || req.headers['x-payment'];
+      if (hasPayment) {
+        return paymentMiddleware(req, res, () => {
+          paymentRecordingMiddleware(req, res, () => {
+            req.paymentVerified = true;
+            next();
+          });
+        });
+      }
+      next();
+    };
+
+    app.use('/api/v1', chatPaymentVerifier, createChatRoutes(chatDeps));
+    app.use('/v1', chatPaymentVerifier, createOpenAIRoutes(chatDeps));
     console.log(`[Chat] LLM chat endpoint enabled (providers: ${llmProviders.map(p => p.name).join(' -> ')})`);
+    console.log('[OpenAI] Compatible endpoint enabled at /v1/chat/completions');
   } else {
     app.post('/api/v1/chat', (_req, res) => {
       res.status(503).json({ error: 'Chat not configured. Set OPENAI_API_KEY or GEMINI_API_KEY.' });
+    });
+    app.post('/v1/chat/completions', (_req, res) => {
+      res.status(503).json({ error: { message: 'Chat not configured. Set OPENAI_API_KEY or GEMINI_API_KEY.', type: 'server_error', code: 'not_configured' } });
     });
   }
 
@@ -368,7 +406,7 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   app.use('/s', createSignPageProxy());
   app.use('/_next', createSignPageProxy());
 
-  return { app, paymentFacilitator, teeProvider, taskWorker, settlementWorker };
+  return { app, paymentFacilitator, teeProvider, taskWorker, settlementWorker, cleanupWorker };
 }
 
 async function startServer() {
@@ -389,7 +427,7 @@ async function startServer() {
     const agentTokenId = await ensureAgentRegistered(config, earlyTeeProvider);
 
     // Create app with tokenId
-    const { app, paymentFacilitator, teeProvider, taskWorker, settlementWorker } = createApp(
+    const { app, paymentFacilitator, teeProvider, taskWorker, settlementWorker, cleanupWorker } = createApp(
       config,
       agentTokenId
     );
@@ -405,6 +443,9 @@ async function startServer() {
 
       taskWorker.start();
       console.log('TaskWorker started');
+
+      cleanupWorker.start();
+      console.log('CleanupWorker started');
 
       if (settlementWorker) {
         settlementWorker.start();
