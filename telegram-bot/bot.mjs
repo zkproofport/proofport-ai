@@ -47,7 +47,7 @@ async function callChatAPI(message, session) {
 }
 
 // ─── Helper: Call Chat API with SSE streaming ────────────────────────
-async function callChatAPIStreaming(message, session, onChunk) {
+async function callChatAPIStreaming(message, session, onStep) {
   const headers = { 'Content-Type': 'application/json' };
   if (session) {
     headers['X-Session-Id'] = session.sessionId;
@@ -72,6 +72,7 @@ async function callChatAPIStreaming(message, session, onChunk) {
     return {
       status: resp.status,
       content: '',
+      steps: [],
       error: errorData.error?.message || `HTTP ${resp.status}`,
       headers: {
         sessionId: resp.headers.get('x-session-id'),
@@ -90,6 +91,8 @@ async function callChatAPIStreaming(message, session, onChunk) {
   const decoder = new TextDecoder();
   let buffer = '';
   let fullContent = '';
+  const steps = [];
+  let currentEventType = null;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -103,6 +106,11 @@ async function callChatAPIStreaming(message, session, onChunk) {
       // Skip heartbeat comments and empty lines
       if (!line || line.startsWith(':')) continue;
 
+      if (line.startsWith('event: ')) {
+        currentEventType = line.slice(7).trim();
+        continue;
+      }
+
       if (line.startsWith('data: ')) {
         const data = line.slice(6);
         if (data === '[DONE]') continue;
@@ -110,20 +118,31 @@ async function callChatAPIStreaming(message, session, onChunk) {
         try {
           const parsed = JSON.parse(data);
 
+          // Handle named step events
+          if (currentEventType === 'step') {
+            const stepMessage = parsed.message;
+            steps.push(stepMessage);
+            if (onStep) onStep(stepMessage);
+            currentEventType = null;
+            continue;
+          }
+
           // Check for SSE error events
           if (parsed.error) {
             return {
               status: 200,
               content: fullContent,
+              steps,
               error: parsed.error.message,
               headers: sessionHeaders,
             };
           }
 
+          // Default: content chunk
+          currentEventType = null;
           const delta = parsed.choices?.[0]?.delta;
           if (delta?.content) {
             fullContent += delta.content;
-            onChunk(fullContent);
           }
         } catch {
           // Ignore malformed SSE data lines
@@ -135,6 +154,7 @@ async function callChatAPIStreaming(message, session, onChunk) {
   return {
     status: 200,
     content: fullContent,
+    steps,
     error: null,
     headers: sessionHeaders,
   };
@@ -195,11 +215,14 @@ function cleanDisplayText(text) {
 
 /**
  * Process accumulated content: extract DSL block, clean for Telegram display.
- * Returns cleaned text (without DSL block and code fences).
+ * Strips both complete and partial/incomplete proofport DSL blocks.
  */
 function processForDisplay(content) {
   const { text } = extractProofportBlock(content);
-  return cleanDisplayText(text);
+  let cleaned = cleanDisplayText(text);
+  // Strip any partial/incomplete proofport block that hasn't closed yet
+  cleaned = cleaned.replace(/```proofport[\s\S]*$/, '').trimEnd();
+  return cleaned;
 }
 
 // ─── Helper: Split and send long messages (Telegram 4096 char limit) ─
@@ -301,7 +324,7 @@ bot.onText(/\/circuits/, async (msg) => {
   }
 });
 
-// ─── General message handler (SSE streaming with progressive updates) ─
+// ─── General message handler (SSE streaming with step events) ───────
 bot.on('message', async (msg) => {
   if (!msg.text || msg.text.startsWith('/')) return;
 
@@ -317,64 +340,25 @@ bot.on('message', async (msg) => {
 
   try {
     let session = sessions.get(chatId);
-    let sentMessageId = null;
-    let lastEditedText = '';
-    let editTimer = null;
-    const EDIT_DEBOUNCE_MS = 600;
 
-    // Debounced message update: sends first chunk immediately, then edits every 600ms
-    const scheduleEdit = (accumulatedContent) => {
-      const displayText = processForDisplay(accumulatedContent);
-      if (!displayText || displayText === lastEditedText) return;
-
-      if (editTimer) clearTimeout(editTimer);
-
-      const doEdit = async () => {
-        try {
-          // Truncate for Telegram 4096 limit (leave room for "..." indicator)
-          const text = displayText.length > 4000 ? displayText.slice(0, 3997) + '...' : displayText;
-
-          if (!sentMessageId) {
-            const sent = await bot.sendMessage(chatId, text, { disable_web_page_preview: true });
-            sentMessageId = sent.message_id;
-          } else {
-            await bot.editMessageText(text, {
-              chat_id: chatId,
-              message_id: sentMessageId,
-              disable_web_page_preview: true,
-            });
-          }
-          lastEditedText = displayText;
-        } catch (e) {
-          // Ignore "message is not modified" and other transient errors
-          if (!e.message?.includes('not modified')) {
-            console.error(`[${chatId}] Edit error:`, e.message);
-          }
-        }
-      };
-
-      // First message: send immediately. Subsequent: debounce.
-      if (!sentMessageId) {
-        doEdit();
-      } else {
-        editTimer = setTimeout(doEdit, EDIT_DEBOUNCE_MS);
+    // onStep callback: send each step as a SEPARATE Telegram message
+    const onStep = async (stepMessage) => {
+      try {
+        await bot.sendMessage(chatId, stepMessage, { disable_web_page_preview: true });
+      } catch (e) {
+        console.error(`[${chatId}] Step send error:`, e.message);
       }
     };
 
     // Try streaming call
-    let result = await callChatAPIStreaming(userMessage, session, scheduleEdit);
+    let result = await callChatAPIStreaming(userMessage, session, onStep);
 
     // Session expired → retry without session
     if (result.status === 404 || result.status === 403) {
       console.log(`[${chatId}] Session expired, creating new session...`);
       sessions.delete(chatId);
-      sentMessageId = null;
-      lastEditedText = '';
-      result = await callChatAPIStreaming(userMessage, null, scheduleEdit);
+      result = await callChatAPIStreaming(userMessage, null, onStep);
     }
-
-    // Cancel pending edit timer
-    if (editTimer) clearTimeout(editTimer);
 
     // Save session
     if (result.headers.sessionSecret) {
@@ -385,55 +369,19 @@ bot.on('message', async (msg) => {
       console.log(`[${chatId}] New session created: ${result.headers.sessionId}`);
     }
 
-    // Handle error responses
+    // Handle error
     if (result.error && !result.content) {
-      const errorText = `Error: ${result.error}\n\nTry /reset to start a fresh session.`;
-      if (sentMessageId) {
-        await bot.editMessageText(errorText, {
-          chat_id: chatId,
-          message_id: sentMessageId,
-          disable_web_page_preview: true,
-        }).catch(() => {});
-      } else {
-        await bot.sendMessage(chatId, errorText, { disable_web_page_preview: true });
-      }
+      await bot.sendMessage(chatId, `Error: ${result.error}\n\nTry /reset to start a fresh session.`, { disable_web_page_preview: true });
       return;
     }
 
-    // Final update with complete content
+    // Send final response as ONE message (accumulated content)
     const fullContent = result.content || '';
     const { text: displayText, data: proofportData } = extractProofportBlock(fullContent);
     const cleanedText = cleanDisplayText(displayText);
 
-    if (cleanedText && cleanedText !== lastEditedText) {
-      if (cleanedText.length > 4000) {
-        // Final text too long for single message — send remaining as new messages
-        if (sentMessageId) {
-          // Edit first message with truncated content, send overflow as new
-          const firstPart = cleanedText.slice(0, 4000);
-          await bot.editMessageText(firstPart, {
-            chat_id: chatId,
-            message_id: sentMessageId,
-            disable_web_page_preview: true,
-          }).catch(() => {});
-          const overflow = cleanedText.slice(4000);
-          if (overflow.trim()) {
-            await bot.sendMessage(chatId, overflow.trim(), { disable_web_page_preview: true });
-          }
-        } else {
-          await sendLongMessage(chatId, cleanedText);
-        }
-      } else {
-        if (!sentMessageId) {
-          await bot.sendMessage(chatId, cleanedText, { disable_web_page_preview: true });
-        } else {
-          await bot.editMessageText(cleanedText, {
-            chat_id: chatId,
-            message_id: sentMessageId,
-            disable_web_page_preview: true,
-          }).catch(() => {});
-        }
-      }
+    if (cleanedText) {
+      await sendLongMessage(chatId, cleanedText);
     }
 
     // Send QR images from proofport DSL data

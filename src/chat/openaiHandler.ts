@@ -119,6 +119,7 @@ function buildDslBlock(lastSkillResult: unknown, signingUrl: string | undefined)
  * Run the LLM chat loop with tool execution.
  * When onStream is provided, intermediate LLM content (step descriptions before tool calls)
  * and final content are streamed incrementally via the callback.
+ * When onStep is provided, named SSE step events are emitted before/after tool execution.
  */
 async function runChatLoop(
   history: LLMMessage[],
@@ -126,6 +127,7 @@ async function runChatLoop(
   deps: ChatHandlerDeps,
   paymentVerified: boolean,
   onStream?: (content: string) => void,
+  onStep?: (step: { message: string }) => void,
 ): Promise<{ response: string }> {
   let functionCallCount = 0;
   let proofCallCount = 0;
@@ -149,6 +151,21 @@ async function runChatLoop(
       const toolResults: Array<{ id?: string; name: string; result: unknown }> = [];
 
       for (const tc of llmResponse.toolCalls) {
+        // Emit BEFORE step
+        if (onStep) {
+          if (tc.name === 'generate_proof') {
+            if (!tc.args.requestId) {
+              onStep({ message: '⏳ Step 1/5: Generating signing URL...' });
+            } else {
+              onStep({ message: '⏳ Steps 3-5: Generating proof (this may take 1-2 minutes)...' });
+            }
+          } else if (tc.name === 'verify_proof') {
+            onStep({ message: '⏳ Verifying proof on-chain...' });
+          } else if (tc.name === 'get_supported_circuits') {
+            onStep({ message: '⏳ Fetching supported circuits...' });
+          }
+        }
+
         let skillResult: unknown;
 
         if (tc.name === 'generate_proof' || tc.name === 'verify_proof') {
@@ -166,6 +183,39 @@ async function runChatLoop(
 
         if (typeof skillResult === 'object' && skillResult !== null && 'signingUrl' in skillResult) {
           signingUrl = (skillResult as { signingUrl: string }).signingUrl;
+        }
+
+        // Emit AFTER step based on result
+        if (onStep) {
+          if (tc.name === 'generate_proof') {
+            const sr = skillResult as Record<string, unknown> | undefined;
+            if (sr && typeof sr === 'object') {
+              if (sr.state === 'input-required') {
+                onStep({ message: '✅ Step 1/5: Signing URL generated' });
+              } else if (sr.state === 'payment-required') {
+                onStep({ message: '💳 Step 2/5: Payment required — $0.10 USDC' });
+              } else if (sr.state === 'waiting') {
+                onStep({ message: '⏳ Signing not yet complete' });
+              } else if (sr.proofId || sr.proof) {
+                onStep({ message: '✅ Step 5/5: Proof generated' });
+              } else if (sr.error) {
+                onStep({ message: `❌ Error: ${sr.error}` });
+              }
+            }
+          } else if (tc.name === 'verify_proof') {
+            const sr = skillResult as Record<string, unknown> | undefined;
+            if (sr && typeof sr === 'object') {
+              if (sr.valid === true) {
+                onStep({ message: '✅ Proof is valid on-chain' });
+              } else if (sr.valid === false) {
+                onStep({ message: '❌ Proof verification failed' });
+              } else {
+                onStep({ message: '✅ Verification complete' });
+              }
+            }
+          } else if (tc.name === 'get_supported_circuits') {
+            onStep({ message: '✅ Circuits retrieved' });
+          }
         }
 
         toolResults.push({ id: tc.id, name: tc.name, result: skillResult });
@@ -380,7 +430,12 @@ export function createOpenAIRoutes(deps: ChatHandlerDeps): Router {
             }
           };
 
-          await runChatLoop(history, systemPrompt, deps, paymentVerified, onStream);
+          // Step callback: sends named SSE step events
+          const onStep = (step: { message: string }) => {
+            res.write(`event: step\ndata: ${JSON.stringify(step)}\n\n`);
+          };
+
+          await runChatLoop(history, systemPrompt, deps, paymentVerified, onStream, onStep);
           await saveSession();
 
           // Send final chunk with finish_reason
@@ -418,7 +473,7 @@ export function createOpenAIRoutes(deps: ChatHandlerDeps): Router {
           clearInterval(heartbeat);
         }
       } else {
-        // Non-streaming: run chat loop, then return complete response
+        // Non-streaming: run chat loop, then return complete response (no onStep)
         const { response } = await runChatLoop(history, systemPrompt, deps, paymentVerified);
         await saveSession();
 
