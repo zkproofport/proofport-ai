@@ -312,6 +312,8 @@ export async function executeSkill(
         status: 'pending',
         createdAt: now.toISOString(),
         expiresAt: expiresAt.toISOString(),
+        countryList: countryList as string[] | undefined,
+        isIncluded: isIncluded as boolean | undefined,
       };
 
       const signingKey = `signing:${signingRequestId}`;
@@ -351,8 +353,8 @@ export async function executeSkill(
         circuitId: resolvedCircuitId,
       };
       if (resolvedCircuitId === 'coinbase_country_attestation') {
-        skillParams.countryList = countryList;
-        skillParams.isIncluded = isIncluded;
+        skillParams.countryList = countryList || record.countryList;
+        skillParams.isIncluded = isIncluded ?? record.isIncluded;
       }
 
       // Payment check: if payment is required and not yet completed, return payment page URL

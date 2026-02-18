@@ -339,6 +339,10 @@ export function createRestRoutes(deps: RestRoutesDeps): Router {
           status: 'pending',
           createdAt: now.toISOString(),
           expiresAt: expiresAt.toISOString(),
+          ...(circuitId === 'coinbase_country_attestation' && {
+            countryList,
+            isIncluded,
+          }),
         };
 
         const signingKey = `signing:${signingRequestId}`;

@@ -44,4 +44,6 @@ export interface SigningRequestRecord {
   expiresAt: string;       // ISO timestamp (TTL)
   paymentStatus?: 'pending' | 'completed';  // x402 payment tracking
   paymentTxHash?: string;                   // On-chain tx hash when paid
+  countryList?: string[];  // For coinbase_country_attestation
+  isIncluded?: boolean;    // For coinbase_country_attestation
 }
