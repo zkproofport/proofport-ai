@@ -561,8 +561,10 @@ h1{font-size:1.25rem;font-weight:600;margin-bottom:.5rem;text-align:center}
 .status{padding:1rem;border-radius:8px;margin-top:1rem;font-size:.875rem;text-align:center}
 .loading{background:#1a2a3a;border:1px solid #2a4a5a;color:#93c5fd}
 .success{background:#1a3a2a;border:1px solid #2a5a3a;color:#4ade80}
-.error{background:#3a1a1a;border:1px solid #5a2a2a;color:#f87171}
+.error{background:#3a1a1a;border:1px solid #5a2a2a;color:#f87171;word-break:break-word;overflow-wrap:break-word}
 .done{background:#1a3a2a;border:1px solid #2a5a3a;color:#4ade80}
+.balance-info{color:#999;font-size:.8rem;text-align:center;margin-top:.5rem}
+.faucet-link{color:#93c5fd;text-decoration:underline}
 .spinner{display:inline-block;width:16px;height:16px;border:2px solid #93c5fd;border-top-color:transparent;border-radius:50%;animation:spin 1s linear infinite;vertical-align:middle;margin-right:6px}
 @keyframes spin{to{transform:rotate(360deg)}}
 </style>
@@ -637,11 +639,28 @@ async function handlePay(){
       }
     }
 
+    btn.textContent='Checking balance...';
+    const usdc=new ethers.Contract(payInfo.usdcAddress,ERC20_ABI,signer);
+    const addr=await signer.getAddress();
+    const balance=await usdc.balanceOf(addr);
+    const required=BigInt(payInfo.amount);
+
+    if(balance<required){
+      const balFmt=(Number(balance)/1e6).toFixed(2);
+      const reqFmt=(Number(required)/1e6).toFixed(2);
+      const isTn=payInfo.chainId===84532;
+      st.innerHTML='<div class="status error">Insufficient USDC balance<br><br>'+
+        'Your balance: <strong>'+balFmt+' USDC</strong><br>'+
+        'Required: <strong>'+reqFmt+' USDC</strong></div>'+
+        (isTn?'<p class="balance-info">This is Base Sepolia testnet. Get test USDC from <a class="faucet-link" href="https://faucet.circle.com/" target="_blank">Circle Faucet</a></p>':'');
+      btn.disabled=false;btn.textContent='Connect Wallet & Pay';
+      return;
+    }
+
     btn.textContent='Sending USDC...';
     st.innerHTML='<div class="status loading"><span class="spinner"></span>Confirm the transaction in your wallet</div>';
 
-    const usdc=new ethers.Contract(payInfo.usdcAddress,ERC20_ABI,signer);
-    const tx=await usdc.transfer(payInfo.payTo,BigInt(payInfo.amount));
+    const tx=await usdc.transfer(payInfo.payTo,required);
 
     st.innerHTML='<div class="status loading"><span class="spinner"></span>Waiting for confirmation...</div>';
     btn.textContent='Confirming...';
@@ -659,7 +678,12 @@ async function handlePay(){
     st.innerHTML='<div class="status success">\\u2713 Payment confirmed!</div><p style="text-align:center;color:#999;margin-top:1rem;font-size:.875rem">Return to the chat and tell the agent to proceed.</p>';
   }catch(e){
     console.error(e);
-    st.innerHTML='<div class="status error">'+e.message+'</div>';
+    let msg=e.message||'Unknown error';
+    if(msg.includes('transfer amount exceeds balance'))msg='Insufficient USDC balance. Please fund your wallet and try again.';
+    else if(msg.includes('user rejected'))msg='Transaction rejected by user.';
+    else if(msg.includes('denied'))msg='Transaction denied by wallet.';
+    else if(msg.length>200)msg=msg.substring(0,200)+'...';
+    st.innerHTML='<div class="status error">'+msg+'</div>';
     btn.disabled=false;btn.textContent='Connect Wallet & Pay';
   }
 }
