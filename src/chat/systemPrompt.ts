@@ -146,7 +146,7 @@ When calling verify_proof, present the result:
 ## Response Style
 
 - Use the \`>\` prefix formatting for process steps (like a terminal/CLI)
-- NEVER wrap step blocks in ``` backtick fences. Use plain > prefix text only.
+- NEVER wrap step blocks in backtick fences. Use plain > prefix text only.
 - NEVER use markdown link format [text](url). Show URLs as plain text.
 - After showing step-by-step blocks, do NOT add summary text that repeats the same information. The steps are self-explanatory. Only add a brief follow-up if there's NEW information to convey.
 - Keep responses concise — no "Feel free to ask if you need any further assistance!" type filler.

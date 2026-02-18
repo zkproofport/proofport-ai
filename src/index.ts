@@ -17,7 +17,8 @@ import { getAgentCardHandler, getMcpDiscoveryHandler, getOasfAgentHandler } from
 import { createA2aHandler } from './a2a/taskHandler.js';
 import { TaskStore } from './a2a/taskStore.js';
 import { TaskEventEmitter } from './a2a/streaming.js';
-import { createPaymentMiddleware, buildPaymentRequiredHeaderValue } from './payment/x402Middleware.js';
+import { createPaymentMiddleware, buildPaymentRequiredHeaderValue, PAYMENT_NETWORKS } from './payment/x402Middleware.js';
+import { HTTPFacilitatorClient } from '@x402/core/server';
 import { createPaymentRecordingMiddleware } from './payment/recordingMiddleware.js';
 import { PaymentFacilitator } from './payment/facilitator.js';
 import { SettlementWorker } from './payment/settlementWorker.js';
@@ -493,12 +494,15 @@ el.innerHTML=
       circuitId: record.circuitId,
       scope: record.scope,
       paymentStatus: record.paymentStatus || null,
+      paymentTxHash: record.paymentTxHash || null,
       payTo: config.paymentPayTo,
       amount,
       priceDisplay: config.paymentProofPrice || '$0.10',
       usdcAddress,
       chainId,
       chainName: isTestnet ? 'Base Sepolia' : 'Base',
+      usdcName: 'USDC',
+      usdcVersion: '2',
     });
   });
 
@@ -537,11 +541,97 @@ el.innerHTML=
     res.json({ status: 'confirmed' });
   });
 
-  // Payment page for USDC transfer
+  // Payment via EIP-3009 signed authorization (facilitator settles on-chain)
+  app.post('/api/payment/sign/:requestId', async (req, res) => {
+    const { requestId } = req.params;
+    const { authorization, signature } = req.body;
+
+    if (!authorization || !signature) {
+      res.status(400).json({ error: 'Missing authorization or signature' });
+      return;
+    }
+
+    const key = `signing:${requestId}`;
+    const data = await redis.get(key);
+
+    if (!data) {
+      res.status(404).json({ error: 'Request not found or expired' });
+      return;
+    }
+
+    const record: SigningRequestRecord = JSON.parse(data);
+
+    if (record.paymentStatus === 'completed') {
+      res.json({ success: true, message: 'Payment already completed', txHash: record.paymentTxHash });
+      return;
+    }
+
+    // Build x402 payment payload and requirements for facilitator settlement
+    const network = config.paymentMode === 'testnet'
+      ? PAYMENT_NETWORKS.testnet
+      : PAYMENT_NETWORKS.mainnet;
+    const usdcAddress = network === PAYMENT_NETWORKS.testnet
+      ? '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+      : '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+    const priceStr = (config.paymentProofPrice || '$0.10').replace('$', '');
+    const amount = String(Math.round(parseFloat(priceStr) * 1_000_000));
+
+    const paymentRequirements = {
+      scheme: 'exact' as const,
+      network,
+      amount,
+      asset: usdcAddress,
+      payTo: config.paymentPayTo,
+      maxTimeoutSeconds: 300,
+      extra: { name: 'USDC', version: '2' } as Record<string, unknown>,
+    };
+
+    const resourceUrl = `${config.a2aBaseUrl}/v1/chat/completions`;
+    const paymentPayload = {
+      x402Version: 2,
+      resource: { url: resourceUrl, description: 'ZK proof generation payment', mimeType: '' },
+      accepted: paymentRequirements,
+      payload: { authorization, signature } as Record<string, unknown>,
+    };
+
+    try {
+      const facilitatorClient = new HTTPFacilitatorClient({
+        url: config.paymentFacilitatorUrl,
+      });
+
+      const settleResult = await facilitatorClient.settle(paymentPayload, paymentRequirements);
+
+      if (settleResult.success) {
+        record.paymentStatus = 'completed';
+        record.paymentTxHash = settleResult.transaction;
+        const ttl = await redis.ttl(key);
+        await redis.set(key, JSON.stringify(record), 'EX', ttl > 0 ? ttl : 300);
+
+        console.log(`[Payment] Facilitator settled for ${requestId}: ${settleResult.transaction}`);
+        res.json({
+          success: true,
+          txHash: settleResult.transaction,
+          network: settleResult.network,
+        });
+      } else {
+        console.error(`[Payment] Facilitator settlement failed for ${requestId}: ${settleResult.errorMessage}`);
+        res.status(400).json({
+          error: settleResult.errorMessage || settleResult.errorReason || 'Payment settlement failed',
+        });
+      }
+    } catch (error: any) {
+      console.error('[Payment] Facilitator settle error:', error);
+      res.status(500).json({
+        error: error.message || 'Payment processing failed',
+      });
+    }
+  });
+
+  // Payment page for USDC authorization signing (EIP-3009 via x402 facilitator)
   app.get('/pay/:requestId', (req, res) => {
     const { requestId } = req.params;
     const infoUrl = `${config.a2aBaseUrl}/api/payment/${requestId}`;
-    const confirmUrl = `${config.a2aBaseUrl}/api/payment/confirm/${requestId}`;
+    const signUrl = `${config.a2aBaseUrl}/api/payment/sign/${requestId}`;
     res.setHeader('Content-Type', 'text/html');
     res.send(`<!DOCTYPE html>
 <html lang="en">
@@ -560,6 +650,7 @@ h1{font-size:1.25rem;font-weight:600;margin-bottom:.5rem;text-align:center}
 .label{color:#999;font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.25rem}
 .value{font-family:'Courier New',monospace;font-size:.8rem;color:#93c5fd;word-break:break-all}
 .price{font-size:2rem;font-weight:700;text-align:center;color:#4ade80;margin:1rem 0}
+.no-gas{color:#93c5fd;font-size:.8rem;text-align:center;margin-bottom:.5rem}
 .btn{display:block;width:100%;padding:.875rem;border:none;border-radius:8px;font-size:1rem;font-weight:600;cursor:pointer;margin-top:1rem;transition:opacity .2s}
 .btn-pay{background:#2563eb;color:#fff}
 .btn-pay:hover{opacity:.9}
@@ -569,9 +660,8 @@ h1{font-size:1.25rem;font-weight:600;margin-bottom:.5rem;text-align:center}
 .success{background:#1a3a2a;border:1px solid #2a5a3a;color:#4ade80}
 .error{background:#3a1a1a;border:1px solid #5a2a2a;color:#f87171;word-break:break-word;overflow-wrap:break-word}
 .done{background:#1a3a2a;border:1px solid #2a5a3a;color:#4ade80}
-.balance-info{color:#999;font-size:.8rem;text-align:center;margin-top:.5rem}
-.faucet-link{color:#93c5fd;text-decoration:underline}
 .spinner{display:inline-block;width:16px;height:16px;border:2px solid #93c5fd;border-top-color:transparent;border-radius:50%;animation:spin 1s linear infinite;vertical-align:middle;margin-right:6px}
+.tx-link{color:#93c5fd;text-decoration:underline;font-size:.8rem}
 @keyframes spin{to{transform:rotate(360deg)}}
 </style>
 </head>
@@ -583,8 +673,7 @@ h1{font-size:1.25rem;font-weight:600;margin-bottom:.5rem;text-align:center}
 </div>
 <script>
 const INFO_URL='${infoUrl}';
-const CONFIRM_URL='${confirmUrl}';
-const ERC20_ABI=['function transfer(address to, uint256 amount) returns (bool)','function balanceOf(address) view returns (uint256)'];
+const SIGN_URL='${signUrl}';
 
 let payInfo=null;
 
@@ -596,7 +685,9 @@ async function init(){
     payInfo=await r.json();
 
     if(payInfo.paymentStatus==='completed'){
-      el.innerHTML='<div class="status done">\\u2713 Payment already completed</div><p style="text-align:center;color:#999;margin-top:1rem;font-size:.875rem">Return to the chat and tell the agent to proceed.</p>';
+      const explorerBase=payInfo.chainId===84532?'https://sepolia.basescan.org':'https://basescan.org';
+      const txLink=payInfo.paymentTxHash?'<p style="text-align:center;margin-top:.75rem"><a class="tx-link" href="'+explorerBase+'/tx/'+payInfo.paymentTxHash+'" target="_blank">View transaction</a></p>':'';
+      el.innerHTML='<div class="status done">\\u2713 Payment already completed</div>'+txLink+'<p style="text-align:center;color:#999;margin-top:1rem;font-size:.875rem">Return to the chat and tell the agent to proceed.</p>';
       return;
     }
 
@@ -604,7 +695,8 @@ async function init(){
       '<div class="field"><div class="label">Circuit</div><div class="value">'+payInfo.circuitId+'</div></div>'+
       '<div class="field"><div class="label">Network</div><div class="value">'+payInfo.chainName+'</div></div>'+
       '<div class="price">'+payInfo.priceDisplay+' USDC</div>'+
-      '<button class="btn btn-pay" id="payBtn" onclick="handlePay()">Connect Wallet & Pay</button>'+
+      '<p class="no-gas">No gas fees required. You only sign an authorization.</p>'+
+      '<button class="btn btn-pay" id="payBtn" onclick="handlePay()">Connect Wallet & Sign</button>'+
       '<div id="payStatus"></div>';
   }catch(e){el.innerHTML='<div class="status error">Failed to load: '+e.message+'</div>'}
 }
@@ -618,7 +710,7 @@ async function handlePay(){
   try{
     if(!window.ethereum){
       st.innerHTML='<div class="status error">No wallet detected. Please open this page in a browser with MetaMask or a Web3 wallet.</div>';
-      btn.disabled=false;btn.textContent='Connect Wallet & Pay';
+      btn.disabled=false;btn.textContent='Connect Wallet & Sign';
       return;
     }
 
@@ -645,52 +737,71 @@ async function handlePay(){
       }
     }
 
-    btn.textContent='Checking balance...';
-    const usdc=new ethers.Contract(payInfo.usdcAddress,ERC20_ABI,signer);
+    // Build EIP-712 typed data for TransferWithAuthorization (EIP-3009)
+    btn.textContent='Preparing authorization...';
     const addr=await signer.getAddress();
-    const balance=await usdc.balanceOf(addr);
-    const required=BigInt(payInfo.amount);
+    const now=Math.floor(Date.now()/1000);
+    const nonce=ethers.hexlify(ethers.randomBytes(32));
 
-    if(balance<required){
-      const balFmt=(Number(balance)/1e6).toFixed(2);
-      const reqFmt=(Number(required)/1e6).toFixed(2);
-      const isTn=payInfo.chainId===84532;
-      st.innerHTML='<div class="status error">Insufficient USDC balance<br><br>'+
-        'Your balance: <strong>'+balFmt+' USDC</strong><br>'+
-        'Required: <strong>'+reqFmt+' USDC</strong></div>'+
-        (isTn?'<p class="balance-info">This is Base Sepolia testnet. Get test USDC from <a class="faucet-link" href="https://faucet.circle.com/" target="_blank">Circle Faucet</a></p>':'');
-      btn.disabled=false;btn.textContent='Connect Wallet & Pay';
-      return;
-    }
+    const domain={
+      name:payInfo.usdcName,
+      version:payInfo.usdcVersion,
+      chainId:payInfo.chainId,
+      verifyingContract:payInfo.usdcAddress
+    };
 
-    btn.textContent='Sending USDC...';
-    st.innerHTML='<div class="status loading"><span class="spinner"></span>Confirm the transaction in your wallet</div>';
+    const types={
+      TransferWithAuthorization:[
+        {name:'from',type:'address'},
+        {name:'to',type:'address'},
+        {name:'value',type:'uint256'},
+        {name:'validAfter',type:'uint256'},
+        {name:'validBefore',type:'uint256'},
+        {name:'nonce',type:'bytes32'}
+      ]
+    };
 
-    const tx=await usdc.transfer(payInfo.payTo,required);
+    const authorization={
+      from:addr,
+      to:payInfo.payTo,
+      value:payInfo.amount,
+      validAfter:String(now-600),
+      validBefore:String(now+300),
+      nonce:nonce
+    };
 
-    st.innerHTML='<div class="status loading"><span class="spinner"></span>Waiting for confirmation...</div>';
-    btn.textContent='Confirming...';
-    await tx.wait(1);
+    btn.textContent='Sign in wallet...';
+    st.innerHTML='<div class="status loading"><span class="spinner"></span>Sign the authorization in your wallet (no gas)</div>';
 
-    // Notify backend
-    st.innerHTML='<div class="status loading"><span class="spinner"></span>Confirming payment...</div>';
-    await fetch(CONFIRM_URL,{
+    const signature=await signer.signTypedData(domain,types,authorization);
+
+    // Send signed authorization to backend for facilitator settlement
+    btn.textContent='Processing payment...';
+    st.innerHTML='<div class="status loading"><span class="spinner"></span>Facilitator is processing payment...</div>';
+
+    const resp=await fetch(SIGN_URL,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({txHash:tx.hash})
+      body:JSON.stringify({authorization,signature})
     });
 
-    btn.style.display='none';
-    st.innerHTML='<div class="status success">\\u2713 Payment confirmed!</div><p style="text-align:center;color:#999;margin-top:1rem;font-size:.875rem">Return to the chat and tell the agent to proceed.</p>';
+    const result=await resp.json();
+
+    if(resp.ok&&result.success){
+      const explorerBase=payInfo.chainId===84532?'https://sepolia.basescan.org':'https://basescan.org';
+      const txLink=result.txHash?'<p style="text-align:center;margin-top:.75rem"><a class="tx-link" href="'+explorerBase+'/tx/'+result.txHash+'" target="_blank">View transaction</a></p>':'';
+      btn.style.display='none';
+      st.innerHTML='<div class="status success">\\u2713 Payment confirmed!</div>'+txLink+'<p style="text-align:center;color:#999;margin-top:1rem;font-size:.875rem">Return to the chat and tell the agent to proceed.</p>';
+    }else{
+      throw new Error(result.error||'Payment settlement failed');
+    }
   }catch(e){
     console.error(e);
     let msg=e.message||'Unknown error';
-    if(msg.includes('transfer amount exceeds balance'))msg='Insufficient USDC balance. Please fund your wallet and try again.';
-    else if(msg.includes('user rejected'))msg='Transaction rejected by user.';
-    else if(msg.includes('denied'))msg='Transaction denied by wallet.';
-    else if(msg.length>200)msg=msg.substring(0,200)+'...';
+    if(msg.includes('user rejected'))msg='Signature rejected by user.';
+    else if(msg.includes('denied'))msg='Signature denied by wallet.';
     st.innerHTML='<div class="status error">'+msg+'</div>';
-    btn.disabled=false;btn.textContent='Connect Wallet & Pay';
+    btn.disabled=false;btn.textContent='Connect Wallet & Sign';
   }
 }
 
