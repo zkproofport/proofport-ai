@@ -47,26 +47,6 @@ export interface ChatHandlerDeps {
 
 const MAX_FUNCTION_CALLS = 3;
 const SESSION_TTL_SECONDS = 3600;
-const MAX_HISTORY_MESSAGES = 20;
-
-function trimHistory(history: LLMMessage[], maxMessages: number): LLMMessage[] {
-  if (history.length <= maxMessages) return history;
-
-  let startIdx = history.length - maxMessages;
-
-  while (startIdx < history.length) {
-    const msg = history[startIdx];
-    if (msg.role === 'user' && msg.toolResults && msg.toolResults.length > 0) {
-      startIdx--;
-      continue;
-    }
-    break;
-  }
-
-  if (startIdx < 0) startIdx = 0;
-
-  return history.slice(startIdx);
-}
 
 export function createChatRoutes(deps: ChatHandlerDeps): Router {
   const router = Router();
@@ -190,13 +170,10 @@ export function createChatRoutes(deps: ChatHandlerDeps): Router {
         finalResponse = 'I apologize, but I was unable to generate a response.';
       }
 
-      // Keep only last N messages to prevent context overflow
-      const trimmedHistory = trimHistory(history, MAX_HISTORY_MESSAGES);
-
-      // Save updated conversation history to Redis
+      // Save full conversation history to Redis
       const sessionDataToSave: SessionData = {
         secretHash,
-        history: trimmedHistory,
+        history,
       };
 
       await deps.redis.set(sessionKey, JSON.stringify(sessionDataToSave), 'EX', SESSION_TTL_SECONDS);
