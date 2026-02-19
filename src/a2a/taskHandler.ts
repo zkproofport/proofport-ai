@@ -62,14 +62,38 @@ function extractSkillFromMessage(message: Message): { skill: string; params: Rec
   for (const part of message.parts) {
     if (part.kind === 'text') {
       const text = part.text.toLowerCase();
+      const originalText = part.text;
+
+      // Extract common params from text
+      const extractedParams: Record<string, unknown> = {};
+
+      // Extract circuitId
+      if (text.includes('coinbase_country') || text.includes('country_attestation') || text.includes('country attestation')) {
+        extractedParams.circuitId = 'coinbase_country_attestation';
+      } else if (text.includes('coinbase_attestation') || text.includes('coinbase kyc') || text.includes('kyc')) {
+        extractedParams.circuitId = 'coinbase_attestation';
+      }
+
+      // Extract scope (domain-like pattern)
+      const domainMatch = originalText.match(/\b([a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.(?:com|org|net|io|xyz|app|dev|co|kr|jp))\b/i);
+      if (domainMatch) {
+        extractedParams.scope = domainMatch[1];
+      }
+
+      // Extract address (0x-prefixed hex, 40 hex chars)
+      const addressMatch = originalText.match(/\b(0x[a-fA-F0-9]{40})\b/);
+      if (addressMatch) {
+        extractedParams.address = addressMatch[1];
+      }
+
       if (text.includes('verify') || text.includes('verification')) {
-        return { skill: 'verify_proof', params: {} };
+        return { skill: 'verify_proof', params: extractedParams };
       }
       if (text.includes('circuit') || text.includes('supported') || text.includes('list')) {
-        return { skill: 'get_supported_circuits', params: {} };
+        return { skill: 'get_supported_circuits', params: extractedParams };
       }
       if (text.includes('proof') || text.includes('generate') || text.includes('prove')) {
-        return { skill: 'generate_proof', params: {} };
+        return { skill: 'generate_proof', params: extractedParams };
       }
     }
   }
