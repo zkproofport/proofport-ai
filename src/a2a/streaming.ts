@@ -41,6 +41,14 @@ export class TaskEventEmitter extends EventEmitter {
 
 /**
  * Write an SSE stream for a task. Used by both message/stream and tasks/resubscribe.
+ *
+ * A2A v0.3 streaming format — each SSE data line contains a JSON-RPC response
+ * where result is either:
+ *   - TaskStatusUpdateEvent: { id, status, final }  — detected by 'status' field
+ *   - TaskArtifactUpdateEvent: { id, artifact, final } — detected by 'artifact' field
+ *
+ * a2a-ui discriminates events via duck-typing ('status' in event vs 'artifact' in event)
+ * and stops streaming when final === true.
  */
 export function attachSseStream(
   res: Response,
@@ -55,10 +63,40 @@ export function attachSseStream(
   res.write(':keepalive\n\n');
 
   const eventListener = (event: { type: string; data: unknown }) => {
+    let result: unknown;
+
+    if (event.type === 'statusUpdate') {
+      const data = event.data as StatusUpdateEvent;
+      result = {
+        id: data.taskId,
+        status: data.status,
+        final: data.final,
+      };
+    } else if (event.type === 'artifactUpdate') {
+      const data = event.data as ArtifactUpdateEvent;
+      result = {
+        id: data.taskId,
+        artifact: {
+          ...data.artifact,
+          artifactId: data.artifact.id,
+        },
+        final: false,
+      };
+    } else if (event.type === 'task') {
+      // Final task event — close the stream.
+      // The preceding statusUpdate with final:true already carries completion data.
+      const task = event.data as A2aTask;
+      result = {
+        id: task.id,
+        status: task.status,
+        final: true,
+      };
+    }
+
     const response = {
       jsonrpc: '2.0' as const,
       id: jsonRpcId,
-      result: { [event.type]: event.data },
+      result,
     };
     res.write(`data: ${JSON.stringify(response)}\n\n`);
 

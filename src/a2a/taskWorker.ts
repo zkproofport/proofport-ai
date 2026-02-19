@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { TaskStore, type A2aTask, type Artifact } from './taskStore.js';
+import { TaskStore, type A2aTask, type Artifact, type Message } from './taskStore.js';
 import { TaskEventEmitter } from './streaming.js';
 import type { Config } from '../config/index.js';
 import { BbProver } from '../prover/bbProver.js';
@@ -104,6 +104,18 @@ export class TaskWorker {
       span.setStatus({ code: SpanStatusCode.ERROR, message: error.message || String(error) });
       console.error(`Task ${task.id} failed:`, error);
       const errorMessage = error.message || String(error);
+
+      // Add error artifact so a2a-ui can display the error text
+      const errorArtifact: Artifact = {
+        id: randomUUID(),
+        mimeType: 'application/json',
+        parts: [
+          { kind: 'text', text: errorMessage },
+        ],
+      };
+      await this.deps.taskStore.addArtifact(task.id, errorArtifact);
+      this.deps.taskEventEmitter.emitArtifactUpdate(task.id, errorArtifact);
+
       await this.deps.taskStore.updateTaskStatus(task.id, 'failed', {
         role: 'agent',
         parts: [{ kind: 'text', text: errorMessage }],
@@ -213,29 +225,38 @@ export class TaskWorker {
       const signingUrl = `${this.deps.config.signPageUrl.replace(/\/$/, '')}/s/${newRequestId}`;
 
       // Build artifact with awaiting_signature status
+      const signingText = 'Signature required. Please open the signing URL to connect your wallet and sign.';
       const artifact: Artifact = {
         id: randomUUID(),
         mimeType: 'application/json',
-        parts: [{
-          kind: 'data',
-          mimeType: 'application/json',
-          data: {
-            status: 'awaiting_signature',
-            signingUrl,
-            requestId: newRequestId,
-            message:
-              `Signature required. Please ask the user to open the signing URL and connect their wallet to sign. ` +
-              `Then call generate_proof again with requestId: "${newRequestId}".`,
+        parts: [
+          { kind: 'text', text: signingText },
+          {
+            kind: 'data',
+            mimeType: 'application/json',
+            data: {
+              status: 'awaiting_signature',
+              signingUrl,
+              requestId: newRequestId,
+              message:
+                `Signature required. Please ask the user to open the signing URL and connect their wallet to sign. ` +
+                `Then call generate_proof again with requestId: "${newRequestId}".`,
+            },
           },
-        }],
+        ],
       };
 
       await this.deps.taskStore.addArtifact(task.id, artifact);
-      const updatedTask = await this.deps.taskStore.updateTaskStatus(task.id, 'completed');
+      const statusMsg: Message = {
+        role: 'agent',
+        parts: [{ kind: 'text', text: 'Signature required. Please open the signing URL to connect your wallet and sign.' }],
+        timestamp: new Date().toISOString(),
+      };
+      const updatedTask = await this.deps.taskStore.updateTaskStatus(task.id, 'completed', statusMsg);
       emitter.emitArtifactUpdate(task.id, artifact);
       emitter.emitStatusUpdate(
         task.id,
-        { state: 'completed', timestamp: new Date().toISOString() },
+        { state: 'completed', message: statusMsg, timestamp: new Date().toISOString() },
         true
       );
       emitter.emitTaskComplete(task.id, updatedTask);
@@ -339,22 +360,31 @@ export class TaskWorker {
     };
 
     // Build artifact
+    const proofText = `Proof generated successfully for circuit ${circuitId}.`;
     const artifact: Artifact = {
       id: randomUUID(),
       mimeType: 'application/json',
-      parts: [{
-        kind: 'data',
-        mimeType: 'application/json',
-        data: result,
-      }],
+      parts: [
+        { kind: 'text', text: proofText },
+        {
+          kind: 'data',
+          mimeType: 'application/json',
+          data: result,
+        },
+      ],
     };
 
     await this.deps.taskStore.addArtifact(task.id, artifact);
-    const updatedTask = await this.deps.taskStore.updateTaskStatus(task.id, 'completed');
+    const proofStatusMsg: Message = {
+      role: 'agent',
+      parts: [{ kind: 'text', text: proofText }],
+      timestamp: new Date().toISOString(),
+    };
+    const updatedTask = await this.deps.taskStore.updateTaskStatus(task.id, 'completed', proofStatusMsg);
     emitter.emitArtifactUpdate(task.id, artifact);
     emitter.emitStatusUpdate(
       task.id,
-      { state: 'completed', timestamp: new Date().toISOString() },
+      { state: 'completed', message: proofStatusMsg, timestamp: new Date().toISOString() },
       true
     );
     emitter.emitTaskComplete(task.id, updatedTask);
@@ -463,22 +493,31 @@ export class TaskWorker {
         error: verifyError.message || String(verifyError),
       };
 
+      const verifyErrText = `Proof verification failed: ${verifyError.message || 'contract reverted'}`;
       const artifact: Artifact = {
         id: randomUUID(),
         mimeType: 'application/json',
-        parts: [{
-          kind: 'data',
-          mimeType: 'application/json',
-          data: errorResult,
-        }],
+        parts: [
+          { kind: 'text', text: verifyErrText },
+          {
+            kind: 'data',
+            mimeType: 'application/json',
+            data: errorResult,
+          },
+        ],
       };
 
       await this.deps.taskStore.addArtifact(task.id, artifact);
-      const updatedTask = await this.deps.taskStore.updateTaskStatus(task.id, 'completed');
+      const verifyErrMsg: Message = {
+        role: 'agent',
+        parts: [{ kind: 'text', text: verifyErrText }],
+        timestamp: new Date().toISOString(),
+      };
+      const updatedTask = await this.deps.taskStore.updateTaskStatus(task.id, 'completed', verifyErrMsg);
       emitter.emitArtifactUpdate(task.id, artifact);
       emitter.emitStatusUpdate(
         task.id,
-        { state: 'completed', timestamp: new Date().toISOString() },
+        { state: 'completed', message: verifyErrMsg, timestamp: new Date().toISOString() },
         true
       );
       emitter.emitTaskComplete(task.id, updatedTask);
@@ -493,22 +532,31 @@ export class TaskWorker {
     };
 
     // Build artifact
+    const verifyText = `Proof verification complete: ${isValid ? 'valid' : 'invalid'} (circuit: ${circuitId}, chain: ${chainId}).`;
     const artifact: Artifact = {
       id: randomUUID(),
       mimeType: 'application/json',
-      parts: [{
-        kind: 'data',
-        mimeType: 'application/json',
-        data: result,
-      }],
+      parts: [
+        { kind: 'text', text: verifyText },
+        {
+          kind: 'data',
+          mimeType: 'application/json',
+          data: result,
+        },
+      ],
     };
 
     await this.deps.taskStore.addArtifact(task.id, artifact);
-    const updatedTask = await this.deps.taskStore.updateTaskStatus(task.id, 'completed');
+    const verifyMsg: Message = {
+      role: 'agent',
+      parts: [{ kind: 'text', text: verifyText }],
+      timestamp: new Date().toISOString(),
+    };
+    const updatedTask = await this.deps.taskStore.updateTaskStatus(task.id, 'completed', verifyMsg);
     emitter.emitArtifactUpdate(task.id, artifact);
     emitter.emitStatusUpdate(
       task.id,
-      { state: 'completed', timestamp: new Date().toISOString() },
+      { state: 'completed', message: verifyMsg, timestamp: new Date().toISOString() },
       true
     );
     emitter.emitTaskComplete(task.id, updatedTask);
@@ -538,24 +586,33 @@ export class TaskWorker {
     }));
 
     const result = { circuits, chainId };
+    const circuitText = `Found ${circuits.length} supported circuits on chain ${chainId}.`;
 
     // Build artifact
     const artifact: Artifact = {
       id: randomUUID(),
       mimeType: 'application/json',
-      parts: [{
-        kind: 'data',
-        mimeType: 'application/json',
-        data: result,
-      }],
+      parts: [
+        { kind: 'text', text: circuitText },
+        {
+          kind: 'data',
+          mimeType: 'application/json',
+          data: result,
+        },
+      ],
     };
 
     await this.deps.taskStore.addArtifact(task.id, artifact);
-    const updatedTask = await this.deps.taskStore.updateTaskStatus(task.id, 'completed');
+    const circuitMsg: Message = {
+      role: 'agent',
+      parts: [{ kind: 'text', text: circuitText }],
+      timestamp: new Date().toISOString(),
+    };
+    const updatedTask = await this.deps.taskStore.updateTaskStatus(task.id, 'completed', circuitMsg);
     emitter.emitArtifactUpdate(task.id, artifact);
     emitter.emitStatusUpdate(
       task.id,
-      { state: 'completed', timestamp: new Date().toISOString() },
+      { state: 'completed', message: circuitMsg, timestamp: new Date().toISOString() },
       true
     );
     emitter.emitTaskComplete(task.id, updatedTask);
