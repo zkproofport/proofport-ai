@@ -7,29 +7,30 @@
  */
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 import { SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
-import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
+import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-proto';
 import { resourceFromAttributes } from '@opentelemetry/resources';
 import { ATTR_SERVICE_NAME } from '@opentelemetry/semantic-conventions';
 
 const endpoint = process.env.PHOENIX_COLLECTOR_ENDPOINT;
 
 if (endpoint) {
+  const exporter = new OTLPTraceExporter({
+    url: `${endpoint}/v1/traces`,
+  });
+
   const provider = new NodeTracerProvider({
     resource: resourceFromAttributes({
       [ATTR_SERVICE_NAME]: 'proveragent.eth',
       'project.name': 'proveragent.eth',
+      'openinference.project.name': 'proveragent.eth',
     }),
     spanProcessors: [
-      new SimpleSpanProcessor(
-        new OTLPTraceExporter({
-          url: `${endpoint}/v1/traces`,
-        })
-      ),
+      new SimpleSpanProcessor(exporter),
     ],
   });
 
   provider.register();
-  console.log(`[tracing] OTLP exporter initialized → ${endpoint}/v1/traces`);
+  console.log(`[tracing] OTLP protobuf exporter initialized → ${endpoint}/v1/traces`);
 } else {
   console.log('[tracing] PHOENIX_COLLECTOR_ENDPOINT not set, tracing disabled');
 }
