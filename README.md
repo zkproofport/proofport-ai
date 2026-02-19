@@ -7,6 +7,7 @@ Agent-native ZK proof infrastructure for ZKProofport. A self-contained microserv
 | Document | Description |
 |----------|-------------|
 | [Integration Guide](docs/integration-guide.md) | Complete guide for Claude MCP, GPT Actions, Google ADK, Telegram/Discord, x402 payment |
+| [Manual Testing Guide](docs/a2a-manual-testing-guide.md) | Step-by-step a2a-ui + Phoenix manual testing walkthrough |
 | [E2E Test Report](docs/e2e-test-report-2026-02-15.md) | Staging environment E2E test results (20/20 pass) |
 
 ## Architecture Overview
@@ -217,7 +218,7 @@ Publicly accessible agent identity document. Used by other agents to discover ca
 
 ```json
 {
-  "name": "ZKProofport Prover Agent",
+  "name": "proveragent.eth",
   "description": "Generate and verify zero-knowledge proofs for KYC attestations",
   "version": "1.0.0",
   "capabilities": {
@@ -755,6 +756,104 @@ tests/
 - HTTP Mocking: supertest
 - Redis: Mocked via ioredis test mode
 - Prover: Mocked HTTP responses and bb CLI
+
+## A2A Testing (a2a-ui + Phoenix)
+
+Visual A2A testing environment with [a2a-ui](https://github.com/a2a-community/a2a-ui) and [Arize Phoenix](https://phoenix.arize.com/) tracing.
+
+For detailed step-by-step instructions, see the [Manual Testing Guide](docs/a2a-manual-testing-guide.md).
+
+### Quick Start
+
+```bash
+# Ensure .env.development exists
+cp .env.example .env.development
+# Fill in required values (PROVER_PRIVATE_KEY, NULLIFIER_REGISTRY_ADDRESS, etc.)
+
+# Start full test stack (proofport-ai + Phoenix + a2a-ui)
+./scripts/a2a-test.sh
+
+# Stop
+./scripts/a2a-test-stop.sh
+
+# Run automated E2E tests against live Docker stack
+npm run test:e2e
+
+# Quick E2E (skip Phoenix trace check)
+npm run test:e2e:quick
+```
+
+### Services
+
+| Service | URL | Purpose |
+|---------|-----|---------|
+| proofport-ai | `http://localhost:4002` | A2A agent server |
+| Agent Card | `http://localhost:4002/.well-known/agent-card.json` | Agent discovery |
+| a2a-ui | `http://localhost:3001` | A2A web test UI |
+| Phoenix | `http://localhost:6006` | Trace visualization |
+
+### Usage
+
+1. Open `http://localhost:3001`
+2. Go to **Agents** tab → click **Add** → enter `http://localhost:4002` → click **Create Agent**
+3. Go to **Conversations** tab → click **Add** → select **proveragent.eth** → click **Create Conversation**
+4. Click the third icon button (open/expand) on the conversation row to enter chat view
+5. Type `list supported circuits` in the "Ask anything" field → press Enter
+6. Verify: agent returns artifact with `coinbase_attestation` and `coinbase_country_attestation` circuit data
+7. Check Phoenix traces at `http://localhost:6006` (project: `proveragent.eth`)
+
+### Architecture
+
+```
+Browser → a2a-ui (:3001) → POST /a2a → proofport-ai (:4002)
+              ↓                              ↓
+       reads traces from              sends OTLP traces to
+              ↓                              ↓
+         Phoenix UI (:6006) ← ← ← Phoenix Collector
+```
+
+The test stack uses Docker Compose override:
+```bash
+docker compose -f docker-compose.yml -f docker-compose.test.yml up --build -d
+```
+
+### Text-Based Skill Inference
+
+a2a-ui sends text messages. proofport-ai infers the skill from keywords:
+
+| Text Input | Detected Skill |
+|-----------|---------------|
+| "list supported circuits" | `get_supported_circuits` |
+| "verify this proof" | `verify_proof` |
+| "generate a proof" | `generate_proof` |
+
+For `generate_proof` with full parameters (address, signature, scope), use curl with DataPart:
+```bash
+curl -X POST http://localhost:4002/a2a \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"message/send","params":{
+    "message":{"role":"user","parts":[{"kind":"data","mimeType":"application/json",
+    "data":{"skill":"generate_proof","address":"0x...","signature":"0x...",
+    "scope":"my-app","circuitId":"coinbase_attestation"}}]}}}'
+```
+
+### Phoenix Tracing
+
+proofport-ai sends OpenTelemetry traces to Phoenix with `session_id` attribute matching the A2A `contextId`. This allows a2a-ui's trace sidebar to show per-conversation execution flows.
+
+Instrumented spans:
+- `a2a.message.send` / `a2a.message.stream` — A2A request handling
+- `a2a.tasks.get` / `a2a.tasks.cancel` — Task queries
+- `a2a.task.process` — Background task execution (proof generation/verification)
+
+### Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `A2A_CORS_ORIGINS` | (empty) | Comma-separated CORS origins for a2a-ui (e.g., `http://localhost:3001`) |
+| `PHOENIX_COLLECTOR_ENDPOINT` | (empty) | Phoenix OTLP endpoint (e.g., `http://phoenix:6006`) |
+
+Both are automatically set by `docker-compose.test.yml`.
 
 ## Version Locks
 
