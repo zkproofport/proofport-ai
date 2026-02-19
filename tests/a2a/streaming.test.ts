@@ -237,10 +237,9 @@ describe('attachSseStream', () => {
 
     expect(parsed.jsonrpc).toBe('2.0');
     expect(parsed.id).toBe(42);
-    expect(parsed.result.statusUpdate).toBeDefined();
-    expect(parsed.result.statusUpdate.taskId).toBe(taskId);
-    expect(parsed.result.statusUpdate.status).toEqual(status);
-    expect(parsed.result.statusUpdate.final).toBe(false);
+    expect(parsed.result.id).toBe(taskId);
+    expect(parsed.result.status).toEqual(status);
+    expect(parsed.result.final).toBe(false);
   });
 
   it('forwards artifactUpdate events as SSE with JSON-RPC envelope', () => {
@@ -263,8 +262,9 @@ describe('attachSseStream', () => {
 
     expect(parsed.jsonrpc).toBe('2.0');
     expect(parsed.id).toBe('rpc-art');
-    expect(parsed.result.artifactUpdate).toBeDefined();
-    expect(parsed.result.artifactUpdate.artifact).toEqual(artifact);
+    expect(parsed.result.id).toBe(taskId);
+    expect(parsed.result.artifact).toEqual({ ...artifact, artifactId: artifact.id });
+    expect(parsed.result.final).toBe(false);
   });
 
   it('closes stream on task complete event', () => {

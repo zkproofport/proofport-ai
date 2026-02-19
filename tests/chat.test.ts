@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GeminiClient, type GeminiMessage } from '../src/chat/geminiClient.js';
-import { SKILL_TOOLS } from '../src/chat/tools.js';
+import { CHAT_TOOLS } from '../src/chat/tools.js';
 import { SYSTEM_PROMPT } from '../src/chat/systemPrompt.js';
 
 describe('Chat Integration', () => {
@@ -39,17 +39,18 @@ describe('Chat Integration', () => {
         { role: 'user', parts: [{ text: 'Hello' }] },
       ];
 
-      await client.chat(messages, SYSTEM_PROMPT, SKILL_TOOLS);
+      const geminiTools = [{ functionDeclarations: CHAT_TOOLS.map(t => ({ name: t.name, description: t.description, parameters: t.parameters })) }];
+      await client.chat(messages, SYSTEM_PROMPT, geminiTools);
 
       expect(mockFetch).toHaveBeenCalledTimes(1);
       const callArgs = mockFetch.mock.calls[0];
-      expect(callArgs[0]).toContain('gemini-2.0-flash-exp:generateContent');
+      expect(callArgs[0]).toContain('gemini-2.0-flash-lite:generateContent');
       expect(callArgs[0]).toContain('key=test-key');
 
       const requestBody = JSON.parse(callArgs[1].body);
       expect(requestBody.contents).toEqual(messages);
       expect(requestBody.systemInstruction.parts[0].text).toBe(SYSTEM_PROMPT);
-      expect(requestBody.tools).toEqual(SKILL_TOOLS);
+      expect(requestBody.tools).toEqual(geminiTools);
     });
 
     it('should handle API errors', async () => {
@@ -86,19 +87,18 @@ describe('Chat Integration', () => {
     });
   });
 
-  describe('SKILL_TOOLS', () => {
+  describe('CHAT_TOOLS', () => {
     it('should define all three skills', () => {
-      expect(SKILL_TOOLS).toHaveLength(1);
-      expect(SKILL_TOOLS[0].functionDeclarations).toHaveLength(3);
+      expect(CHAT_TOOLS).toHaveLength(3);
 
-      const skillNames = SKILL_TOOLS[0].functionDeclarations.map(fn => fn.name);
+      const skillNames = CHAT_TOOLS.map(fn => fn.name);
       expect(skillNames).toContain('generate_proof');
       expect(skillNames).toContain('verify_proof');
       expect(skillNames).toContain('get_supported_circuits');
     });
 
     it('should define generate_proof with correct parameters', () => {
-      const generateProof = SKILL_TOOLS[0].functionDeclarations.find(fn => fn.name === 'generate_proof');
+      const generateProof = CHAT_TOOLS.find(fn => fn.name === 'generate_proof');
       expect(generateProof).toBeDefined();
       expect(generateProof?.parameters.required).toEqual(['circuitId', 'scope']);
       expect(generateProof?.parameters.properties).toHaveProperty('circuitId');
@@ -111,7 +111,7 @@ describe('Chat Integration', () => {
     });
 
     it('should define verify_proof with correct parameters', () => {
-      const verifyProof = SKILL_TOOLS[0].functionDeclarations.find(fn => fn.name === 'verify_proof');
+      const verifyProof = CHAT_TOOLS.find(fn => fn.name === 'verify_proof');
       expect(verifyProof).toBeDefined();
       expect(verifyProof?.parameters.required).toEqual(['circuitId', 'proof', 'publicInputs']);
       expect(verifyProof?.parameters.properties).toHaveProperty('circuitId');
@@ -121,7 +121,7 @@ describe('Chat Integration', () => {
     });
 
     it('should define get_supported_circuits with no required parameters', () => {
-      const getCircuits = SKILL_TOOLS[0].functionDeclarations.find(fn => fn.name === 'get_supported_circuits');
+      const getCircuits = CHAT_TOOLS.find(fn => fn.name === 'get_supported_circuits');
       expect(getCircuits).toBeDefined();
       expect(getCircuits?.parameters.required).toEqual([]);
     });
@@ -129,7 +129,7 @@ describe('Chat Integration', () => {
 
   describe('SYSTEM_PROMPT', () => {
     it('should contain key instructions', () => {
-      expect(SYSTEM_PROMPT).toContain('ZKProofport');
+      expect(SYSTEM_PROMPT).toContain('proveragent.eth');
       expect(SYSTEM_PROMPT).toContain('generate_proof');
       expect(SYSTEM_PROMPT).toContain('verify_proof');
       expect(SYSTEM_PROMPT).toContain('get_supported_circuits');
@@ -138,7 +138,7 @@ describe('Chat Integration', () => {
     });
 
     it('should emphasize not making up data', () => {
-      expect(SYSTEM_PROMPT).toContain('NEVER make up proof data');
+      expect(SYSTEM_PROMPT).toContain('NEVER fabricate proof data');
       expect(SYSTEM_PROMPT).toContain('ALWAYS use the function calling tools');
     });
   });

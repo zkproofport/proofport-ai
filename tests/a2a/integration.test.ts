@@ -96,7 +96,7 @@ describe('A2A Integration Tests', () => {
       expect(response.body).toMatchObject({
         name: 'proveragent.eth',
         description: expect.any(String),
-        url: 'https://test.example.com',
+        url: 'https://test.example.com/a2a',
         version: '1.0.0',
         protocolVersion: '0.3.0',
         preferredTransport: 'JSONRPC',

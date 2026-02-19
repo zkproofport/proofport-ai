@@ -251,7 +251,14 @@ describe('TaskWorker', () => {
 
     // Verify status transitions
     expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith('task-generate-123', 'running');
-    expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith('task-generate-123', 'completed');
+    expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith(
+      'task-generate-123',
+      'completed',
+      expect.objectContaining({
+        role: 'agent',
+        parts: expect.arrayContaining([expect.objectContaining({ kind: 'text' })]),
+      })
+    );
 
     // Verify addArtifact was called with proper Artifact
     expect(mockTaskStore.addArtifact).toHaveBeenCalledWith(
@@ -259,17 +266,20 @@ describe('TaskWorker', () => {
       expect.objectContaining({
         id: expect.any(String),
         mimeType: 'application/json',
-        parts: [expect.objectContaining({
-          kind: 'data',
-          mimeType: 'application/json',
-          data: expect.objectContaining({
-            proof: '0xproof123',
-            publicInputs: '0xpublic456',
-            proofWithInputs: '0xproof123public456',
-            nullifier: expect.any(String),
-            signalHash: expect.any(String),
+        parts: expect.arrayContaining([
+          expect.objectContaining({ kind: 'text' }),
+          expect.objectContaining({
+            kind: 'data',
+            mimeType: 'application/json',
+            data: expect.objectContaining({
+              proof: '0xproof123',
+              publicInputs: '0xpublic456',
+              proofWithInputs: '0xproof123public456',
+              nullifier: expect.any(String),
+              signalHash: expect.any(String),
+            }),
           }),
-        })],
+        ]),
       })
     );
 
@@ -332,22 +342,32 @@ describe('TaskWorker', () => {
 
     // Verify status transitions
     expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith('task-verify-456', 'running');
-    expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith('task-verify-456', 'completed');
+    expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith(
+      'task-verify-456',
+      'completed',
+      expect.objectContaining({
+        role: 'agent',
+        parts: expect.arrayContaining([expect.objectContaining({ kind: 'text' })]),
+      })
+    );
 
     // Verify addArtifact was called with verification result
     expect(mockTaskStore.addArtifact).toHaveBeenCalledWith(
       'task-verify-456',
       expect.objectContaining({
         mimeType: 'application/json',
-        parts: [expect.objectContaining({
-          kind: 'data',
-          data: expect.objectContaining({
-            valid: true,
-            circuitId: 'coinbase_attestation',
-            verifierAddress: '0xVerifier1111111111111111111111111111111111',
-            chainId: '84532',
+        parts: expect.arrayContaining([
+          expect.objectContaining({ kind: 'text' }),
+          expect.objectContaining({
+            kind: 'data',
+            data: expect.objectContaining({
+              valid: true,
+              circuitId: 'coinbase_attestation',
+              verifierAddress: '0xVerifier1111111111111111111111111111111111',
+              chainId: '84532',
+            }),
           }),
-        })],
+        ]),
       })
     );
 
@@ -394,31 +414,41 @@ describe('TaskWorker', () => {
 
     // Verify status transitions
     expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith('task-circuits-789', 'running');
-    expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith('task-circuits-789', 'completed');
+    expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith(
+      'task-circuits-789',
+      'completed',
+      expect.objectContaining({
+        role: 'agent',
+        parts: expect.arrayContaining([expect.objectContaining({ kind: 'text' })]),
+      })
+    );
 
     // Verify addArtifact was called with circuits list
     expect(mockTaskStore.addArtifact).toHaveBeenCalledWith(
       'task-circuits-789',
       expect.objectContaining({
         mimeType: 'application/json',
-        parts: [expect.objectContaining({
-          kind: 'data',
-          data: expect.objectContaining({
-            circuits: expect.arrayContaining([
-              expect.objectContaining({
-                id: 'coinbase_attestation',
-                displayName: 'Coinbase KYC',
-                verifierAddress: '0xVerifier1111111111111111111111111111111111',
-              }),
-              expect.objectContaining({
-                id: 'coinbase_country_attestation',
-                displayName: 'Coinbase Country',
-                verifierAddress: '0xVerifier2222222222222222222222222222222222',
-              }),
+        parts: expect.arrayContaining([
+          expect.objectContaining({ kind: 'text' }),
+          expect.objectContaining({
+            kind: 'data',
+            data: expect.objectContaining({
+              circuits: expect.arrayContaining([
+                expect.objectContaining({
+                  id: 'coinbase_attestation',
+                  displayName: 'Coinbase KYC',
+                  verifierAddress: '0xVerifier1111111111111111111111111111111111',
+                }),
+                expect.objectContaining({
+                  id: 'coinbase_country_attestation',
+                  displayName: 'Coinbase Country',
+                  verifierAddress: '0xVerifier2222222222222222222222222222222222',
+                }),
             ]),
             chainId: '84532',
           }),
-        })],
+        }),
+        ]),
       })
     );
 
@@ -638,20 +668,30 @@ describe('TaskWorker', () => {
     expect(BbProver).not.toHaveBeenCalled();
 
     // Verify task completed
-    expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith('task-tee-test', 'completed');
+    expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith(
+      'task-tee-test',
+      'completed',
+      expect.objectContaining({
+        role: 'agent',
+        parts: expect.arrayContaining([expect.objectContaining({ kind: 'text' })]),
+      })
+    );
 
     // Verify addArtifact called with TEE proof result
     expect(mockTaskStore.addArtifact).toHaveBeenCalledWith(
       'task-tee-test',
       expect.objectContaining({
         mimeType: 'application/json',
-        parts: [expect.objectContaining({
-          kind: 'data',
-          data: expect.objectContaining({
-            proof: '0xteeproof',
-            publicInputs: '0xinput1',
+        parts: expect.arrayContaining([
+          expect.objectContaining({ kind: 'text' }),
+          expect.objectContaining({
+            kind: 'data',
+            data: expect.objectContaining({
+              proof: '0xteeproof',
+              publicInputs: '0xinput1',
+            }),
           }),
-        })],
+        ]),
       })
     );
 
@@ -702,7 +742,14 @@ describe('TaskWorker', () => {
     });
 
     // Verify task completed
-    expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith('task-disabled-test', 'completed');
+    expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith(
+      'task-disabled-test',
+      'completed',
+      expect.objectContaining({
+        role: 'agent',
+        parts: expect.arrayContaining([expect.objectContaining({ kind: 'text' })]),
+      })
+    );
 
     // Verify correct progress message about bb
     expect(mockTaskEventEmitter.emitStatusUpdate).toHaveBeenCalledWith(
@@ -762,7 +809,14 @@ describe('TaskWorker', () => {
     });
 
     // Verify task completed
-    expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith('task-local-test', 'completed');
+    expect(mockTaskStore.updateTaskStatus).toHaveBeenCalledWith(
+      'task-local-test',
+      'completed',
+      expect.objectContaining({
+        role: 'agent',
+        parts: expect.arrayContaining([expect.objectContaining({ kind: 'text' })]),
+      })
+    );
 
     // Verify correct progress message about bb (not TEE)
     expect(mockTaskEventEmitter.emitStatusUpdate).toHaveBeenCalledWith(

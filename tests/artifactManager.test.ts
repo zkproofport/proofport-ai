@@ -65,8 +65,8 @@ describe('artifactManager', () => {
 
       await downloadArtifacts(circuitsDir, repoBaseUrl);
 
-      // 2 circuits × 3 files (json, vk, main.nr) + 7 coinbase-libs files = 13 URLs
-      expect(mockFetch).toHaveBeenCalledTimes(13);
+      // 2 circuits × 3 files (json, vk, main.nr) + 7 coinbase-libs files + 4 keccak256 files = 17 URLs
+      expect(mockFetch).toHaveBeenCalledTimes(17);
 
       const calls = mockFetch.mock.calls.map(call => call[0]);
       expect(calls).toContain(`${repoBaseUrl}/coinbase-attestation/target/coinbase_attestation.json`);
@@ -144,11 +144,13 @@ describe('artifactManager', () => {
       const circuit1SrcDir = path.join(circuitsDir, 'coinbase_attestation', 'src');
       const circuit2SrcDir = path.join(circuitsDir, 'coinbase_country_attestation', 'src');
       const coinbaseLibsSrcDir = path.join(circuitsDir, 'coinbase-libs', 'src');
+      const keccak256SrcDir = path.join(circuitsDir, 'keccak256', 'src');
       await fs.mkdir(path.join(circuit1Dir, 'vk'), { recursive: true });
       await fs.mkdir(path.join(circuit2Dir, 'vk'), { recursive: true });
       await fs.mkdir(circuit1SrcDir, { recursive: true });
       await fs.mkdir(circuit2SrcDir, { recursive: true });
       await fs.mkdir(coinbaseLibsSrcDir, { recursive: true });
+      await fs.mkdir(keccak256SrcDir, { recursive: true });
       await fs.writeFile(path.join(circuit1Dir, 'coinbase_attestation.json'), '{}');
       await fs.writeFile(path.join(circuit1Dir, 'vk', 'vk'), '');
       await fs.writeFile(path.join(circuit1SrcDir, 'main.nr'), '');
@@ -156,6 +158,7 @@ describe('artifactManager', () => {
       await fs.writeFile(path.join(circuit2Dir, 'vk', 'vk'), '');
       await fs.writeFile(path.join(circuit2SrcDir, 'main.nr'), '');
       await fs.writeFile(path.join(coinbaseLibsSrcDir, 'lib.nr'), '');
+      await fs.writeFile(path.join(keccak256SrcDir, 'lib.nr'), '');
 
       const mockFetch = vi.mocked(global.fetch);
       mockFetch.mockResolvedValue({

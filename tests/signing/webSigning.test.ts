@@ -8,6 +8,8 @@ vi.mock('ioredis', () => {
     set: vi.fn(),
     del: vi.fn(),
     quit: vi.fn(),
+    incr: vi.fn().mockResolvedValue(1),
+    expire: vi.fn().mockResolvedValue(1),
     status: 'ready',
   };
   return { default: vi.fn(() => mockRedis), Redis: vi.fn(() => mockRedis) };

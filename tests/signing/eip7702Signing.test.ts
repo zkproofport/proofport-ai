@@ -391,7 +391,7 @@ describe('createBatchSigningHandler', () => {
 
     expect(statusMock).toHaveBeenCalledWith(400);
     expect(jsonMock).toHaveBeenCalledWith({
-      error: 'Each signature entry must have signalHash and signature fields',
+      error: 'Each signature entry must have signalHash and signature as non-empty strings',
     });
   });
 });
