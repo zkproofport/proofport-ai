@@ -1,0 +1,12 @@
+# Compose override for x402 payment E2E testing
+# Usage: docker compose -f docker-compose.yml -f docker-compose.e2e-payment.yml up -d ai
+# This overrides PAYMENT_MODE without rebuilding the image.
+services:
+  ai:
+    environment:
+      PAYMENT_MODE: testnet
+      PAYMENT_PAY_TO: "0x5A3E649208Ae15ec52496c1Ae23b2Ff89Ac02f0c"
+      PAYMENT_FACILITATOR_URL: "https://www.x402.org/facilitator"
+      PAYMENT_PROOF_PRICE: "$0.10"
+      SETTLEMENT_CHAIN_RPC_URL: "https://sepolia.base.org"
+      SETTLEMENT_USDC_ADDRESS: "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
