@@ -103,6 +103,51 @@ vi.mock('ethers', () => ({
   },
 }));
 
+// Mock loadConfig — MCP tool handlers call loadConfig() internally
+vi.mock('../../src/config/index.js', () => ({
+  loadConfig: vi.fn(() => ({
+    port: 4002,
+    nodeEnv: 'test',
+    proverUrl: '',
+    bbPath: '/usr/local/bin/bb',
+    nargoPath: '/usr/local/bin/nargo',
+    circuitsDir: '/circuits',
+    circuitsRepoUrl: 'https://example.com/circuits',
+    redisUrl: 'redis://localhost:6379',
+    baseRpcUrl: 'https://base-rpc.example.com',
+    easGraphqlEndpoint: 'https://eas.example.com',
+    chainRpcUrl: 'https://chain.example.com',
+    nullifierRegistryAddress: '0x' + '11'.repeat(20),
+    proverPrivateKey: '0x' + 'ab'.repeat(32),
+    paymentMode: 'disabled',
+    a2aBaseUrl: 'https://a2a.example.com',
+    agentVersion: '1.0.0',
+    paymentPayTo: '',
+    paymentFacilitatorUrl: '',
+    paymentProofPrice: '$0.10',
+    privyAppId: '',
+    privyApiSecret: '',
+    privyApiUrl: '',
+    signPageUrl: '',
+    signingTtlSeconds: 300,
+    teeMode: 'disabled',
+    enclaveCid: undefined,
+    enclavePort: 5000,
+    teeAttestationEnabled: false,
+    erc8004IdentityAddress: '',
+    erc8004ReputationAddress: '',
+    settlementChainRpcUrl: '',
+    settlementPrivateKey: '',
+    settlementOperatorAddress: '',
+    settlementUsdcAddress: '',
+    websiteUrl: 'https://zkproofport.com',
+    erc8004ValidationAddress: '',
+    openaiApiKey: '',
+    geminiApiKey: '',
+    phoenixCollectorEndpoint: '',
+  })),
+}));
+
 // Mock circuit artifact manager
 vi.mock('../../src/circuit/artifactManager.js', () => ({
   ensureArtifacts: vi.fn().mockResolvedValue(undefined),
@@ -117,9 +162,12 @@ vi.mock('../../src/identity/reputation.js', () => ({
   handleProofCompleted: vi.fn().mockResolvedValue(undefined),
 }));
 
-// Mock verifier
+// Mock verifier — must return { isValid, verifierAddress } shape
 vi.mock('../../src/prover/verifier.js', () => ({
-  verifyOnChain: vi.fn().mockResolvedValue(true),
+  verifyOnChain: vi.fn().mockResolvedValue({
+    isValid: true,
+    verifierAddress: '0x0036B61dBFaB8f3CfEEF77dD5D45F7EFBFE2035c',
+  }),
 }));
 
 // Mock contracts config
@@ -354,6 +402,208 @@ describe('MCP Endpoint E2E', () => {
         },
       });
     });
+
+    it('should handle tools/call for verify_proof', async () => {
+      const response = await request(app)
+        .post('/mcp')
+        .set('Accept', 'application/json, text/event-stream')
+        .send({
+          jsonrpc: '2.0',
+          id: 10,
+          method: 'tools/call',
+          params: {
+            name: 'verify_proof',
+            arguments: {
+              circuitId: 'coinbase_attestation',
+              proof: '0xaabb',
+              publicInputs: ['0x' + 'cc'.repeat(32)],
+              chainId: '84532',
+            },
+          },
+        });
+
+      expect(response.status).toBe(200);
+
+      const data = parseSSEResponse(response.text);
+      expect(data).toMatchObject({
+        jsonrpc: '2.0',
+        id: 10,
+        result: {
+          content: expect.arrayContaining([
+            expect.objectContaining({
+              type: 'text',
+            }),
+          ]),
+        },
+      });
+
+      // Result text is JSON — parse and assert chainId returned
+      const content = data.result.content[0];
+      expect(content.type).toBe('text');
+      const parsed = JSON.parse(content.text);
+      expect(parsed).toHaveProperty('chainId', '84532');
+    });
+
+    it('should handle tools/call for verify_proof with invalid circuit', async () => {
+      const response = await request(app)
+        .post('/mcp')
+        .set('Accept', 'application/json, text/event-stream')
+        .send({
+          jsonrpc: '2.0',
+          id: 11,
+          method: 'tools/call',
+          params: {
+            name: 'verify_proof',
+            arguments: {
+              circuitId: 'nonexistent_circuit',
+              proof: '0xaabb',
+              publicInputs: ['0x' + 'cc'.repeat(32)],
+              chainId: '84532',
+            },
+          },
+        });
+
+      expect(response.status).toBe(200);
+
+      const data = parseSSEResponse(response.text);
+      expect(data).toMatchObject({
+        jsonrpc: '2.0',
+        id: 11,
+      });
+
+      // Tool handler returns isError: true with error message in content
+      const result = data.result;
+      expect(result.isError).toBe(true);
+      expect(result.content).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'text',
+            text: expect.stringContaining('Unknown circuit'),
+          }),
+        ]),
+      );
+    });
+
+    it('should handle tools/call for generate_proof (web signing flow — no signPageUrl configured)', async () => {
+      // In test config, signPageUrl is '' (empty) so web signing is not configured.
+      // The tool returns isError: true with a descriptive message.
+      const response = await request(app)
+        .post('/mcp')
+        .set('Accept', 'application/json, text/event-stream')
+        .send({
+          jsonrpc: '2.0',
+          id: 12,
+          method: 'tools/call',
+          params: {
+            name: 'generate_proof',
+            arguments: {
+              circuitId: 'coinbase_attestation',
+              scope: 'test.com',
+            },
+          },
+        });
+
+      expect(response.status).toBe(200);
+
+      const data = parseSSEResponse(response.text);
+      expect(data).toMatchObject({
+        jsonrpc: '2.0',
+        id: 12,
+      });
+
+      // Without signPageUrl configured, generate_proof throws — tool returns isError: true
+      const result = data.result;
+      expect(result.isError).toBe(true);
+      expect(result.content).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'text',
+            text: expect.stringContaining('signing'),
+          }),
+        ]),
+      );
+    });
+
+    it('should handle tools/call for generate_proof with direct signature', async () => {
+      const response = await request(app)
+        .post('/mcp')
+        .set('Accept', 'application/json, text/event-stream')
+        .send({
+          jsonrpc: '2.0',
+          id: 13,
+          method: 'tools/call',
+          params: {
+            name: 'generate_proof',
+            arguments: {
+              circuitId: 'coinbase_attestation',
+              scope: 'test.com',
+              address: '0x' + 'dd'.repeat(20),
+              signature: '0x' + 'ee'.repeat(65),
+            },
+          },
+        });
+
+      expect(response.status).toBe(200);
+
+      const data = parseSSEResponse(response.text);
+      expect(data).toMatchObject({
+        jsonrpc: '2.0',
+        id: 13,
+      });
+
+      // Mock prover returns proof data — tool returns content with proof
+      const result = data.result;
+      expect(result.content).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'text',
+          }),
+        ]),
+      );
+
+      const content = result.content[0];
+      expect(content.type).toBe('text');
+      const parsed = JSON.parse(content.text);
+      expect(parsed).toHaveProperty('proof');
+      expect(result.isError).toBeFalsy();
+    });
+
+    it('should handle tools/call for unknown tool', async () => {
+      const response = await request(app)
+        .post('/mcp')
+        .set('Accept', 'application/json, text/event-stream')
+        .send({
+          jsonrpc: '2.0',
+          id: 14,
+          method: 'tools/call',
+          params: {
+            name: 'nonexistent_tool',
+            arguments: {},
+          },
+        });
+
+      expect(response.status).toBe(200);
+
+      const data = parseSSEResponse(response.text);
+      expect(data).toMatchObject({
+        jsonrpc: '2.0',
+        id: 14,
+      });
+
+      // MCP SDK returns a result with isError: true for unknown tools,
+      // not a JSON-RPC error object
+      if (data.error) {
+        // Some MCP SDK versions return JSON-RPC error
+        expect(data.error).toMatchObject({
+          code: expect.any(Number),
+          message: expect.any(String),
+        });
+      } else {
+        // MCP SDK returns result with isError flag
+        expect(data.result).toBeDefined();
+        expect(data.result.isError).toBe(true);
+      }
+    });
   });
 
   describe('GET /mcp', () => {
@@ -375,6 +625,30 @@ describe('MCP Endpoint E2E', () => {
       expect(response.body).toMatchObject({
         error: expect.stringContaining('Session management not supported'),
       });
+    });
+  });
+
+  describe('MCP Discovery', () => {
+    it('GET /.well-known/mcp.json should return MCP discovery', async () => {
+      const response = await request(app).get('/.well-known/mcp.json');
+
+      expect(response.status).toBe(200);
+      expect(response.headers['content-type']).toMatch(/application\/json/);
+
+      const body = response.body;
+      expect(body).toHaveProperty('protocolVersion');
+      expect(body).toHaveProperty('serverInfo');
+      expect(body.serverInfo).toMatchObject({
+        name: expect.any(String),
+        version: expect.any(String),
+      });
+      expect(body).toHaveProperty('tools');
+      expect(Array.isArray(body.tools)).toBe(true);
+      expect(body.tools.map((t: any) => t.name).sort()).toEqual([
+        'generate_proof',
+        'get_supported_circuits',
+        'verify_proof',
+      ]);
     });
   });
 });
