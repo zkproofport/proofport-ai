@@ -187,21 +187,18 @@ describe('A2A Endpoint E2E', () => {
     app = appBundle.app;
   });
 
-  describe('GET /.well-known/agent.json', () => {
-    it('should return OASF agent with correct structure', async () => {
+  describe('GET /.well-known/agent.json (A2A Agent Card)', () => {
+    it('should return A2A v0.3 agent card', async () => {
       const response = await request(app).get('/.well-known/agent.json');
 
       expect(response.status).toBe(200);
       expect(response.headers['content-type']).toMatch(/application\/json/);
       expect(response.body).toMatchObject({
-        type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
-        name: 'ZKProofport',
-        description: expect.any(String),
-        agentType: 'service',
-        tags: expect.any(Array),
-        services: expect.any(Array),
-        active: true,
-        supportedTrust: ['reputation'],
+        name: 'proveragent.eth',
+        protocolVersion: '0.3.0',
+        preferredTransport: 'JSONRPC',
+        skills: expect.any(Array),
+        capabilities: expect.any(Object),
       });
     });
 
@@ -260,8 +257,8 @@ describe('A2A Endpoint E2E', () => {
       );
     });
 
-    it('should have all required OASF fields', async () => {
-      const response = await request(app).get('/.well-known/agent.json');
+    it('should have all required OASF fields at /.well-known/oasf.json', async () => {
+      const response = await request(app).get('/.well-known/oasf.json');
 
       expect(response.status).toBe(200);
       const agent = response.body;
@@ -474,15 +471,16 @@ describe('A2A Endpoint E2E', () => {
 
   describe('Route Coexistence', () => {
     it('A2A and MCP routes both respond correctly', async () => {
-      // Test OASF Agent Card
+      // Test A2A Agent Card at standard URL
       const oasfResponse = await request(app).get('/.well-known/agent.json');
       expect(oasfResponse.status).toBe(200);
-      expect(oasfResponse.body.name).toBe('ZKProofport');
+      expect(oasfResponse.body.name).toBe('proveragent.eth');
+      expect(oasfResponse.body.protocolVersion).toBe('0.3.0');
 
-      // Test A2A Agent Card
+      // Test A2A Agent Card at alias URL
       const agentCardResponse = await request(app).get('/.well-known/agent-card.json');
       expect(agentCardResponse.status).toBe(200);
-      expect(agentCardResponse.body.name).toBe('ZKProofport Prover Agent');
+      expect(agentCardResponse.body.name).toBe('proveragent.eth');
       expect(agentCardResponse.body.preferredTransport).toBe('JSONRPC');
 
       // Test A2A JSON-RPC (use tasks/get which is non-blocking)

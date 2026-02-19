@@ -1,3 +1,4 @@
+import './tracing.js';
 import express from 'express';
 import http from 'node:http';
 import path from 'node:path';
@@ -189,9 +190,32 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
     });
   });
 
-  // Discovery endpoints for 8004scan
-  app.get('/.well-known/agent.json', getOasfAgentHandler(config, agentTokenId));
+  // CORS for A2A client UIs (e.g., a2a-ui on port 3000)
+  const a2aCorsOrigins = process.env.A2A_CORS_ORIGINS
+    ? process.env.A2A_CORS_ORIGINS.split(',').map(s => s.trim())
+    : [];
+
+  function a2aCorsMiddleware(req: express.Request, res: express.Response, next: express.NextFunction) {
+    const origin = req.headers.origin;
+    if (origin && a2aCorsOrigins.length > 0 && a2aCorsOrigins.includes(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept');
+    }
+    if (req.method === 'OPTIONS') {
+      res.sendStatus(204);
+      return;
+    }
+    next();
+  }
+
+  app.use('/.well-known', a2aCorsMiddleware);
+  app.use('/a2a', a2aCorsMiddleware);
+
+  // Discovery endpoints (A2A standard: agent.json = A2A v0.3 agent card)
+  app.get('/.well-known/agent.json', getAgentCardHandler(config, agentTokenId));
   app.get('/.well-known/agent-card.json', getAgentCardHandler(config, agentTokenId));
+  app.get('/.well-known/oasf.json', getOasfAgentHandler(config, agentTokenId));
   app.get('/.well-known/mcp.json', getMcpDiscoveryHandler(config));
 
   // Payment gate only for message/send and message/stream (proof generation)

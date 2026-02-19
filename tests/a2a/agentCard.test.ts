@@ -72,7 +72,7 @@ describe('A2A Agent Card', () => {
       const { buildAgentCard } = await import('../../src/a2a/agentCard');
       const card = buildAgentCard(mockConfig);
 
-      expect(card.name).toBe('ZKProofport Prover Agent');
+      expect(card.name).toBe('proveragent.eth');
     });
 
     it('should have preferredTransport set to JSONRPC', async () => {
@@ -95,12 +95,12 @@ describe('A2A Agent Card', () => {
       const { buildAgentCard } = await import('../../src/a2a/agentCard');
       const card = buildAgentCard(mockConfig);
 
-      expect(card.url).toBe('https://ai-dev.zkproofport.app');
+      expect(card.url).toBe('https://ai-dev.zkproofport.app/a2a');
 
       // Test with different base URL
       mockConfig.a2aBaseUrl = 'https://ai-staging.zkproofport.app';
       const card2 = buildAgentCard(mockConfig);
-      expect(card2.url).toBe('https://ai-staging.zkproofport.app');
+      expect(card2.url).toBe('https://ai-staging.zkproofport.app/a2a');
     });
 
     it('should use config.agentVersion for version field', async () => {

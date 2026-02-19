@@ -66,7 +66,7 @@ export function buildAgentCard(config: Config, tokenId?: bigint | null): AgentCa
   return {
     name: 'proveragent.eth',
     description: 'Zero-knowledge proof generation and verification for Coinbase attestations',
-    url: config.a2aBaseUrl,
+    url: `${config.a2aBaseUrl}/a2a`,
     version: config.agentVersion,
     protocolVersion: '0.3.0',
     preferredTransport: 'JSONRPC',
@@ -252,7 +252,7 @@ export function buildOasfAgent(config: Config, tokenId?: bigint | null) {
       },
       {
         name: 'OASF',
-        endpoint: `${config.a2aBaseUrl}/.well-known/agent.json`,
+        endpoint: `${config.a2aBaseUrl}/.well-known/oasf.json`,
         version: 'v0.8.0',
         skills: ['Proof Generation', 'Proof Verification', 'Circuit Management'],
         domains: ['Privacy', 'Identity'],
