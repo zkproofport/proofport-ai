@@ -1,8 +1,10 @@
 import type { Request, Response, RequestHandler } from 'express';
-import type { TaskStore, Message, DataPart } from './taskStore.js';
+import type { TaskStore, Message, DataPart, TextPart } from './taskStore.js';
 import type { TaskEventEmitter } from './streaming.js';
 import { attachSseStream } from './streaming.js';
 import type { PaymentFacilitator } from '../payment/facilitator.js';
+import type { LLMProvider } from '../chat/llmProvider.js';
+import { CHAT_TOOLS } from '../chat/tools.js';
 import { trace, SpanStatusCode } from '@opentelemetry/api';
 
 const tracer = trace.getTracer('a2a-handler');
@@ -11,6 +13,7 @@ export interface A2aHandlerDeps {
   taskStore: TaskStore;
   taskEventEmitter: TaskEventEmitter;
   paymentFacilitator?: PaymentFacilitator;
+  llmProvider?: LLMProvider;
 }
 
 interface JsonRpcRequest {
@@ -42,11 +45,10 @@ function jsonRpcResult(id: string | number | undefined, result: unknown): JsonRp
 }
 
 /**
- * Extract skill and params from a user Message.
- * Looks for a DataPart with skill field, or infers from text.
+ * Extract skill and params from a DataPart with explicit skill field.
+ * Returns null if no DataPart contains a skill.
  */
-function extractSkillFromMessage(message: Message): { skill: string; params: Record<string, unknown> } {
-  // Check for DataPart with explicit skill
+function extractSkillFromDataPart(message: Message): { skill: string; params: Record<string, unknown> } | null {
   for (const part of message.parts) {
     if (part.kind === 'data') {
       const dataPart = part as DataPart;
@@ -57,52 +59,71 @@ function extractSkillFromMessage(message: Message): { skill: string; params: Rec
       }
     }
   }
+  return null;
+}
 
-  // Check for TextPart with skill mention
-  for (const part of message.parts) {
-    if (part.kind === 'text') {
-      const text = part.text.toLowerCase();
-      const originalText = part.text;
+export const A2A_INFERENCE_PROMPT = `You are a skill router for proveragent.eth. Given user text, determine which tool to call and extract parameters. ALWAYS respond with a tool call — never with plain text.`;
 
-      // Extract common params from text
-      const extractedParams: Record<string, unknown> = {};
+/**
+ * Use LLM tool-calling to infer skill and params from free-form text.
+ * Enforces tool_choice: required and times out after 30 seconds.
+ */
+async function inferSkillFromText(text: string, llmProvider: LLMProvider): Promise<{ skill: string; params: Record<string, unknown> }> {
+  const timeoutMs = 30000;
+  const response = await Promise.race([
+    llmProvider.chat(
+      [{ role: 'user', content: text }],
+      A2A_INFERENCE_PROMPT,
+      CHAT_TOOLS,
+      { toolChoice: 'required' }
+    ),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('LLM inference timed out after 30 seconds')), timeoutMs)
+    ),
+  ]);
 
-      // Extract circuitId
-      if (text.includes('coinbase_country') || text.includes('country_attestation') || text.includes('country attestation')) {
-        extractedParams.circuitId = 'coinbase_country_attestation';
-      } else if (text.includes('coinbase_attestation') || text.includes('coinbase kyc') || text.includes('kyc')) {
-        extractedParams.circuitId = 'coinbase_attestation';
-      }
-
-      // Extract scope (domain-like pattern)
-      const domainMatch = originalText.match(/\b([a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.(?:com|org|net|io|xyz|app|dev|co|kr|jp))\b/i);
-      if (domainMatch) {
-        extractedParams.scope = domainMatch[1];
-      }
-
-      // Extract address (0x-prefixed hex, 40 hex chars)
-      const addressMatch = originalText.match(/\b(0x[a-fA-F0-9]{40})\b/);
-      if (addressMatch) {
-        extractedParams.address = addressMatch[1];
-      }
-
-      if (text.includes('verify') || text.includes('verification')) {
-        return { skill: 'verify_proof', params: extractedParams };
-      }
-      if (text.includes('circuit') || text.includes('supported') || text.includes('list')) {
-        return { skill: 'get_supported_circuits', params: extractedParams };
-      }
-      if (text.includes('proof') || text.includes('generate') || text.includes('prove')) {
-        return { skill: 'generate_proof', params: extractedParams };
-      }
-    }
+  if (response.toolCalls && response.toolCalls.length > 0) {
+    const toolCall = response.toolCalls[0];
+    return { skill: toolCall.name, params: toolCall.args };
   }
 
-  throw new Error('Could not determine skill from message. Include a DataPart with { "skill": "..." } field.');
+  throw new Error('Could not determine skill from message. The LLM did not return a tool call.');
+}
+
+/**
+ * Resolve skill and params from a message.
+ * Tries DataPart first (instant), falls back to LLM inference for TextPart.
+ * Throws with an error message if resolution fails.
+ */
+async function resolveSkill(
+  message: Message,
+  llmProvider?: LLMProvider,
+): Promise<{ skill: string; params: Record<string, unknown> }> {
+  // Try DataPart first (instant, no LLM needed)
+  const dataPartResult = extractSkillFromDataPart(message);
+  if (dataPartResult) {
+    return dataPartResult;
+  }
+
+  // TextPart — use LLM inference
+  const textContent = message.parts
+    .filter((p): p is TextPart => p.kind === 'text')
+    .map(p => p.text)
+    .join(' ');
+
+  if (!textContent.trim()) {
+    throw new Error('Message contains no text or data parts');
+  }
+
+  if (!llmProvider) {
+    throw new Error('Text inference requires LLM configuration. Use a DataPart with { "skill": "..." } for direct routing.');
+  }
+
+  return inferSkillFromText(textContent, llmProvider);
 }
 
 export function createA2aHandler(deps: A2aHandlerDeps): RequestHandler {
-  const { taskStore, taskEventEmitter, paymentFacilitator } = deps;
+  const { taskStore, taskEventEmitter, paymentFacilitator, llmProvider } = deps;
 
   return async (req: Request, res: Response): Promise<void> => {
     const body = req.body as JsonRpcRequest;
@@ -120,11 +141,11 @@ export function createA2aHandler(deps: A2aHandlerDeps): RequestHandler {
     try {
       switch (body.method) {
         case 'message/send':
-          await handleMessageSend(body, res, taskStore, taskEventEmitter, paymentFacilitator, req);
+          await handleMessageSend(body, res, taskStore, taskEventEmitter, paymentFacilitator, req, llmProvider);
           break;
 
         case 'message/stream':
-          await handleMessageStream(body, res, taskStore, taskEventEmitter, paymentFacilitator, req);
+          await handleMessageStream(body, res, taskStore, taskEventEmitter, paymentFacilitator, req, llmProvider);
           break;
 
         case 'tasks/get':
@@ -154,7 +175,8 @@ async function handleMessageSend(
   taskStore: TaskStore,
   taskEventEmitter: TaskEventEmitter,
   paymentFacilitator?: PaymentFacilitator,
-  req?: Request
+  req?: Request,
+  llmProvider?: LLMProvider
 ): Promise<void> {
   const span = tracer.startSpan('a2a.message.send');
   try {
@@ -171,9 +193,9 @@ async function handleMessageSend(
     let skill: string;
     let skillParams: Record<string, unknown>;
     try {
-      const extracted = extractSkillFromMessage(message);
-      skill = extracted.skill;
-      skillParams = extracted.params;
+      const resolved = await resolveSkill(message, llmProvider);
+      skill = resolved.skill;
+      skillParams = resolved.params;
     } catch (error) {
       res.json(jsonRpcError(body.id, -32602, error instanceof Error ? error.message : 'Could not extract skill'));
       span.setStatus({ code: SpanStatusCode.ERROR, message: error instanceof Error ? error.message : 'Could not extract skill' });
@@ -235,7 +257,8 @@ async function handleMessageStream(
   taskStore: TaskStore,
   taskEventEmitter: TaskEventEmitter,
   paymentFacilitator?: PaymentFacilitator,
-  req?: Request
+  req?: Request,
+  llmProvider?: LLMProvider
 ): Promise<void> {
   const span = tracer.startSpan('a2a.message.stream');
   try {
@@ -251,9 +274,9 @@ async function handleMessageStream(
     let skill: string;
     let skillParams: Record<string, unknown>;
     try {
-      const extracted = extractSkillFromMessage(message);
-      skill = extracted.skill;
-      skillParams = extracted.params;
+      const resolved = await resolveSkill(message, llmProvider);
+      skill = resolved.skill;
+      skillParams = resolved.params;
     } catch (error) {
       res.json(jsonRpcError(body.id, -32602, error instanceof Error ? error.message : 'Could not extract skill'));
       span.setStatus({ code: SpanStatusCode.ERROR, message: error instanceof Error ? error.message : 'Could not extract skill' });

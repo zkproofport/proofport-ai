@@ -1,4 +1,4 @@
-import type { LLMProvider, LLMMessage, LLMTool, LLMResponse } from './llmProvider.js';
+import type { LLMProvider, LLMMessage, LLMTool, LLMResponse, ChatOptions } from './llmProvider.js';
 
 interface OpenAIConfig {
   apiKey: string;
@@ -101,7 +101,7 @@ export class OpenAIProvider implements LLMProvider {
     this.model = config.model || 'gpt-4o-mini';
   }
 
-  async chat(messages: LLMMessage[], systemPrompt: string, tools: LLMTool[]): Promise<LLMResponse> {
+  async chat(messages: LLMMessage[], systemPrompt: string, tools: LLMTool[], options?: ChatOptions): Promise<LLMResponse> {
     const body: Record<string, unknown> = {
       model: this.model,
       messages: toOpenAIMessages(messages, systemPrompt),
@@ -109,6 +109,10 @@ export class OpenAIProvider implements LLMProvider {
 
     if (tools.length > 0) {
       body.tools = toOpenAITools(tools);
+    }
+
+    if (options?.toolChoice === 'required' && tools.length > 0) {
+      body.tool_choice = 'required';
     }
 
     const response = await fetch('https://api.openai.com/v1/chat/completions', {

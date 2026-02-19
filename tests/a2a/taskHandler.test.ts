@@ -17,6 +17,7 @@ import { createRedisClient, type RedisClient } from '../../src/redis/client.js';
 import { TaskStore, type A2aTask, type Message } from '../../src/a2a/taskStore.js';
 import { TaskEventEmitter } from '../../src/a2a/streaming.js';
 import { createA2aHandler } from '../../src/a2a/taskHandler.js';
+import type { LLMProvider } from '../../src/chat/llmProvider.js';
 
 // ─── TaskStore (Redis-backed) ──────────────────────────────────────────────
 
@@ -373,7 +374,7 @@ describe('JSON-RPC Handler', () => {
     });
   });
 
-  it('3. message/send with message that cannot determine skill returns -32602', async () => {
+  it('3. message/send with TextPart and no llmProvider returns LLM configuration error', async () => {
     const req = createMockRequest({
       jsonrpc: '2.0',
       id: 3,
@@ -394,7 +395,7 @@ describe('JSON-RPC Handler', () => {
       id: 3,
       error: {
         code: -32602,
-        message: expect.stringContaining('Could not determine skill'),
+        message: expect.stringContaining('Text inference requires LLM configuration'),
       },
     });
   });
@@ -456,9 +457,7 @@ describe('JSON-RPC Handler', () => {
     expect(mockRedis.lpush).toHaveBeenCalledWith('a2a:queue:submitted', expect.any(String));
   });
 
-  it('6. message/stream extracts skill from text part (proof keyword)', async () => {
-    (mockRedis.set as ReturnType<typeof vi.fn>).mockResolvedValue('OK');
-
+  it('6. message/stream with TextPart and no llmProvider returns LLM configuration error', async () => {
     const req = createMockRequest({
       jsonrpc: '2.0',
       id: 6,
@@ -474,8 +473,16 @@ describe('JSON-RPC Handler', () => {
 
     await handler(req as Request, res as Response, vi.fn());
 
-    // Should succeed (SSE headers set)
-    expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'text/event-stream');
+    // No llmProvider → returns JSON error, no SSE
+    expect(res.json).toHaveBeenCalledWith({
+      jsonrpc: '2.0',
+      id: 6,
+      error: {
+        code: -32602,
+        message: expect.stringContaining('Text inference requires LLM configuration'),
+      },
+    });
+    expect(res.setHeader).not.toHaveBeenCalled();
   });
 
   it('7. message/stream with invalid message returns -32602 (no SSE)', async () => {
@@ -854,6 +861,118 @@ describe('JSON-RPC Handler', () => {
       error: {
         code: -32600,
         message: expect.stringContaining('Invalid request'),
+      },
+    });
+  });
+
+  // --- LLM wiring tests ---
+
+  it('20. message/stream with TextPart and mock LLM routes correctly', async () => {
+    (mockRedis.set as ReturnType<typeof vi.fn>).mockResolvedValue('OK');
+
+    const mockLlm: LLMProvider = {
+      name: 'mock',
+      chat: vi.fn().mockResolvedValue({
+        toolCalls: [{ name: 'generate_proof', args: { circuitId: 'coinbase_attestation', scope: 'test.com' } }],
+      }),
+    };
+
+    const handlerWithLlm = createA2aHandler({ taskStore: store, taskEventEmitter: emitter, llmProvider: mockLlm });
+
+    const req = createMockRequest({
+      jsonrpc: '2.0',
+      id: 20,
+      method: 'message/stream',
+      params: {
+        message: {
+          role: 'user',
+          parts: [{ kind: 'text', text: 'generate a proof' }],
+        },
+      },
+    });
+    const res = createMockResponse();
+
+    await handlerWithLlm(req as Request, res as Response, vi.fn());
+
+    // SSE headers should be set (task created successfully)
+    expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'text/event-stream');
+    expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-cache');
+    expect(res.setHeader).toHaveBeenCalledWith('Connection', 'keep-alive');
+
+    // LLM was called with the text content
+    expect(mockLlm.chat).toHaveBeenCalledTimes(1);
+    expect(mockLlm.chat).toHaveBeenCalledWith(
+      [{ role: 'user', content: 'generate a proof' }],
+      expect.any(String),
+      expect.any(Array),
+      { toolChoice: 'required' }
+    );
+  });
+
+  it('21. message/send with TextPart and LLM returning no tool calls returns -32602', async () => {
+    const mockLlm: LLMProvider = {
+      name: 'mock',
+      chat: vi.fn().mockResolvedValue({ content: 'I cannot help' }),
+    };
+
+    const handlerWithLlm = createA2aHandler({ taskStore: store, taskEventEmitter: emitter, llmProvider: mockLlm });
+
+    const req = createMockRequest({
+      jsonrpc: '2.0',
+      id: 21,
+      method: 'message/send',
+      params: {
+        message: {
+          role: 'user',
+          parts: [{ kind: 'text', text: 'random gibberish' }],
+        },
+      },
+    });
+    const res = createMockResponse();
+
+    await handlerWithLlm(req as Request, res as Response, vi.fn());
+
+    expect(res.json).toHaveBeenCalledWith({
+      jsonrpc: '2.0',
+      id: 21,
+      error: {
+        code: -32602,
+        message: expect.stringContaining('Could not determine skill'),
+      },
+    });
+  });
+
+  it('22. message/send with TextPart and LLM returning invalid skill returns -32602', async () => {
+    const mockLlm: LLMProvider = {
+      name: 'mock',
+      chat: vi.fn().mockResolvedValue({
+        toolCalls: [{ name: 'invalid_skill', args: {} }],
+      }),
+    };
+
+    const handlerWithLlm = createA2aHandler({ taskStore: store, taskEventEmitter: emitter, llmProvider: mockLlm });
+
+    const req = createMockRequest({
+      jsonrpc: '2.0',
+      id: 22,
+      method: 'message/send',
+      params: {
+        message: {
+          role: 'user',
+          parts: [{ kind: 'text', text: 'do something weird' }],
+        },
+      },
+    });
+    const res = createMockResponse();
+
+    await handlerWithLlm(req as Request, res as Response, vi.fn());
+
+    expect(res.json).toHaveBeenCalledWith({
+      jsonrpc: '2.0',
+      id: 22,
+      error: {
+        code: -32602,
+        message: expect.stringContaining('Invalid skill: invalid_skill'),
       },
     });
   });

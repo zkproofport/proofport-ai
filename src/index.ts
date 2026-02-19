@@ -241,8 +241,18 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
     next();
   };
 
+  // LLM providers (created early — needed by both A2A text inference and chat endpoint)
+  const llmProviders: LLMProvider[] = [];
+  if (config.openaiApiKey) {
+    llmProviders.push(new OpenAIProvider({ apiKey: config.openaiApiKey }));
+  }
+  if (config.geminiApiKey) {
+    llmProviders.push(new GeminiProvider({ apiKey: config.geminiApiKey }));
+  }
+  const llmProvider = llmProviders.length > 0 ? new MultiLLMProvider(llmProviders) : undefined;
+
   // Payment-gated routes — single POST /a2a handles all A2A v0.3 JSON-RPC methods
-  app.post('/a2a', a2aPaymentMiddleware, createA2aHandler({ taskStore, taskEventEmitter, paymentFacilitator }));
+  app.post('/a2a', a2aPaymentMiddleware, createA2aHandler({ taskStore, taskEventEmitter, paymentFacilitator, llmProvider }));
 
   // REST API routes with payment middleware on proof generation only (verify is free)
   const restPaymentMiddleware = (req: any, res: any, next: any) => {
@@ -379,16 +389,7 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
 
   // Chat endpoint (LLM-based natural language interface)
   // Payment enforced via PaymentRequiredError — same x402 flow as REST/MCP/A2A
-  const llmProviders: LLMProvider[] = [];
-  if (config.openaiApiKey) {
-    llmProviders.push(new OpenAIProvider({ apiKey: config.openaiApiKey }));
-  }
-  if (config.geminiApiKey) {
-    llmProviders.push(new GeminiProvider({ apiKey: config.geminiApiKey }));
-  }
-
-  if (llmProviders.length > 0) {
-    const llmProvider = new MultiLLMProvider(llmProviders);
+  if (llmProvider) {
     const paymentRequiredHeader = buildPaymentRequiredHeaderValue(
       config,
       `${config.a2aBaseUrl}/v1/chat/completions`,

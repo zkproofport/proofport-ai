@@ -1,4 +1,4 @@
-import type { LLMProvider, LLMMessage, LLMTool, LLMResponse } from './llmProvider.js';
+import type { LLMProvider, LLMMessage, LLMTool, LLMResponse, ChatOptions } from './llmProvider.js';
 
 export interface GeminiMessage {
   role: 'user' | 'model';
@@ -52,7 +52,8 @@ export class GeminiClient {
   async chat(
     messages: GeminiMessage[],
     systemInstruction: string,
-    tools?: GeminiTool[]
+    tools?: GeminiTool[],
+    toolChoice?: 'auto' | 'required'
   ): Promise<GeminiMessage> {
     const url = `${this.baseUrl}/models/${this.model}:generateContent?key=${this.apiKey}`;
 
@@ -65,6 +66,10 @@ export class GeminiClient {
 
     if (tools && tools.length > 0) {
       body.tools = tools;
+    }
+
+    if (toolChoice === 'required') {
+      body.toolConfig = { functionCallingConfig: { mode: 'ANY' } };
     }
 
     const response = await fetch(url, {
@@ -168,10 +173,10 @@ export class GeminiProvider implements LLMProvider {
     this.client = new GeminiClient(config);
   }
 
-  async chat(messages: LLMMessage[], systemPrompt: string, tools: LLMTool[]): Promise<LLMResponse> {
+  async chat(messages: LLMMessage[], systemPrompt: string, tools: LLMTool[], options?: ChatOptions): Promise<LLMResponse> {
     const geminiMessages = toGeminiMessages(messages);
     const geminiTools = tools.length > 0 ? toGeminiTools(tools) : undefined;
-    const geminiResponse = await this.client.chat(geminiMessages, systemPrompt, geminiTools);
+    const geminiResponse = await this.client.chat(geminiMessages, systemPrompt, geminiTools, options?.toolChoice);
     return fromGeminiResponse(geminiResponse);
   }
 }

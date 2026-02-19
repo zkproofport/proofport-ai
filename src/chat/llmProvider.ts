@@ -20,7 +20,12 @@ export interface LLMResponse {
   toolCalls?: Array<{ id?: string; name: string; args: Record<string, unknown> }>;
 }
 
+export interface ChatOptions {
+  toolChoice?: 'auto' | 'required';
+  timeoutMs?: number;
+}
+
 export interface LLMProvider {
   name: string;
-  chat(messages: LLMMessage[], systemPrompt: string, tools: LLMTool[]): Promise<LLMResponse>;
+  chat(messages: LLMMessage[], systemPrompt: string, tools: LLMTool[], options?: ChatOptions): Promise<LLMResponse>;
 }

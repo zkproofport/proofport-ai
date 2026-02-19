@@ -1,4 +1,4 @@
-import type { LLMProvider, LLMMessage, LLMTool, LLMResponse } from './llmProvider.js';
+import type { LLMProvider, LLMMessage, LLMTool, LLMResponse, ChatOptions } from './llmProvider.js';
 
 export class MultiLLMProvider implements LLMProvider {
   name = 'multi';
@@ -11,13 +11,13 @@ export class MultiLLMProvider implements LLMProvider {
     this.providers = providers;
   }
 
-  async chat(messages: LLMMessage[], systemPrompt: string, tools: LLMTool[]): Promise<LLMResponse> {
+  async chat(messages: LLMMessage[], systemPrompt: string, tools: LLMTool[], options?: ChatOptions): Promise<LLMResponse> {
     let lastError: Error | undefined;
 
     for (const provider of this.providers) {
       try {
         console.log(`[Chat] Trying ${provider.name}...`);
-        const response = await provider.chat(messages, systemPrompt, tools);
+        const response = await provider.chat(messages, systemPrompt, tools, options);
         console.log(`[Chat] ${provider.name} succeeded`);
         return response;
       } catch (error) {
