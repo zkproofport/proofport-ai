@@ -10,6 +10,9 @@ import { VERIFIER_ADDRESSES } from '../config/contracts.js';
 import { handleProofCompleted } from '../identity/reputation.js';
 import type { TeeProvider } from '../tee/types.js';
 import type { SigningRequestRecord } from '../signing/types.js';
+import { trace, SpanStatusCode } from '@opentelemetry/api';
+
+const tracer = trace.getTracer('a2a-worker');
 
 export class TaskWorker {
   private intervalId: NodeJS.Timeout | null = null;
@@ -81,6 +84,10 @@ export class TaskWorker {
 
   async processTask(task: A2aTask): Promise<void> {
     const { skill } = task;
+    const span = tracer.startSpan('a2a.task.process');
+    span.setAttribute('a2a.skill', skill);
+    span.setAttribute('a2a.task_id', task.id);
+    if (task.contextId) span.setAttribute('session_id', task.contextId);
 
     try {
       if (skill === 'generate_proof') {
@@ -92,7 +99,9 @@ export class TaskWorker {
       } else {
         throw new Error(`Unknown skill: ${skill}`);
       }
+      span.setStatus({ code: SpanStatusCode.OK });
     } catch (error: any) {
+      span.setStatus({ code: SpanStatusCode.ERROR, message: error.message || String(error) });
       console.error(`Task ${task.id} failed:`, error);
       const errorMessage = error.message || String(error);
       await this.deps.taskStore.updateTaskStatus(task.id, 'failed', {
@@ -109,6 +118,8 @@ export class TaskWorker {
       if (failedTask) {
         this.deps.taskEventEmitter.emitTaskComplete(task.id, failedTask);
       }
+    } finally {
+      span.end();
     }
   }
 

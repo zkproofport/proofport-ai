@@ -76,6 +76,9 @@ export function loadConfig() {
     // Chat / LLM (optional)
     openaiApiKey: process.env.OPENAI_API_KEY || '',
     geminiApiKey: process.env.GEMINI_API_KEY || '',
+
+    // Tracing (optional)
+    phoenixCollectorEndpoint: process.env.PHOENIX_COLLECTOR_ENDPOINT || '',
   };
 }
 

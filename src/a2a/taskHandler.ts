@@ -3,6 +3,9 @@ import type { TaskStore, Message, DataPart } from './taskStore.js';
 import type { TaskEventEmitter } from './streaming.js';
 import { attachSseStream } from './streaming.js';
 import type { PaymentFacilitator } from '../payment/facilitator.js';
+import { trace, SpanStatusCode } from '@opentelemetry/api';
+
+const tracer = trace.getTracer('a2a-handler');
 
 export interface A2aHandlerDeps {
   taskStore: TaskStore;
@@ -129,60 +132,77 @@ async function handleMessageSend(
   paymentFacilitator?: PaymentFacilitator,
   req?: Request
 ): Promise<void> {
-  const params = body.params || {};
-  const message = params.message as Message | undefined;
-
-  if (!message || !message.role || !Array.isArray(message.parts) || message.parts.length === 0) {
-    res.json(jsonRpcError(body.id, -32602, 'Invalid params: message with role and non-empty parts is required'));
-    return;
-  }
-
-  // Extract skill from message
-  let skill: string;
-  let skillParams: Record<string, unknown>;
+  const span = tracer.startSpan('a2a.message.send');
   try {
-    const extracted = extractSkillFromMessage(message);
-    skill = extracted.skill;
-    skillParams = extracted.params;
-  } catch (error) {
-    res.json(jsonRpcError(body.id, -32602, error instanceof Error ? error.message : 'Could not extract skill'));
-    return;
-  }
+    const params = body.params || {};
+    const message = params.message as Message | undefined;
 
-  if (!VALID_SKILLS.includes(skill)) {
-    res.json(jsonRpcError(body.id, -32602, `Invalid skill: ${skill}. Valid skills: ${VALID_SKILLS.join(', ')}`));
-    return;
-  }
+    if (!message || !message.role || !Array.isArray(message.parts) || message.parts.length === 0) {
+      res.json(jsonRpcError(body.id, -32602, 'Invalid params: message with role and non-empty parts is required'));
+      span.setStatus({ code: SpanStatusCode.OK });
+      return;
+    }
 
-  // Add timestamp to user message
-  const userMessage: Message = {
-    ...message,
-    timestamp: message.timestamp || new Date().toISOString(),
-  };
+    // Extract skill from message
+    let skill: string;
+    let skillParams: Record<string, unknown>;
+    try {
+      const extracted = extractSkillFromMessage(message);
+      skill = extracted.skill;
+      skillParams = extracted.params;
+    } catch (error) {
+      res.json(jsonRpcError(body.id, -32602, error instanceof Error ? error.message : 'Could not extract skill'));
+      span.setStatus({ code: SpanStatusCode.ERROR, message: error instanceof Error ? error.message : 'Could not extract skill' });
+      return;
+    }
 
-  // Create task
-  const task = await taskStore.createTask(skill, skillParams, userMessage);
+    if (!VALID_SKILLS.includes(skill)) {
+      res.json(jsonRpcError(body.id, -32602, `Invalid skill: ${skill}. Valid skills: ${VALID_SKILLS.join(', ')}`));
+      span.setStatus({ code: SpanStatusCode.ERROR, message: `Invalid skill: ${skill}` });
+      return;
+    }
 
-  // Record payment if present
-  if (paymentFacilitator && req) {
-    const paymentInfo = (req as any).x402Payment;
-    if (paymentInfo) {
-      try {
-        await paymentFacilitator.recordPayment({
-          taskId: task.id,
-          payerAddress: paymentInfo.payerAddress,
-          amount: paymentInfo.amount,
-          network: paymentInfo.network,
-        });
-      } catch (error) {
-        console.error(`Failed to record payment for task ${task.id}:`, error);
+    const contextId = (params.message as any)?.contextId;
+    if (contextId) span.setAttribute('session_id', contextId);
+    span.setAttribute('a2a.skill', skill);
+
+    // Add timestamp to user message
+    const userMessage: Message = {
+      ...message,
+      timestamp: message.timestamp || new Date().toISOString(),
+    };
+
+    // Create task
+    const task = await taskStore.createTask(skill, skillParams, userMessage);
+    span.setAttribute('a2a.task_id', task.id);
+
+    // Record payment if present
+    if (paymentFacilitator && req) {
+      const paymentInfo = (req as any).x402Payment;
+      if (paymentInfo) {
+        try {
+          await paymentFacilitator.recordPayment({
+            taskId: task.id,
+            payerAddress: paymentInfo.payerAddress,
+            amount: paymentInfo.amount,
+            network: paymentInfo.network,
+          });
+        } catch (error) {
+          console.error(`Failed to record payment for task ${task.id}:`, error);
+        }
       }
     }
-  }
 
-  // Wait for task completion (blocking)
-  const completedTask = await waitForTaskCompletion(task.id, taskStore, taskEventEmitter, 120000);
-  res.json(jsonRpcResult(body.id, completedTask));
+    // Wait for task completion (blocking)
+    const completedTask = await waitForTaskCompletion(task.id, taskStore, taskEventEmitter, 120000);
+    res.json(jsonRpcResult(body.id, completedTask));
+    span.setStatus({ code: SpanStatusCode.OK });
+  } catch (err) {
+    span.setStatus({ code: SpanStatusCode.ERROR, message: String(err) });
+    throw err;
+  } finally {
+    span.end();
+  }
 }
 
 async function handleMessageStream(
@@ -193,56 +213,73 @@ async function handleMessageStream(
   paymentFacilitator?: PaymentFacilitator,
   req?: Request
 ): Promise<void> {
-  const params = body.params || {};
-  const message = params.message as Message | undefined;
-
-  if (!message || !message.role || !Array.isArray(message.parts) || message.parts.length === 0) {
-    res.json(jsonRpcError(body.id, -32602, 'Invalid params: message with role and non-empty parts is required'));
-    return;
-  }
-
-  let skill: string;
-  let skillParams: Record<string, unknown>;
+  const span = tracer.startSpan('a2a.message.stream');
   try {
-    const extracted = extractSkillFromMessage(message);
-    skill = extracted.skill;
-    skillParams = extracted.params;
-  } catch (error) {
-    res.json(jsonRpcError(body.id, -32602, error instanceof Error ? error.message : 'Could not extract skill'));
-    return;
-  }
+    const params = body.params || {};
+    const message = params.message as Message | undefined;
 
-  if (!VALID_SKILLS.includes(skill)) {
-    res.json(jsonRpcError(body.id, -32602, `Invalid skill: ${skill}. Valid skills: ${VALID_SKILLS.join(', ')}`));
-    return;
-  }
+    if (!message || !message.role || !Array.isArray(message.parts) || message.parts.length === 0) {
+      res.json(jsonRpcError(body.id, -32602, 'Invalid params: message with role and non-empty parts is required'));
+      span.setStatus({ code: SpanStatusCode.OK });
+      return;
+    }
 
-  const userMessage: Message = {
-    ...message,
-    timestamp: message.timestamp || new Date().toISOString(),
-  };
+    let skill: string;
+    let skillParams: Record<string, unknown>;
+    try {
+      const extracted = extractSkillFromMessage(message);
+      skill = extracted.skill;
+      skillParams = extracted.params;
+    } catch (error) {
+      res.json(jsonRpcError(body.id, -32602, error instanceof Error ? error.message : 'Could not extract skill'));
+      span.setStatus({ code: SpanStatusCode.ERROR, message: error instanceof Error ? error.message : 'Could not extract skill' });
+      return;
+    }
 
-  const task = await taskStore.createTask(skill, skillParams, userMessage);
+    if (!VALID_SKILLS.includes(skill)) {
+      res.json(jsonRpcError(body.id, -32602, `Invalid skill: ${skill}. Valid skills: ${VALID_SKILLS.join(', ')}`));
+      span.setStatus({ code: SpanStatusCode.ERROR, message: `Invalid skill: ${skill}` });
+      return;
+    }
 
-  // Record payment if present
-  if (paymentFacilitator && req) {
-    const paymentInfo = (req as any).x402Payment;
-    if (paymentInfo) {
-      try {
-        await paymentFacilitator.recordPayment({
-          taskId: task.id,
-          payerAddress: paymentInfo.payerAddress,
-          amount: paymentInfo.amount,
-          network: paymentInfo.network,
-        });
-      } catch (error) {
-        console.error(`Failed to record payment for task ${task.id}:`, error);
+    const contextId = (params.message as any)?.contextId;
+    if (contextId) span.setAttribute('session_id', contextId);
+    span.setAttribute('a2a.skill', skill);
+
+    const userMessage: Message = {
+      ...message,
+      timestamp: message.timestamp || new Date().toISOString(),
+    };
+
+    const task = await taskStore.createTask(skill, skillParams, userMessage);
+    span.setAttribute('a2a.task_id', task.id);
+
+    // Record payment if present
+    if (paymentFacilitator && req) {
+      const paymentInfo = (req as any).x402Payment;
+      if (paymentInfo) {
+        try {
+          await paymentFacilitator.recordPayment({
+            taskId: task.id,
+            payerAddress: paymentInfo.payerAddress,
+            amount: paymentInfo.amount,
+            network: paymentInfo.network,
+          });
+        } catch (error) {
+          console.error(`Failed to record payment for task ${task.id}:`, error);
+        }
       }
     }
-  }
 
-  // Attach SSE stream
-  attachSseStream(res, taskEventEmitter, task.id, body.id || '');
+    // Attach SSE stream
+    attachSseStream(res, taskEventEmitter, task.id, body.id || '');
+    span.setStatus({ code: SpanStatusCode.OK });
+  } catch (err) {
+    span.setStatus({ code: SpanStatusCode.ERROR, message: String(err) });
+    throw err;
+  } finally {
+    span.end();
+  }
 }
 
 async function handleTaskGet(
@@ -250,27 +287,40 @@ async function handleTaskGet(
   res: Response,
   taskStore: TaskStore
 ): Promise<void> {
-  const params = body.params || {};
+  const span = tracer.startSpan('a2a.tasks.get');
+  try {
+    const params = body.params || {};
 
-  if (!params.id || typeof params.id !== 'string') {
-    res.json(jsonRpcError(body.id, -32602, 'Invalid params: id is required'));
-    return;
+    if (!params.id || typeof params.id !== 'string') {
+      res.json(jsonRpcError(body.id, -32602, 'Invalid params: id is required'));
+      span.setStatus({ code: SpanStatusCode.OK });
+      return;
+    }
+
+    span.setAttribute('a2a.task_id', params.id as string);
+
+    const task = await taskStore.getTask(params.id);
+
+    if (!task) {
+      res.json(jsonRpcError(body.id, -32001, 'Task not found'));
+      span.setStatus({ code: SpanStatusCode.ERROR, message: 'Task not found' });
+      return;
+    }
+
+    // Support historyLength parameter
+    const historyLength = typeof params.historyLength === 'number' ? params.historyLength : undefined;
+    if (historyLength !== undefined && task.history) {
+      task.history = task.history.slice(-historyLength);
+    }
+
+    res.json(jsonRpcResult(body.id, task));
+    span.setStatus({ code: SpanStatusCode.OK });
+  } catch (err) {
+    span.setStatus({ code: SpanStatusCode.ERROR, message: String(err) });
+    throw err;
+  } finally {
+    span.end();
   }
-
-  const task = await taskStore.getTask(params.id);
-
-  if (!task) {
-    res.json(jsonRpcError(body.id, -32001, 'Task not found'));
-    return;
-  }
-
-  // Support historyLength parameter
-  const historyLength = typeof params.historyLength === 'number' ? params.historyLength : undefined;
-  if (historyLength !== undefined && task.history) {
-    task.history = task.history.slice(-historyLength);
-  }
-
-  res.json(jsonRpcResult(body.id, task));
 }
 
 async function handleTaskCancel(
@@ -278,26 +328,40 @@ async function handleTaskCancel(
   res: Response,
   taskStore: TaskStore
 ): Promise<void> {
-  const params = body.params || {};
-
-  if (!params.id || typeof params.id !== 'string') {
-    res.json(jsonRpcError(body.id, -32602, 'Invalid params: id is required'));
-    return;
-  }
-
+  const span = tracer.startSpan('a2a.tasks.cancel');
   try {
-    const updatedTask = await taskStore.updateTaskStatus(params.id, 'canceled');
-    res.json(jsonRpcResult(body.id, updatedTask));
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('Invalid status transition')) {
-      res.json(jsonRpcError(body.id, -32002, error.message));
+    const params = body.params || {};
+
+    if (!params.id || typeof params.id !== 'string') {
+      res.json(jsonRpcError(body.id, -32602, 'Invalid params: id is required'));
+      span.setStatus({ code: SpanStatusCode.OK });
       return;
     }
-    if (error instanceof Error && error.message === 'Task not found') {
-      res.json(jsonRpcError(body.id, -32001, 'Task not found'));
-      return;
+
+    span.setAttribute('a2a.task_id', params.id as string);
+
+    try {
+      const updatedTask = await taskStore.updateTaskStatus(params.id, 'canceled');
+      res.json(jsonRpcResult(body.id, updatedTask));
+      span.setStatus({ code: SpanStatusCode.OK });
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Invalid status transition')) {
+        res.json(jsonRpcError(body.id, -32002, error.message));
+        span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+        return;
+      }
+      if (error instanceof Error && error.message === 'Task not found') {
+        res.json(jsonRpcError(body.id, -32001, 'Task not found'));
+        span.setStatus({ code: SpanStatusCode.ERROR, message: 'Task not found' });
+        return;
+      }
+      throw error;
     }
-    throw error;
+  } catch (err) {
+    span.setStatus({ code: SpanStatusCode.ERROR, message: String(err) });
+    throw err;
+  } finally {
+    span.end();
   }
 }
 
