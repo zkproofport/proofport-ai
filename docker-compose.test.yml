@@ -1,0 +1,41 @@
+# A2A Test Stack: Phoenix tracing + a2a-ui
+# Usage: docker compose -f docker-compose.yml -f docker-compose.test.yml up --build -d
+services:
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    container_name: proofport-ai-phoenix
+    ports:
+      - "6006:6006"
+      - "4317:4317"
+    environment:
+      PHOENIX_WORKING_DIR: /mnt/data
+    volumes:
+      - phoenix_data:/mnt/data
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://0.0.0.0:6006/healthz')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  a2a-ui:
+    build:
+      context: ./tools/a2a-ui
+      dockerfile: Dockerfile
+    container_name: proofport-ai-a2a-ui
+    ports:
+      - "3001:3000"
+    depends_on:
+      ai:
+        condition: service_healthy
+
+  ai:
+    environment:
+      PHOENIX_COLLECTOR_ENDPOINT: http://phoenix:6006
+      A2A_CORS_ORIGINS: http://localhost:3001
+    depends_on:
+      phoenix:
+        condition: service_healthy
+
+volumes:
+  phoenix_data:
