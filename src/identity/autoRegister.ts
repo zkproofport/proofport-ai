@@ -75,7 +75,7 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
               }
 
               const metadata: AgentMetadata = {
-                name: 'ZKProofport Prover Agent',
+                name: 'proveragent.eth',
                 description: 'Zero-knowledge proof generation and verification for Coinbase attestations',
                 agentUrl: config.a2aBaseUrl,
                 capabilities: [
@@ -129,7 +129,7 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
 
     // Build metadata
     const metadata: AgentMetadata = {
-      name: 'ZKProofport Prover Agent',
+      name: 'proveragent.eth',
       description: 'Zero-knowledge proof generation and verification for Coinbase attestations',
       agentUrl: config.a2aBaseUrl,
       capabilities: [

@@ -562,7 +562,7 @@ curl https://stg-ai.zkproofport.app/.well-known/agent-card.json
 {
   "version": "0.3",
   "agent": {
-    "name": "ZKProofport Prover Agent",
+    "name": "proveragent.eth",
     "description": "Zero-knowledge proof generation and verification service",
     "url": "https://stg-ai.zkproofport.app"
   },

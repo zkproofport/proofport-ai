@@ -157,7 +157,7 @@ describe('Payment Integration Tests', () => {
     it('Agent Card is accessible without payment', async () => {
       const response = await request(app).get('/.well-known/agent.json');
       expect(response.status).toBe(200);
-      expect(response.body.name).toBe('ZKProofport Prover Agent');
+      expect(response.body.name).toBe('proveragent.eth');
     });
   });
 

@@ -93,7 +93,7 @@ export async function ensureAgentValidated(
         }
       } else {
         const result = await validationRegistration.register({
-          name: 'ZKProofport Prover Agent',
+          name: 'proveragent.eth',
           description: 'Zero-knowledge proof generation and verification for Coinbase attestations',
           agentUrl: config.a2aBaseUrl,
           capabilities: ['proof_generation', 'proof_verification'],

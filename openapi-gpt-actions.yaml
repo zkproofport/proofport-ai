@@ -1,6 +1,6 @@
 openapi: 3.1.0
 info:
-  title: ZKProofport Prover Agent
+  title: proveragent.eth
   version: 1.0.0
   description: |
     Zero-knowledge proof generation and verification for Coinbase attestations.
