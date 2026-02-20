@@ -771,16 +771,16 @@ cp .env.example .env.development
 # Fill in required values (PROVER_PRIVATE_KEY, NULLIFIER_REGISTRY_ADDRESS, etc.)
 
 # Start full test stack (proofport-ai + Phoenix + a2a-ui)
-./scripts/a2a-test.sh
+docker compose -f docker-compose.yml -f docker-compose.test.yml up --build -d
 
 # Stop
-./scripts/a2a-test-stop.sh
+docker compose -f docker-compose.yml -f docker-compose.test.yml down
 
 # Run automated E2E tests against live Docker stack
 npm run test:e2e
 
-# Quick E2E (skip Phoenix trace check)
-npm run test:e2e:quick
+# Run full E2E suite (endpoints + payment + LLM inference)
+./scripts/run-e2e.sh --build
 ```
 
 ### Services

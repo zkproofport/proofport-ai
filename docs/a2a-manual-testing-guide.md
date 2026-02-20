@@ -10,16 +10,17 @@ The a2a-ui is a community-built web UI ([a2a-community/a2a-ui](https://github.co
 
 - Docker Desktop running
 - `.env.development` file present in `proofport-ai/` (copy from `.env.example` and fill in required values)
+- For automated tests: `.env.test` file with test credentials (copy from `.env.test.example`). Required vars: `TEST_WALLET_ADDRESS`, `TEST_PAYER_PRIVATE_KEY`, `BASE_RPC_URL`
 - Ports `3001`, `4002`, `4317`, and `6006` free on the host
 
 ---
 
 ## 1. Start the Test Stack
 
-Run the test stack startup script from the `proofport-ai/` directory:
+Start the test stack from the `proofport-ai/` directory:
 
 ```bash
-./scripts/a2a-test.sh
+docker compose -f docker-compose.yml -f docker-compose.test.yml up --build -d
 ```
 
 This starts 5 containers: `ai`, `redis`, `a2a-ui`, `phoenix`, and `phoenix-proxy` (nginx CORS sidecar for Phoenix). Wait until all containers report healthy status.
@@ -55,7 +56,7 @@ Open [http://localhost:3001](http://localhost:3001) in a browser.
 3. In the dialog, enter the agent URL: `http://localhost:4002`
 4. Click **Create Agent**.
 
-**Expected result:** The agent `proveragent.eth` appears in the Agents list with status **Active** and **3 messages** (reflecting the 3 registered skills: `get_supported_circuits`, `generate_proof`, `verify_proof`).
+**Expected result:** The agent `proveragent.eth` appears in the Agents list with status **Active** and **6 messages** (reflecting the 6 registered skills: `get_supported_circuits`, `request_signing`, `check_status`, `request_payment`, `generate_proof`, `verify_proof`).
 
 If the agent fails to register, see the Troubleshooting section for CORS and connectivity issues.
 
@@ -130,10 +131,40 @@ Send multiple messages in the same conversation to verify stateless skill routin
 2. `what circuits do you support?` — same `get_supported_circuits` result (tests alternative keyword routing)
 3. `verify this proof` — routes to `verify_proof` (returns error artifact "Missing required parameters: circuitId, proof, publicInputs")
 4. `generate a proof` — routes to `generate_proof` (returns error artifact "Missing required parameters: scope, circuitId")
+5. `check status abc-123` — routes to `check_status` (returns task state for taskId `abc-123`)
+6. `request payment abc-123` — routes to `request_payment` (returns payment URL for taskId)
+7. `request signing abc-123` — routes to `request_signing` (returns signing URL for taskId)
 
 Each message should produce a separate response with visible text. proofport-ai is stateless (no conversational context), so each message is processed independently. Failed tasks include error artifacts so a2a-ui can display the error message.
 
-#### Context ID
+#### Multi-Turn Proof Generation Flow
+
+The full proof flow uses 4 sequential tool calls (the agent orchestrating proofport-ai manages this loop):
+
+```
+[STEP 1/4] request_signing → returns requestId + signingUrl (user visits to sign)
+[STEP 2/4] check_status → poll until signing complete, then check for payment requirement
+[STEP 3/4] request_payment → get paymentUrl when signing is complete
+[STEP 4/4] generate_proof → generate proof when phase is 'ready' (signing + payment done)
+[OPTIONAL] verify_proof → verify the completed proof on-chain
+```
+
+For simplified integration, use the REST flow endpoint (Section 17a) which wraps steps 1-3 into a single call.
+
+#### A2A contextId Auto-Resolution
+
+When sending a DataPart with a `contextId` field, proofport-ai automatically links the new task to an existing flow:
+
+```json
+{
+  "skill": "check_status",
+  "contextId": "existing-task-id"
+}
+```
+
+The `contextId` resolves to the `taskId` stored in Redis under that context, enabling the calling agent to track the flow across multiple turns without storing the taskId explicitly.
+
+#### Context ID (Phoenix Tracing)
 
 In the **Agent Details** panel (right side of chat view), the **Conversation** section shows:
 
@@ -171,6 +202,8 @@ All error cases return valid JSON-RPC error responses or error artifacts, not un
 ### 8. curl DataPart Testing
 
 For skills that require structured input parameters, use the A2A `DataPart` message format. This bypasses the text-based routing and directly addresses a skill with its required fields.
+
+All 6 skills are available: `get_supported_circuits`, `request_signing`, `check_status`, `request_payment`, `generate_proof`, `verify_proof`.
 
 #### get_supported_circuits
 
@@ -255,6 +288,87 @@ curl -s -X POST http://localhost:4002/a2a \
 
 > For `generate_proof`, use a wallet address that holds a valid Coinbase KYC attestation on the target chain. For Base Sepolia testing, the attested wallet is `0xD6C714247037E5201B7e3dEC97a3ab59a9d2F739`.
 
+#### check_status
+
+```bash
+curl -s -X POST http://localhost:4002/a2a \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "message/send",
+    "params": {
+      "message": {
+        "role": "user",
+        "parts": [{
+          "kind": "data",
+          "mimeType": "application/json",
+          "data": {
+            "skill": "check_status",
+            "taskId": "<taskId-from-generate_proof>"
+          }
+        }]
+      }
+    }
+  }'
+```
+
+Expected: artifact with `state` field (`input-required`, `processing`, or `completed`) and proof data when completed.
+
+#### request_signing
+
+```bash
+curl -s -X POST http://localhost:4002/a2a \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "message/send",
+    "params": {
+      "message": {
+        "role": "user",
+        "parts": [{
+          "kind": "data",
+          "mimeType": "application/json",
+          "data": {
+            "skill": "request_signing",
+            "taskId": "<taskId-from-generate_proof>"
+          }
+        }]
+      }
+    }
+  }'
+```
+
+Expected: artifact with `signingUrl` field pointing to the signing page.
+
+#### request_payment
+
+```bash
+curl -s -X POST http://localhost:4002/a2a \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "message/send",
+    "params": {
+      "message": {
+        "role": "user",
+        "parts": [{
+          "kind": "data",
+          "mimeType": "application/json",
+          "data": {
+            "skill": "request_payment",
+            "taskId": "<taskId-from-generate_proof>"
+          }
+        }]
+      }
+    }
+  }'
+```
+
+Expected: artifact with `paymentUrl` and payment amount details.
+
 ---
 
 ### 8a. Korean / Multilingual Text Inference
@@ -325,7 +439,7 @@ curl -s -X POST http://localhost:4002/mcp \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
 ```
 
-Expected: SSE response listing 3 tools: `get_supported_circuits`, `generate_proof`, `verify_proof`.
+Expected: SSE response listing 6 tools: `get_supported_circuits`, `request_signing`, `check_status`, `request_payment`, `generate_proof`, `verify_proof`.
 
 #### Call get_supported_circuits
 
@@ -373,7 +487,7 @@ Add the MCP server to your Claude Code settings:
 }
 ```
 
-After restarting Claude Code, the 3 tools appear in the tool picker. Test by asking:
+After restarting Claude Code, the 6 tools appear in the tool picker. Test by asking:
 
 - "list supported circuits" → invokes `get_supported_circuits` tool
 - "verify proof 0x... for coinbase_attestation on chain 84532" → invokes `verify_proof` tool
@@ -503,6 +617,36 @@ curl -s -X POST http://localhost:4002/api/v1/proofs \
 ```
 
 Expected: Either a completed proof response with `proof`, `publicInputs`, and `nullifier` fields, or a signing URL response if the wallet requires user action (Phase 2 web signing).
+
+---
+
+### 18a. REST Flow Endpoint (simplified 3-call flow)
+
+The flow endpoint wraps the multi-turn proof generation into a simplified API:
+
+**Start a flow:**
+
+```bash
+curl -s -X POST http://localhost:4002/api/v1/flow \
+  -H "Content-Type: application/json" \
+  -d '{
+    "circuitId": "coinbase_attestation",
+    "scope": "test.com",
+    "address": "0xD6C714247037E5201B7e3dEC97a3ab59a9d2F739"
+  }' | jq
+```
+
+Expected: `{ "flowId": "<uuid>", "state": "input-required", "signingUrl": "http://localhost:4002/s/<flowId>" }`
+
+**Poll flow status:**
+
+```bash
+curl -s http://localhost:4002/api/v1/flow/<flowId> | jq
+```
+
+Expected: state transitions `input-required` → `processing` → `completed`. When completed, response includes `proof`, `publicInputs`, and `nullifier`.
+
+The flow endpoint consolidates steps 1-3 of the multi-turn flow (generate_proof → user signs → check_status polling) into a single session tracked by `flowId`.
 
 ---
 
@@ -645,8 +789,8 @@ Traces appear within 1-2 seconds after a message is sent (using `SimpleSpanProce
 | 4 | TEE status | HTTP | `GET /tee/status` | 200, mode info | |
 | 5 | Identity status | HTTP | `GET /identity/status` | 200, ERC-8004 contracts | |
 | 6 | OASF discovery | HTTP | `GET /.well-known/oasf.json` | agent descriptor with registrations | |
-| 7 | A2A agent card | HTTP | `GET /.well-known/agent.json` | 3 skills, identity block | |
-| 8 | MCP discovery | HTTP | `GET /.well-known/mcp.json` | 3 tools listed | |
+| 7 | A2A agent card | HTTP | `GET /.well-known/agent.json` | 6 skills, identity block | |
+| 8 | MCP discovery | HTTP | `GET /.well-known/mcp.json` | 6 tools listed | |
 | 9 | OpenAPI spec | HTTP | `GET /openapi.json` | valid OpenAPI spec | |
 | 10 | A2A text: list circuits | A2A | `message/send` text | completed, circuits artifact | |
 | 11 | A2A DataPart: get_circuits | A2A | `message/send` DataPart | completed, circuit data | |
@@ -657,7 +801,7 @@ Traces appear within 1-2 seconds after a message is sent (using `SimpleSpanProce
 | 16 | A2A error: missing params | A2A | `message/send` partial params | error artifact with missing fields | |
 | 17 | A2A error: empty message | A2A | `message/send` empty | -32602 | |
 | 18 | MCP initialize | MCP | `POST /mcp` initialize | server info, protocolVersion | |
-| 19 | MCP tools/list | MCP | `POST /mcp` tools/list | 3 tools returned | |
+| 19 | MCP tools/list | MCP | `POST /mcp` tools/list | 6 tools returned | |
 | 20 | MCP get_supported_circuits | MCP | `tools/call` | circuit data SSE response | |
 | 21 | MCP verify_proof | MCP | `tools/call` fake proof | valid: false, error field | |
 | 22 | MCP generate_proof | MCP | `tools/call` | proof or signing URL | |
@@ -687,23 +831,24 @@ cd /Users/nhn/Workspace/proofport-app-dev/proofport-ai && npm test
 
 Covers: A2A handler, task worker, MCP tools, chat handler, payment middleware, signing, TEE, identity, circuits.
 
-### Docker Stack E2E (bash)
+### Docker Stack E2E (Vitest)
 
 ```bash
-# Start stack
-./scripts/a2a-test.sh
+# Start test stack
+docker compose -f docker-compose.yml -f docker-compose.test.yml up --build -d
 
-# Run all automated assertions
-npm run test:e2e
+# Run E2E tests
+npx vitest run tests/e2e/
 
-# Quick mode (skip Phoenix trace check)
-npm run test:e2e:quick
+# Run with payment-enabled stack
+docker compose -f docker-compose.yml -f docker-compose.e2e-payment.yml up --build -d
+npx vitest run tests/e2e/x402-e2e.test.ts
 ```
 
-### Staging E2E (real payment + proof on Base Sepolia)
+### Staging E2E
 
 ```bash
-node /Users/nhn/Workspace/proofport-app-dev/proofport-ai/scripts/e2e-test.mjs
+E2E_BASE_URL=https://stg-ai.zkproofport.app npx vitest run tests/e2e/endpoints.test.ts
 ```
 
 ---
@@ -711,10 +856,10 @@ node /Users/nhn/Workspace/proofport-app-dev/proofport-ai/scripts/e2e-test.mjs
 ## Stop Test Stack
 
 ```bash
-./scripts/a2a-test-stop.sh
+docker compose -f docker-compose.yml -f docker-compose.test.yml down
 ```
 
-This stops and removes all 5 test containers (ai, redis, a2a-ui, phoenix, phoenix-proxy) while preserving any local data volumes.
+This stops and removes all test containers while preserving any local data volumes.
 
 ---
 

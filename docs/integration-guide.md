@@ -15,11 +15,14 @@ Base URLs:
 
 ## 사용 가능한 도구/기능 (Available Tools/Skills)
 
-모든 프로토콜에서 제공하는 3가지 핵심 기능:
+모든 프로토콜에서 제공하는 6가지 도구/기능:
 
-1. `generate_proof` — ZK 증명 생성 (x402 결제 필요: $0.10 USDC)
-2. `verify_proof` — 온체인 증명 검증 (x402 결제 필요: $0.10 USDC)
-3. `get_supported_circuits` — 사용 가능한 회로 목록 조회 (무료)
+1. `get_supported_circuits` — [DISCOVERY] 사용 가능한 회로 목록 조회 (무료)
+2. `request_signing` — [STEP 1/4] 서명 세션 생성 → signingUrl 반환 (무료)
+3. `check_status` — [STEP 2/4] 서명/결제 상태 확인 (무료)
+4. `request_payment` — [STEP 3/4] 결제 URL 요청 (무료)
+5. `generate_proof` — [STEP 4/4] ZK 증명 생성 (x402 결제 필요: $0.10 USDC)
+6. `verify_proof` — [OPTIONAL] 온체인 증명 검증 (무료)
 
 ## Discovery Endpoints
 
@@ -65,7 +68,7 @@ Accept: application/json, text/event-stream
 | Method | 설명 |
 |--------|------|
 | `initialize` | MCP 세션 초기화 |
-| `tools/list` | 사용 가능한 도구 목록 조회 |
+| `tools/list` | 사용 가능한 6개 도구 목록 조회 |
 | `tools/call` | 도구 호출 |
 
 ### 1.3 MCP Tool: get_supported_circuits
@@ -195,10 +198,13 @@ Accept: application/json, text/event-stream
 
 **무료 도구 (결제 불필요):**
 - `get_supported_circuits` — 회로 목록 조회는 항상 무료
+- `request_signing` — 서명 세션 생성 무료
+- `check_status` — 상태 확인 무료
+- `request_payment` — 결제 URL 요청 무료
+- `verify_proof` — 온체인 증명 검증 무료
 
 **유료 도구 ($0.10 USDC):**
 - `generate_proof` — 증명 생성
-- `verify_proof` — 증명 검증
 
 ### 1.7 Cursor / Windsurf Integration
 
@@ -229,7 +235,7 @@ await client.connect(transport);
 // 도구 목록 조회
 const { tools } = await client.listTools();
 console.log('사용 가능한 도구:', tools.map(t => t.name));
-// 출력: ['get_supported_circuits', 'generate_proof', 'verify_proof']
+// 출력: ['get_supported_circuits', 'request_signing', 'check_status', 'request_payment', 'generate_proof', 'verify_proof']
 
 // 도구 호출
 const result = await client.callTool({
@@ -296,12 +302,19 @@ GPT Actions는 OpenAPI 명세를 사용하여 사용 가능한 액션을 정의�
 ```
 당신은 ZKProofport로 구동되는 영지식 증명 어시스턴트입니다. 다음 기능을 제공합니다:
 
-1. GET /api/v1/circuits를 사용하여 지원되는 ZK 회로 목록 조회
-2. POST /api/v1/proofs를 사용하여 영지식 증명 생성
-3. POST /api/v1/proofs/verify를 사용하여 온체인 증명 검증
-4. GET /api/v1/proofs/{taskId}를 사용하여 증명 상태 확인
+1. GET /api/v1/circuits — [DISCOVERY] 지원되는 ZK 회로 목록 조회
+2. POST /api/v1/signing — [STEP 1/4] 서명 세션 생성 → signingUrl 반환
+3. GET /api/v1/proofs/{taskId} — [STEP 2/4] 서명/결제 상태 확인
+4. POST /api/v1/payment/{taskId} — [STEP 3/4] 결제 URL 요청
+5. POST /api/v1/proofs — [STEP 4/4] 영지식 증명 생성 (서명+결제 완료 후)
+6. POST /api/v1/proofs/verify — [OPTIONAL] 온체인 증명 검증 (무료)
 
-사용자가 증명 생성을 요청하면, 먼저 사용 가능한 회로를 나열한 후 필요한 입력값(circuitId, scope)을 요청하세요. 증명 생성은 signingUrl을 반환하며, 사용자는 해당 URL에서 지갑 서명을 완료해야 합니다.
+증명 생성 멀티턴 플로우:
+- 사용자가 증명 생성을 요청하면, 먼저 사용 가능한 회로를 확인합니다.
+- STEP 1: request_signing으로 서명 세션을 생성하고 signingUrl을 사용자에게 안내합니다.
+- STEP 2: check_status로 서명 완료를 확인합니다.
+- STEP 3: request_payment로 결제 URL을 생성하고 사용자에게 안내합니다.
+- STEP 4: 결제 완료 후 generate_proof로 증명을 생성합니다.
 
 사용 가능한 회로:
 - coinbase_attestation: Coinbase KYC 증명 (신원 비공개)
@@ -399,7 +412,7 @@ curl https://stg-ai.zkproofport.app/api/v1/proofs/abc-def-123
 }
 ```
 
-#### **POST /api/v1/proofs/verify** — 증명 검증 (x402 결제 필요)
+#### **POST /api/v1/proofs/verify** — 증명 검증 (무료)
 
 ```bash
 curl -X POST https://stg-ai.zkproofport.app/api/v1/proofs/verify \
@@ -438,15 +451,15 @@ assistant = client.beta.assistants.create(
             "type": "function",
             "function": {
                 "name": "list_circuits",
-                "description": "사용 가능한 ZK 회로 목록 조회",
+                "description": "[DISCOVERY] 사용 가능한 ZK 회로 목록 조회",
                 "parameters": {"type": "object", "properties": {}}
             }
         },
         {
             "type": "function",
             "function": {
-                "name": "generate_proof",
-                "description": "Coinbase 인증을 위한 ZK 증명 생성",
+                "name": "request_signing",
+                "description": "[STEP 1/4] 서명 세션 생성 → signingUrl 반환",
                 "parameters": {
                     "type": "object",
                     "required": ["circuitId", "scope"],
@@ -456,7 +469,49 @@ assistant = client.beta.assistants.create(
                             "enum": ["coinbase_attestation", "coinbase_country_attestation"]
                         },
                         "scope": {"type": "string"},
-                        "address": {"type": "string", "description": "지갑 주소"}
+                        "address": {"type": "string", "description": "지갑 주소 (선택)"}
+                    }
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "check_status",
+                "description": "[STEP 2/4] 서명/결제 상태 확인",
+                "parameters": {
+                    "type": "object",
+                    "required": ["requestId"],
+                    "properties": {
+                        "requestId": {"type": "string"}
+                    }
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "request_payment",
+                "description": "[STEP 3/4] 결제 URL 요청 (서명 완료 후)",
+                "parameters": {
+                    "type": "object",
+                    "required": ["requestId"],
+                    "properties": {
+                        "requestId": {"type": "string"}
+                    }
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "generate_proof",
+                "description": "[STEP 4/4] ZK 증명 생성 (서명+결제 완료 후)",
+                "parameters": {
+                    "type": "object",
+                    "required": ["requestId"],
+                    "properties": {
+                        "requestId": {"type": "string"}
                     }
                 }
             }
@@ -465,7 +520,7 @@ assistant = client.beta.assistants.create(
             "type": "function",
             "function": {
                 "name": "verify_proof",
-                "description": "온체인 ZK 증명 검증",
+                "description": "[OPTIONAL] 온체인 ZK 증명 검증 (무료)",
                 "parameters": {
                     "type": "object",
                     "required": ["proof", "publicInputs", "circuitId"],
@@ -487,6 +542,12 @@ def handle_function_call(name, args):
     base = "https://stg-ai.zkproofport.app"
     if name == "list_circuits":
         return requests.get(f"{base}/api/v1/circuits").json()
+    elif name == "request_signing":
+        return requests.post(f"{base}/api/v1/signing", json=args).json()
+    elif name == "check_status":
+        return requests.get(f"{base}/api/v1/proofs/{args['requestId']}").json()
+    elif name == "request_payment":
+        return requests.post(f"{base}/api/v1/payment/{args['requestId']}").json()
     elif name == "generate_proof":
         return requests.post(f"{base}/api/v1/proofs", json=args).json()
     elif name == "verify_proof":
@@ -570,24 +631,47 @@ curl https://stg-ai.zkproofport.app/.well-known/agent-card.json
     {
       "id": "get_supported_circuits",
       "name": "Get Supported Circuits",
-      "description": "사용 가능한 ZK 회로 목록 조회",
+      "description": "[DISCOVERY] 사용 가능한 ZK 회로 목록 조회",
       "parameters": {}
+    },
+    {
+      "id": "request_signing",
+      "name": "Request Signing",
+      "description": "[STEP 1/4] 서명 세션 생성 → signingUrl 반환",
+      "parameters": {
+        "circuitId": "string",
+        "scope": "string",
+        "address": "string (optional)"
+      }
+    },
+    {
+      "id": "check_status",
+      "name": "Check Status",
+      "description": "[STEP 2/4] 서명/결제 상태 확인",
+      "parameters": {
+        "requestId": "string"
+      }
+    },
+    {
+      "id": "request_payment",
+      "name": "Request Payment",
+      "description": "[STEP 3/4] 결제 URL 요청",
+      "parameters": {
+        "requestId": "string"
+      }
     },
     {
       "id": "generate_proof",
       "name": "Generate Proof",
-      "description": "영지식 증명 생성",
+      "description": "[STEP 4/4] 영지식 증명 생성",
       "parameters": {
-        "circuitId": "string",
-        "scope": "string",
-        "address": "string (optional)",
-        "signature": "string (optional)"
+        "requestId": "string"
       }
     },
     {
       "id": "verify_proof",
       "name": "Verify Proof",
-      "description": "온체인 증명 검증",
+      "description": "[OPTIONAL] 온체인 증명 검증 (무료)",
       "parameters": {
         "proof": "string",
         "publicInputs": "array",
@@ -729,20 +813,41 @@ def call_zkproofport(skill: str, **kwargs):
 # 도구 정의
 list_circuits_tool = Tool(
     name="list_circuits",
-    description="사용 가능한 ZK 증명 회로 목록 조회",
+    description="[DISCOVERY] 사용 가능한 ZK 증명 회로 목록 조회",
     function=lambda: call_zkproofport("get_supported_circuits")
+)
+
+request_signing_tool = Tool(
+    name="request_signing",
+    description="[STEP 1/4] 서명 세션 생성 → signingUrl 반환",
+    function=lambda circuitId, scope, address=None:
+        call_zkproofport("request_signing", circuitId=circuitId, scope=scope, address=address)
+)
+
+check_status_tool = Tool(
+    name="check_status",
+    description="[STEP 2/4] 서명/결제 상태 확인",
+    function=lambda requestId:
+        call_zkproofport("check_status", requestId=requestId)
+)
+
+request_payment_tool = Tool(
+    name="request_payment",
+    description="[STEP 3/4] 결제 URL 요청",
+    function=lambda requestId:
+        call_zkproofport("request_payment", requestId=requestId)
 )
 
 generate_proof_tool = Tool(
     name="generate_proof",
-    description="영지식 증명 생성",
-    function=lambda circuitId, scope, address=None:
-        call_zkproofport("generate_proof", circuitId=circuitId, scope=scope, address=address)
+    description="[STEP 4/4] 영지식 증명 생성",
+    function=lambda requestId:
+        call_zkproofport("generate_proof", requestId=requestId)
 )
 
 verify_proof_tool = Tool(
     name="verify_proof",
-    description="온체인 증명 검증",
+    description="[OPTIONAL] 온체인 증명 검증 (무료)",
     function=lambda proof, publicInputs, circuitId:
         call_zkproofport("verify_proof", proof=proof, publicInputs=publicInputs, circuitId=circuitId)
 )
@@ -754,7 +859,7 @@ agent = Agent(
     instruction="""당신은 사용자가 ZKProofport를 사용하여 영지식 증명을 생성하고
     검증할 수 있도록 돕는 프라이버시 에이전트입니다. 증명을 생성하기 전에
     항상 사용 가능한 회로를 먼저 나열하세요.""",
-    tools=[list_circuits_tool, generate_proof_tool, verify_proof_tool]
+    tools=[list_circuits_tool, request_signing_tool, check_status_tool, request_payment_tool, generate_proof_tool, verify_proof_tool]
 )
 ```
 
@@ -778,7 +883,7 @@ const client = new A2AClient({
 // 에이전트 발견
 const card = await client.getAgentCard();
 console.log('Skills:', card.skills.map(s => s.id));
-// 출력: ['get_supported_circuits', 'generate_proof', 'verify_proof']
+// 출력: ['get_supported_circuits', 'request_signing', 'check_status', 'request_payment', 'generate_proof', 'verify_proof']
 
 // 무료 스킬 실행
 const circuitsResult = await client.sendMessage({
@@ -810,10 +915,13 @@ console.log(proofResult);
 ### 3.6 A2A 결제 동작
 
 - `get_supported_circuits` → **무료** (결제 불필요)
+- `request_signing` → **무료** (결제 불필요)
+- `check_status` → **무료** (결제 불필요)
+- `request_payment` → **무료** (결제 불필요)
 - `generate_proof` → **x402 필요** ($0.10 USDC)
-- `verify_proof` → **x402 필요** ($0.10 USDC)
+- `verify_proof` → **무료** (결제 불필요)
 
-유료 스킬 호출 시 402 응답을 받으면, 클라이언트는 x402 결제 서명을 생성하여 재시도해야 합니다.
+`generate_proof`만 유료입니다. 402 응답을 받으면, 클라이언트는 x402 결제 서명을 생성하여 재시도해야 합니다.
 
 ---
 
@@ -1232,12 +1340,15 @@ export function ZKChat() {
 
 | 엔드포인트 | 프로토콜 | x402 결제 | 비고 |
 |-----------|---------|-----------|------|
-| `POST /a2a` (generate_proof) | A2A | 필요 | get_supported_circuits만 무료 |
-| `POST /mcp` (tools/call) | MCP | 필요 | 모든 tool call에 적용 |
+| `POST /a2a` (generate_proof) | A2A | 필요 | 다른 5개 스킬은 무료 |
+| `POST /mcp` (generate_proof) | MCP | 필요 | 다른 5개 도구는 무료 |
 | `POST /api/v1/proofs` | REST | 필요 | 증명 생성 |
-| `POST /api/v1/proofs/verify` | REST | 필요 | 증명 검증 |
 | `POST /api/v1/chat` | Chat | 필요 | 대화형 인터페이스 |
 | `GET /api/v1/circuits` | REST | 무료 | 회로 목록 조회 |
+| `POST /api/v1/signing` | REST | 무료 | 서명 세션 생성 |
+| `GET /api/v1/proofs/{taskId}` | REST | 무료 | 상태 확인 |
+| `POST /api/v1/payment/{taskId}` | REST | 무료 | 결제 URL 요청 |
+| `POST /api/v1/proofs/verify` | REST | 무료 | 증명 검증 |
 | `GET /health` | REST | 무료 | 상태 확인 |
 
 ### 5.2 x402 Client 설정 (Node.js)
@@ -1420,7 +1531,7 @@ resp2 = requests.post(
 | Testnet (Base Sepolia) | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` | [Circle Faucet](https://faucet.circle.com/) (무료) |
 | Production (Base Mainnet) | `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` | 실제 USDC 구매 필요 |
 
-**비용:** 증명 생성당 $0.10, 검증당 $0.10
+**비용:** 증명 생성당 $0.10 (검증은 무료)
 
 ---
 
@@ -1468,10 +1579,13 @@ console.log(data);
 
 | State | 설명 | 다음 가능한 상태 |
 |-------|------|-----------------|
-| `input-required` | 사용자 서명 대기 | `processing`, `failed` |
+| `signing` | 사용자 서명 대기 (signingUrl 제공) | `payment`, `failed`, `expired` |
+| `payment` | 결제 대기 (paymentUrl 제공) | `ready`, `failed`, `expired` |
+| `ready` | 서명+결제 완료, 증명 생성 가능 | `processing`, `expired` |
 | `processing` | 증명 생성 중 | `completed`, `failed` |
 | `completed` | 증명 완료 | (종료 상태) |
 | `failed` | 증명 실패 | (종료 상태) |
+| `expired` | 세션 만료 | (종료 상태) |
 
 ---
 
@@ -1836,7 +1950,11 @@ async function generateProof(params) {
 네, 다음 방법으로 가능합니다:
 1. Circle Faucet에서 무료 USDC 받기 (Base Sepolia)
 2. `GET /api/v1/circuits` 엔드포인트 사용 (무료)
-3. A2A `get_supported_circuits` 스킬 사용 (무료)
+3. `POST /api/v1/signing` — 서명 세션 생성 (무료)
+4. `GET /api/v1/proofs/{taskId}` — 상태 확인 (무료)
+5. `POST /api/v1/payment/{taskId}` — 결제 URL 요청 (무료)
+6. `POST /api/v1/proofs/verify` — 증명 검증 (무료)
+7. A2A/MCP의 `get_supported_circuits`, `request_signing`, `check_status`, `request_payment`, `verify_proof` 스킬 (무료)
 
 ### Q3: 증명 생성이 얼마나 걸리나요?
 
