@@ -149,6 +149,22 @@ export class TaskStore {
     return task;
   }
 
+  /**
+   * Link a contextId to a requestId for session-based flow auto-resolution.
+   * Redis key: a2a:ctx:{contextId} -> requestId (TTL = ttlSeconds)
+   */
+  async setContextFlow(contextId: string, requestId: string): Promise<void> {
+    await this.redis.set(`a2a:ctx:${contextId}`, requestId, 'EX', this.ttlSeconds);
+  }
+
+  /**
+   * Get the requestId linked to a contextId.
+   * Returns null if no flow is linked.
+   */
+  async getContextFlow(contextId: string): Promise<string | null> {
+    return this.redis.get(`a2a:ctx:${contextId}`);
+  }
+
   async addArtifact(id: string, artifact: Artifact): Promise<A2aTask> {
     const task = await this.getTask(id);
 

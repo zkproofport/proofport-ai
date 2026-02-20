@@ -34,7 +34,7 @@ interface JsonRpcResponse {
   };
 }
 
-const VALID_SKILLS = ['generate_proof', 'verify_proof', 'get_supported_circuits'];
+const VALID_SKILLS = ['request_signing', 'check_status', 'request_payment', 'generate_proof', 'verify_proof', 'get_supported_circuits'];
 
 function jsonRpcError(id: string | number | undefined, code: number, message: string): JsonRpcResponse {
   return { jsonrpc: '2.0', id, error: { code, message } };
@@ -212,6 +212,20 @@ async function handleMessageSend(
     if (contextId) span.setAttribute('session_id', contextId);
     span.setAttribute('a2a.skill', skill);
 
+    // Auto-resolve requestId from context flow
+    if (contextId) {
+      try {
+        const storedRequestId = await taskStore.getContextFlow(contextId);
+        if (storedRequestId && !skillParams.requestId) {
+          if (['check_status', 'request_payment', 'generate_proof'].includes(skill)) {
+            skillParams.requestId = storedRequestId;
+          }
+        }
+      } catch (e) {
+        console.error('[a2a] Failed to resolve context flow:', e);
+      }
+    }
+
     // Add timestamp to user message
     const userMessage: Message = {
       ...message,
@@ -219,7 +233,7 @@ async function handleMessageSend(
     };
 
     // Create task
-    const task = await taskStore.createTask(skill, skillParams, userMessage);
+    const task = await taskStore.createTask(skill, skillParams, userMessage, contextId || undefined);
     span.setAttribute('a2a.task_id', task.id);
 
     // Record payment if present
@@ -293,12 +307,26 @@ async function handleMessageStream(
     if (contextId) span.setAttribute('session_id', contextId);
     span.setAttribute('a2a.skill', skill);
 
+    // Auto-resolve requestId from context flow
+    if (contextId) {
+      try {
+        const storedRequestId = await taskStore.getContextFlow(contextId);
+        if (storedRequestId && !skillParams.requestId) {
+          if (['check_status', 'request_payment', 'generate_proof'].includes(skill)) {
+            skillParams.requestId = storedRequestId;
+          }
+        }
+      } catch (e) {
+        console.error('[a2a] Failed to resolve context flow:', e);
+      }
+    }
+
     const userMessage: Message = {
       ...message,
       timestamp: message.timestamp || new Date().toISOString(),
     };
 
-    const task = await taskStore.createTask(skill, skillParams, userMessage);
+    const task = await taskStore.createTask(skill, skillParams, userMessage, contextId || undefined);
     span.setAttribute('a2a.task_id', task.id);
 
     // Record payment if present

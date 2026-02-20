@@ -81,9 +81,45 @@ export function buildAgentCard(config: Config, tokenId?: bigint | null): AgentCa
     },
     skills: [
       {
+        id: 'request_signing',
+        name: 'Request Wallet Signing',
+        description: '[STEP 1/4] Start a proof generation session. Returns a URL where the user connects their wallet and signs. Use the same contextId for all subsequent calls (check_status, request_payment, generate_proof) to auto-link the session.',
+        tags: ['signing', 'wallet', 'session'],
+        examples: [
+          'I want to generate a KYC proof',
+          'Start a proof for my Coinbase attestation',
+        ],
+        inputModes: ['application/json'],
+        outputModes: ['application/json'],
+      },
+      {
+        id: 'check_status',
+        name: 'Check Request Status',
+        description: '[STEP 2/4] Check signing and payment status. Returns phase: signing | payment | ready | expired. If using the same contextId as request_signing, the requestId is auto-resolved. When phase is "payment", call request_payment. When "ready", call generate_proof.',
+        tags: ['status', 'polling'],
+        examples: [
+          'Check if signing is complete',
+          'What is the status of my request?',
+        ],
+        inputModes: ['application/json'],
+        outputModes: ['application/json'],
+      },
+      {
+        id: 'request_payment',
+        name: 'Request Payment',
+        description: '[STEP 3/4] Initiate USDC payment for proof generation. Returns a payment URL. Only call when check_status shows phase "payment". Signing must be completed first.',
+        tags: ['payment', 'usdc', 'x402'],
+        examples: [
+          'I need to pay for the proof',
+          'Get the payment link',
+        ],
+        inputModes: ['application/json'],
+        outputModes: ['application/json'],
+      },
+      {
         id: 'generate_proof',
         name: 'Generate ZK Proof',
-        description: 'Generate a zero-knowledge proof for Coinbase KYC or country attestation',
+        description: '[STEP 4/4] Generate a zero-knowledge proof. Call when check_status shows phase "ready". If using the same contextId, the requestId is auto-resolved. Proof generation takes 30-90 seconds.',
         tags: ['zk-proof', 'privacy', 'coinbase', 'attestation', 'noir'],
         examples: [
           'Generate a KYC proof for my Coinbase account',
@@ -96,7 +132,7 @@ export function buildAgentCard(config: Config, tokenId?: bigint | null): AgentCa
       {
         id: 'verify_proof',
         name: 'Verify ZK Proof',
-        description: 'Verify a zero-knowledge proof against on-chain verifier contract',
+        description: '[OPTIONAL] Verify a zero-knowledge proof on-chain against the deployed verifier contract. Not part of the standard generation flow.',
         tags: ['verification', 'on-chain', 'smart-contract'],
         examples: [
           'Verify this proof on Base Sepolia',
@@ -108,7 +144,7 @@ export function buildAgentCard(config: Config, tokenId?: bigint | null): AgentCa
       {
         id: 'get_supported_circuits',
         name: 'Get Supported Circuits',
-        description: 'List all supported ZK circuits with metadata',
+        description: '[DISCOVERY] List all supported ZK circuits with metadata. Call this first to discover available circuits before starting a proof generation flow.',
         tags: ['circuits', 'metadata', 'discovery'],
         examples: [
           'What circuits do you support?',
@@ -159,8 +195,44 @@ export function buildMcpDiscovery(config: Config) {
     },
     tools: [
       {
+        name: 'request_signing',
+        description: '[STEP 1/4] Start a proof generation session. Returns a signing URL and requestId. After user signs, call check_status with the requestId.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            circuitId: { type: 'string', description: 'Circuit identifier: coinbase_attestation or coinbase_country_attestation' },
+            scope: { type: 'string', description: 'Privacy scope string' },
+            countryList: { type: 'array', items: { type: 'string' }, description: 'Country codes for country attestation' },
+            isIncluded: { type: 'boolean', description: 'Prove inclusion or exclusion from country list' },
+          },
+          required: ['circuitId', 'scope'],
+        },
+      },
+      {
+        name: 'check_status',
+        description: '[STEP 2/4] Check signing and payment status of a proof request. Returns phase: signing | payment | ready | expired. When "payment", call request_payment. When "ready", call generate_proof.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            requestId: { type: 'string', description: 'Request ID from request_signing' },
+          },
+          required: ['requestId'],
+        },
+      },
+      {
+        name: 'request_payment',
+        description: '[STEP 3/4] Initiate USDC payment for proof generation. Returns a payment URL. Only call when check_status shows phase "payment".',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            requestId: { type: 'string', description: 'Request ID from request_signing' },
+          },
+          required: ['requestId'],
+        },
+      },
+      {
         name: 'generate_proof',
-        description: 'Generate a zero-knowledge proof for Coinbase KYC or country attestation',
+        description: '[STEP 4/4] Generate a zero-knowledge proof. Call with requestId when check_status shows phase "ready". Takes 30-90 seconds.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -190,7 +262,7 @@ export function buildMcpDiscovery(config: Config) {
       },
       {
         name: 'verify_proof',
-        description: 'Verify a zero-knowledge proof on-chain via deployed verifier contract',
+        description: '[OPTIONAL] Verify a zero-knowledge proof on-chain via deployed verifier contract. Not part of the standard generation flow.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -208,7 +280,7 @@ export function buildMcpDiscovery(config: Config) {
       },
       {
         name: 'get_supported_circuits',
-        description: 'List all supported ZK circuits with metadata',
+        description: '[DISCOVERY] List all supported ZK circuits with metadata. Call first before starting a proof generation flow.',
         inputSchema: {
           type: 'object',
           properties: {},
@@ -254,20 +326,20 @@ export function buildOasfAgent(config: Config, tokenId?: bigint | null) {
         name: 'OASF',
         endpoint: `${config.a2aBaseUrl}/.well-known/oasf.json`,
         version: 'v0.8.0',
-        skills: ['Proof Generation', 'Proof Verification', 'Circuit Management'],
+        skills: ['Proof Session Management', 'Proof Generation', 'Proof Verification', 'Circuit Management'],
         domains: ['Privacy', 'Identity'],
       },
       {
         name: 'A2A',
         endpoint: `${config.a2aBaseUrl}/.well-known/agent-card.json`,
         version: '0.3.0',
-        a2aSkills: ['generate_proof', 'verify_proof', 'get_supported_circuits'],
+        a2aSkills: ['request_signing', 'check_status', 'request_payment', 'generate_proof', 'verify_proof', 'get_supported_circuits'],
       },
       {
         name: 'MCP',
         endpoint: `${config.a2aBaseUrl}/.well-known/mcp.json`,
         version: '2024-11-05',
-        mcpTools: ['generate_proof', 'verify_proof', 'get_supported_circuits'],
+        mcpTools: ['request_signing', 'check_status', 'request_payment', 'generate_proof', 'verify_proof', 'get_supported_circuits'],
       },
     ],
     x402Support: config.paymentMode !== 'disabled',
