@@ -1,17 +1,25 @@
 import express, { type Router, type Request, type Response } from 'express';
-import { randomUUID } from 'crypto';
-import { ethers } from 'ethers';
-import type { TaskStore, Message, DataPart } from '../a2a/taskStore.js';
+import type { TaskStore } from '../a2a/taskStore.js';
 import type { TaskEventEmitter } from '../a2a/streaming.js';
-import { CIRCUITS, type CircuitId } from '../config/circuits.js';
-import { VERIFIER_ADDRESSES } from '../config/contracts.js';
-import type { SigningRequestRecord } from '../signing/types.js';
-import type { RedisClient } from '../redis/client.js';
-import { computeSignalHash } from '../input/inputBuilder.js';
+import { createRedisClient, type RedisClient } from '../redis/client.js';
+import type { RateLimiter } from '../redis/rateLimiter.js';
+import type { ProofCache } from '../redis/proofCache.js';
+import type { TeeProvider } from '../tee/types.js';
 import type { Config } from '../config/index.js';
 import type { PaymentFacilitator } from '../payment/facilitator.js';
-import { storeProofResult, getProofResult } from '../redis/proofResultStore.js';
+import { getProofResult } from '../redis/proofResultStore.js';
 import { verifyOnChain } from '../prover/verifier.js';
+import { VERIFIER_ADDRESSES } from '../config/contracts.js';
+import {
+  handleRequestSigning,
+  handleCheckStatus,
+  handleRequestPayment,
+  handleGenerateProof,
+  handleVerifyProof,
+  handleGetSupportedCircuits,
+  type SkillDeps,
+} from '../skills/skillHandler.js';
+import { createFlow, advanceFlow, getFlow } from '../skills/flowManager.js';
 
 /**
  * Split a hex string into an array of bytes32 (32-byte / 64 hex char) elements.
@@ -33,359 +41,120 @@ export interface RestRoutesDeps {
   redis: RedisClient;
   config: Config;
   paymentFacilitator?: PaymentFacilitator;
+  rateLimiter?: RateLimiter;
+  proofCache?: ProofCache;
+  teeProvider?: TeeProvider;
 }
 
-interface Circuit {
-  id: string;
-  displayName: string;
-  description: string;
-  requiredInputs: readonly string[];
-  verifierAddress: string | null;
-}
-
-interface GenerateProofRequestBody {
-  circuitId?: CircuitId;
-  scope?: string;
-  address?: string;
-  signature?: string;
-  requestId?: string;
-  countryList?: string[];
-  isIncluded?: boolean;
-}
-
-interface TaskArtifact {
-  id: string;
-  mimeType: string;
-  parts: Array<{ kind: string; text?: string; data?: unknown }>;
-  metadata?: Record<string, unknown>;
-}
-
-/**
- * Wait for a task to reach a terminal state.
- * Used by REST endpoints to block until proof generation completes.
- */
-function waitForTaskCompletion(
-  taskId: string,
-  taskStore: TaskStore,
-  emitter: TaskEventEmitter,
-  timeoutMs: number
-): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(async () => {
-      emitter.removeListener(`task:${taskId}`, listener);
-      const task = await taskStore.getTask(taskId);
-      if (task) {
-        resolve(task);
-      } else {
-        reject(new Error('Task not found after timeout'));
-      }
-    }, timeoutMs);
-
-    const listener = (event: { type: string; data: unknown }) => {
-      if (event.type === 'task') {
-        clearTimeout(timeout);
-        emitter.removeListener(`task:${taskId}`, listener);
-        resolve(event.data);
-      }
-    };
-
-    emitter.on(`task:${taskId}`, listener);
-  });
-}
-
-/**
- * Extract proof result from task artifacts.
- * Returns flat JSON object for REST API response.
- */
-function extractProofFromTask(task: any): {
-  proof?: string;
-  publicInputs?: string;
-  nullifier?: string;
-  signalHash?: string;
-  error?: string;
-} {
-  const result: {
-    proof?: string;
-    publicInputs?: string;
-    nullifier?: string;
-    signalHash?: string;
-    error?: string;
-  } = {};
-
-  if (!task.artifacts || task.artifacts.length === 0) {
-    return result;
-  }
-
-  for (const artifact of task.artifacts as TaskArtifact[]) {
-    for (const part of artifact.parts) {
-      if (part.kind === 'data' && part.data) {
-        const data = part.data as Record<string, unknown>;
-        if (data.proof) result.proof = data.proof as string;
-        if (data.publicInputs) result.publicInputs = data.publicInputs as string;
-        if (data.nullifier) result.nullifier = data.nullifier as string;
-        if (data.signalHash) result.signalHash = data.signalHash as string;
-        if (data.error) result.error = data.error as string;
-      }
-    }
-  }
-
-  return result;
-}
-
-/**
- * Extract signing URL and requestId from task artifacts.
- */
-function extractSigningUrlFromTask(task: any): {
-  signingUrl?: string;
-  requestId?: string;
-} {
-  const result: { signingUrl?: string; requestId?: string } = {};
-
-  if (!task.artifacts || task.artifacts.length === 0) {
-    return result;
-  }
-
-  for (const artifact of task.artifacts as TaskArtifact[]) {
-    for (const part of artifact.parts) {
-      if (part.kind === 'data' && part.data) {
-        const data = part.data as Record<string, unknown>;
-        if (data.signingUrl) result.signingUrl = data.signingUrl as string;
-        if (data.requestId) result.requestId = data.requestId as string;
-      }
-    }
-  }
-
-  return result;
+function buildSkillDeps(deps: RestRoutesDeps): SkillDeps {
+  const { config, redis, rateLimiter, proofCache, teeProvider } = deps;
+  return {
+    redis,
+    signPageUrl: config.signPageUrl || config.a2aBaseUrl,
+    signingTtlSeconds: config.signingTtlSeconds,
+    paymentMode: config.paymentMode,
+    paymentProofPrice: config.paymentProofPrice,
+    easGraphqlEndpoint: config.easGraphqlEndpoint,
+    rpcUrls: [config.baseRpcUrl],
+    bbPath: config.bbPath,
+    nargoPath: config.nargoPath,
+    circuitsDir: config.circuitsDir,
+    chainRpcUrl: config.chainRpcUrl,
+    teeMode: config.teeMode,
+    rateLimiter,
+    proofCache,
+    teeProvider,
+  };
 }
 
 export function createRestRoutes(deps: RestRoutesDeps): Router {
-  const { taskStore, taskEventEmitter, redis, config } = deps;
+  const { redis, config } = deps;
   const router = express.Router();
 
   /**
    * GET /api/v1/circuits
-   * Returns list of supported circuits with metadata
+   * Returns list of supported circuits with metadata.
    */
-  router.get('/circuits', (_req: Request, res: Response) => {
-    const chainId = '84532'; // Base Sepolia
-    const verifierMap = VERIFIER_ADDRESSES[chainId] || {};
+  router.get('/circuits', (req: Request, res: Response) => {
+    const chainId = req.query.chainId as string | undefined;
+    const result = handleGetSupportedCircuits({ chainId });
+    res.json(result);
+  });
 
-    const circuits: Circuit[] = Object.entries(CIRCUITS).map(([id, circuit]) => ({
-      id,
-      displayName: circuit.displayName,
-      description: circuit.description,
-      requiredInputs: circuit.requiredInputs,
-      verifierAddress: verifierMap[id] || null,
-    }));
+  /**
+   * POST /api/v1/signing
+   * Start a proof generation session. Returns signingUrl + requestId.
+   */
+  router.post('/signing', async (req: Request, res: Response) => {
+    try {
+      const { circuitId, scope, countryList, isIncluded } = req.body as {
+        circuitId?: string;
+        scope?: string;
+        countryList?: string[];
+        isIncluded?: boolean;
+      };
+      const skillDeps = buildSkillDeps(deps);
+      const result = await handleRequestSigning({ circuitId: circuitId ?? '', scope: scope ?? '', countryList, isIncluded }, skillDeps);
+      res.json(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(400).json({ error: message });
+    }
+  });
 
-    res.json({ circuits });
+  /**
+   * GET /api/v1/signing/:requestId/status
+   * Check signing and payment status of a proof request.
+   */
+  router.get('/signing/:requestId/status', async (req: Request, res: Response) => {
+    try {
+      const { requestId } = req.params;
+      const skillDeps = buildSkillDeps(deps);
+      const result = await handleCheckStatus({ requestId }, skillDeps);
+      res.json(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const status = message.includes('not found') ? 404 : 400;
+      res.status(status).json({ error: message });
+    }
+  });
+
+  /**
+   * POST /api/v1/signing/:requestId/payment
+   * Initiate USDC payment for a proof request. Returns paymentUrl.
+   */
+  router.post('/signing/:requestId/payment', async (req: Request, res: Response) => {
+    try {
+      const { requestId } = req.params;
+      const skillDeps = buildSkillDeps(deps);
+      const result = await handleRequestPayment({ requestId }, skillDeps);
+      res.json(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(400).json({ error: message });
+    }
   });
 
   /**
    * POST /api/v1/proofs
-   * Generate a ZK proof (three modes: web signing, resume, direct)
+   * Generate a ZK proof (session mode via requestId, or direct mode via address+signature).
    */
   router.post('/proofs', async (req: Request, res: Response) => {
-    const body = req.body as GenerateProofRequestBody;
-
-    const { circuitId, scope, address, signature, requestId, countryList, isIncluded } = body;
-
-    // Validate required fields
-    if (!circuitId) {
-      res.status(400).json({ error: 'circuitId is required' });
-      return;
-    }
-
-    if (!scope) {
-      res.status(400).json({ error: 'scope is required' });
-      return;
-    }
-
-    if (!(circuitId in CIRCUITS)) {
-      res.status(400).json({ error: `Unknown circuit: ${circuitId}` });
-      return;
-    }
-
-    // Validate country fields for country circuit
-    if (circuitId === 'coinbase_country_attestation') {
-      if (!countryList || countryList.length === 0) {
-        res.status(400).json({ error: 'countryList is required for coinbase_country_attestation' });
-        return;
-      }
-      if (isIncluded === undefined || isIncluded === null) {
-        res.status(400).json({ error: 'isIncluded is required for coinbase_country_attestation' });
-        return;
-      }
-    }
-
     try {
-      // Mode 3: Resume with requestId (user already signed)
-      if (requestId) {
-        const key = `signing:${requestId}`;
-        const data = await redis.get(key);
-
-        if (!data) {
-          res.status(400).json({ error: 'Invalid or expired requestId' });
-          return;
-        }
-
-        const record: SigningRequestRecord = JSON.parse(data);
-
-        if (record.status !== 'completed') {
-          res.status(400).json({ error: `Signing request is ${record.status}. Wait for user to sign.` });
-          return;
-        }
-
-        if (!record.signature || !record.address) {
-          res.status(400).json({ error: 'Signing request is missing signature or address' });
-          return;
-        }
-
-        // Create task with completed signature
-        const skillParams: Record<string, unknown> = {
-          address: record.address,
-          signature: record.signature,
-          scope,
-          circuitId,
-        };
-
-        if (circuitId === 'coinbase_country_attestation') {
-          skillParams.countryList = countryList;
-          skillParams.isIncluded = isIncluded;
-        }
-
-        const userMessage: Message = {
-          role: 'user',
-          parts: [
-            {
-              kind: 'data',
-              mimeType: 'application/json',
-              data: { skill: 'generate_proof', ...skillParams },
-            } as DataPart,
-          ],
-          timestamp: new Date().toISOString(),
-        };
-
-        const task = await taskStore.createTask('generate_proof', skillParams, userMessage);
-
-        // Record payment if present
-        if (deps.paymentFacilitator) {
-          const paymentInfo = (req as any).x402Payment;
-          if (paymentInfo) {
-            try {
-              await deps.paymentFacilitator.recordPayment({
-                taskId: task.id,
-                payerAddress: paymentInfo.payerAddress,
-                amount: paymentInfo.amount,
-                network: paymentInfo.network,
-              });
-            } catch (error) {
-              console.error(`Failed to record payment for task ${task.id}:`, error);
-            }
-          }
-        }
-
-        const completedTask = await waitForTaskCompletion(task.id, taskStore, taskEventEmitter, 120000);
-        const taskData = completedTask as any;
-
-        if (taskData.status.state === 'failed') {
-          const errorMsg =
-            taskData.status.message?.parts?.[0]?.text || 'Proof generation failed';
-          res.status(500).json({ error: errorMsg });
-          return;
-        }
-
-        const proofData = extractProofFromTask(taskData);
-
-        // Store proof result and generate verifyUrl
-        let verifyUrl: string | undefined;
-        let proofId: string | undefined;
-        if (proofData.proof && proofData.publicInputs) {
-          try {
-            proofId = await storeProofResult(redis, {
-              proof: proofData.proof,
-              publicInputs: proofData.publicInputs,
-              circuitId,
-              nullifier: proofData.nullifier || '',
-              signalHash: proofData.signalHash || '',
-            });
-            verifyUrl = `${config.a2aBaseUrl}/v/${proofId}`;
-          } catch (err) {
-            console.error('[REST] Failed to store proof result:', err);
-          }
-        }
-
-        res.json({
-          taskId: taskData.id,
-          state: taskData.status.state,
-          ...proofData,
-          ...(proofId && { proofId }),
-          ...(verifyUrl && { verifyUrl }),
-        });
-        return;
-      }
-
-      // Mode 1: Web signing (no address/signature provided)
-      if (!address || !signature) {
-        // Create signing request
-        const signingRequestId = randomUUID();
-        const now = new Date();
-        const expiresAt = new Date(now.getTime() + 300000); // 5 minutes
-
-        const signingRecord: SigningRequestRecord = {
-          id: signingRequestId,
-          scope,
-          circuitId,
-          status: 'pending',
-          createdAt: now.toISOString(),
-          expiresAt: expiresAt.toISOString(),
-          ...(circuitId === 'coinbase_country_attestation' && {
-            countryList,
-            isIncluded,
-          }),
-        };
-
-        const signingKey = `signing:${signingRequestId}`;
-        await redis.set(signingKey, JSON.stringify(signingRecord), 'EX', 300);
-
-        const signingUrl = `${config.a2aBaseUrl}/s/${signingRequestId}`;
-
-        res.json({
-          taskId: signingRequestId,
-          state: 'input-required',
-          signingUrl,
-          requestId: signingRequestId,
-          message: 'Please sign at the signing URL to continue',
-        });
-        return;
-      }
-
-      // Mode 2: Direct signing (address + signature provided)
-      const skillParams: Record<string, unknown> = {
-        address,
-        signature,
-        scope,
-        circuitId,
+      const { circuitId, scope, address, signature, requestId, countryList, isIncluded } = req.body as {
+        circuitId?: string;
+        scope?: string;
+        address?: string;
+        signature?: string;
+        requestId?: string;
+        countryList?: string[];
+        isIncluded?: boolean;
       };
-
-      if (circuitId === 'coinbase_country_attestation') {
-        skillParams.countryList = countryList;
-        skillParams.isIncluded = isIncluded;
-      }
-
-      const userMessage: Message = {
-        role: 'user',
-        parts: [
-          {
-            kind: 'data',
-            mimeType: 'application/json',
-            data: { skill: 'generate_proof', ...skillParams },
-          } as DataPart,
-        ],
-        timestamp: new Date().toISOString(),
-      };
-
-      const task = await taskStore.createTask('generate_proof', skillParams, userMessage);
+      const skillDeps = buildSkillDeps(deps);
+      const result = await handleGenerateProof(
+        { circuitId, scope, address, signature, requestId, countryList, isIncluded },
+        skillDeps,
+      );
 
       // Record payment if present
       if (deps.paymentFacilitator) {
@@ -393,71 +162,33 @@ export function createRestRoutes(deps: RestRoutesDeps): Router {
         if (paymentInfo) {
           try {
             await deps.paymentFacilitator.recordPayment({
-              taskId: task.id,
+              taskId: result.proofId,
               payerAddress: paymentInfo.payerAddress,
               amount: paymentInfo.amount,
               network: paymentInfo.network,
             });
-          } catch (error) {
-            console.error(`Failed to record payment for task ${task.id}:`, error);
+          } catch (err) {
+            console.error(`[REST] Failed to record payment for proof ${result.proofId}:`, err);
           }
         }
       }
 
-      const completedTask = await waitForTaskCompletion(task.id, taskStore, taskEventEmitter, 120000);
-      const taskData = completedTask as any;
-
-      if (taskData.status.state === 'failed') {
-        const errorMsg =
-          taskData.status.message?.parts?.[0]?.text || 'Proof generation failed';
-        res.status(500).json({ error: errorMsg });
-        return;
-      }
-
-      const proofData = extractProofFromTask(taskData);
-
-      // Store proof result and generate verifyUrl
-      let verifyUrl: string | undefined;
-      let proofId: string | undefined;
-      if (proofData.proof && proofData.publicInputs) {
-        try {
-          proofId = await storeProofResult(redis, {
-            proof: proofData.proof,
-            publicInputs: proofData.publicInputs,
-            circuitId,
-            nullifier: proofData.nullifier || '',
-            signalHash: proofData.signalHash || '',
-          });
-          verifyUrl = `${config.a2aBaseUrl}/v/${proofId}`;
-        } catch (err) {
-          console.error('[REST] Failed to store proof result:', err);
-        }
-      }
-
-      res.json({
-        taskId: taskData.id,
-        state: taskData.status.state,
-        ...proofData,
-        ...(proofId && { proofId }),
-        ...(verifyUrl && { verifyUrl }),
-      });
+      res.json(result);
     } catch (error) {
-      console.error('Proof generation error:', error);
-      res.status(500).json({
-        error: error instanceof Error ? error.message : 'Internal server error',
-      });
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(400).json({ error: message });
     }
   });
 
   /**
    * GET /api/v1/proofs/:taskId
-   * Get task status
+   * Get task status (legacy A2A task lookup — kept for backward compatibility).
    */
   router.get('/proofs/:taskId', async (req: Request, res: Response) => {
     const { taskId } = req.params;
 
     try {
-      const task = await taskStore.getTask(taskId);
+      const task = await deps.taskStore.getTask(taskId);
 
       if (!task) {
         res.status(404).json({ error: 'Task not found' });
@@ -518,112 +249,31 @@ export function createRestRoutes(deps: RestRoutesDeps): Router {
 
   /**
    * POST /api/v1/proofs/verify
-   * Verify a ZK proof on-chain
+   * Verify a ZK proof on-chain.
    */
   router.post('/proofs/verify', async (req: Request, res: Response) => {
-    const { circuitId, proof, publicInputs, chainId } = req.body as {
-      circuitId?: CircuitId;
-      proof?: string;
-      publicInputs?: string[];
-      chainId?: string;
-    };
-
-    if (!circuitId) {
-      res.status(400).json({ error: 'circuitId is required' });
-      return;
-    }
-
-    if (!proof) {
-      res.status(400).json({ error: 'proof is required' });
-      return;
-    }
-
-    if (!publicInputs || !Array.isArray(publicInputs)) {
-      res.status(400).json({ error: 'publicInputs is required and must be an array' });
-      return;
-    }
-
-    if (!(circuitId in CIRCUITS)) {
-      res.status(400).json({ error: `Unknown circuit: ${circuitId}` });
-      return;
-    }
-
     try {
-      const targetChainId = chainId || '84532';
-
-      const skillParams: Record<string, unknown> = {
-        circuitId,
-        proof,
-        publicInputs,
-        chainId: targetChainId,
+      const { circuitId, proof, publicInputs, chainId } = req.body as {
+        circuitId?: string;
+        proof?: string;
+        publicInputs?: string | string[];
+        chainId?: string;
       };
-
-      const userMessage: Message = {
-        role: 'user',
-        parts: [
-          {
-            kind: 'data',
-            mimeType: 'application/json',
-            data: { skill: 'verify_proof', ...skillParams },
-          } as DataPart,
-        ],
-        timestamp: new Date().toISOString(),
-      };
-
-      const task = await taskStore.createTask('verify_proof', skillParams, userMessage);
-      const completedTask = await waitForTaskCompletion(task.id, taskStore, taskEventEmitter, 120000);
-      const taskData = completedTask as any;
-
-      if (taskData.status.state === 'failed') {
-        const errorMsg =
-          taskData.status.message?.parts?.[0]?.text || 'Verification failed';
-        res.status(500).json({ error: errorMsg });
-        return;
-      }
-
-      const verifierMap = VERIFIER_ADDRESSES[targetChainId] || {};
-      const verifierAddress = verifierMap[circuitId] || null;
-
-      if (!taskData.artifacts || taskData.artifacts.length === 0) {
-        res.status(500).json({ error: 'No verification result returned' });
-        return;
-      }
-
-      let valid = false;
-      let errorMsg: string | undefined;
-
-      for (const artifact of taskData.artifacts as TaskArtifact[]) {
-        for (const part of artifact.parts) {
-          if (part.kind === 'data' && part.data) {
-            const data = part.data as Record<string, unknown>;
-            if (typeof data.valid === 'boolean') {
-              valid = data.valid;
-            }
-            if (data.error) {
-              errorMsg = data.error as string;
-            }
-          }
-        }
-      }
-
-      res.json({
-        valid,
-        circuitId,
-        verifierAddress,
-        chainId: targetChainId,
-        ...(errorMsg ? { error: errorMsg } : {}),
-      });
+      const skillDeps = buildSkillDeps(deps);
+      const result = await handleVerifyProof(
+        { circuitId: circuitId ?? '', proof: proof ?? '', publicInputs: publicInputs ?? [], chainId },
+        skillDeps,
+      );
+      res.json(result);
     } catch (error) {
-      console.error('Verification error:', error);
-      res.status(500).json({
-        error: error instanceof Error ? error.message : 'Internal server error',
-      });
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(400).json({ error: message });
     }
   });
 
   /**
    * GET /api/v1/verify/:proofId
-   * Verify a stored proof on-chain by proofId (QR code / link verification)
+   * Verify a stored proof on-chain by proofId (QR code / link verification).
    */
   router.get('/verify/:proofId', async (req: Request, res: Response) => {
     const { proofId } = req.params;
@@ -676,5 +326,193 @@ export function createRestRoutes(deps: RestRoutesDeps): Router {
     }
   });
 
+  /**
+   * POST /api/v1/flow
+   * Start an orchestrated proof flow. Returns flowId, signingUrl, and initial phase.
+   */
+  router.post('/flow', async (req: Request, res: Response) => {
+    try {
+      const { circuitId, scope, countryList, isIncluded } = req.body;
+      if (!circuitId || !scope) {
+        res.status(400).json({ error: 'circuitId and scope are required' });
+        return;
+      }
+      const skillDeps = buildSkillDeps(deps);
+      const flow = await createFlow({ circuitId, scope, countryList, isIncluded }, skillDeps);
+      res.json(flow);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  /**
+   * GET /api/v1/flow/:flowId
+   * Get flow state. Auto-advances if not in a terminal phase.
+   */
+  router.get('/flow/:flowId', async (req: Request, res: Response) => {
+    try {
+      const flow = await getFlow(req.params.flowId, deps.redis);
+      if (!flow) {
+        res.status(404).json({ error: 'Flow not found or expired' });
+        return;
+      }
+      // Auto-advance if not in terminal state
+      if (!['completed', 'failed', 'expired'].includes(flow.phase)) {
+        const skillDeps = buildSkillDeps(deps);
+        const advanced = await advanceFlow(req.params.flowId, skillDeps);
+        res.json(advanced);
+        return;
+      }
+      res.json(flow);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  /**
+   * GET /api/v1/flow/:flowId/events
+   * SSE stream for real-time flow phase updates.
+   * Subscribes to Redis pub/sub on flow:events:{flowId} and polls every 5s as fallback.
+   */
+  router.get('/flow/:flowId/events', async (req: Request, res: Response) => {
+    const { flowId } = req.params;
+
+    // Check flow exists
+    const flow = await getFlow(flowId, deps.redis);
+    if (!flow) {
+      res.status(404).json({ error: 'Flow not found or expired' });
+      return;
+    }
+
+    // SSE headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    // Send initial state
+    res.write(`event: phase\ndata: ${JSON.stringify(flow)}\n\n`);
+
+    if (['completed', 'failed', 'expired'].includes(flow.phase)) {
+      res.write(`event: done\ndata: ${JSON.stringify({ flowId })}\n\n`);
+      res.end();
+      return;
+    }
+
+    // Subscribe to Redis pub/sub for instant updates
+    // Need a separate Redis connection for subscribing
+    const subscriber = createRedisClient(deps.config.redisUrl);
+    const channel = `flow:events:${flowId}`;
+
+    await subscriber.subscribe(channel);
+    subscriber.on('message', (_ch: string, message: string) => {
+      try {
+        const flowData = JSON.parse(message);
+        res.write(`event: phase\ndata: ${message}\n\n`);
+        if (['completed', 'failed', 'expired'].includes(flowData.phase)) {
+          res.write(`event: done\ndata: ${JSON.stringify({ flowId })}\n\n`);
+          cleanup();
+        }
+      } catch { /* ignore parse errors */ }
+    });
+
+    // Fallback polling every 5 seconds
+    const skillDeps = buildSkillDeps(deps);
+    const pollInterval = setInterval(async () => {
+      try {
+        const current = await getFlow(flowId, deps.redis);
+        if (!current) {
+          res.write(`event: phase\ndata: ${JSON.stringify({ flowId, phase: 'expired' })}\n\n`);
+          res.write(`event: done\ndata: ${JSON.stringify({ flowId })}\n\n`);
+          cleanup();
+          return;
+        }
+        if (!['completed', 'failed', 'expired'].includes(current.phase)) {
+          await advanceFlow(flowId, skillDeps);
+        }
+      } catch { /* ignore polling errors */ }
+    }, 5000);
+
+    let cleaned = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      clearInterval(pollInterval);
+      subscriber.unsubscribe(channel).catch(() => {});
+      subscriber.quit().catch(() => {});
+      res.end();
+    };
+
+    req.on('close', cleanup);
+  });
+
   return router;
+}
+
+// ─── Task artifact helpers (used by GET /proofs/:taskId) ─────────────────────
+
+interface TaskArtifact {
+  id: string;
+  mimeType: string;
+  parts: Array<{ kind: string; text?: string; data?: unknown }>;
+  metadata?: Record<string, unknown>;
+}
+
+function extractProofFromTask(task: any): {
+  proof?: string;
+  publicInputs?: string;
+  nullifier?: string;
+  signalHash?: string;
+  error?: string;
+} {
+  const result: {
+    proof?: string;
+    publicInputs?: string;
+    nullifier?: string;
+    signalHash?: string;
+    error?: string;
+  } = {};
+
+  if (!task.artifacts || task.artifacts.length === 0) {
+    return result;
+  }
+
+  for (const artifact of task.artifacts as TaskArtifact[]) {
+    for (const part of artifact.parts) {
+      if (part.kind === 'data' && part.data) {
+        const data = part.data as Record<string, unknown>;
+        if (data.proof) result.proof = data.proof as string;
+        if (data.publicInputs) result.publicInputs = data.publicInputs as string;
+        if (data.nullifier) result.nullifier = data.nullifier as string;
+        if (data.signalHash) result.signalHash = data.signalHash as string;
+        if (data.error) result.error = data.error as string;
+      }
+    }
+  }
+
+  return result;
+}
+
+function extractSigningUrlFromTask(task: any): {
+  signingUrl?: string;
+  requestId?: string;
+} {
+  const result: { signingUrl?: string; requestId?: string } = {};
+
+  if (!task.artifacts || task.artifacts.length === 0) {
+    return result;
+  }
+
+  for (const artifact of task.artifacts as TaskArtifact[]) {
+    for (const part of artifact.parts) {
+      if (part.kind === 'data' && part.data) {
+        const data = part.data as Record<string, unknown>;
+        if (data.signingUrl) result.signingUrl = data.signingUrl as string;
+        if (data.requestId) result.requestId = data.requestId as string;
+      }
+    }
+  }
+
+  return result;
 }

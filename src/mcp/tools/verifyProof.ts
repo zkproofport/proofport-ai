@@ -1,3 +1,10 @@
+/**
+ * verifyProof.ts — MCP tool wrapper for on-chain proof verification.
+ *
+ * Thin adapter over verifyOnChain from prover/verifier.
+ * Used by MCP server and unit tests.
+ */
+
 import { CIRCUITS } from '../../config/circuits.js';
 import { VERIFIER_ADDRESSES } from '../../config/contracts.js';
 import { verifyOnChain } from '../../prover/verifier.js';
@@ -9,46 +16,42 @@ export interface VerifyProofInput {
   chainId?: string;
 }
 
-export interface VerifyProofResult {
+export interface VerifyProofDeps {
+  rpcUrl: string;
+  defaultChainId: string;
+}
+
+export interface VerifyProofOutput {
   isValid: boolean;
   verifierAddress: string;
   chainId: string;
 }
 
-export interface VerifyProofDeps {
-  rpcUrl: string;
-  defaultChainId?: string;
-}
-
 /**
- * Verify a ZK proof on-chain.
+ * Verify a ZK proof on-chain using the deployed verifier contract.
  *
- * 1. Validates circuitId is in CIRCUITS
- * 2. Looks up verifier address from VERIFIER_ADDRESSES[chainId][circuitId]
- * 3. Calls on-chain verifier.verify(proof, publicInputs) using ethers v6
- * 4. Returns isValid, verifierAddress, chainId
+ * @throws Error if circuitId is unknown or no verifier is deployed for the given chainId.
  */
 export async function verifyProof(
   input: VerifyProofInput,
   deps: VerifyProofDeps,
-): Promise<VerifyProofResult> {
+): Promise<VerifyProofOutput> {
   const { proof, publicInputs, circuitId } = input;
-  const chainId = input.chainId || deps.defaultChainId || '84532';
+  const chainId = input.chainId || deps.defaultChainId;
 
   // Validate circuitId
   if (!(circuitId in CIRCUITS)) {
-    throw new Error(`Unknown circuit: ${circuitId}. Supported: ${Object.keys(CIRCUITS).join(', ')}`);
+    throw new Error(`Unknown circuit: ${circuitId}`);
   }
 
-  // Validate verifier exists for this chain/circuit combo
+  // Validate verifier exists for this chain/circuit
   const chainVerifiers = VERIFIER_ADDRESSES[chainId];
   if (!chainVerifiers || !chainVerifiers[circuitId]) {
     throw new Error(
-      `No verifier deployed for circuit "${circuitId}" on chain "${chainId}"`
+      `No verifier deployed for circuit "${circuitId}" on chain "${chainId}"`,
     );
   }
 
-  // Call on-chain verification
   const result = await verifyOnChain({
     proof,
     publicInputs,

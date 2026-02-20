@@ -2,11 +2,64 @@ import type { LLMTool } from './llmProvider.js';
 
 export const CHAT_TOOLS: LLMTool[] = [
   {
+    name: 'request_signing',
+    description: '[STEP 1] Start a proof generation session. Creates a signing request and returns a URL where the user connects their wallet and signs. This is the first step in the proof generation flow.',
+    parameters: {
+      type: 'object',
+      properties: {
+        circuitId: {
+          type: 'string',
+          enum: ['coinbase_attestation', 'coinbase_country_attestation'],
+          description: 'Which circuit to use: coinbase_attestation for KYC, coinbase_country_attestation for country verification',
+        },
+        scope: {
+          type: 'string',
+          description: 'Privacy scope (usually the requesting app domain, e.g., "myapp.com")',
+        },
+        countryList: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Country codes (ISO 3166-1 alpha-2) for country attestation. Required only for coinbase_country_attestation.',
+        },
+        isIncluded: {
+          type: 'boolean',
+          description: 'For country attestation: true to prove inclusion in countryList, false to prove exclusion. Required only for coinbase_country_attestation.',
+        },
+      },
+      required: ['circuitId', 'scope'],
+    },
+  },
+  {
+    name: 'check_status',
+    description: '[STEP 2] Check the current status of a proof request. Returns the signing status, payment status, and current phase (signing, payment, ready, or expired). Use this after the user says they have signed or paid.',
+    parameters: {
+      type: 'object',
+      properties: {
+        requestId: {
+          type: 'string',
+          description: 'The request ID returned from request_signing.',
+        },
+      },
+      required: ['requestId'],
+    },
+  },
+  {
+    name: 'request_payment',
+    description: '[STEP 3] Initiate payment for proof generation. Returns a URL where the user pays $0.10 USDC. Can only be called after signing is complete. If payment is disabled, returns a message to proceed directly to generate_proof.',
+    parameters: {
+      type: 'object',
+      properties: {
+        requestId: {
+          type: 'string',
+          description: 'The request ID returned from request_signing.',
+        },
+      },
+      required: ['requestId'],
+    },
+  },
+  {
     name: 'generate_proof',
-    description:
-      'Generate a zero-knowledge proof for Coinbase KYC or country attestation. ' +
-      'If user has not provided address/signature, creates a web signing request where the user connects their wallet in a browser. ' +
-      'For web signing flow, only circuitId and scope are required.',
+    description: '[STEP 4] Generate a zero-knowledge proof. Requires either: (1) a requestId from a completed signing+payment session, or (2) address+signature for direct generation. When using requestId, signing and payment must both be completed first — use check_status to verify phase is "ready" before calling.',
     parameters: {
       type: 'object',
       properties: {
@@ -21,15 +74,15 @@ export const CHAT_TOOLS: LLMTool[] = [
         },
         address: {
           type: 'string',
-          description: 'User wallet address (0x-prefixed). Optional for web signing flow.',
+          description: 'User wallet address (0x-prefixed). Required for direct flow, not needed with requestId.',
         },
         signature: {
           type: 'string',
-          description: 'User signature. Optional for web signing flow.',
+          description: 'User signature (0x-prefixed). Required for direct flow, not needed with requestId.',
         },
         requestId: {
           type: 'string',
-          description: 'Request ID from previous signing step to resume proof generation.',
+          description: 'Request ID from request_signing. Signing and payment must be completed before calling generate_proof with this.',
         },
         countryList: {
           type: 'array',
@@ -46,7 +99,7 @@ export const CHAT_TOOLS: LLMTool[] = [
   },
   {
     name: 'verify_proof',
-    description: 'Verify a zero-knowledge proof on-chain against the deployed verifier contract.',
+    description: '[OPTIONAL] Verify a zero-knowledge proof on-chain against the deployed verifier contract.',
     parameters: {
       type: 'object',
       properties: {
@@ -74,7 +127,7 @@ export const CHAT_TOOLS: LLMTool[] = [
   },
   {
     name: 'get_supported_circuits',
-    description: 'List all supported ZK circuits with their metadata, descriptions, and required inputs.',
+    description: '[DISCOVERY] List all supported ZK circuits with their metadata, descriptions, and required inputs.',
     parameters: {
       type: 'object',
       properties: {},

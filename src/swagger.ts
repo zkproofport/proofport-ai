@@ -42,6 +42,15 @@ export function buildSwaggerSpec(baseUrl: string) {
         description:
           'Handles MCP JSON-RPC requests (initialize, tools/list, tools/call). Stateless mode — each request creates a fresh transport.',
         tags: ['MCP'],
+        parameters: [
+          {
+            name: 'Accept',
+            in: 'header',
+            required: true,
+            schema: { type: 'string', default: 'application/json, text/event-stream' },
+            description: 'Must include both application/json and text/event-stream. Without this header, the MCP SDK returns 406 Not Acceptable.',
+          },
+        ],
         requestBody: {
           required: true,
           content: {
@@ -94,14 +103,97 @@ export function buildSwaggerSpec(baseUrl: string) {
                     },
                   },
                 },
+                callRequestSigning: {
+                  summary: 'Call request_signing',
+                  value: {
+                    jsonrpc: '2.0',
+                    id: 4,
+                    method: 'tools/call',
+                    params: {
+                      name: 'request_signing',
+                      arguments: {
+                        circuitId: 'coinbase_attestation',
+                        scope: 'myapp.com',
+                      },
+                    },
+                  },
+                },
+                callCheckStatus: {
+                  summary: 'Call check_status',
+                  value: {
+                    jsonrpc: '2.0',
+                    id: 5,
+                    method: 'tools/call',
+                    params: {
+                      name: 'check_status',
+                      arguments: {
+                        requestId: '<requestId from request_signing>',
+                      },
+                    },
+                  },
+                },
+                callRequestPayment: {
+                  summary: 'Call request_payment',
+                  value: {
+                    jsonrpc: '2.0',
+                    id: 6,
+                    method: 'tools/call',
+                    params: {
+                      name: 'request_payment',
+                      arguments: {
+                        requestId: '<requestId from request_signing>',
+                      },
+                    },
+                  },
+                },
+                callGenerateProof: {
+                  summary: 'Call generate_proof (with requestId)',
+                  value: {
+                    jsonrpc: '2.0',
+                    id: 7,
+                    method: 'tools/call',
+                    params: {
+                      name: 'generate_proof',
+                      arguments: {
+                        circuitId: 'coinbase_attestation',
+                        scope: 'myapp.com',
+                        requestId: '<requestId from request_signing>',
+                      },
+                    },
+                  },
+                },
+                callVerifyProof: {
+                  summary: 'Call verify_proof',
+                  value: {
+                    jsonrpc: '2.0',
+                    id: 8,
+                    method: 'tools/call',
+                    params: {
+                      name: 'verify_proof',
+                      arguments: {
+                        circuitId: 'coinbase_attestation',
+                        proof: '0x...',
+                        publicInputs: ['0x...'],
+                        chainId: '84532',
+                      },
+                    },
+                  },
+                },
               },
             },
           },
         },
         responses: {
           '200': {
-            description: 'MCP JSON-RPC response',
+            description: 'MCP JSON-RPC response (SSE event stream with JSON-RPC payloads)',
             content: {
+              'text/event-stream': {
+                schema: {
+                  type: 'string',
+                  description: 'SSE stream with `data:` lines containing JSON-RPC responses',
+                  example: 'event: message\ndata: {"result":{"content":[{"type":"text","text":"..."}]},"jsonrpc":"2.0","id":1}\n\n',
+                },
+              },
               'application/json': {
                 schema: {
                   type: 'object',
@@ -109,6 +201,26 @@ export function buildSwaggerSpec(baseUrl: string) {
                     jsonrpc: { type: 'string' },
                     id: { type: 'number' },
                     result: { type: 'object' },
+                  },
+                },
+              },
+            },
+          },
+          '406': {
+            description: 'Not Acceptable — client must accept both application/json and text/event-stream',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    jsonrpc: { type: 'string', example: '2.0' },
+                    error: {
+                      type: 'object',
+                      properties: {
+                        code: { type: 'number', example: -32000 },
+                        message: { type: 'string', example: 'Not Acceptable: Client must accept both application/json and text/event-stream' },
+                      },
+                    },
                   },
                 },
               },
@@ -257,6 +369,76 @@ export function buildSwaggerSpec(baseUrl: string) {
                     },
                   },
                 },
+                messageSendGetCircuits: {
+                  summary: 'message/send — get_supported_circuits',
+                  value: {
+                    jsonrpc: '2.0',
+                    id: 'req-6',
+                    method: 'message/send',
+                    params: {
+                      message: {
+                        role: 'user',
+                        parts: [{ kind: 'data', mimeType: 'application/json', data: { skill: 'get_supported_circuits' } }],
+                      },
+                    },
+                  },
+                },
+                messageSendRequestSigning: {
+                  summary: 'message/send — request_signing',
+                  value: {
+                    jsonrpc: '2.0',
+                    id: 'req-7',
+                    method: 'message/send',
+                    params: {
+                      message: {
+                        role: 'user',
+                        parts: [{ kind: 'data', mimeType: 'application/json', data: { skill: 'request_signing', circuitId: 'coinbase_attestation', scope: 'myapp.com' } }],
+                      },
+                    },
+                  },
+                },
+                messageSendCheckStatus: {
+                  summary: 'message/send — check_status',
+                  value: {
+                    jsonrpc: '2.0',
+                    id: 'req-8',
+                    method: 'message/send',
+                    params: {
+                      message: {
+                        role: 'user',
+                        parts: [{ kind: 'data', mimeType: 'application/json', data: { skill: 'check_status', requestId: '<requestId from request_signing>' } }],
+                      },
+                    },
+                  },
+                },
+                messageSendRequestPayment: {
+                  summary: 'message/send — request_payment',
+                  value: {
+                    jsonrpc: '2.0',
+                    id: 'req-9',
+                    method: 'message/send',
+                    params: {
+                      message: {
+                        role: 'user',
+                        parts: [{ kind: 'data', mimeType: 'application/json', data: { skill: 'request_payment', requestId: '<requestId from request_signing>' } }],
+                      },
+                    },
+                  },
+                },
+                messageSendVerifyProof: {
+                  summary: 'message/send — verify_proof',
+                  value: {
+                    jsonrpc: '2.0',
+                    id: 'req-10',
+                    method: 'message/send',
+                    params: {
+                      message: {
+                        role: 'user',
+                        parts: [{ kind: 'data', mimeType: 'application/json', data: { skill: 'verify_proof', circuitId: 'coinbase_attestation', proof: '0x...', publicInputs: ['0x...'], chainId: '84532' } }],
+                      },
+                    },
+                  },
+                },
               },
             },
           },
@@ -321,6 +503,19 @@ export function buildSwaggerSpec(baseUrl: string) {
                 },
               },
             },
+          },
+        },
+      },
+    },
+    '/.well-known/oasf.json': {
+      get: {
+        summary: 'OASF Agent Discovery (alias)',
+        description: 'Alias for /.well-known/agent.json — returns the same OASF agent identity',
+        tags: ['Discovery'],
+        responses: {
+          '200': {
+            description: 'Agent identity document',
+            content: { 'application/json': { schema: { type: 'object' } } },
           },
         },
       },
@@ -538,6 +733,147 @@ export function buildSwaggerSpec(baseUrl: string) {
               },
             },
           },
+        },
+      },
+    },
+    '/api/v1/signing': {
+      post: {
+        summary: 'Create a signing session',
+        description: 'Creates a new signing request. Returns a requestId, signingUrl (where the user signs), and expiresAt timestamp. This is the first step in the multi-turn proof generation flow.',
+        tags: ['REST API'],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['circuitId', 'scope'],
+                properties: {
+                  circuitId: {
+                    type: 'string',
+                    enum: ['coinbase_attestation', 'coinbase_country_attestation'],
+                    description: 'Which circuit to use',
+                  },
+                  scope: {
+                    type: 'string',
+                    description: 'Privacy scope (e.g., "myapp.com")',
+                    example: 'myapp.com',
+                  },
+                  countryList: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Country codes for country attestation (ISO 3166-1 alpha-2)',
+                  },
+                  isIncluded: {
+                    type: 'boolean',
+                    description: 'For country attestation: true for inclusion, false for exclusion',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Signing session created',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    requestId: { type: 'string', description: 'Unique request ID for this session' },
+                    signingUrl: { type: 'string', description: 'URL where the user signs with their wallet' },
+                    expiresAt: { type: 'string', format: 'date-time', description: 'When this signing session expires' },
+                  },
+                },
+              },
+            },
+          },
+          '400': { description: 'Invalid parameters (missing circuitId, unknown circuit, etc.)' },
+        },
+      },
+    },
+    '/api/v1/signing/{requestId}/status': {
+      get: {
+        summary: 'Check signing/payment status',
+        description: 'Returns the current phase of a signing request: signing (waiting for signature), payment (signature received, awaiting payment), ready (all prerequisites met, can generate proof), or expired.',
+        tags: ['REST API'],
+        parameters: [
+          {
+            name: 'requestId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+            description: 'Request ID from POST /api/v1/signing',
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Current status of the signing request',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    requestId: { type: 'string' },
+                    phase: { type: 'string', enum: ['signing', 'payment', 'ready', 'expired'] },
+                    signing: {
+                      type: 'object',
+                      properties: {
+                        status: { type: 'string', enum: ['pending', 'completed'] },
+                        address: { type: 'string', nullable: true },
+                      },
+                    },
+                    payment: {
+                      type: 'object',
+                      nullable: true,
+                      properties: {
+                        required: { type: 'boolean' },
+                        status: { type: 'string', enum: ['pending', 'completed'] },
+                      },
+                    },
+                    expiresAt: { type: 'string', format: 'date-time' },
+                  },
+                },
+              },
+            },
+          },
+          '404': { description: 'Request not found or expired' },
+        },
+      },
+    },
+    '/api/v1/signing/{requestId}/payment': {
+      post: {
+        summary: 'Initiate payment for proof generation',
+        description: 'Creates a payment request for the given signing session. Signing must be completed first. Returns a paymentUrl where the user pays $0.10 USDC. If payment mode is disabled, returns a message to proceed directly to generate_proof.',
+        tags: ['REST API'],
+        parameters: [
+          {
+            name: 'requestId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+            description: 'Request ID from POST /api/v1/signing',
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Payment initiated or not required',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    message: { type: 'string', description: 'Status message' },
+                    paymentUrl: { type: 'string', nullable: true, description: 'URL where user pays (null if payment disabled)' },
+                    requestId: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          '400': { description: 'Signing not completed yet or payment already completed' },
+          '404': { description: 'Request not found or expired' },
         },
       },
     },
@@ -820,6 +1156,193 @@ export function buildSwaggerSpec(baseUrl: string) {
         },
       },
     },
+    '/v1/models': {
+      get: {
+        summary: 'List available models',
+        description: 'Returns available model list (OpenAI-compatible). Returns a single model: zkproofport.',
+        tags: ['Chat'],
+        responses: {
+          '200': {
+            description: 'Model list',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    object: { type: 'string', example: 'list' },
+                    data: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          id: { type: 'string', example: 'zkproofport' },
+                          object: { type: 'string', example: 'model' },
+                          owned_by: { type: 'string', example: 'zkproofport' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/api/v1/chat': {
+      post: {
+        summary: 'Chat endpoint (DEPRECATED)',
+        description: 'This endpoint has been moved to /v1/chat/completions. Returns 410 Gone.',
+        tags: ['Chat'],
+        deprecated: true,
+        responses: {
+          '410': {
+            description: 'Gone — endpoint moved to /v1/chat/completions',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    error: { type: 'string', example: 'This endpoint has been moved to /v1/chat/completions' },
+                    newEndpoint: { type: 'string', example: '/v1/chat/completions' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/v/{proofId}': {
+      get: {
+        summary: 'Proof verification page (HTML)',
+        description: 'Returns an HTML page that displays proof verification results. Used for QR code scanning after proof generation.',
+        tags: ['HTML Pages'],
+        parameters: [
+          { name: 'proofId', in: 'path', required: true, schema: { type: 'string' }, description: 'Proof ID from proof generation' },
+        ],
+        responses: {
+          '200': { description: 'HTML verification page', content: { 'text/html': { schema: { type: 'string' } } } },
+        },
+      },
+    },
+    '/pay/{requestId}': {
+      get: {
+        summary: 'Payment page (HTML)',
+        description: 'Returns an HTML page where the user can pay $0.10 USDC for proof generation. Used in the multi-turn signing flow.',
+        tags: ['HTML Pages'],
+        parameters: [
+          { name: 'requestId', in: 'path', required: true, schema: { type: 'string' }, description: 'Request ID from signing session' },
+        ],
+        responses: {
+          '200': { description: 'HTML payment page', content: { 'text/html': { schema: { type: 'string' } } } },
+        },
+      },
+    },
+    '/api/payment/{requestId}': {
+      get: {
+        summary: 'Get payment request details',
+        description: 'Returns payment request information including amount, network, and status.',
+        tags: ['Payment'],
+        parameters: [
+          { name: 'requestId', in: 'path', required: true, schema: { type: 'string' }, description: 'Request ID from signing session' },
+        ],
+        responses: {
+          '200': {
+            description: 'Payment request details',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    requestId: { type: 'string' },
+                    amount: { type: 'string', example: '100000' },
+                    token: { type: 'string', example: 'USDC' },
+                    network: { type: 'string', example: 'base-sepolia' },
+                    payTo: { type: 'string' },
+                    status: { type: 'string', enum: ['pending', 'completed'] },
+                  },
+                },
+              },
+            },
+          },
+          '404': { description: 'Payment request not found' },
+        },
+      },
+    },
+    '/api/payment/confirm/{requestId}': {
+      post: {
+        summary: 'Confirm payment completion',
+        description: 'Called after USDC payment transaction is confirmed on-chain. Updates the signing request payment status.',
+        tags: ['Payment'],
+        parameters: [
+          { name: 'requestId', in: 'path', required: true, schema: { type: 'string' }, description: 'Request ID' },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  txHash: { type: 'string', description: 'On-chain transaction hash' },
+                },
+                required: ['txHash'],
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'Payment confirmed', content: { 'application/json': { schema: { type: 'object', properties: { message: { type: 'string' } } } } } },
+          '400': { description: 'Invalid request or already confirmed' },
+          '404': { description: 'Request not found' },
+        },
+      },
+    },
+    '/api/payment/sign/{requestId}': {
+      post: {
+        summary: 'Get EIP-3009 signing data for payment',
+        description: 'Returns the EIP-712 typed data for TransferWithAuthorization (EIP-3009) that the user needs to sign for USDC payment.',
+        tags: ['Payment'],
+        parameters: [
+          { name: 'requestId', in: 'path', required: true, schema: { type: 'string' }, description: 'Request ID' },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  payerAddress: { type: 'string', description: 'Payer wallet address' },
+                },
+                required: ['payerAddress'],
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'EIP-712 typed data for signing',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    domain: { type: 'object' },
+                    types: { type: 'object' },
+                    value: { type: 'object' },
+                    primaryType: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          '400': { description: 'Invalid request' },
+          '404': { description: 'Request not found' },
+        },
+      },
+    },
     '/api/signing/{requestId}': {
       get: {
         summary: 'Get signing request details',
@@ -982,7 +1505,7 @@ export function buildSwaggerSpec(baseUrl: string) {
     {
       name: 'MCP',
       description:
-        'Model Context Protocol endpoints. Tools: generate_proof, verify_proof, get_supported_circuits',
+        'Model Context Protocol endpoints. Tools: get_supported_circuits, request_signing, check_status, request_payment, generate_proof, verify_proof',
     },
     {
       name: 'A2A',
@@ -1008,13 +1531,21 @@ export function buildSwaggerSpec(baseUrl: string) {
       name: 'Chat',
       description: 'OpenAI Chat Completions-compatible endpoint. Session via X-Session-Id/X-Session-Secret headers. Structured data in content via ```proofport DSL block.',
     },
+    {
+      name: 'Payment',
+      description: 'Web payment flow endpoints for USDC payment via EIP-3009 TransferWithAuthorization',
+    },
+    {
+      name: 'HTML Pages',
+      description: 'HTML pages for web-based signing, payment, and proof verification',
+    },
   ],
   components: {
     schemas: {
       MCPToolGenerateProof: {
         type: 'object',
         description: 'MCP tool: generate_proof — Generate a ZK proof for a circuit',
-        required: ['address', 'signature', 'scope', 'circuitId'],
+        required: ['circuitId', 'scope'],
         properties: {
           address: {
             type: 'string',
@@ -1033,6 +1564,10 @@ export function buildSwaggerSpec(baseUrl: string) {
           circuitId: {
             type: 'string',
             enum: ['coinbase_attestation', 'coinbase_country_attestation'],
+          },
+          requestId: {
+            type: 'string',
+            description: 'Request ID from request_signing (for session-based flow)',
           },
           countryList: {
             type: 'array',

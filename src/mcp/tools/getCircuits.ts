@@ -1,22 +1,28 @@
+/**
+ * getCircuits.ts — MCP tool wrapper for listing supported circuits.
+ *
+ * Thin adapter over CIRCUITS config.
+ * Used by MCP server and unit tests.
+ */
+
 import { CIRCUITS } from '../../config/circuits.js';
 
-export interface CircuitInfo {
+export interface CircuitMetadata {
   id: string;
   displayName: string;
   description: string;
   requiredInputs: readonly string[];
 }
 
-export interface GetCircuitsResult {
-  circuits: CircuitInfo[];
+export interface GetSupportedCircuitsOutput {
+  circuits: CircuitMetadata[];
 }
 
 /**
- * Return metadata for all supported circuits.
- * Used by the get_supported_circuits MCP tool.
+ * Return metadata for all supported ZK circuits.
  */
-export function getSupportedCircuits(): GetCircuitsResult {
-  const circuits: CircuitInfo[] = Object.values(CIRCUITS).map(circuit => ({
+export function getSupportedCircuits(): GetSupportedCircuitsOutput {
+  const circuits: CircuitMetadata[] = Object.values(CIRCUITS).map((circuit) => ({
     id: circuit.id,
     displayName: circuit.displayName,
     description: circuit.description,

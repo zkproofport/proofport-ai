@@ -226,8 +226,9 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
       const message = req.body?.params?.message;
       if (message) {
         const parts = message.parts || [];
+        const FREE_SKILLS = new Set(['get_supported_circuits', 'verify_proof', 'request_signing', 'check_status', 'request_payment']);
         const isFreeSkill = parts.some((p: any) =>
-          p.kind === 'data' && (p.data?.skill === 'get_supported_circuits' || p.data?.skill === 'verify_proof')
+          p.kind === 'data' && FREE_SKILLS.has(p.data?.skill)
         );
         if (isFreeSkill) {
           next();
@@ -256,6 +257,7 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
 
   // REST API routes with payment middleware on proof generation only (verify is free)
   const restPaymentMiddleware = (req: any, res: any, next: any) => {
+    // Only proof generation requires payment; signing/status/payment-request routes are free
     const isProofGeneration = req.path === '/proofs' && req.method === 'POST';
     if (isProofGeneration) {
       return paymentMiddleware(req, res, () => {
@@ -264,7 +266,7 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
     }
     next();
   };
-  app.use('/api/v1', restPaymentMiddleware, createRestRoutes({ taskStore, taskEventEmitter, redis, config, paymentFacilitator }));
+  app.use('/api/v1', restPaymentMiddleware, createRestRoutes({ taskStore, taskEventEmitter, redis, config, paymentFacilitator, rateLimiter, proofCache, teeProvider }));
 
   // CORS for signing routes (sign-page on port 3200 → AI server on port 4002)
   app.use('/api/signing', (req, res, next) => {
@@ -362,7 +364,8 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
     if (method === 'tools/call') {
       // Skip payment for free tools (read-only or verification)
       const toolName = req.body?.params?.name;
-      if (toolName === 'get_supported_circuits' || toolName === 'verify_proof') {
+      const FREE_MCP_TOOLS = new Set(['get_supported_circuits', 'verify_proof', 'request_signing', 'check_status', 'request_payment']);
+      if (FREE_MCP_TOOLS.has(toolName)) {
         next();
         return;
       }
@@ -372,7 +375,25 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
     }
     next();
   };
-  app.post('/mcp', mcpPaymentMiddleware, async (req, res) => {
+  // MCP StreamableHTTP requires Accept to include both application/json and text/event-stream.
+  // Swagger UI and simple curl clients often send only one — fix it here so they don't get 406.
+  // Must patch both Express headers AND raw HTTP headers (Node.js IncomingMessage.rawHeaders)
+  // because the MCP SDK converts to Web Standard Request using raw headers.
+  app.post('/mcp', (req, _res, next) => {
+    const accept = req.headers['accept'] || '';
+    if (!accept.includes('text/event-stream') || !accept.includes('application/json')) {
+      const fixed = 'application/json, text/event-stream';
+      req.headers['accept'] = fixed;
+      // Patch rawHeaders array (used by @hono/node-server getRequestListener)
+      const idx = req.rawHeaders.findIndex(h => h.toLowerCase() === 'accept');
+      if (idx !== -1) {
+        req.rawHeaders[idx + 1] = fixed;
+      } else {
+        req.rawHeaders.push('Accept', fixed);
+      }
+    }
+    next();
+  }, mcpPaymentMiddleware, async (req, res) => {
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     const server = createMcpServer({ rateLimiter, proofCache, redis, teeProvider });
     await server.connect(transport);
@@ -398,6 +419,20 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
     const chatDeps = {
       redis, taskStore, taskEventEmitter, a2aBaseUrl: config.a2aBaseUrl, llmProvider,
       paymentRequiredHeader,
+      signPageUrl: config.signPageUrl,
+      signingTtlSeconds: config.signingTtlSeconds,
+      paymentMode: config.paymentMode,
+      paymentProofPrice: config.paymentProofPrice,
+      easGraphqlEndpoint: config.easGraphqlEndpoint,
+      rpcUrls: [config.baseRpcUrl],
+      bbPath: config.bbPath,
+      nargoPath: config.nargoPath,
+      circuitsDir: config.circuitsDir,
+      chainRpcUrl: config.chainRpcUrl,
+      rateLimiter,
+      proofCache,
+      teeProvider,
+      teeMode: resolvedMode,
     };
 
     // Conditional payment verifier: only runs x402 verification when PAYMENT-SIGNATURE is present
@@ -562,6 +597,17 @@ el.innerHTML=
     const ttl = await redis.ttl(key);
     await redis.set(key, JSON.stringify(record), 'EX', ttl > 0 ? ttl : 300);
 
+    // Publish flow event if this requestId is linked to a flow
+    try {
+      const { getFlowByRequestId, publishFlowEvent } = await import('./skills/flowManager.js');
+      const flow = await getFlowByRequestId(requestId, redis);
+      if (flow) {
+        await publishFlowEvent(redis, flow.flowId, { ...flow, updatedAt: new Date().toISOString() });
+      }
+    } catch (e) {
+      console.error('[payment] Failed to publish flow event:', e);
+    }
+
     console.log(`[Payment] Confirmed for ${requestId}: ${txHash}`);
     res.json({ status: 'confirmed' });
   });
@@ -631,6 +677,17 @@ el.innerHTML=
         record.paymentTxHash = settleResult.transaction;
         const ttl = await redis.ttl(key);
         await redis.set(key, JSON.stringify(record), 'EX', ttl > 0 ? ttl : 300);
+
+        // Publish flow event if this requestId is linked to a flow
+        try {
+          const { getFlowByRequestId, publishFlowEvent } = await import('./skills/flowManager.js');
+          const flow = await getFlowByRequestId(requestId, redis);
+          if (flow) {
+            await publishFlowEvent(redis, flow.flowId, { ...flow, updatedAt: new Date().toISOString() });
+          }
+        } catch (e) {
+          console.error('[payment] Failed to publish flow event:', e);
+        }
 
         console.log(`[Payment] Facilitator settled for ${requestId}: ${settleResult.transaction}`);
         res.json({

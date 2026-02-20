@@ -6,7 +6,7 @@ import { CHAT_TOOLS } from './tools.js';
 import { SYSTEM_PROMPT } from './systemPrompt.js';
 import { executeSkill, PaymentRequiredError, type ChatHandlerDeps } from './chatHandler.js';
 
-const MAX_FUNCTION_CALLS = 3;
+const MAX_FUNCTION_CALLS = 5;
 const MODEL_NAME = 'zkproofport';
 const SESSION_TTL_SECONDS = 3600;
 const MAX_HISTORY_MESSAGES = 50;
