@@ -5,7 +5,7 @@
   "type": "module",
   "main": "bot.mjs",
   "scripts": {
-    "start": "node bot.mjs"
+    "start": "node --env-file=.env bot.mjs"
   },
   "keywords": [
     "telegram-bot",

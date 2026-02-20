@@ -20,5 +20,8 @@ coverage/
 # Rust prover (unused, bb CLI used instead)
 prover/
 
+# Test environment (contains private keys)
+.env.test
+
 # OMC state
 .omc/

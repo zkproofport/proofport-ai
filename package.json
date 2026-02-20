@@ -11,10 +11,10 @@
     "mcp:stdio": "node dist/mcp/stdio.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "./scripts/a2a-e2e-test.sh",
-    "test:e2e:quick": "./scripts/a2a-e2e-test.sh --quick",
+    "test:e2e": "vitest run --project e2e",
+    "test:unit": "vitest run --project unit",
     "typecheck": "tsc --noEmit",
-    "test:all": "./scripts/test-all.sh"
+    "test:all": "vitest run"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
@@ -39,10 +39,8 @@
   "devDependencies": {
     "@types/express": "^4.17.0",
     "@types/node": "^20.0.0",
-    "@types/supertest": "^6.0.3",
     "@types/swagger-ui-express": "^4.1.8",
     "@x402/fetch": "^2.3.0",
-    "supertest": "^7.2.2",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
     "vitest": "^3.0.0"
