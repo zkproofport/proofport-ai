@@ -18,9 +18,8 @@ import { getAgentCardHandler, getMcpDiscoveryHandler, getOasfAgentHandler } from
 import { createA2aHandler } from './a2a/taskHandler.js';
 import { TaskStore } from './a2a/taskStore.js';
 import { TaskEventEmitter } from './a2a/streaming.js';
-import { createPaymentMiddleware, buildPaymentRequiredHeaderValue, PAYMENT_NETWORKS } from './payment/x402Middleware.js';
+import { PAYMENT_NETWORKS } from './payment/x402Middleware.js';
 import { HTTPFacilitatorClient } from '@x402/core/server';
-import { createPaymentRecordingMiddleware } from './payment/recordingMiddleware.js';
 import { PaymentFacilitator } from './payment/facilitator.js';
 import { SettlementWorker } from './payment/settlementWorker.js';
 import { validatePaymentConfig, getPaymentModeConfig } from './payment/freeTier.js';
@@ -90,11 +89,6 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
 
   // Payment setup
   const paymentFacilitator = new PaymentFacilitator(redis, { ttlSeconds: 86400 });
-  const paymentMiddleware = createPaymentMiddleware(config);
-  const paymentRecordingMiddleware = createPaymentRecordingMiddleware({
-    paymentMode: config.paymentMode,
-    facilitator: paymentFacilitator,
-  });
   const paymentModeConfig = getPaymentModeConfig(config.paymentMode);
 
   // TEE setup
@@ -218,30 +212,6 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   app.get('/.well-known/oasf.json', getOasfAgentHandler(config, agentTokenId));
   app.get('/.well-known/mcp.json', getMcpDiscoveryHandler(config));
 
-  // Payment gate only for message/send and message/stream (proof generation)
-  const a2aPaymentMiddleware = (req: any, res: any, next: any) => {
-    const method = req.body?.method;
-    if (method === 'message/send' || method === 'message/stream') {
-      // Skip payment for get_supported_circuits (read-only, no proof generation)
-      const message = req.body?.params?.message;
-      if (message) {
-        const parts = message.parts || [];
-        const FREE_SKILLS = new Set(['get_supported_circuits', 'verify_proof', 'request_signing', 'check_status', 'request_payment']);
-        const isFreeSkill = parts.some((p: any) =>
-          p.kind === 'data' && FREE_SKILLS.has(p.data?.skill)
-        );
-        if (isFreeSkill) {
-          next();
-          return;
-        }
-      }
-      return paymentMiddleware(req, res, () => {
-        paymentRecordingMiddleware(req, res, next);
-      });
-    }
-    next();
-  };
-
   // LLM providers (created early — needed by both A2A text inference and chat endpoint)
   const llmProviders: LLMProvider[] = [];
   if (config.openaiApiKey) {
@@ -252,21 +222,12 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   }
   const llmProvider = llmProviders.length > 0 ? new MultiLLMProvider(llmProviders) : undefined;
 
-  // Payment-gated routes — single POST /a2a handles all A2A v0.3 JSON-RPC methods
-  app.post('/a2a', a2aPaymentMiddleware, createA2aHandler({ taskStore, taskEventEmitter, paymentFacilitator, llmProvider }));
+  // Single POST /a2a handles all A2A v0.3 JSON-RPC methods
+  // Payment is handled inside skillHandler via request_payment flow (no HTTP-level x402 gate)
+  app.post('/a2a', createA2aHandler({ taskStore, taskEventEmitter, llmProvider }));
 
-  // REST API routes with payment middleware on proof generation only (verify is free)
-  const restPaymentMiddleware = (req: any, res: any, next: any) => {
-    // Only proof generation requires payment; signing/status/payment-request routes are free
-    const isProofGeneration = req.path === '/proofs' && req.method === 'POST';
-    if (isProofGeneration) {
-      return paymentMiddleware(req, res, () => {
-        paymentRecordingMiddleware(req, res, next);
-      });
-    }
-    next();
-  };
-  app.use('/api/v1', restPaymentMiddleware, createRestRoutes({ taskStore, taskEventEmitter, redis, config, paymentFacilitator, rateLimiter, proofCache, teeProvider }));
+  // REST API routes — payment is handled inside skillHandler via request_payment flow
+  app.use('/api/v1', createRestRoutes({ taskStore, taskEventEmitter, redis, config, rateLimiter, proofCache, teeProvider }));
 
   // CORS for signing routes (sign-page on port 3200 → AI server on port 4002)
   app.use('/api/signing', (req, res, next) => {
@@ -378,23 +339,8 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   app.post('/api/signing/callback/:requestId', createSigningCallbackHandler(redis));
   app.post('/api/signing/batch', createBatchSigningHandler(redis));
 
-  // MCP StreamableHTTP endpoint (stateless mode, payment only on paid tools/call)
-  const mcpPaymentMiddleware = (req: any, res: any, next: any) => {
-    const method = req.body?.method;
-    if (method === 'tools/call') {
-      // Skip payment for free tools (read-only or verification)
-      const toolName = req.body?.params?.name;
-      const FREE_MCP_TOOLS = new Set(['get_supported_circuits', 'verify_proof', 'request_signing', 'check_status', 'request_payment']);
-      if (FREE_MCP_TOOLS.has(toolName)) {
-        next();
-        return;
-      }
-      return paymentMiddleware(req, res, () => {
-        paymentRecordingMiddleware(req, res, next);
-      });
-    }
-    next();
-  };
+  // MCP StreamableHTTP endpoint (stateless mode)
+  // Payment is handled inside skillHandler via request_payment flow (no HTTP-level x402 gate)
   // MCP StreamableHTTP requires Accept to include both application/json and text/event-stream.
   // Swagger UI and simple curl clients often send only one — fix it here so they don't get 406.
   // Must patch both Express headers AND raw HTTP headers (Node.js IncomingMessage.rawHeaders)
@@ -413,7 +359,7 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
       }
     }
     next();
-  }, mcpPaymentMiddleware, async (req, res) => {
+  }, async (req, res) => {
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     const server = createMcpServer({ rateLimiter, proofCache, redis, teeProvider });
     await server.connect(transport);
@@ -429,16 +375,10 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   });
 
   // Chat endpoint (LLM-based natural language interface)
-  // Payment enforced via PaymentRequiredError — same x402 flow as REST/MCP/A2A
+  // Payment is handled inside skillHandler via request_payment flow (no HTTP-level x402 gate)
   if (llmProvider) {
-    const paymentRequiredHeader = buildPaymentRequiredHeaderValue(
-      config,
-      `${config.a2aBaseUrl}/v1/chat/completions`,
-      'ZK proof generation/verification via chat',
-    );
     const chatDeps = {
       redis, taskStore, taskEventEmitter, a2aBaseUrl: config.a2aBaseUrl, llmProvider,
-      paymentRequiredHeader,
       signPageUrl: config.signPageUrl,
       signingTtlSeconds: config.signingTtlSeconds,
       paymentMode: config.paymentMode,
@@ -455,21 +395,7 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
       teeMode: resolvedMode,
     };
 
-    // Conditional payment verifier: only runs x402 verification when PAYMENT-SIGNATURE is present
-    const chatPaymentVerifier = (req: any, res: any, next: any) => {
-      const hasPayment = req.headers['payment-signature'] || req.headers['x-payment'];
-      if (hasPayment) {
-        return paymentMiddleware(req, res, () => {
-          paymentRecordingMiddleware(req, res, () => {
-            req.paymentVerified = true;
-            next();
-          });
-        });
-      }
-      next();
-    };
-
-    app.use('/v1', chatPaymentVerifier, createOpenAIRoutes(chatDeps));
+    app.use('/v1', createOpenAIRoutes(chatDeps));
     console.log(`[Chat] LLM chat endpoint enabled (providers: ${llmProviders.map(p => p.name).join(' -> ')})`);
     console.log('[OpenAI] Compatible endpoint enabled at /v1/chat/completions');
   } else {

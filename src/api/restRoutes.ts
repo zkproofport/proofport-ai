@@ -6,7 +6,6 @@ import type { RateLimiter } from '../redis/rateLimiter.js';
 import type { ProofCache } from '../redis/proofCache.js';
 import type { TeeProvider } from '../tee/types.js';
 import type { Config } from '../config/index.js';
-import type { PaymentFacilitator } from '../payment/facilitator.js';
 import { getProofResult } from '../redis/proofResultStore.js';
 import { verifyOnChain } from '../prover/verifier.js';
 import { VERIFIER_ADDRESSES } from '../config/contracts.js';
@@ -40,7 +39,6 @@ export interface RestRoutesDeps {
   taskEventEmitter: TaskEventEmitter;
   redis: RedisClient;
   config: Config;
-  paymentFacilitator?: PaymentFacilitator;
   rateLimiter?: RateLimiter;
   proofCache?: ProofCache;
   teeProvider?: TeeProvider;
@@ -155,23 +153,6 @@ export function createRestRoutes(deps: RestRoutesDeps): Router {
         { circuitId, scope, address, signature, requestId, countryList, isIncluded },
         skillDeps,
       );
-
-      // Record payment if present
-      if (deps.paymentFacilitator) {
-        const paymentInfo = (req as any).x402Payment;
-        if (paymentInfo) {
-          try {
-            await deps.paymentFacilitator.recordPayment({
-              taskId: result.proofId,
-              payerAddress: paymentInfo.payerAddress,
-              amount: paymentInfo.amount,
-              network: paymentInfo.network,
-            });
-          } catch (err) {
-            console.error(`[REST] Failed to record payment for proof ${result.proofId}:`, err);
-          }
-        }
-      }
 
       res.json(result);
     } catch (error) {

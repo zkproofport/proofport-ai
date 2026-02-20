@@ -2,7 +2,6 @@ import type { Request, Response, RequestHandler } from 'express';
 import type { TaskStore, Message, DataPart, TextPart } from './taskStore.js';
 import type { TaskEventEmitter } from './streaming.js';
 import { attachSseStream } from './streaming.js';
-import type { PaymentFacilitator } from '../payment/facilitator.js';
 import type { LLMProvider } from '../chat/llmProvider.js';
 import { CHAT_TOOLS } from '../chat/tools.js';
 import { trace, SpanStatusCode } from '@opentelemetry/api';
@@ -12,7 +11,6 @@ const tracer = trace.getTracer('a2a-handler');
 export interface A2aHandlerDeps {
   taskStore: TaskStore;
   taskEventEmitter: TaskEventEmitter;
-  paymentFacilitator?: PaymentFacilitator;
   llmProvider?: LLMProvider;
 }
 
@@ -123,7 +121,7 @@ async function resolveSkill(
 }
 
 export function createA2aHandler(deps: A2aHandlerDeps): RequestHandler {
-  const { taskStore, taskEventEmitter, paymentFacilitator, llmProvider } = deps;
+  const { taskStore, taskEventEmitter, llmProvider } = deps;
 
   return async (req: Request, res: Response): Promise<void> => {
     const body = req.body as JsonRpcRequest;
@@ -141,11 +139,11 @@ export function createA2aHandler(deps: A2aHandlerDeps): RequestHandler {
     try {
       switch (body.method) {
         case 'message/send':
-          await handleMessageSend(body, res, taskStore, taskEventEmitter, paymentFacilitator, req, llmProvider);
+          await handleMessageSend(body, res, taskStore, taskEventEmitter, req, llmProvider);
           break;
 
         case 'message/stream':
-          await handleMessageStream(body, res, taskStore, taskEventEmitter, paymentFacilitator, req, llmProvider);
+          await handleMessageStream(body, res, taskStore, taskEventEmitter, req, llmProvider);
           break;
 
         case 'tasks/get':
@@ -174,7 +172,6 @@ async function handleMessageSend(
   res: Response,
   taskStore: TaskStore,
   taskEventEmitter: TaskEventEmitter,
-  paymentFacilitator?: PaymentFacilitator,
   req?: Request,
   llmProvider?: LLMProvider
 ): Promise<void> {
@@ -236,23 +233,6 @@ async function handleMessageSend(
     const task = await taskStore.createTask(skill, skillParams, userMessage, contextId || undefined);
     span.setAttribute('a2a.task_id', task.id);
 
-    // Record payment if present
-    if (paymentFacilitator && req) {
-      const paymentInfo = (req as any).x402Payment;
-      if (paymentInfo) {
-        try {
-          await paymentFacilitator.recordPayment({
-            taskId: task.id,
-            payerAddress: paymentInfo.payerAddress,
-            amount: paymentInfo.amount,
-            network: paymentInfo.network,
-          });
-        } catch (error) {
-          console.error(`Failed to record payment for task ${task.id}:`, error);
-        }
-      }
-    }
-
     // Wait for task completion (blocking)
     const completedTask = await waitForTaskCompletion(task.id, taskStore, taskEventEmitter, 120000);
     res.json(jsonRpcResult(body.id, completedTask));
@@ -270,7 +250,6 @@ async function handleMessageStream(
   res: Response,
   taskStore: TaskStore,
   taskEventEmitter: TaskEventEmitter,
-  paymentFacilitator?: PaymentFacilitator,
   req?: Request,
   llmProvider?: LLMProvider
 ): Promise<void> {
@@ -328,23 +307,6 @@ async function handleMessageStream(
 
     const task = await taskStore.createTask(skill, skillParams, userMessage, contextId || undefined);
     span.setAttribute('a2a.task_id', task.id);
-
-    // Record payment if present
-    if (paymentFacilitator && req) {
-      const paymentInfo = (req as any).x402Payment;
-      if (paymentInfo) {
-        try {
-          await paymentFacilitator.recordPayment({
-            taskId: task.id,
-            payerAddress: paymentInfo.payerAddress,
-            amount: paymentInfo.amount,
-            network: paymentInfo.network,
-          });
-        } catch (error) {
-          console.error(`Failed to record payment for task ${task.id}:`, error);
-        }
-      }
-    }
 
     // Attach SSE stream
     attachSseStream(res, taskEventEmitter, task.id, body.id || '');

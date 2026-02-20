@@ -4,7 +4,7 @@ import { randomUUID, randomBytes, createHash } from 'crypto';
 import type { LLMMessage } from './llmProvider.js';
 import { CHAT_TOOLS } from './tools.js';
 import { SYSTEM_PROMPT } from './systemPrompt.js';
-import { executeSkill, PaymentRequiredError, type ChatHandlerDeps } from './chatHandler.js';
+import { executeSkill, type ChatHandlerDeps } from './chatHandler.js';
 
 const MAX_FUNCTION_CALLS = 5;
 const MODEL_NAME = 'zkproofport';
@@ -125,7 +125,6 @@ async function runChatLoop(
   history: LLMMessage[],
   systemPrompt: string,
   deps: ChatHandlerDeps,
-  paymentVerified: boolean,
   onStream?: (content: string) => void,
   onStep?: (step: { message: string }) => void,
 ): Promise<{ response: string }> {
@@ -173,7 +172,7 @@ async function runChatLoop(
             skillResult = { error: 'Only one proof operation allowed per request. Please send a new message.' };
           } else {
             proofCallCount++;
-            skillResult = await executeSkill(tc.name, tc.args, deps, paymentVerified);
+            skillResult = await executeSkill(tc.name, tc.args, deps);
           }
         } else {
           skillResult = await executeSkill(tc.name, tc.args, deps);
@@ -295,7 +294,6 @@ export function createOpenAIRoutes(deps: ChatHandlerDeps): Router {
       const completionId = `chatcmpl-${randomUUID()}`;
       const created = Math.floor(Date.now() / 1000);
       const model = body.model || MODEL_NAME;
-      const paymentVerified = !!(req as any).paymentVerified;
 
       // --- Session management (via HTTP headers) ---
       const providedSessionId = req.headers['x-session-id'] as string | undefined;
@@ -435,7 +433,7 @@ export function createOpenAIRoutes(deps: ChatHandlerDeps): Router {
             res.write(`event: step\ndata: ${JSON.stringify(step)}\n\n`);
           };
 
-          await runChatLoop(history, systemPrompt, deps, paymentVerified, onStream, onStep);
+          await runChatLoop(history, systemPrompt, deps, onStream, onStep);
           await saveSession();
 
           // Send final chunk with finish_reason
@@ -451,14 +449,12 @@ export function createOpenAIRoutes(deps: ChatHandlerDeps): Router {
         } catch (error) {
           // Send error as SSE event (can't change HTTP status after headers flushed)
           const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-          const errorType = error instanceof PaymentRequiredError ? 'payment_required' : 'server_error';
           res.write(`data: ${JSON.stringify({
             id: completionId,
             object: 'chat.completion.chunk',
             created,
             model,
             choices: [{ index: 0, delta: { content: `\n\nError: ${errorMessage}` }, finish_reason: null }],
-            ...(errorType === 'payment_required' ? { error: { type: 'payment_required', code: 'payment_required' } } : {}),
           })}\n\n`);
           res.write(`data: ${JSON.stringify({
             id: completionId,
@@ -474,7 +470,7 @@ export function createOpenAIRoutes(deps: ChatHandlerDeps): Router {
         }
       } else {
         // Non-streaming: run chat loop, then return complete response (no onStep)
-        const { response } = await runChatLoop(history, systemPrompt, deps, paymentVerified);
+        const { response } = await runChatLoop(history, systemPrompt, deps);
         await saveSession();
 
         res.json({
@@ -500,18 +496,6 @@ export function createOpenAIRoutes(deps: ChatHandlerDeps): Router {
         });
       }
     } catch (error) {
-      // Non-streaming error handling (streaming errors handled above)
-      if (error instanceof PaymentRequiredError && deps.paymentRequiredHeader) {
-        res.setHeader('PAYMENT-REQUIRED', deps.paymentRequiredHeader);
-        res.status(402).json({
-          error: {
-            message: 'Payment required for proof generation. Retry with PAYMENT-SIGNATURE header.',
-            type: 'payment_required',
-            code: 'payment_required',
-          },
-        });
-        return;
-      }
       console.error('[OpenAI] Error:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       res.status(500).json({

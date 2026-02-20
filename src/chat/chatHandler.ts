@@ -15,20 +15,12 @@ import {
   type SkillDeps,
 } from '../skills/skillHandler.js';
 
-export class PaymentRequiredError extends Error {
-  constructor() {
-    super('Payment required for proof generation');
-    this.name = 'PaymentRequiredError';
-  }
-}
-
 export interface ChatHandlerDeps {
   redis: RedisClient;
   taskStore: TaskStore;
   taskEventEmitter: TaskEventEmitter;
   a2aBaseUrl: string;
   llmProvider: LLMProvider;
-  paymentRequiredHeader?: string | null;
   // Fields for skillHandler:
   signPageUrl: string;
   signingTtlSeconds: number;
@@ -70,7 +62,6 @@ export async function executeSkill(
   skillName: string,
   args: Record<string, unknown>,
   deps: ChatHandlerDeps,
-  paymentVerified = false,
 ): Promise<unknown> {
   const skillDeps = buildSkillDeps(deps);
 
