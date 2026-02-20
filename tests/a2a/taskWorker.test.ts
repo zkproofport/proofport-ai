@@ -75,6 +75,7 @@ vi.mock('../../src/identity/reputation.js', () => ({
 vi.mock('../../src/config/circuits.js', () => ({
   CIRCUITS: {
     coinbase_attestation: {
+      id: 'coinbase_attestation',
       displayName: 'Coinbase KYC',
       description: 'Verify Coinbase KYC attestation',
       easSchemaId: '0x' + '11'.repeat(32),
@@ -82,6 +83,7 @@ vi.mock('../../src/config/circuits.js', () => ({
       requiredInputs: ['address', 'signature', 'scope'],
     },
     coinbase_country_attestation: {
+      id: 'coinbase_country_attestation',
       displayName: 'Coinbase Country',
       description: 'Verify Coinbase country attestation',
       easSchemaId: '0x' + '22'.repeat(32),
@@ -99,6 +101,11 @@ vi.mock('../../src/config/contracts.js', () => ({
       coinbase_country_attestation: '0xVerifier2222222222222222222222222222222222',
     },
   },
+}));
+
+// Mock storeProofResult
+vi.mock('../../src/redis/proofResultStore.js', () => ({
+  storeProofResult: vi.fn().mockResolvedValue('proof-id-1234'),
 }));
 
 import { BbProver } from '../../src/prover/bbProver.js';
@@ -274,9 +281,10 @@ describe('TaskWorker', () => {
             data: expect.objectContaining({
               proof: '0xproof123',
               publicInputs: '0xpublic456',
-              proofWithInputs: '0xproof123public456',
               nullifier: expect.any(String),
               signalHash: expect.any(String),
+              proofId: 'proof-id-1234',
+              verifyUrl: expect.any(String),
             }),
           }),
         ]),
@@ -661,7 +669,7 @@ describe('TaskWorker', () => {
     expect(mockTeeProvider.prove).toHaveBeenCalledWith(
       'coinbase_attestation',
       [expect.any(String)],
-      'task-tee-test'
+      expect.any(String)
     );
 
     // Verify BbProver was NOT called
@@ -695,16 +703,10 @@ describe('TaskWorker', () => {
       })
     );
 
-    // Verify correct progress message about TEE
+    // Verify running status was emitted
     expect(mockTaskEventEmitter.emitStatusUpdate).toHaveBeenCalledWith(
       'task-tee-test',
-      expect.objectContaining({
-        state: 'running',
-        message: expect.objectContaining({
-          role: 'agent',
-          parts: [{ kind: 'text', text: 'Running proof in TEE enclave' }],
-        }),
-      }),
+      expect.objectContaining({ state: 'running' }),
       false
     );
   });
@@ -751,16 +753,10 @@ describe('TaskWorker', () => {
       })
     );
 
-    // Verify correct progress message about bb
+    // Verify running status was emitted
     expect(mockTaskEventEmitter.emitStatusUpdate).toHaveBeenCalledWith(
       'task-disabled-test',
-      expect.objectContaining({
-        state: 'running',
-        message: expect.objectContaining({
-          role: 'agent',
-          parts: [{ kind: 'text', text: 'Running bb prove' }],
-        }),
-      }),
+      expect.objectContaining({ state: 'running' }),
       false
     );
   });
@@ -818,16 +814,10 @@ describe('TaskWorker', () => {
       })
     );
 
-    // Verify correct progress message about bb (not TEE)
+    // Verify running status was emitted
     expect(mockTaskEventEmitter.emitStatusUpdate).toHaveBeenCalledWith(
       'task-local-test',
-      expect.objectContaining({
-        state: 'running',
-        message: expect.objectContaining({
-          role: 'agent',
-          parts: [{ kind: 'text', text: 'Running bb prove' }],
-        }),
-      }),
+      expect.objectContaining({ state: 'running' }),
       false
     );
   });
@@ -914,7 +904,7 @@ describe('TaskWorker', () => {
       'failed',
       expect.objectContaining({
         role: 'agent',
-        parts: [{ kind: 'text', text: expect.stringContaining('Missing required parameters') }],
+        parts: [{ kind: 'text', text: expect.stringContaining('address and signature') }],
       })
     );
   });

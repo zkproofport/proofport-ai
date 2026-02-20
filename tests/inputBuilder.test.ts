@@ -32,10 +32,11 @@ import { AUTHORIZED_SIGNERS } from '../src/config/contracts.js';
 
 // ─── Test fixtures ───────────────────────────────────────────────────────
 
-// Deterministic test wallet (DO NOT use in production)
-const TEST_PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
+// Test wallet — loaded from .env.test (via tests/setup.ts)
+const TEST_PRIVATE_KEY = process.env.PROVER_PRIVATE_KEY;
+if (!TEST_PRIVATE_KEY) throw new Error('PROVER_PRIVATE_KEY is required in .env.test');
 const TEST_WALLET = new ethers.Wallet(TEST_PRIVATE_KEY);
-const TEST_ADDRESS = TEST_WALLET.address; // 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+const TEST_ADDRESS = TEST_WALLET.address;
 
 const TEST_SCOPE = 'test-scope-v1';
 const TEST_CIRCUIT_KYC = 'coinbase_attestation';

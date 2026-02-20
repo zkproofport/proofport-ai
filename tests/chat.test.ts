@@ -89,9 +89,12 @@ describe('Chat Integration', () => {
 
   describe('CHAT_TOOLS', () => {
     it('should define all three skills', () => {
-      expect(CHAT_TOOLS).toHaveLength(3);
+      expect(CHAT_TOOLS).toHaveLength(6);
 
       const skillNames = CHAT_TOOLS.map(fn => fn.name);
+      expect(skillNames).toContain('request_signing');
+      expect(skillNames).toContain('check_status');
+      expect(skillNames).toContain('request_payment');
       expect(skillNames).toContain('generate_proof');
       expect(skillNames).toContain('verify_proof');
       expect(skillNames).toContain('get_supported_circuits');
@@ -139,7 +142,7 @@ describe('Chat Integration', () => {
 
     it('should emphasize not making up data', () => {
       expect(SYSTEM_PROMPT).toContain('NEVER fabricate proof data');
-      expect(SYSTEM_PROMPT).toContain('ALWAYS use the function calling tools');
+      expect(SYSTEM_PROMPT).toContain('ALWAYS use function calling tools');
     });
   });
 });

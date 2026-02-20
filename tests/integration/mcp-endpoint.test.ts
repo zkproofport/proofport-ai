@@ -324,12 +324,15 @@ describe('MCP Endpoint E2E', () => {
         },
       });
 
-      // Verify all three tools are present
+      // Verify all six tools are present
       const tools = data.result.tools;
-      expect(tools).toHaveLength(3);
+      expect(tools).toHaveLength(6);
       expect(tools.map((t: any) => t.name).sort()).toEqual([
+        'check_status',
         'generate_proof',
         'get_supported_circuits',
+        'request_payment',
+        'request_signing',
         'verify_proof',
       ]);
     });
@@ -645,8 +648,11 @@ describe('MCP Endpoint E2E', () => {
       expect(body).toHaveProperty('tools');
       expect(Array.isArray(body.tools)).toBe(true);
       expect(body.tools.map((t: any) => t.name).sort()).toEqual([
+        'check_status',
         'generate_proof',
         'get_supported_circuits',
+        'request_payment',
+        'request_signing',
         'verify_proof',
       ]);
     });

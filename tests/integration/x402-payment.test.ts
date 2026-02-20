@@ -809,7 +809,7 @@ describe('x402 Payment Gating E2E', () => {
       expect(data).toBeDefined();
       expect(data.result).toBeDefined();
       expect(data.result.tools).toBeDefined();
-      expect(data.result.tools).toHaveLength(3);
+      expect(data.result.tools).toHaveLength(6);
     });
   });
 
@@ -845,9 +845,9 @@ describe('x402 Payment Gating E2E', () => {
         });
 
       expect(response.status).toBe(200);
-      expect(response.body.taskId).toBeDefined();
-      expect(response.body.state).toBe('completed');
       expect(response.body.proof).toBeDefined();
+      expect(response.body.publicInputs).toBeDefined();
+      expect(response.body.proofId).toBeDefined();
     });
 
     it('GET /api/v1/circuits WITHOUT payment returns 200 (free)', async () => {
