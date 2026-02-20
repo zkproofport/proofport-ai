@@ -238,43 +238,6 @@ describe('A2A taskHandler', () => {
       );
     });
 
-    it('records payment via paymentFacilitator when x402Payment is present', async () => {
-      const completedTask = makeTask({ id: 'task-paid' });
-      const mockRecordPayment = vi.fn().mockResolvedValue(undefined);
-
-      const deps = makeDeps({
-        paymentFacilitator: { recordPayment: mockRecordPayment } as any,
-      });
-
-      vi.mocked(deps.taskStore.createTask).mockResolvedValue(completedTask);
-      vi.mocked(deps.taskEventEmitter.on).mockImplementation((event: string, cb: any) => {
-        setImmediate(() => cb({ type: 'task', data: completedTask }));
-        return deps.taskEventEmitter;
-      });
-
-      // Inject x402Payment middleware
-      const app = express();
-      app.use(express.json());
-      app.use((req: any, _res, next) => {
-        req.x402Payment = { payerAddress: '0xPayer', amount: '100000', network: 'base-sepolia' };
-        next();
-      });
-      app.post('/rpc', createA2aHandler(deps));
-
-      const res = await request(app)
-        .post('/rpc')
-        .send(dataSendBody('generate_proof', { requestId: 'req-paid' }));
-
-      expect(res.status).toBe(200);
-      expect(mockRecordPayment).toHaveBeenCalledOnce();
-      expect(mockRecordPayment).toHaveBeenCalledWith({
-        taskId: 'task-paid',
-        payerAddress: '0xPayer',
-        amount: '100000',
-        network: 'base-sepolia',
-      });
-    });
-
     it('returns error -32602 for invalid skill name in DataPart', async () => {
       const res = await request(makeApp())
         .post('/rpc')

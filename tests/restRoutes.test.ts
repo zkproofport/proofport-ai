@@ -331,54 +331,6 @@ describe('REST Routes — /api/v1', () => {
       );
     });
 
-    it('records payment via paymentFacilitator when x402Payment is on request', async () => {
-      const mockResult = {
-        proof: '0x',
-        publicInputs: '0x',
-        nullifier: '0x',
-        signalHash: '0x',
-        proofId: 'proof-paid',
-        verifyUrl: 'http://localhost:4002/v/proof-paid',
-      };
-      vi.mocked(handleGenerateProof).mockResolvedValue(mockResult);
-
-      const mockRecordPayment = vi.fn().mockResolvedValue(undefined);
-      const appWithFacilitator = express();
-      appWithFacilitator.use(express.json());
-
-      // Inject x402Payment onto request to simulate middleware
-      appWithFacilitator.use((req: any, _res, next) => {
-        req.x402Payment = {
-          payerAddress: '0xPayer',
-          amount: '100000',
-          network: 'base-sepolia',
-        };
-        next();
-      });
-
-      appWithFacilitator.use(
-        '/api/v1',
-        createRestRoutes(
-          makeDeps({
-            paymentFacilitator: { recordPayment: mockRecordPayment } as any,
-          }),
-        ),
-      );
-
-      const res = await request(appWithFacilitator)
-        .post('/api/v1/proofs')
-        .send({ requestId: 'req-done' });
-
-      expect(res.status).toBe(200);
-      expect(mockRecordPayment).toHaveBeenCalledOnce();
-      expect(mockRecordPayment).toHaveBeenCalledWith({
-        taskId: 'proof-paid',
-        payerAddress: '0xPayer',
-        amount: '100000',
-        network: 'base-sepolia',
-      });
-    });
-
     it('returns 400 when handleGenerateProof throws', async () => {
       vi.mocked(handleGenerateProof).mockRejectedValue(
         new Error('Signing not yet completed.'),

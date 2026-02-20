@@ -432,7 +432,9 @@ describe('x402 Payment Gating E2E', () => {
   // ─── A2A Payment Gating ─────────────────────────────────────────────────
 
   describe('A2A Payment Gating', () => {
-    it('message/send generate_proof WITHOUT payment returns 402', async () => {
+    it('message/send generate_proof WITHOUT x402 payment header returns 200 (no middleware gating)', async () => {
+      // x402 middleware removed — generate_proof is accessible without payment header.
+      // Payment is enforced inside skillHandler via request_payment flow (Redis paymentStatus check).
       const response = await request(app)
         .post('/a2a')
         .send({
@@ -459,11 +461,8 @@ describe('x402 Payment Gating E2E', () => {
           },
         });
 
-      expect(response.status).toBe(402);
-      expect(response.body).toMatchObject({
-        error: 'Payment required',
-        x402Version: 2,
-      });
+      // No longer 402 — reaches handler directly (may complete or fail based on skillHandler logic)
+      expect(response.status).toBe(200);
     });
 
     it('message/send generate_proof WITH payment header returns 200 (task completes)', async () => {
@@ -656,7 +655,9 @@ describe('x402 Payment Gating E2E', () => {
   // ─── MCP Payment Gating ─────────────────────────────────────────────────
 
   describe('MCP Payment Gating', () => {
-    it('tools/call generate_proof WITHOUT payment returns 402', async () => {
+    it('tools/call generate_proof WITHOUT x402 payment header returns 200 (no middleware gating)', async () => {
+      // x402 middleware removed — generate_proof is accessible without payment header.
+      // Payment is enforced inside skillHandler via request_payment flow.
       const response = await request(app)
         .post('/mcp')
         .set('Accept', 'application/json, text/event-stream')
@@ -675,11 +676,8 @@ describe('x402 Payment Gating E2E', () => {
           },
         });
 
-      expect(response.status).toBe(402);
-      expect(response.body).toMatchObject({
-        error: 'Payment required',
-        x402Version: 2,
-      });
+      // No longer 402 — reaches MCP handler directly
+      expect(response.status).toBe(200);
     });
 
     it('tools/call generate_proof WITH payment header returns 200 (proof generated)', async () => {
@@ -816,7 +814,9 @@ describe('x402 Payment Gating E2E', () => {
   // ─── REST Payment Gating ────────────────────────────────────────────────
 
   describe('REST Payment Gating', () => {
-    it('POST /api/v1/proofs WITHOUT payment returns 402', async () => {
+    it('POST /api/v1/proofs WITHOUT x402 payment header returns 200 (no middleware gating)', async () => {
+      // x402 middleware removed — POST /api/v1/proofs is accessible without payment header.
+      // Payment is enforced inside skillHandler via request_payment flow.
       const response = await request(app)
         .post('/api/v1/proofs')
         .send({
@@ -826,11 +826,8 @@ describe('x402 Payment Gating E2E', () => {
           signature: '0x' + 'ee'.repeat(65),
         });
 
-      expect(response.status).toBe(402);
-      expect(response.body).toMatchObject({
-        error: 'Payment required',
-        x402Version: 2,
-      });
+      // No longer 402 — reaches REST handler directly
+      expect(response.status).toBe(200);
     });
 
     it('POST /api/v1/proofs WITH payment header returns 200', async () => {

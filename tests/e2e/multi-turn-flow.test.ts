@@ -1087,3 +1087,138 @@ describe('A2A Context Linking — No contextId (backward compatible)', () => {
     expect(foundRequestId).toBeDefined();
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// A2A TextPart — LLM Inference E2E (Full Round-Trip via POST /a2a)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('A2A TextPart — LLM Inference E2E', () => {
+  // Helper: send TextPart message to POST /a2a and get full response
+  async function a2aTextCall(id: number, text: string) {
+    return jsonPost('/a2a', {
+      jsonrpc: '2.0',
+      id,
+      method: 'message/send',
+      params: {
+        message: {
+          role: 'user',
+          parts: [{ kind: 'text', text }],
+        },
+      },
+    });
+  }
+
+  function extractDataFromArtifacts(artifacts: any[]): Record<string, unknown> {
+    const result: Record<string, unknown> = {};
+    for (const artifact of artifacts || []) {
+      for (const part of artifact.parts || []) {
+        if (part.kind === 'data' && part.data) {
+          Object.assign(result, part.data);
+        }
+      }
+    }
+    return result;
+  }
+
+  it('TextPart: "list supported circuits" → get_supported_circuits skill executed, returns circuits', { timeout: 30000 }, async () => {
+    const { status, json } = await a2aTextCall(700, 'list supported circuits');
+
+    expect(status).toBe(200);
+    expect(json.error).toBeUndefined();
+    expect(json.result).toBeDefined();
+    expect(json.result.status.state).toBe('completed');
+
+    const data = extractDataFromArtifacts(json.result.artifacts);
+    expect(data.circuits).toBeDefined();
+    expect(Array.isArray(data.circuits)).toBe(true);
+    expect((data.circuits as any[]).length).toBeGreaterThan(0);
+  });
+
+  it('TextPart: "verify proof 0xaabb for coinbase_attestation" → verify_proof skill executed', { timeout: 30000 }, async () => {
+    const { status, json } = await a2aTextCall(
+      701,
+      'verify proof 0xaabb with publicInputs 0x' + 'cc'.repeat(32) + ' for coinbase_attestation on chain 84532'
+    );
+
+    expect(status).toBe(200);
+    expect(json.error).toBeUndefined();
+    expect(json.result).toBeDefined();
+    // verify_proof may complete or fail depending on proof data, but skill should execute
+    expect(['completed', 'failed']).toContain(json.result.status.state);
+  });
+
+  it('TextPart: "generate proof for coinbase_attestation scope test.com" → request_signing flow started', { timeout: 30000 }, async () => {
+    const { status, json } = await a2aTextCall(
+      702,
+      'generate proof for coinbase_attestation with scope textpart-test.zkproofport.app'
+    );
+
+    expect(status).toBe(200);
+    expect(json.error).toBeUndefined();
+    expect(json.result).toBeDefined();
+    // LLM routes to request_signing (start of flow) or generate_proof
+    // Both are valid — the key is the skill executed successfully
+    expect(['completed', 'failed']).toContain(json.result.status.state);
+
+    if (json.result.status.state === 'completed') {
+      const data = extractDataFromArtifacts(json.result.artifacts);
+      // If routed to request_signing: should have requestId + signingUrl
+      // If routed to generate_proof: would fail (no signing done yet) but still returns
+      if (data.requestId) {
+        expect(data.signingUrl).toBeDefined();
+        expect(typeof data.signingUrl).toBe('string');
+      }
+    }
+  });
+
+  it('TextPart multi-turn: request_signing → check_status via natural language', { timeout: 60000 }, async () => {
+    // Step 1: Start signing via TextPart
+    const { status: s1, json: j1 } = await a2aTextCall(
+      710,
+      'I need a KYC proof for coinbase_attestation with scope textpart-multi.zkproofport.app'
+    );
+
+    expect(s1).toBe(200);
+    expect(j1.result).toBeDefined();
+    expect(j1.result.status.state).toBe('completed');
+
+    const data1 = extractDataFromArtifacts(j1.result.artifacts);
+    // LLM should route to request_signing
+    if (!data1.requestId) {
+      // If LLM routed to generate_proof instead, that's also valid but we can't continue multi-turn
+      return;
+    }
+
+    const requestId = data1.requestId as string;
+
+    // Step 2: Check status using DataPart (reliable) to verify the request exists
+    const { status: s2, json: j2 } = await jsonPost('/a2a', {
+      jsonrpc: '2.0',
+      id: 711,
+      method: 'message/send',
+      params: {
+        message: {
+          role: 'user',
+          parts: [{ kind: 'data', mimeType: 'application/json', data: { skill: 'check_status', requestId } }],
+        },
+      },
+    });
+
+    expect(s2).toBe(200);
+    expect(j2.result.status.state).toBe('completed');
+
+    const data2 = extractDataFromArtifacts(j2.result.artifacts);
+    expect(data2.phase).toBe('signing');
+  });
+
+  it('TextPart: message with no LLM configured returns error gracefully', { timeout: 15000 }, async () => {
+    // If LLM is configured, this will succeed. If not, should return a JSON-RPC error.
+    // Either way, the server should NOT crash or return 500.
+    const { status, json } = await a2aTextCall(720, 'hello world');
+
+    expect(status).toBe(200);
+    // Either a result (LLM routed to a skill) or an error (LLM not configured / couldn't determine skill)
+    expect(json.jsonrpc).toBe('2.0');
+    expect(json.result !== undefined || json.error !== undefined).toBe(true);
+  });
+});

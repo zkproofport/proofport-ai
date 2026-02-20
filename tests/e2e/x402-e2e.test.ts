@@ -144,7 +144,8 @@ describe('Payment Mode Verification', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('A2A Payment Gating', () => {
-  it('message/send generate_proof WITHOUT payment → 402', async () => {
+  it('message/send generate_proof WITHOUT payment → not 402 (no x402 middleware gating)', async () => {
+    // x402 middleware removed — payment enforced inside skillHandler via request_payment flow
     const { status, json } = await jsonPost('/a2a', {
       jsonrpc: '2.0',
       id: 1,
@@ -167,7 +168,8 @@ describe('A2A Payment Gating', () => {
       },
     });
 
-    expect(status).toBe(402);
+    // No longer 402 — reaches A2A handler directly
+    expect(status).not.toBe(402);
   });
 
   it('message/send get_supported_circuits WITHOUT payment → 200 (free)', async () => {
@@ -256,7 +258,8 @@ describe('A2A Payment Gating', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('MCP Payment Gating', () => {
-  it('tools/call generate_proof WITHOUT payment → 402', async () => {
+  it('tools/call generate_proof WITHOUT payment → 200 (no x402 middleware gating)', async () => {
+    // x402 middleware removed — payment enforced inside skillHandler via request_payment flow
     const res = await fetch(`${BASE_URL}/mcp`, {
       method: 'POST',
       headers: {
@@ -277,7 +280,7 @@ describe('MCP Payment Gating', () => {
       }),
     });
 
-    expect(res.status).toBe(402);
+    expect(res.status).toBe(200);
   });
 
   it('tools/call get_supported_circuits WITHOUT payment → 200 (free)', async () => {
@@ -375,7 +378,8 @@ describe('MCP Payment Gating', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('REST Payment Gating', () => {
-  it('POST /api/v1/proofs WITHOUT payment → 402', async () => {
+  it('POST /api/v1/proofs WITHOUT payment → not 402 (no x402 middleware gating)', async () => {
+    // x402 middleware removed — payment enforced inside skillHandler via request_payment flow
     const { status } = await jsonPost('/api/v1/proofs', {
       circuitId: 'coinbase_attestation',
       scope: 'test.com',
@@ -383,7 +387,8 @@ describe('REST Payment Gating', () => {
       signature: '0x' + 'ee'.repeat(65),
     });
 
-    expect(status).toBe(402);
+    // No longer 402 — reaches handler directly (may return 400 from skillHandler payment check)
+    expect(status).not.toBe(402);
   });
 
   it('GET /api/v1/circuits WITHOUT payment → 200 (free)', async () => {
@@ -440,8 +445,9 @@ describe('Always-Free Endpoints (with payment enabled)', () => {
 // 402 response header format verification
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('402 Payment Required Header Format', () => {
-  it('POST /api/v1/proofs → 402 with correct PAYMENT-REQUIRED header format', async () => {
+describe('No x402 Middleware Gating (payment via request_payment flow)', () => {
+  it('POST /api/v1/proofs → not 402 (no x402 middleware)', async () => {
+    // x402 middleware removed — payment enforced inside skillHandler via request_payment flow
     const res = await fetch(`${BASE_URL}/api/v1/proofs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -453,21 +459,12 @@ describe('402 Payment Required Header Format', () => {
       }),
     });
 
-    expect(res.status).toBe(402);
-
-    const paymentHeader = res.headers.get('payment-required') ?? res.headers.get('PAYMENT-REQUIRED');
-    expect(paymentHeader).toBeDefined();
-
-    // Decode base64 header
-    const decoded = JSON.parse(Buffer.from(paymentHeader!, 'base64').toString('utf8'));
-    expect(decoded.x402Version).toBe(2);
-    expect(decoded.accepts).toBeDefined();
-    expect(Array.isArray(decoded.accepts)).toBe(true);
-    expect(decoded.accepts[0].network).toBe('eip155:84532');
-    expect(decoded.accepts[0].asset).toBe('0x036CbD53842c5426634e7929541eC2318f3dCF7e');
+    // No longer 402 — reaches handler directly
+    expect(res.status).not.toBe(402);
   });
 
-  it('A2A generate_proof → 402 with correct PAYMENT-REQUIRED header format', async () => {
+  it('A2A generate_proof → not 402 (no x402 middleware)', async () => {
+    // x402 middleware removed — payment enforced inside skillHandler via request_payment flow
     const res = await fetch(`${BASE_URL}/a2a`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -494,15 +491,8 @@ describe('402 Payment Required Header Format', () => {
       }),
     });
 
-    expect(res.status).toBe(402);
-
-    const paymentHeader = res.headers.get('payment-required') ?? res.headers.get('PAYMENT-REQUIRED');
-    expect(paymentHeader).toBeDefined();
-
-    const decoded = JSON.parse(Buffer.from(paymentHeader!, 'base64').toString('utf8'));
-    expect(decoded.x402Version).toBe(2);
-    expect(decoded.accepts).toBeDefined();
-    expect(decoded.accepts[0].network).toBe('eip155:84532');
+    // No longer 402 — reaches A2A handler directly
+    expect(res.status).not.toBe(402);
   });
 });
 
