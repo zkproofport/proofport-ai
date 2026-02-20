@@ -423,3 +423,15 @@ bot.on('polling_error', (error) => {
 });
 
 console.log('Bot is listening for messages...');
+
+// ─── Render Web Service Keep-Alive ───────────────────────────────────
+// Render requires an open HTTP port for Web Services.
+// This lightweight server satisfies that requirement.
+import http from 'http';
+const server = http.createServer((_req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('Bot is running!');
+});
+server.listen(process.env.PORT || 3000, () => {
+  console.log('Health server listening on port', process.env.PORT || 3000);
+});
