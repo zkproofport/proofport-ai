@@ -288,6 +288,26 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
     next();
   });
 
+  // CORS for payment routes (sign-page on port 3200 → AI server on port 4002)
+  app.use('/api/payment', (req, res, next) => {
+    const origin = req.headers.origin;
+    const allowedOrigins = [
+      'http://127.0.0.1:3200',
+      'http://localhost:3200',
+      config.signPageUrl,
+    ].filter(Boolean);
+    if (origin && allowedOrigins.includes(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    }
+    if (req.method === 'OPTIONS') {
+      res.sendStatus(204);
+      return;
+    }
+    next();
+  });
+
   // Signing request details (sign-page fetches request info from here)
   app.get('/api/signing/:requestId', async (req, res) => {
     const { requestId } = req.params;
@@ -709,192 +729,11 @@ el.innerHTML=
     }
   });
 
-  // Payment page for USDC authorization signing (EIP-3009 via x402 facilitator)
-  app.get('/pay/:requestId', (req, res) => {
-    const { requestId } = req.params;
-    const infoUrl = `${config.a2aBaseUrl}/api/payment/${requestId}`;
-    const signUrl = `${config.a2aBaseUrl}/api/payment/sign/${requestId}`;
-    res.setHeader('Content-Type', 'text/html');
-    res.send(`<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>proveragent.eth — Payment</title>
-<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.1/dist/ethers.umd.min.js"><\/script>
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:#0a0a0a;color:#f0f0f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1rem}
-.card{background:#1a1a1a;border:1px solid #333;border-radius:12px;padding:2rem;max-width:480px;width:100%}
-h1{font-size:1.25rem;font-weight:600;margin-bottom:.5rem;text-align:center}
-.subtitle{color:#999;font-size:.875rem;text-align:center;margin-bottom:1.5rem}
-.field{margin-bottom:.75rem}
-.label{color:#999;font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.25rem}
-.value{font-family:'Courier New',monospace;font-size:.8rem;color:#93c5fd;word-break:break-all}
-.price{font-size:2rem;font-weight:700;text-align:center;color:#4ade80;margin:1rem 0}
-.no-gas{color:#93c5fd;font-size:.8rem;text-align:center;margin-bottom:.5rem}
-.btn{display:block;width:100%;padding:.875rem;border:none;border-radius:8px;font-size:1rem;font-weight:600;cursor:pointer;margin-top:1rem;transition:opacity .2s}
-.btn-pay{background:#2563eb;color:#fff}
-.btn-pay:hover{opacity:.9}
-.btn-pay:disabled{opacity:.5;cursor:not-allowed}
-.status{padding:1rem;border-radius:8px;margin-top:1rem;font-size:.875rem;text-align:center}
-.loading{background:#1a2a3a;border:1px solid #2a4a5a;color:#93c5fd}
-.success{background:#1a3a2a;border:1px solid #2a5a3a;color:#4ade80}
-.error{background:#3a1a1a;border:1px solid #5a2a2a;color:#f87171;word-break:break-word;overflow-wrap:break-word}
-.done{background:#1a3a2a;border:1px solid #2a5a3a;color:#4ade80}
-.spinner{display:inline-block;width:16px;height:16px;border:2px solid #93c5fd;border-top-color:transparent;border-radius:50%;animation:spin 1s linear infinite;vertical-align:middle;margin-right:6px}
-.tx-link{color:#93c5fd;text-decoration:underline;font-size:.8rem}
-@keyframes spin{to{transform:rotate(360deg)}}
-</style>
-</head>
-<body>
-<div class="card">
-<h1>proveragent.eth</h1>
-<p class="subtitle">ZK Proof Generation Payment</p>
-<div id="content"><div class="status loading"><span class="spinner"></span>Loading...</div></div>
-</div>
-<script>
-const INFO_URL='${infoUrl}';
-const SIGN_URL='${signUrl}';
-
-let payInfo=null;
-
-async function init(){
-  const el=document.getElementById('content');
-  try{
-    const r=await fetch(INFO_URL);
-    if(!r.ok){const d=await r.json();el.innerHTML='<div class="status error">'+d.error+'</div>';return}
-    payInfo=await r.json();
-
-    if(payInfo.paymentStatus==='completed'){
-      const explorerBase=payInfo.chainId===84532?'https://sepolia.basescan.org':'https://basescan.org';
-      const txLink=payInfo.paymentTxHash?'<p style="text-align:center;margin-top:.75rem"><a class="tx-link" href="'+explorerBase+'/tx/'+payInfo.paymentTxHash+'" target="_blank">View transaction</a></p>':'';
-      el.innerHTML='<div class="status done">\\u2713 Payment already completed</div>'+txLink+'<p style="text-align:center;color:#999;margin-top:1rem;font-size:.875rem">Return to the chat and tell the agent to proceed.</p>';
-      return;
-    }
-
-    el.innerHTML=
-      '<div class="field"><div class="label">Circuit</div><div class="value">'+payInfo.circuitId+'</div></div>'+
-      '<div class="field"><div class="label">Network</div><div class="value">'+payInfo.chainName+'</div></div>'+
-      '<div class="price">'+payInfo.priceDisplay+' USDC</div>'+
-      '<p class="no-gas">No gas fees required. You only sign an authorization.</p>'+
-      '<button class="btn btn-pay" id="payBtn" onclick="handlePay()">Connect Wallet & Sign</button>'+
-      '<div id="payStatus"></div>';
-  }catch(e){el.innerHTML='<div class="status error">Failed to load: '+e.message+'</div>'}
-}
-
-async function handlePay(){
-  const btn=document.getElementById('payBtn');
-  const st=document.getElementById('payStatus');
-  btn.disabled=true;
-  btn.textContent='Connecting...';
-
-  try{
-    if(!window.ethereum){
-      st.innerHTML='<div class="status error">No wallet detected. Please open this page in a browser with MetaMask or a Web3 wallet.</div>';
-      btn.disabled=false;btn.textContent='Connect Wallet & Sign';
-      return;
-    }
-
-    const provider=new ethers.BrowserProvider(window.ethereum);
-    const signer=await provider.getSigner();
-    const network=await provider.getNetwork();
-
-    // Switch chain if needed
-    const targetChainHex='0x'+payInfo.chainId.toString(16);
-    if(Number(network.chainId)!==payInfo.chainId){
-      btn.textContent='Switching network...';
-      try{
-        await window.ethereum.request({method:'wallet_switchEthereumChain',params:[{chainId:targetChainHex}]});
-      }catch(switchErr){
-        if(switchErr.code===4902){
-          await window.ethereum.request({method:'wallet_addEthereumChain',params:[{
-            chainId:targetChainHex,
-            chainName:payInfo.chainName,
-            nativeCurrency:{name:'ETH',symbol:'ETH',decimals:18},
-            rpcUrls:[payInfo.chainId===84532?'https://sepolia.base.org':'https://mainnet.base.org'],
-            blockExplorerUrls:[payInfo.chainId===84532?'https://sepolia.basescan.org':'https://basescan.org']
-          }]});
-        }else throw switchErr;
-      }
-    }
-
-    // Build EIP-712 typed data for TransferWithAuthorization (EIP-3009)
-    btn.textContent='Preparing authorization...';
-    const addr=await signer.getAddress();
-    const now=Math.floor(Date.now()/1000);
-    const nonce=ethers.hexlify(ethers.randomBytes(32));
-
-    const domain={
-      name:payInfo.usdcName,
-      version:payInfo.usdcVersion,
-      chainId:payInfo.chainId,
-      verifyingContract:payInfo.usdcAddress
-    };
-
-    const types={
-      TransferWithAuthorization:[
-        {name:'from',type:'address'},
-        {name:'to',type:'address'},
-        {name:'value',type:'uint256'},
-        {name:'validAfter',type:'uint256'},
-        {name:'validBefore',type:'uint256'},
-        {name:'nonce',type:'bytes32'}
-      ]
-    };
-
-    const authorization={
-      from:addr,
-      to:payInfo.payTo,
-      value:payInfo.amount,
-      validAfter:String(now-600),
-      validBefore:String(now+300),
-      nonce:nonce
-    };
-
-    btn.textContent='Sign in wallet...';
-    st.innerHTML='<div class="status loading"><span class="spinner"></span>Sign the authorization in your wallet (no gas)</div>';
-
-    const signature=await signer.signTypedData(domain,types,authorization);
-
-    // Send signed authorization to backend for facilitator settlement
-    btn.textContent='Processing payment...';
-    st.innerHTML='<div class="status loading"><span class="spinner"></span>Facilitator is processing payment...</div>';
-
-    const resp=await fetch(SIGN_URL,{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({authorization,signature})
-    });
-
-    const result=await resp.json();
-
-    if(resp.ok&&result.success){
-      const explorerBase=payInfo.chainId===84532?'https://sepolia.basescan.org':'https://basescan.org';
-      const txLink=result.txHash?'<p style="text-align:center;margin-top:.75rem"><a class="tx-link" href="'+explorerBase+'/tx/'+result.txHash+'" target="_blank">View transaction</a></p>':'';
-      btn.style.display='none';
-      st.innerHTML='<div class="status success">\\u2713 Payment confirmed!</div>'+txLink+'<p style="text-align:center;color:#999;margin-top:1rem;font-size:.875rem">Return to the chat and tell the agent to proceed.</p>';
-    }else{
-      throw new Error(result.error||'Payment settlement failed');
-    }
-  }catch(e){
-    console.error(e);
-    let msg=e.message||'Unknown error';
-    if(msg.includes('user rejected'))msg='Signature rejected by user.';
-    else if(msg.includes('denied'))msg='Signature denied by wallet.';
-    st.innerHTML='<div class="status error">'+msg+'</div>';
-    btn.disabled=false;btn.textContent='Connect Wallet & Sign';
-  }
-}
-
-init();
-<\/script>
-</body>
-</html>`);
-  });
+  // Payment page is now served by the sign-page Next.js app (proxied via /pay below)
 
   // Proxy sign-page requests to internal Next.js server
   app.use('/s', createSignPageProxy());
+  app.use('/pay', createSignPageProxy());
   app.use('/_next', createSignPageProxy());
 
   return { app, paymentFacilitator, teeProvider, taskWorker, settlementWorker, cleanupWorker };

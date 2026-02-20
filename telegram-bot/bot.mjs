@@ -188,6 +188,46 @@ function extractProofportBlock(content) {
 }
 
 /**
+ * Extract signing/payment URLs from text and return cleaned text + button descriptors.
+ * Matches /s/ (signing) and /pay/ (payment) URLs on zkproofport.app or localhost.
+ * Removes the lines containing those URLs from the display text.
+ * Returns { cleanedText, buttons } where buttons is [{ text, url }].
+ */
+function extractAndReplaceUrls(text) {
+  const urlRegex = /https?:\/\/[^\s)]+\/(?:s|pay)\/[^\s),.:!?'"]+/g;
+  const buttons = [];
+  const seenUrls = new Set();
+
+  const matches = [...text.matchAll(urlRegex)];
+  for (const match of matches) {
+    const url = match[0];
+    if (seenUrls.has(url)) continue;
+    seenUrls.add(url);
+    // Telegram Bot API requires HTTPS for inline keyboard buttons — skip http/localhost URLs
+    if (!url.startsWith('https://')) continue;
+    const isPayment = /\/pay\//.test(url);
+    buttons.push({
+      text: isPayment ? 'Pay with USDC' : 'Connect Wallet & Sign',
+      url,
+    });
+  }
+
+  // Remove the extracted URLs from the text (keeping surrounding text intact)
+  let cleanedText = text;
+  for (const { url } of buttons) {
+    const escaped = url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    cleanedText = cleanedText.replace(new RegExp(escaped, 'g'), '');
+  }
+  // Clean up lines that became empty after URL removal
+  cleanedText = cleanedText.replace(/^\s*$/gm, '');
+
+  // Collapse any newly created excessive blank lines
+  cleanedText = cleanedText.replace(/\n{3,}/g, '\n\n').trim();
+
+  return { cleanedText, buttons };
+}
+
+/**
  * Clean display text for Telegram:
  * - Strips generic ``` code block fences
  * - Converts [text](url) markdown links to plain: "text: url" or just url
@@ -344,7 +384,14 @@ bot.on('message', async (msg) => {
     // onStep callback: send each step as a SEPARATE Telegram message
     const onStep = async (stepMessage) => {
       try {
-        await bot.sendMessage(chatId, stepMessage, { disable_web_page_preview: true });
+        const { cleanedText: stepCleaned, buttons: stepButtons } = extractAndReplaceUrls(stepMessage);
+        const stepOptions = { disable_web_page_preview: true };
+        if (stepButtons.length > 0) {
+          stepOptions.reply_markup = {
+            inline_keyboard: [stepButtons.map(b => ({ text: b.text, url: b.url }))],
+          };
+        }
+        await bot.sendMessage(chatId, stepCleaned || stepMessage, stepOptions);
       } catch (e) {
         console.error(`[${chatId}] Step send error:`, e.message);
       }
@@ -378,10 +425,14 @@ bot.on('message', async (msg) => {
     // Send final response as ONE message (accumulated content)
     const fullContent = result.content || '';
     const { text: displayText, data: proofportData } = extractProofportBlock(fullContent);
-    const cleanedText = cleanDisplayText(displayText);
+    const baseCleanedText = cleanDisplayText(displayText);
+    const { cleanedText, buttons } = extractAndReplaceUrls(baseCleanedText);
 
     if (cleanedText) {
-      await sendLongMessage(chatId, cleanedText);
+      const msgOptions = buttons.length > 0
+        ? { reply_markup: { inline_keyboard: [buttons.map(b => ({ text: b.text, url: b.url }))] } }
+        : {};
+      await sendLongMessage(chatId, cleanedText, msgOptions);
     }
 
     // Send QR images from proofport DSL data

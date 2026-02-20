@@ -2,7 +2,7 @@
 
 import { useParams } from 'next/navigation';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { useAccount, useSignMessage } from 'wagmi';
+import { useAccount, useSignMessage, useDisconnect } from 'wagmi';
 import { useState, useEffect, useCallback } from 'react';
 import { toBytes } from 'viem';
 
@@ -16,6 +16,7 @@ export default function SigningPage() {
   const requestId = params.requestId as string;
   const { address, isConnected } = useAccount();
   const { signMessageAsync } = useSignMessage();
+  const { disconnect } = useDisconnect();
 
   const [signalHash, setSignalHash] = useState<string | null>(null);
   const [status, setStatus] = useState<'loading' | 'idle' | 'preparing' | 'ready' | 'signing' | 'submitting' | 'success' | 'error' | 'expired'>('loading');
@@ -162,8 +163,17 @@ export default function SigningPage() {
         ) : (
           <>
             <div className="info">
-              <strong>Connected:</strong>
-              <br />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <strong>Connected:</strong>
+                {status !== 'success' && (
+                  <button
+                    onClick={() => { disconnect(); setStatus('idle'); setSignalHash(null); setErrorMessage(''); }}
+                    style={{ background: 'none', border: 'none', color: '#999', fontSize: '0.75rem', cursor: 'pointer', textDecoration: 'underline' }}
+                  >
+                    Change Wallet
+                  </button>
+                )}
+              </div>
               <span className="address">{address}</span>
             </div>
 
