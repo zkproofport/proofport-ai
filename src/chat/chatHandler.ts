@@ -1,11 +1,19 @@
-import { randomUUID } from 'crypto';
 import type { RedisClient } from '../redis/client.js';
 import type { TaskStore } from '../a2a/taskStore.js';
 import type { TaskEventEmitter } from '../a2a/streaming.js';
 import type { LLMProvider } from './llmProvider.js';
-import { getSupportedCircuits } from '../mcp/tools/getCircuits.js';
-import type { SigningRequestRecord } from '../signing/types.js';
-import { storeProofResult } from '../redis/proofResultStore.js';
+import type { RateLimiter } from '../redis/rateLimiter.js';
+import type { ProofCache } from '../redis/proofCache.js';
+import type { TeeProvider } from '../tee/types.js';
+import {
+  handleRequestSigning,
+  handleCheckStatus,
+  handleRequestPayment,
+  handleGenerateProof,
+  handleVerifyProof,
+  handleGetSupportedCircuits,
+  type SkillDeps,
+} from '../skills/skillHandler.js';
 
 export class PaymentRequiredError extends Error {
   constructor() {
@@ -21,74 +29,41 @@ export interface ChatHandlerDeps {
   a2aBaseUrl: string;
   llmProvider: LLMProvider;
   paymentRequiredHeader?: string | null;
+  // Fields for skillHandler:
+  signPageUrl: string;
+  signingTtlSeconds: number;
+  paymentMode: 'disabled' | 'testnet' | 'mainnet';
+  paymentProofPrice: string;
+  easGraphqlEndpoint: string;
+  rpcUrls: string[];
+  bbPath: string;
+  nargoPath: string;
+  circuitsDir: string;
+  chainRpcUrl: string;
+  rateLimiter?: RateLimiter;
+  proofCache?: ProofCache;
+  teeProvider?: TeeProvider;
+  teeMode: string;
 }
 
-export async function createAndPollTask(
-  skillName: string,
-  skillParams: Record<string, unknown>,
-  deps: ChatHandlerDeps
-): Promise<unknown> {
-  const userMessage = {
-    role: 'user' as const,
-    parts: [
-      {
-        kind: 'data' as const,
-        mimeType: 'application/json',
-        data: { skill: skillName, params: skillParams },
-      },
-    ],
+function buildSkillDeps(deps: ChatHandlerDeps): SkillDeps {
+  return {
+    redis: deps.redis,
+    signPageUrl: deps.signPageUrl,
+    signingTtlSeconds: deps.signingTtlSeconds,
+    paymentMode: deps.paymentMode,
+    paymentProofPrice: deps.paymentProofPrice,
+    easGraphqlEndpoint: deps.easGraphqlEndpoint,
+    rpcUrls: deps.rpcUrls,
+    bbPath: deps.bbPath,
+    nargoPath: deps.nargoPath,
+    circuitsDir: deps.circuitsDir,
+    chainRpcUrl: deps.chainRpcUrl,
+    rateLimiter: deps.rateLimiter,
+    proofCache: deps.proofCache,
+    teeProvider: deps.teeProvider,
+    teeMode: deps.teeMode,
   };
-
-  const task = await deps.taskStore.createTask(skillName, skillParams, userMessage);
-  deps.taskEventEmitter.emit('task.created', task);
-
-  const maxWaitMs = 5 * 60 * 1000;
-  const pollIntervalMs = 500;
-  const startTime = Date.now();
-
-  while (Date.now() - startTime < maxWaitMs) {
-    const updatedTask = await deps.taskStore.getTask(task.id);
-
-    if (!updatedTask) {
-      throw new Error('Task disappeared during execution');
-    }
-
-    if (updatedTask.status.state === 'completed') {
-      if (updatedTask.artifacts && updatedTask.artifacts.length > 0) {
-        const artifact = updatedTask.artifacts[0];
-        if (artifact.parts && artifact.parts.length > 0) {
-          const dataPart = artifact.parts.find(p => p.kind === 'data');
-          if (dataPart && 'data' in dataPart) {
-            return dataPart.data;
-          }
-        }
-      }
-
-      if (updatedTask.status.message) {
-        return updatedTask.status.message;
-      }
-
-      return { status: 'completed' };
-    }
-
-    if (updatedTask.status.state === 'failed') {
-      const errorMsg = updatedTask.status.message?.parts?.[0];
-      const errorText = errorMsg && 'text' in errorMsg ? errorMsg.text : 'Unknown error';
-      throw new Error(`Task failed: ${errorText}`);
-    }
-
-    if (updatedTask.status.state === 'rejected') {
-      throw new Error('Task was rejected');
-    }
-
-    if (updatedTask.status.state === 'canceled') {
-      throw new Error('Task was canceled');
-    }
-
-    await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
-  }
-
-  throw new Error('Task execution timeout');
 }
 
 export async function executeSkill(
@@ -97,163 +72,61 @@ export async function executeSkill(
   deps: ChatHandlerDeps,
   paymentVerified = false,
 ): Promise<unknown> {
+  const skillDeps = buildSkillDeps(deps);
+
   if (skillName === 'get_supported_circuits') {
-    return getSupportedCircuits();
+    return handleGetSupportedCircuits({ chainId: args.chainId as string | undefined });
+  }
+
+  if (skillName === 'request_signing') {
+    return handleRequestSigning({
+      circuitId: args.circuitId as string,
+      scope: args.scope as string,
+      countryList: args.countryList as string[] | undefined,
+      isIncluded: args.isIncluded as boolean | undefined,
+    }, skillDeps);
+  }
+
+  if (skillName === 'check_status') {
+    return handleCheckStatus({
+      requestId: args.requestId as string,
+    }, skillDeps);
+  }
+
+  if (skillName === 'request_payment') {
+    return handleRequestPayment({
+      requestId: args.requestId as string,
+    }, skillDeps);
   }
 
   if (skillName === 'generate_proof') {
-    const { circuitId, scope, address, signature, requestId, countryList, isIncluded } = args;
+    const result = await handleGenerateProof({
+      requestId: args.requestId as string | undefined,
+      address: args.address as string | undefined,
+      signature: args.signature as string | undefined,
+      scope: args.scope as string | undefined,
+      circuitId: args.circuitId as string | undefined,
+      countryList: args.countryList as string[] | undefined,
+      isIncluded: args.isIncluded as boolean | undefined,
+    }, skillDeps);
 
-    if (!address && !signature && !requestId) {
-      const signingRequestId = randomUUID();
-      const now = new Date();
-      const expiresAt = new Date(now.getTime() + 300000);
-
-      const signingRecord: SigningRequestRecord = {
-        id: signingRequestId,
-        scope: scope as string,
-        circuitId: circuitId as string,
-        status: 'pending',
-        createdAt: now.toISOString(),
-        expiresAt: expiresAt.toISOString(),
-        countryList: countryList as string[] | undefined,
-        isIncluded: isIncluded as boolean | undefined,
-      };
-
-      const signingKey = `signing:${signingRequestId}`;
-      await deps.redis.set(signingKey, JSON.stringify(signingRecord), 'EX', 300);
-
-      const signingUrl = `${deps.a2aBaseUrl}/s/${signingRequestId}`;
-
-      return {
-        state: 'input-required',
-        signingUrl,
-        requestId: signingRequestId,
-        message: 'Please open the signing URL to connect your wallet and sign.',
-      };
+    // Add payment receipt URL if we have a tx hash
+    if (result.paymentTxHash) {
+      (result as unknown as Record<string, unknown>).paymentReceiptUrl =
+        `https://sepolia.basescan.org/tx/${result.paymentTxHash}`;
     }
 
-    if (requestId) {
-      const key = `signing:${requestId}`;
-      const data = await deps.redis.get(key);
-      if (!data) throw new Error('Invalid or expired requestId');
-
-      const record: SigningRequestRecord = JSON.parse(data);
-      if (record.status !== 'completed') {
-        return { state: 'waiting', message: `Signing is ${record.status}. Please complete signing first.` };
-      }
-      if (!record.signature || !record.address) {
-        throw new Error('Signing request missing signature or address');
-      }
-
-      // Use scope/circuitId from signing record if not provided in args
-      const resolvedScope = scope || record.scope;
-      const resolvedCircuitId = circuitId || record.circuitId;
-
-      const skillParams: Record<string, unknown> = {
-        address: record.address,
-        signature: record.signature,
-        scope: resolvedScope,
-        circuitId: resolvedCircuitId,
-      };
-      if (resolvedCircuitId === 'coinbase_country_attestation') {
-        skillParams.countryList = countryList || record.countryList;
-        skillParams.isIncluded = isIncluded ?? record.isIncluded;
-      }
-
-      // Payment check: if payment is required and not yet completed, return payment page URL
-      if (!paymentVerified && deps.paymentRequiredHeader) {
-        if (record.paymentStatus === 'completed') {
-          // Payment already done — proceed
-        } else {
-          // Mark as payment-pending and return payment URL
-          if (!record.paymentStatus) {
-            record.paymentStatus = 'pending';
-            const ttl = await deps.redis.ttl(key);
-            await deps.redis.set(key, JSON.stringify(record), 'EX', ttl > 0 ? ttl : 300);
-          }
-          const paymentUrl = `${deps.a2aBaseUrl}/pay/${requestId}`;
-          return {
-            state: 'payment-required',
-            paymentUrl,
-            requestId,
-            amount: '$0.10 USDC',
-            network: 'Base Sepolia',
-            message: 'Please complete USDC payment to generate the proof.',
-          };
-        }
-      }
-
-      // Save payment transaction hash from signing record
-      const paymentTxHash = record.paymentTxHash;
-
-      const result = await createAndPollTask(skillName, skillParams, deps);
-      const enriched = await enrichProofResult(result, resolvedCircuitId as string, deps);
-
-      // Add payment receipt if available
-      if (paymentTxHash && typeof enriched === 'object' && enriched !== null) {
-        (enriched as Record<string, unknown>).paymentTxHash = paymentTxHash;
-        (enriched as Record<string, unknown>).paymentReceiptUrl = `https://sepolia.basescan.org/tx/${paymentTxHash}`;
-      }
-
-      return enriched;
-    }
-
-    const skillParams: Record<string, unknown> = { address, signature, scope, circuitId };
-    if (circuitId === 'coinbase_country_attestation') {
-      skillParams.countryList = countryList;
-      skillParams.isIncluded = isIncluded;
-    }
-    if (!paymentVerified && deps.paymentRequiredHeader) {
-      throw new PaymentRequiredError();
-    }
-    const result = await createAndPollTask(skillName, skillParams, deps);
-    return await enrichProofResult(result, circuitId as string, deps);
+    return result;
   }
 
   if (skillName === 'verify_proof') {
-    return await createAndPollTask(skillName, args, deps);
+    return handleVerifyProof({
+      circuitId: args.circuitId as string,
+      proof: args.proof as string,
+      publicInputs: args.publicInputs as string | string[],
+      chainId: args.chainId as string | undefined,
+    }, skillDeps);
   }
 
   throw new Error(`Unknown skill: ${skillName}`);
-}
-
-/**
- * After proof generation, store the result in Redis and add a verifyUrl.
- * Returns the original result enriched with proofId and verifyUrl.
- */
-async function enrichProofResult(
-  result: unknown,
-  circuitId: string,
-  deps: ChatHandlerDeps,
-): Promise<unknown> {
-  if (
-    typeof result !== 'object' || result === null ||
-    !('proof' in result) || !('publicInputs' in result)
-  ) {
-    return result;
-  }
-
-  const proofResult = result as Record<string, unknown>;
-
-  try {
-    const proofId = await storeProofResult(deps.redis, {
-      proof: proofResult.proof as string,
-      publicInputs: proofResult.publicInputs as string,
-      circuitId,
-      nullifier: (proofResult.nullifier as string) || '',
-      signalHash: (proofResult.signalHash as string) || '',
-    });
-
-    const verifyUrl = `${deps.a2aBaseUrl}/v/${proofId}`;
-
-    return {
-      ...proofResult,
-      proofId,
-      verifyUrl,
-    };
-  } catch (error) {
-    console.error('[Chat] Failed to store proof result:', error);
-    return result;
-  }
 }

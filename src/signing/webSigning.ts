@@ -164,6 +164,19 @@ export function createSigningCallbackHandler(redis: RedisClient) {
 
     await redis.set(key, JSON.stringify(updatedRecord), 'EX', 300);
 
+    // Publish flow event if this requestId is linked to a flow
+    try {
+      const { getFlowByRequestId, publishFlowEvent } = await import('../skills/flowManager.js');
+      const flow = await getFlowByRequestId(requestId, redis);
+      if (flow) {
+        // Don't advance the flow here — let the SSE endpoint's polling handle state advancement.
+        await publishFlowEvent(redis, flow.flowId, { ...flow, updatedAt: new Date().toISOString() });
+      }
+    } catch (e) {
+      // Non-blocking — flow event publishing must not break the signing callback
+      console.error('[webSigning] Failed to publish flow event:', e);
+    }
+
     return res.status(200).json({ success: true });
   };
 }

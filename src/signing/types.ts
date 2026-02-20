@@ -32,7 +32,7 @@ export interface SigningProvider {
   isAvailable(address: string): Promise<boolean>;
 }
 
-export interface SigningRequestRecord {
+export interface ProofRequestRecord {
   id: string;              // UUID
   address?: string;        // Signer address (set when user connects wallet on sign-page)
   signalHash?: string;     // Hash to sign (computed after address is known)
@@ -47,3 +47,5 @@ export interface SigningRequestRecord {
   countryList?: string[];  // For coinbase_country_attestation
   isIncluded?: boolean;    // For coinbase_country_attestation
 }
+
+export type SigningRequestRecord = ProofRequestRecord;
