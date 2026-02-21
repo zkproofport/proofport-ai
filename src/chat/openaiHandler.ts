@@ -154,9 +154,9 @@ async function runChatLoop(
         if (onStep) {
           if (tc.name === 'generate_proof') {
             if (!tc.args.requestId) {
-              onStep({ message: '⏳ Step 1/5: Generating signing URL...' });
+              onStep({ message: '⏳ Step 1/4: Generating signing URL...' });
             } else {
-              onStep({ message: '⏳ Steps 3-5: Generating proof (this may take 1-2 minutes)...' });
+              onStep({ message: '⏳ Step 3/4: Generating proof (this may take 1-2 minutes)...' });
             }
           } else if (tc.name === 'verify_proof') {
             onStep({ message: '⏳ Verifying proof on-chain...' });
@@ -190,13 +190,13 @@ async function runChatLoop(
             const sr = skillResult as Record<string, unknown> | undefined;
             if (sr && typeof sr === 'object') {
               if (sr.state === 'input-required') {
-                onStep({ message: '✅ Step 1/5: Signing URL generated' });
+                onStep({ message: '✅ Step 1/4: Signing URL generated' });
               } else if (sr.state === 'payment-required') {
-                onStep({ message: '💳 Step 2/5: Payment required — $0.10 USDC' });
+                onStep({ message: '💳 Step 2/4: Payment required — $0.10 USDC' });
               } else if (sr.state === 'waiting') {
-                onStep({ message: '⏳ Signing not yet complete' });
+                onStep({ message: '⏳ Waiting for wallet signature...' });
               } else if (sr.proofId || sr.proof) {
-                onStep({ message: '✅ Step 5/5: Proof generated' });
+                onStep({ message: '✅ Step 4/4: Proof generated successfully' });
               } else if (sr.error) {
                 onStep({ message: `❌ Error: ${sr.error}` });
               }
