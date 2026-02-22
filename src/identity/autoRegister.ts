@@ -44,44 +44,47 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
         console.log(`Agent already registered on ERC-8004 Identity contract (tokenId: ${info.tokenId})`);
 
         // Check if metadata needs updating (e.g., agentUrl changed from localhost to production)
-        if (info.metadataUri) {
-          try {
-            const currentMetadata = parseMetadataUri(info.metadataUri);
-            const expectedName = 'proveragent.base.eth';
-            const expectedImage = `${config.a2aBaseUrl}/icon.png`;
-            const needsUpdate = currentMetadata && (
-              currentMetadata.name !== expectedName ||
-              currentMetadata.image !== expectedImage ||
-              currentMetadata.agentUrl !== config.a2aBaseUrl ||
-              currentMetadata.x402Support !== (config.paymentMode !== 'disabled') ||
-              !currentMetadata.services ||
-              currentMetadata.services.length === 0 ||
-              !currentMetadata.type ||
-              !currentMetadata.supportedTrusts ||
-              currentMetadata.supportedTrusts.length === 0
-            );
-            if (needsUpdate) {
+        try {
+          const currentMetadata = info.metadataUri ? parseMetadataUri(info.metadataUri) : null;
+          const expectedName = 'proveragent.base.eth';
+          const expectedImage = `${config.a2aBaseUrl}/icon.png`;
+          const needsUpdate = !currentMetadata || (
+            currentMetadata.name !== expectedName ||
+            currentMetadata.image !== expectedImage ||
+            currentMetadata.agentUrl !== config.a2aBaseUrl ||
+            currentMetadata.x402Support !== (config.paymentMode !== 'disabled') ||
+            !currentMetadata.services ||
+            currentMetadata.services.length === 0 ||
+            !currentMetadata.type ||
+            !currentMetadata.supportedTrusts ||
+            currentMetadata.supportedTrusts.length === 0
+          );
+          if (needsUpdate) {
               console.log('Agent metadata needs updating on-chain...');
-              if (currentMetadata.name !== expectedName) {
-                console.log(`  name mismatch: on-chain="${currentMetadata.name}", expected="${expectedName}"`);
-              }
-              if (currentMetadata.image !== expectedImage) {
-                console.log(`  image mismatch: on-chain="${currentMetadata.image || 'none'}", expected="${expectedImage}"`);
-              }
-              if (currentMetadata.agentUrl !== config.a2aBaseUrl) {
-                console.log(`  URL mismatch: on-chain="${currentMetadata.agentUrl}", current="${config.a2aBaseUrl}"`);
-              }
-              if (currentMetadata.x402Support !== (config.paymentMode !== 'disabled')) {
-                console.log(`  x402Support mismatch: on-chain=${currentMetadata.x402Support}, current=${config.paymentMode !== 'disabled'}`);
-              }
-              if (!currentMetadata.services || currentMetadata.services.length === 0) {
-                console.log('  services array missing or empty');
-              }
-              if (!currentMetadata.type) {
-                console.log('  type field missing');
-              }
-              if (!currentMetadata.supportedTrusts || currentMetadata.supportedTrusts.length === 0) {
-                console.log('  supportedTrusts field missing');
+              if (!currentMetadata) {
+                console.log('  no on-chain metadata found — will set full metadata');
+              } else {
+                if (currentMetadata.name !== expectedName) {
+                  console.log(`  name mismatch: on-chain="${currentMetadata.name}", expected="${expectedName}"`);
+                }
+                if (currentMetadata.image !== expectedImage) {
+                  console.log(`  image mismatch: on-chain="${currentMetadata.image || 'none'}", expected="${expectedImage}"`);
+                }
+                if (currentMetadata.agentUrl !== config.a2aBaseUrl) {
+                  console.log(`  URL mismatch: on-chain="${currentMetadata.agentUrl}", current="${config.a2aBaseUrl}"`);
+                }
+                if (currentMetadata.x402Support !== (config.paymentMode !== 'disabled')) {
+                  console.log(`  x402Support mismatch: on-chain=${currentMetadata.x402Support}, current=${config.paymentMode !== 'disabled'}`);
+                }
+                if (!currentMetadata.services || currentMetadata.services.length === 0) {
+                  console.log('  services array missing or empty');
+                }
+                if (!currentMetadata.type) {
+                  console.log('  type field missing');
+                }
+                if (!currentMetadata.supportedTrusts || currentMetadata.supportedTrusts.length === 0) {
+                  console.log('  supportedTrusts field missing');
+                }
               }
 
               const metadata: AgentMetadata = {
@@ -126,7 +129,6 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
               console.error(`Failed to update metadata: ${error.message}`);
             }
           }
-        }
 
         // Submit TEE validation if configured
         if (teeProvider && teeProvider.mode !== 'disabled') {

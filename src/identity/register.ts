@@ -96,9 +96,13 @@ export class AgentRegistration {
     }
 
     // Find tokenId via Transfer events (contract doesn't have tokenOfOwner)
-    const tokenId = await this.findTokenId();
+    let tokenId = await this.findTokenId();
     if (tokenId === null) {
-      // Fallback: registered but can't find tokenId
+      // Fallback: try ownerOf() for small tokenIds (0-99)
+      tokenId = await this.findTokenIdByOwner();
+    }
+    if (tokenId === null) {
+      console.warn('Agent is registered but tokenId could not be resolved — metadata update will be skipped');
       return {
         tokenId: 0n,
         owner: this.signer.address,
@@ -147,6 +151,25 @@ export class AgentRegistration {
       if (currentBlock - fromBlock > 50000) break;
     }
 
+    return null;
+  }
+
+  /**
+   * Find tokenId by checking ownerOf() for small tokenIds (0-99)
+   * Fallback when Transfer event scanning fails (e.g., registration too old)
+   */
+  private async findTokenIdByOwner(): Promise<bigint | null> {
+    for (let i = 0n; i < 100n; i++) {
+      try {
+        const owner = await this.contract.ownerOf(i);
+        if (owner.toLowerCase() === this.signer.address.toLowerCase()) {
+          return i;
+        }
+      } catch {
+        // tokenId doesn't exist or reverted, skip
+        continue;
+      }
+    }
     return null;
   }
 
