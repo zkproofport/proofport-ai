@@ -130,7 +130,6 @@ export class AgentRegistration {
    * Find tokenId by scanning Transfer events in chunks
    */
   private async findTokenId(): Promise<bigint | null> {
-    const addressPadded = ethers.zeroPadValue(this.signer.address, 32);
     const transferFilter = this.contract.filters.Transfer(null, this.signer.address);
 
     const currentBlock = await this.provider.getBlockNumber();
@@ -259,8 +258,8 @@ export function createMetadataUri(metadata: AgentMetadata): string {
     json.registrations = metadata.registrations;
   }
 
-  if (metadata.supportedTrusts !== undefined) {
-    json.supportedTrusts = metadata.supportedTrusts;
+  if (metadata.supportedTrust !== undefined) {
+    json.supportedTrust = metadata.supportedTrust;
   }
 
   // Convert to base64

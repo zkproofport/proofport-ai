@@ -13,8 +13,8 @@ export interface AgentMetadata {
   services?: Array<{ name: string; endpoint: string; version?: string }>;
   type?: string;
   image?: string;
-  registrations?: Array<{ chainId: string; tokenId: string; txHash: string; contract: string }>;
-  supportedTrusts?: string[];
+  registrations?: Array<{ agentRegistry: string; agentId: string; chainId?: string; tokenId?: string; txHash?: string; contract?: string }>;
+  supportedTrust?: string[];
 }
 
 /**

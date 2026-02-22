@@ -56,8 +56,8 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
             !currentMetadata.services ||
             currentMetadata.services.length === 0 ||
             !currentMetadata.type ||
-            !currentMetadata.supportedTrusts ||
-            currentMetadata.supportedTrusts.length === 0
+            !currentMetadata.supportedTrust ||
+            currentMetadata.supportedTrust.length === 0
           );
           if (needsUpdate) {
               console.log('Agent metadata needs updating on-chain...');
@@ -82,8 +82,8 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
                 if (!currentMetadata.type) {
                   console.log('  type field missing');
                 }
-                if (!currentMetadata.supportedTrusts || currentMetadata.supportedTrusts.length === 0) {
-                  console.log('  supportedTrusts field missing');
+                if (!currentMetadata.supportedTrust || currentMetadata.supportedTrust.length === 0) {
+                  console.log('  supportedTrust field missing');
                 }
               }
 
@@ -112,13 +112,11 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
                 ],
                 registrations: [
                   {
-                    chainId: 'eip155:84532',
-                    tokenId: info.tokenId.toString(),
-                    txHash: '',
-                    contract: config.erc8004IdentityAddress,
+                    agentRegistry: `eip155:84532:${config.erc8004IdentityAddress}`,
+                    agentId: info.tokenId.toString(),
                   },
                 ],
-                supportedTrusts: ['tee-attestation'],
+                supportedTrust: ['tee-attestation'],
               };
 
               const txHash = await registration.updateMetadata(info.tokenId, metadata);
@@ -164,7 +162,7 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
         { name: 'A2A', endpoint: `${config.a2aBaseUrl}/.well-known/agent-card.json`, version: '0.3.0' },
       ],
       registrations: [],
-      supportedTrusts: ['tee-attestation'],
+      supportedTrust: ['tee-attestation'],
     };
 
     // Register on-chain

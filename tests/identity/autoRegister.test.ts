@@ -186,7 +186,7 @@ describe('ensureAgentRegistered', () => {
           { name: 'A2A', endpoint: 'https://ai.zkproofport.app/.well-known/agent-card.json', version: '0.3.0' },
         ],
         registrations: [],
-        supportedTrusts: ['tee-attestation'],
+        supportedTrust: ['tee-attestation'],
       });
     });
 
