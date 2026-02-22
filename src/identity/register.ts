@@ -6,13 +6,14 @@ import type {
   AgentIdentityInfo,
 } from './types.js';
 
-// Minimal ABI for ERC-8004 Identity contract
+// Minimal ABI for ERC-8004 Identity contract (includes ERC-721 Enumerable)
 const IDENTITY_ABI = [
   'function register(string metadataURI) external returns (uint256 tokenId)',
   'function setAgentURI(uint256 agentId, string newURI) external',
   'function tokenURI(uint256 tokenId) external view returns (string)',
   'function ownerOf(uint256 tokenId) external view returns (address)',
   'function balanceOf(address owner) external view returns (uint256)',
+  'function tokenOfOwnerByIndex(address owner, uint256 index) external view returns (uint256)',
   'event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)',
 ];
 
@@ -95,11 +96,10 @@ export class AgentRegistration {
       return null;
     }
 
-    // Find tokenId via Transfer events (contract doesn't have tokenOfOwner)
-    let tokenId = await this.findTokenId();
+    // Find tokenId — try tokenOfOwnerByIndex first (ERC-721 Enumerable), then event scan
+    let tokenId = await this.findTokenIdByEnumerable();
     if (tokenId === null) {
-      // Fallback: try ownerOf() for small tokenIds (0-99)
-      tokenId = await this.findTokenIdByOwner();
+      tokenId = await this.findTokenId();
     }
     if (tokenId === null) {
       console.warn('Agent is registered but tokenId could not be resolved — metadata update will be skipped');
@@ -110,6 +110,7 @@ export class AgentRegistration {
         isRegistered: true,
       };
     }
+    console.log(`Resolved tokenId: ${tokenId}`);
 
     const metadataUri = await this.contract.tokenURI(tokenId);
 
@@ -155,22 +156,17 @@ export class AgentRegistration {
   }
 
   /**
-   * Find tokenId by checking ownerOf() for small tokenIds (0-99)
-   * Fallback when Transfer event scanning fails (e.g., registration too old)
+   * Find tokenId using ERC-721 Enumerable tokenOfOwnerByIndex
+   * Most reliable method — returns the first token owned by the signer
    */
-  private async findTokenIdByOwner(): Promise<bigint | null> {
-    for (let i = 0n; i < 100n; i++) {
-      try {
-        const owner = await this.contract.ownerOf(i);
-        if (owner.toLowerCase() === this.signer.address.toLowerCase()) {
-          return i;
-        }
-      } catch {
-        // tokenId doesn't exist or reverted, skip
-        continue;
-      }
+  private async findTokenIdByEnumerable(): Promise<bigint | null> {
+    try {
+      const tokenId = await this.contract.tokenOfOwnerByIndex(this.signer.address, 0);
+      return BigInt(tokenId);
+    } catch {
+      // Contract may not implement ERC-721 Enumerable
+      return null;
     }
-    return null;
   }
 
   /**
