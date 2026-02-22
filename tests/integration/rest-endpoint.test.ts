@@ -28,24 +28,13 @@ vi.mock('@x402/core/server', () => ({
 
 // vi.hoisted() runs before vi.mock() factory hoisting, so these values are
 // available inside the ioredis mock factory without TDZ errors.
-const { _redisStore, _redisListStore, _mockRedisHolder } = vi.hoisted(() => ({
+const { _redisStore, _redisListStore } = vi.hoisted(() => ({
   _redisStore: new Map<string, string>(),
   _redisListStore: new Map<string, string[]>(),
-  _mockRedisHolder: { instance: null as any },
 }));
 
-// Mock ioredis with list operation support (task queue uses lpush/rpop).
-// mockRedis is a singleton — all new Redis() calls return the same object.
-// beforeEach restores redis.lpush to the original vi.fn after TaskWorker.start()
-// patches it, preventing stale closure accumulation across tests.
+// Mock ioredis with Map-based store.
 vi.mock('ioredis', () => {
-  const _lpushOriginal = vi.fn((key: string, value: string) => {
-    const list = _redisListStore.get(key) || [];
-    list.push(value);
-    _redisListStore.set(key, list);
-    return Promise.resolve(list.length);
-  });
-
   const mockRedis: any = {
     get: vi.fn((key: string) => Promise.resolve(_redisStore.get(key) || null)),
     set: vi.fn((...args: any[]) => {
@@ -56,13 +45,7 @@ vi.mock('ioredis', () => {
       _redisStore.delete(key);
       return Promise.resolve(1);
     }),
-    rpop: vi.fn((key: string) => {
-      const list = _redisListStore.get(key);
-      if (list && list.length > 0) return Promise.resolve(list.pop()!);
-      return Promise.resolve(null);
-    }),
-    lpush: _lpushOriginal,
-    rpush: vi.fn((key: string, value: string) => {
+    lpush: vi.fn((key: string, value: string) => {
       const list = _redisListStore.get(key) || [];
       list.push(value);
       _redisListStore.set(key, list);
@@ -73,10 +56,7 @@ vi.mock('ioredis', () => {
     expire: vi.fn().mockResolvedValue(1),
     quit: vi.fn().mockResolvedValue('OK'),
     status: 'ready',
-    // Store original lpush so beforeEach can restore it after each test patches it
-    _originalLpushFn: _lpushOriginal,
   };
-  _mockRedisHolder.instance = mockRedis;
   return { default: vi.fn(() => mockRedis), Redis: vi.fn(() => mockRedis) };
 });
 
@@ -174,60 +154,6 @@ vi.mock('../../src/config/contracts.js', async () => {
   };
 });
 
-// Mock TaskWorker — intercepts task creation via the queue and immediately emits
-// task completion so waitForTaskCompletion() resolves without real proof generation.
-//
-// Strategy: `start()` patches the taskStore's redis lpush so that whenever a task
-// is pushed to `a2a:queue:submitted`, the worker immediately processes it in the
-// next microtask (after waitForTaskCompletion has registered its listener).
-vi.mock('../../src/a2a/taskWorker.js', () => {
-  return {
-    TaskWorker: vi.fn().mockImplementation((deps: any) => {
-      return {
-        start: vi.fn(() => {
-          const { taskStore, taskEventEmitter } = deps;
-          const redis = (taskStore as any).redis;
-          const originalLpush = redis.lpush.bind(redis);
-          redis.lpush = async (key: string, value: string) => {
-            const result = await originalLpush(key, value);
-            if (key === 'a2a:queue:submitted') {
-              setImmediate(async () => {
-                try {
-                  const task = await taskStore.getTask(value);
-                  if (!task || task.status.state !== 'queued') return;
-                  await taskStore.updateTaskStatus(value, 'running');
-                  await taskStore.addArtifact(value, {
-                    id: 'proof-artifact',
-                    mimeType: 'application/json',
-                    parts: [
-                      {
-                        kind: 'data',
-                        mimeType: 'application/json',
-                        data: {
-                          proof: '0xmockproof',
-                          publicInputs: '0x' + 'cc'.repeat(32),
-                          nullifier: '0x' + 'dd'.repeat(32),
-                          signalHash: '0x' + 'ee'.repeat(32),
-                          valid: true,
-                        },
-                      },
-                    ],
-                  });
-                  const finalTask = await taskStore.updateTaskStatus(value, 'completed');
-                  taskEventEmitter.emitTaskComplete(value, finalTask);
-                } catch (err) {
-                  console.error('[TaskWorker mock] setImmediate error:', err);
-                }
-              });
-            }
-            return result;
-          };
-        }),
-        stop: vi.fn(),
-      };
-    }),
-  };
-});
 
 // ─── Test config ───────────────────────────────────────────────────────────
 
@@ -278,19 +204,8 @@ describe('REST API Endpoint E2E', () => {
     _redisStore.clear();
     _redisListStore.clear();
 
-    // Restore the original lpush vi.fn on the shared mockRedis singleton.
-    // Each test's TaskWorker.start() patches redis.lpush with a new async wrapper
-    // that closes over that test's taskStore/taskEventEmitter. Without this restore,
-    // wrappers accumulate and inner closures reference stale instances from previous
-    // tests, causing waitForTaskCompletion() to never receive the completion event.
-    if (_mockRedisHolder.instance?._originalLpushFn) {
-      _mockRedisHolder.instance.lpush = _mockRedisHolder.instance._originalLpushFn;
-    }
-
     const appBundle = createApp(testConfig, 123456n);
     app = appBundle.app;
-    // Start the task worker — this patches redis.lpush for this test's app instance
-    appBundle.taskWorker.start();
   });
 
   // ─── GET /api/v1/circuits ───────────────────────────────────────────────
@@ -683,6 +598,627 @@ describe('REST API Endpoint E2E', () => {
       expect(response.body).toHaveProperty('error');
       expect(response.body.error).toHaveProperty('type', 'gone');
       expect(response.body.error).toHaveProperty('code', 'endpoint_removed');
+    });
+  });
+
+  // ─── POST /api/v1/signing ─────────────────────────────────────────────────
+
+  describe('POST /api/v1/signing', () => {
+    it('creates signing session with valid params', async () => {
+      const response = await request(app)
+        .post('/api/v1/signing')
+        .send({ circuitId: 'coinbase_attestation', scope: 'test.com' });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('requestId');
+      expect(response.body).toHaveProperty('signingUrl');
+      expect(response.body).toHaveProperty('expiresAt');
+      expect(typeof response.body.requestId).toBe('string');
+      expect(response.body.requestId.length).toBeGreaterThan(0);
+      expect(response.body.signingUrl).toContain(response.body.requestId);
+    });
+
+    it('returns requestId and circuitId in response', async () => {
+      const response = await request(app)
+        .post('/api/v1/signing')
+        .send({ circuitId: 'coinbase_attestation', scope: 'myapp.xyz' });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('circuitId', 'coinbase_attestation');
+      expect(response.body).toHaveProperty('scope', 'myapp.xyz');
+    });
+
+    it('stores the session in Redis', async () => {
+      const response = await request(app)
+        .post('/api/v1/signing')
+        .send({ circuitId: 'coinbase_attestation', scope: 'test.com' });
+
+      expect(response.status).toBe(200);
+      const { requestId } = response.body;
+      const stored = _redisStore.get(`signing:${requestId}`);
+      expect(stored).toBeDefined();
+      const record = JSON.parse(stored!);
+      expect(record.id).toBe(requestId);
+      expect(record.circuitId).toBe('coinbase_attestation');
+      expect(record.scope).toBe('test.com');
+      expect(record.status).toBe('pending');
+    });
+
+    it('returns 400 for missing circuitId', async () => {
+      const response = await request(app)
+        .post('/api/v1/signing')
+        .send({ scope: 'test.com' });
+
+      expect(response.status).toBe(400);
+      expect(response.body).toHaveProperty('error');
+    });
+
+    it('returns 400 for missing scope', async () => {
+      const response = await request(app)
+        .post('/api/v1/signing')
+        .send({ circuitId: 'coinbase_attestation' });
+
+      expect(response.status).toBe(400);
+      expect(response.body).toHaveProperty('error');
+      expect(response.body.error).toContain('scope');
+    });
+
+    it('returns 400 for unknown circuitId', async () => {
+      const response = await request(app)
+        .post('/api/v1/signing')
+        .send({ circuitId: 'unknown_circuit', scope: 'test.com' });
+
+      expect(response.status).toBe(400);
+      expect(response.body).toHaveProperty('error');
+      expect(response.body.error).toContain('unknown_circuit');
+    });
+
+    it('creates session for coinbase_country_attestation with all required fields', async () => {
+      const response = await request(app)
+        .post('/api/v1/signing')
+        .send({
+          circuitId: 'coinbase_country_attestation',
+          scope: 'test.com',
+          countryList: ['US', 'CA'],
+          isIncluded: true,
+        });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('requestId');
+      expect(response.body).toHaveProperty('circuitId', 'coinbase_country_attestation');
+    });
+
+    it('returns 400 for coinbase_country_attestation missing countryList', async () => {
+      const response = await request(app)
+        .post('/api/v1/signing')
+        .send({
+          circuitId: 'coinbase_country_attestation',
+          scope: 'test.com',
+          isIncluded: true,
+        });
+
+      expect(response.status).toBe(400);
+      expect(response.body).toHaveProperty('error');
+      expect(response.body.error).toContain('countryList');
+    });
+
+    it('returns 400 for coinbase_country_attestation missing isIncluded', async () => {
+      const response = await request(app)
+        .post('/api/v1/signing')
+        .send({
+          circuitId: 'coinbase_country_attestation',
+          scope: 'test.com',
+          countryList: ['US'],
+        });
+
+      expect(response.status).toBe(400);
+      expect(response.body).toHaveProperty('error');
+      expect(response.body.error).toContain('isIncluded');
+    });
+  });
+
+  // ─── GET /api/v1/signing/:requestId/status ────────────────────────────────
+
+  describe('GET /api/v1/signing/:requestId/status', () => {
+    it('returns 404 for non-existent requestId', async () => {
+      const response = await request(app).get('/api/v1/signing/non-existent-req-id-999/status');
+
+      expect(response.status).toBe(404);
+      expect(response.body).toHaveProperty('error');
+    });
+
+    it('returns status for a pending signing session', async () => {
+      // Pre-populate Redis with a pending signing record
+      const requestId = 'test-status-pending-req-001';
+      const record = {
+        id: requestId,
+        scope: 'test.com',
+        circuitId: 'coinbase_attestation',
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 300_000).toISOString(),
+      };
+      _redisStore.set(`signing:${requestId}`, JSON.stringify(record));
+
+      const response = await request(app).get(`/api/v1/signing/${requestId}/status`);
+
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('requestId', requestId);
+      expect(response.body).toHaveProperty('phase', 'signing');
+      expect(response.body.signing).toHaveProperty('status', 'pending');
+    });
+
+    it('returns ready phase when signing is completed and payment is disabled', async () => {
+      // Pre-populate with a completed signing record
+      const requestId = 'test-status-completed-req-002';
+      const record = {
+        id: requestId,
+        scope: 'test.com',
+        circuitId: 'coinbase_attestation',
+        status: 'completed',
+        address: '0x' + '55'.repeat(20),
+        signature: '0x' + '66'.repeat(65),
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 300_000).toISOString(),
+      };
+      _redisStore.set(`signing:${requestId}`, JSON.stringify(record));
+
+      const response = await request(app).get(`/api/v1/signing/${requestId}/status`);
+
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('requestId', requestId);
+      // payment mode is 'disabled' in testConfig → phase should be 'ready'
+      expect(response.body).toHaveProperty('phase', 'ready');
+      expect(response.body.signing).toHaveProperty('status', 'completed');
+      expect(response.body.payment).toHaveProperty('status', 'not_required');
+    });
+
+    it('returns expiresAt in the response', async () => {
+      const requestId = 'test-status-expiry-req-003';
+      const expiresAt = new Date(Date.now() + 300_000).toISOString();
+      const record = {
+        id: requestId,
+        scope: 'test.com',
+        circuitId: 'coinbase_attestation',
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+        expiresAt,
+      };
+      _redisStore.set(`signing:${requestId}`, JSON.stringify(record));
+
+      const response = await request(app).get(`/api/v1/signing/${requestId}/status`);
+
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('expiresAt', expiresAt);
+    });
+  });
+
+  // ─── POST /api/v1/signing/:requestId/payment ─────────────────────────────
+
+  describe('POST /api/v1/signing/:requestId/payment', () => {
+    it('returns 400 for non-existent requestId', async () => {
+      const response = await request(app)
+        .post('/api/v1/signing/non-existent-payment-req-999/payment')
+        .send({});
+
+      expect(response.status).toBe(400);
+      expect(response.body).toHaveProperty('error');
+    });
+
+    it('returns 400 when payment mode is disabled', async () => {
+      // Pre-populate a completed signing record
+      const requestId = 'test-payment-disabled-req-001';
+      const record = {
+        id: requestId,
+        scope: 'test.com',
+        circuitId: 'coinbase_attestation',
+        status: 'completed',
+        address: '0x' + '55'.repeat(20),
+        signature: '0x' + '66'.repeat(65),
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 300_000).toISOString(),
+      };
+      _redisStore.set(`signing:${requestId}`, JSON.stringify(record));
+
+      const response = await request(app)
+        .post(`/api/v1/signing/${requestId}/payment`)
+        .send({});
+
+      // paymentMode is 'disabled' in testConfig — handleRequestPayment throws
+      expect(response.status).toBe(400);
+      expect(response.body).toHaveProperty('error');
+      expect(response.body.error).toContain('disabled');
+    });
+
+    it('returns 400 when signing is not yet completed', async () => {
+      // Pre-populate a pending signing record (signing not done yet)
+      const requestId = 'test-payment-pending-signing-req-002';
+      const record = {
+        id: requestId,
+        scope: 'test.com',
+        circuitId: 'coinbase_attestation',
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 300_000).toISOString(),
+      };
+      _redisStore.set(`signing:${requestId}`, JSON.stringify(record));
+
+      const response = await request(app)
+        .post(`/api/v1/signing/${requestId}/payment`)
+        .send({});
+
+      expect(response.status).toBe(400);
+      expect(response.body).toHaveProperty('error');
+    });
+  });
+
+  // ─── POST /api/v1/flow ────────────────────────────────────────────────────
+
+  describe('POST /api/v1/flow', () => {
+    it('creates flow and returns flowId, signingUrl, phase=signing', async () => {
+      const response = await request(app)
+        .post('/api/v1/flow')
+        .send({ circuitId: 'coinbase_attestation', scope: 'test.com' });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('flowId');
+      expect(response.body).toHaveProperty('signingUrl');
+      expect(response.body).toHaveProperty('phase', 'signing');
+      expect(response.body).toHaveProperty('requestId');
+      expect(typeof response.body.flowId).toBe('string');
+      expect(response.body.signingUrl).toContain(response.body.requestId);
+    });
+
+    it('stores flow and signing session in Redis', async () => {
+      const response = await request(app)
+        .post('/api/v1/flow')
+        .send({ circuitId: 'coinbase_attestation', scope: 'flow-scope.io' });
+
+      expect(response.status).toBe(200);
+      const { flowId, requestId } = response.body;
+
+      // Flow record stored
+      const flowData = _redisStore.get(`flow:${flowId}`);
+      expect(flowData).toBeDefined();
+      const flow = JSON.parse(flowData!);
+      expect(flow.flowId).toBe(flowId);
+      expect(flow.phase).toBe('signing');
+
+      // Signing session stored
+      const signingData = _redisStore.get(`signing:${requestId}`);
+      expect(signingData).toBeDefined();
+    });
+
+    it('returns 400 for missing circuitId', async () => {
+      const response = await request(app)
+        .post('/api/v1/flow')
+        .send({ scope: 'test.com' });
+
+      expect(response.status).toBe(400);
+      expect(response.body).toHaveProperty('error');
+    });
+
+    it('returns 400 for missing scope', async () => {
+      const response = await request(app)
+        .post('/api/v1/flow')
+        .send({ circuitId: 'coinbase_attestation' });
+
+      expect(response.status).toBe(400);
+      expect(response.body).toHaveProperty('error');
+    });
+
+    it('includes circuitId and scope in returned flow', async () => {
+      const response = await request(app)
+        .post('/api/v1/flow')
+        .send({ circuitId: 'coinbase_attestation', scope: 'myservice.dev' });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('circuitId', 'coinbase_attestation');
+      expect(response.body).toHaveProperty('scope', 'myservice.dev');
+    });
+  });
+
+  // ─── GET /api/v1/flow/:flowId ─────────────────────────────────────────────
+
+  describe('GET /api/v1/flow/:flowId', () => {
+    it('returns 404 for non-existent flowId', async () => {
+      const response = await request(app).get('/api/v1/flow/non-existent-flow-id-999');
+
+      expect(response.status).toBe(404);
+      expect(response.body).toHaveProperty('error');
+      expect(response.body.error).toContain('not found');
+    });
+
+    it('returns flow data for a completed flow (terminal phase, no advance)', async () => {
+      const flowId = 'test-flow-completed-001';
+      const requestId = 'test-flow-req-completed-001';
+      const now = new Date().toISOString();
+      const flow = {
+        flowId,
+        circuitId: 'coinbase_attestation',
+        scope: 'test.com',
+        phase: 'completed',
+        requestId,
+        signingUrl: `https://a2a.example.com/s/${requestId}`,
+        proofResult: {
+          proof: '0xmockproof',
+          publicInputs: '0xmockpublic',
+          nullifier: '0x' + 'aa'.repeat(32),
+          signalHash: '0x' + 'bb'.repeat(32),
+          proofId: 'test-proof-id-001',
+          verifyUrl: 'https://a2a.example.com/v/test-proof-id-001',
+        },
+        createdAt: now,
+        updatedAt: now,
+        expiresAt: new Date(Date.now() + 300_000).toISOString(),
+      };
+      _redisStore.set(`flow:${flowId}`, JSON.stringify(flow));
+
+      const response = await request(app).get(`/api/v1/flow/${flowId}`);
+
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('flowId', flowId);
+      expect(response.body).toHaveProperty('phase', 'completed');
+      expect(response.body).toHaveProperty('circuitId', 'coinbase_attestation');
+      expect(response.body.proofResult).toHaveProperty('proof', '0xmockproof');
+    });
+
+    it('returns flow data for a failed flow (terminal phase, no advance)', async () => {
+      const flowId = 'test-flow-failed-002';
+      const requestId = 'test-flow-req-failed-002';
+      const now = new Date().toISOString();
+      const flow = {
+        flowId,
+        circuitId: 'coinbase_attestation',
+        scope: 'test.com',
+        phase: 'failed',
+        requestId,
+        signingUrl: `https://a2a.example.com/s/${requestId}`,
+        error: 'Proof generation failed: mock error',
+        createdAt: now,
+        updatedAt: now,
+        expiresAt: new Date(Date.now() + 300_000).toISOString(),
+      };
+      _redisStore.set(`flow:${flowId}`, JSON.stringify(flow));
+
+      const response = await request(app).get(`/api/v1/flow/${flowId}`);
+
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('flowId', flowId);
+      expect(response.body).toHaveProperty('phase', 'failed');
+      expect(response.body).toHaveProperty('error');
+    });
+  });
+
+  // ─── POST /api/v1/proofs (session mode via requestId) ────────────────────
+
+  describe('POST /api/v1/proofs with requestId (session mode)', () => {
+    it('generates proof using a completed signing session', async () => {
+      // Pre-populate Redis with a completed signing record
+      const requestId = 'test-session-proof-req-001';
+      const record = {
+        id: requestId,
+        scope: 'test.com',
+        circuitId: 'coinbase_attestation',
+        status: 'completed',
+        address: '0x' + '55'.repeat(20),
+        signature: '0x' + '66'.repeat(65),
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 300_000).toISOString(),
+      };
+      _redisStore.set(`signing:${requestId}`, JSON.stringify(record));
+
+      const response = await request(app)
+        .post('/api/v1/proofs')
+        .send({ requestId });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('proof');
+      expect(response.body).toHaveProperty('publicInputs');
+      expect(response.body).toHaveProperty('nullifier');
+      expect(response.body).toHaveProperty('signalHash');
+      expect(response.body).toHaveProperty('proofId');
+    }, 10000);
+
+    it('consumes the signing record after proof generation (one-time use)', async () => {
+      const requestId = 'test-session-proof-req-002';
+      const record = {
+        id: requestId,
+        scope: 'test.com',
+        circuitId: 'coinbase_attestation',
+        status: 'completed',
+        address: '0x' + '55'.repeat(20),
+        signature: '0x' + '66'.repeat(65),
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 300_000).toISOString(),
+      };
+      _redisStore.set(`signing:${requestId}`, JSON.stringify(record));
+
+      // First call succeeds
+      const first = await request(app).post('/api/v1/proofs').send({ requestId });
+      expect(first.status).toBe(200);
+
+      // Second call should fail — record was consumed (deleted from Redis)
+      const second = await request(app).post('/api/v1/proofs').send({ requestId });
+      expect(second.status).toBe(400);
+      expect(second.body).toHaveProperty('error');
+    }, 15000);
+
+    it('returns 400 when signing session is still pending', async () => {
+      const requestId = 'test-session-proof-req-003';
+      const record = {
+        id: requestId,
+        scope: 'test.com',
+        circuitId: 'coinbase_attestation',
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 300_000).toISOString(),
+      };
+      _redisStore.set(`signing:${requestId}`, JSON.stringify(record));
+
+      const response = await request(app)
+        .post('/api/v1/proofs')
+        .send({ requestId });
+
+      expect(response.status).toBe(400);
+      expect(response.body).toHaveProperty('error');
+      expect(response.body.error).toContain('Signing not yet completed');
+    });
+
+    it('returns 400 for non-existent requestId', async () => {
+      const response = await request(app)
+        .post('/api/v1/proofs')
+        .send({ requestId: 'non-existent-request-id-xyz' });
+
+      expect(response.status).toBe(400);
+      expect(response.body).toHaveProperty('error');
+    });
+  });
+
+  // ─── GET /api/v1/verify/:proofId ─────────────────────────────────────────
+
+  describe('GET /api/v1/verify/:proofId', () => {
+    it('returns 404 for non-existent proofId', async () => {
+      const response = await request(app).get('/api/v1/verify/non-existent-proof-id-999');
+
+      expect(response.status).toBe(404);
+      expect(response.body).toHaveProperty('error');
+      expect(response.body.error).toContain('not found');
+    });
+
+    it('verifies a stored proof and returns verification result', async () => {
+      // Pre-populate Redis with a stored proof result
+      const proofId = 'test-verify-stored-proof-001';
+      const proofRecord = {
+        proofId,
+        proof: '0x' + 'ab'.repeat(100),
+        publicInputs: '0x' + 'cd'.repeat(32),
+        circuitId: 'coinbase_attestation',
+        nullifier: '0x' + 'ef'.repeat(32),
+        signalHash: '0x' + '12'.repeat(32),
+        createdAt: new Date().toISOString(),
+      };
+      _redisStore.set(`proof:result:${proofId}`, JSON.stringify(proofRecord));
+
+      const response = await request(app).get(`/api/v1/verify/${proofId}`);
+
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('proofId', proofId);
+      expect(response.body).toHaveProperty('circuitId', 'coinbase_attestation');
+      expect(response.body).toHaveProperty('nullifier');
+      expect(response.body).toHaveProperty('isValid');
+      expect(response.body).toHaveProperty('verifierAddress');
+      expect(response.body).toHaveProperty('chainId');
+      expect(typeof response.body.isValid).toBe('boolean');
+    });
+
+    it('returns isValid=true when mock verifier approves', async () => {
+      const proofId = 'test-verify-valid-proof-002';
+      const proofRecord = {
+        proofId,
+        proof: '0x' + 'aa'.repeat(50),
+        publicInputs: '0x' + 'bb'.repeat(32),
+        circuitId: 'coinbase_attestation',
+        nullifier: '0x' + 'cc'.repeat(32),
+        signalHash: '0x' + 'dd'.repeat(32),
+        createdAt: new Date().toISOString(),
+      };
+      _redisStore.set(`proof:result:${proofId}`, JSON.stringify(proofRecord));
+
+      const response = await request(app).get(`/api/v1/verify/${proofId}`);
+
+      expect(response.status).toBe(200);
+      // verifyOnChain mock returns { isValid: true, ... }
+      expect(response.body).toHaveProperty('isValid', true);
+    });
+  });
+
+  // ─── POST /api/v1/proofs with coinbase_country_attestation ───────────────
+
+  describe('POST /api/v1/proofs with coinbase_country_attestation', () => {
+    it('generates proof with countryList and isIncluded', async () => {
+      const response = await request(app)
+        .post('/api/v1/proofs')
+        .send({
+          circuitId: 'coinbase_country_attestation',
+          scope: 'test.com',
+          address: '0x' + '55'.repeat(20),
+          signature: '0x' + '66'.repeat(65),
+          countryList: ['US', 'CA'],
+          isIncluded: true,
+        });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('proof');
+      expect(response.body).toHaveProperty('publicInputs');
+      expect(response.body).toHaveProperty('nullifier');
+      expect(response.body).toHaveProperty('proofId');
+    }, 10000);
+
+    it('generates proof with isIncluded=false (exclusion proof)', async () => {
+      const response = await request(app)
+        .post('/api/v1/proofs')
+        .send({
+          circuitId: 'coinbase_country_attestation',
+          scope: 'dapp.io',
+          address: '0x' + '55'.repeat(20),
+          signature: '0x' + '66'.repeat(65),
+          countryList: ['RU', 'KP'],
+          isIncluded: false,
+        });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('proof');
+      expect(response.body).toHaveProperty('proofId');
+    }, 10000);
+
+    it('returns 400 for coinbase_country_attestation missing countryList', async () => {
+      const response = await request(app)
+        .post('/api/v1/proofs')
+        .send({
+          circuitId: 'coinbase_country_attestation',
+          scope: 'test.com',
+          address: '0x' + '55'.repeat(20),
+          signature: '0x' + '66'.repeat(65),
+          isIncluded: true,
+        });
+
+      expect(response.status).toBe(400);
+      expect(response.body).toHaveProperty('error');
+      expect(response.body.error).toContain('countryList');
+    });
+
+    it('returns 400 for coinbase_country_attestation missing isIncluded', async () => {
+      const response = await request(app)
+        .post('/api/v1/proofs')
+        .send({
+          circuitId: 'coinbase_country_attestation',
+          scope: 'test.com',
+          address: '0x' + '55'.repeat(20),
+          signature: '0x' + '66'.repeat(65),
+          countryList: ['US'],
+        });
+
+      expect(response.status).toBe(400);
+      expect(response.body).toHaveProperty('error');
+      expect(response.body.error).toContain('isIncluded');
+    });
+
+    it('returns 400 for coinbase_country_attestation with empty countryList', async () => {
+      const response = await request(app)
+        .post('/api/v1/proofs')
+        .send({
+          circuitId: 'coinbase_country_attestation',
+          scope: 'test.com',
+          address: '0x' + '55'.repeat(20),
+          signature: '0x' + '66'.repeat(65),
+          countryList: [],
+          isIncluded: true,
+        });
+
+      expect(response.status).toBe(400);
+      expect(response.body).toHaveProperty('error');
+      expect(response.body.error).toContain('countryList');
     });
   });
 });

@@ -4,6 +4,10 @@
  * Tests the FULL signing → payment → ready flow across all protocols.
  * Simulates user interaction via internal signing/payment endpoints.
  *
+ * Uses SDK clients for A2A (@a2a-js/sdk/client) and MCP
+ * (@modelcontextprotocol/sdk/client) protocol sections.
+ * REST endpoint tests use raw fetch (no SDK exists for custom REST).
+ *
  * Prerequisites:
  *   cd proofport-ai && docker compose up --build -d
  *   Wait for healthy: curl http://localhost:4002/health
@@ -11,8 +15,14 @@
  * Run: npx vitest run tests/e2e/multi-turn-flow.test.ts
  */
 
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { randomUUID } from 'crypto';
 import { ethers } from 'ethers';
+import { ClientFactory } from '@a2a-js/sdk/client';
+import type { Client as A2aClient } from '@a2a-js/sdk/client';
+import type { Task, Artifact } from '@a2a-js/sdk';
+import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:4002';
 
@@ -22,7 +32,41 @@ if (!PROVER_KEY) throw new Error('PROVER_PRIVATE_KEY is required in .env.test');
 const TEST_WALLET = new ethers.Wallet(PROVER_KEY);
 const TEST_ADDRESS = TEST_WALLET.address;
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── SDK Clients (initialized in beforeAll) ──────────────────────────────────
+
+let a2aClient: A2aClient;
+
+// ─── SDK Helpers ─────────────────────────────────────────────────────────────
+
+function extractDataFromArtifacts(artifacts: Artifact[] | undefined): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const artifact of artifacts || []) {
+    for (const part of artifact.parts || []) {
+      if (part.kind === 'data' && (part as any).data) {
+        Object.assign(result, (part as any).data);
+      }
+    }
+  }
+  return result;
+}
+
+async function createMcpSdkClient(): Promise<{ client: McpClient; transport: StreamableHTTPClientTransport }> {
+  const client = new McpClient(
+    { name: 'e2e-test', version: '1.0.0' },
+    { capabilities: {} },
+  );
+  const transport = new StreamableHTTPClientTransport(new URL(`${BASE_URL}/mcp`));
+  await client.connect(transport);
+  return { client, transport };
+}
+
+function parseToolResult(result: any): any {
+  const textContents = result.content?.filter((c: any) => c.type === 'text');
+  if (!textContents || textContents.length === 0) return null;
+  return JSON.parse(textContents[textContents.length - 1].text);
+}
+
+// ─── REST Helpers (kept as raw fetch) ────────────────────────────────────────
 
 async function jsonPost(path: string, body: unknown, headers?: Record<string, string>) {
   const res = await fetch(`${BASE_URL}${path}`, {
@@ -40,17 +84,6 @@ async function jsonGet(path: string) {
   const res = await fetch(`${BASE_URL}${path}`);
   const json = await res.json();
   return { status: res.status, headers: res.headers, json };
-}
-
-function parseSseEvents(text: string): any[] {
-  return text
-    .split('\n')
-    .filter(line => line.startsWith('data: ') || line.startsWith('data:'))
-    .map(line => {
-      const data = line.startsWith('data: ') ? line.substring(6) : line.substring(5);
-      try { return JSON.parse(data.trim()); } catch { return null; }
-    })
-    .filter(Boolean);
 }
 
 /**
@@ -109,6 +142,10 @@ beforeAll(async () => {
       `Original error: ${err}`,
     );
   }
+
+  // Initialize A2A SDK client
+  const factory = new ClientFactory();
+  a2aClient = await factory.createFromUrl(BASE_URL);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -258,49 +295,26 @@ describe('Multi-Turn Flow — REST Country Circuit', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// A2A Protocol — Full Multi-Turn Flow
+// A2A Protocol — Full Multi-Turn Flow (SDK Client)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('Multi-Turn Flow — A2A Protocol', () => {
   let requestId: string;
 
-  async function a2aSkillCall(id: number, skill: string, params: Record<string, unknown>) {
-    return jsonPost('/a2a', {
-      jsonrpc: '2.0',
-      id,
-      method: 'message/send',
-      params: {
-        message: {
-          role: 'user',
-          parts: [{ kind: 'data', mimeType: 'application/json', data: { skill, ...params } }],
-        },
+  it('Step 1: A2A request_signing returns requestId + signingUrl', async () => {
+    const result = await a2aClient.sendMessage({
+      message: {
+        kind: 'message',
+        messageId: randomUUID(),
+        role: 'user',
+        parts: [{ kind: 'data', data: { skill: 'request_signing', circuitId: 'coinbase_attestation', scope: 'a2a-flow-test.zkproofport.app' } }],
       },
     });
-  }
 
-  function extractDataFromArtifacts(artifacts: any[]): Record<string, unknown> {
-    const result: Record<string, unknown> = {};
-    for (const artifact of artifacts || []) {
-      for (const part of artifact.parts || []) {
-        if (part.kind === 'data' && part.data) {
-          Object.assign(result, part.data);
-        }
-      }
-    }
-    return result;
-  }
+    const task = result as Task;
+    expect(task.status.state).toBe('input-required');
 
-  it('Step 1: A2A request_signing returns requestId + signingUrl', async () => {
-    const { status, json } = await a2aSkillCall(200, 'request_signing', {
-      circuitId: 'coinbase_attestation',
-      scope: 'a2a-flow-test.zkproofport.app',
-    });
-
-    expect(status).toBe(200);
-    expect(json.result).toBeDefined();
-    expect(json.result.status.state).toBe('completed');
-
-    const data = extractDataFromArtifacts(json.result.artifacts);
+    const data = extractDataFromArtifacts(task.artifacts);
     expect(data.requestId).toBeDefined();
     expect(data.signingUrl).toBeDefined();
     expect(typeof data.signingUrl).toBe('string');
@@ -312,12 +326,19 @@ describe('Multi-Turn Flow — A2A Protocol', () => {
   it('Step 2: A2A check_status returns phase: signing', async () => {
     expect(requestId).toBeDefined();
 
-    const { status, json } = await a2aSkillCall(201, 'check_status', { requestId });
+    const result = await a2aClient.sendMessage({
+      message: {
+        kind: 'message',
+        messageId: randomUUID(),
+        role: 'user',
+        parts: [{ kind: 'data', data: { skill: 'check_status', requestId } }],
+      },
+    });
 
-    expect(status).toBe(200);
-    expect(json.result.status.state).toBe('completed');
+    const task = result as Task;
+    expect(task.status.state).toBe('input-required');
 
-    const data = extractDataFromArtifacts(json.result.artifacts);
+    const data = extractDataFromArtifacts(task.artifacts);
     expect(data.phase).toBe('signing');
     expect((data.signing as any).status).toBe('pending');
   });
@@ -325,10 +346,17 @@ describe('Multi-Turn Flow — A2A Protocol', () => {
   it('Step 3: A2A request_payment before signing fails', async () => {
     expect(requestId).toBeDefined();
 
-    const { status, json } = await a2aSkillCall(202, 'request_payment', { requestId });
+    const result = await a2aClient.sendMessage({
+      message: {
+        kind: 'message',
+        messageId: randomUUID(),
+        role: 'user',
+        parts: [{ kind: 'data', data: { skill: 'request_payment', requestId } }],
+      },
+    });
 
-    expect(status).toBe(200);
-    expect(json.result.status.state).toBe('failed');
+    const task = result as Task;
+    expect(task.status.state).toBe('failed');
   });
 
   it('Step 4: Simulate signing completion', async () => {
@@ -339,10 +367,17 @@ describe('Multi-Turn Flow — A2A Protocol', () => {
   it('Step 5: A2A check_status after signing shows correct phase', async () => {
     expect(requestId).toBeDefined();
 
-    const { status, json } = await a2aSkillCall(203, 'check_status', { requestId });
+    const result = await a2aClient.sendMessage({
+      message: {
+        kind: 'message',
+        messageId: randomUUID(),
+        role: 'user',
+        parts: [{ kind: 'data', data: { skill: 'check_status', requestId } }],
+      },
+    });
 
-    expect(status).toBe(200);
-    const data = extractDataFromArtifacts(json.result.artifacts);
+    const task = result as Task;
+    const data = extractDataFromArtifacts(task.artifacts);
     expect((data.signing as any).status).toBe('completed');
 
     if (paymentMode === 'disabled') {
@@ -355,16 +390,23 @@ describe('Multi-Turn Flow — A2A Protocol', () => {
   it('Step 6: A2A request_payment after signing succeeds (or disabled)', async () => {
     expect(requestId).toBeDefined();
 
-    const { status, json } = await a2aSkillCall(204, 'request_payment', { requestId });
+    const result = await a2aClient.sendMessage({
+      message: {
+        kind: 'message',
+        messageId: randomUUID(),
+        role: 'user',
+        parts: [{ kind: 'data', data: { skill: 'request_payment', requestId } }],
+      },
+    });
 
-    expect(status).toBe(200);
+    const task = result as Task;
 
     if (paymentMode === 'disabled') {
       // Should fail with "not required" error
-      expect(json.result.status.state).toBe('failed');
+      expect(task.status.state).toBe('failed');
     } else {
-      expect(json.result.status.state).toBe('completed');
-      const data = extractDataFromArtifacts(json.result.artifacts);
+      expect(task.status.state).toBe('input-required');
+      const data = extractDataFromArtifacts(task.artifacts);
       expect(data.paymentUrl).toBeDefined();
       expect((data.paymentUrl as string)).toContain('/pay/');
       expect(data.amount).toBeDefined();
@@ -378,10 +420,17 @@ describe('Multi-Turn Flow — A2A Protocol', () => {
 
     await simulatePayment(requestId);
 
-    const { status, json } = await a2aSkillCall(205, 'check_status', { requestId });
-    expect(status).toBe(200);
+    const result = await a2aClient.sendMessage({
+      message: {
+        kind: 'message',
+        messageId: randomUUID(),
+        role: 'user',
+        parts: [{ kind: 'data', data: { skill: 'check_status', requestId } }],
+      },
+    });
 
-    const data = extractDataFromArtifacts(json.result.artifacts);
+    const task = result as Task;
+    const data = extractDataFromArtifacts(task.artifacts);
     expect(data.phase).toBe('ready');
     expect((data.payment as any).status).toBe('completed');
     expect((data.payment as any).txHash).toBeDefined();
@@ -389,60 +438,34 @@ describe('Multi-Turn Flow — A2A Protocol', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// MCP Protocol — Full Multi-Turn Flow
+// MCP Protocol — Full Multi-Turn Flow (SDK Client)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('Multi-Turn Flow — MCP Protocol', () => {
   let requestId: string;
+  let mcpClient: McpClient;
+  let mcpTransport: StreamableHTTPClientTransport;
 
-  async function mcpToolCall(id: number, toolName: string, args: Record<string, unknown>) {
-    const res = await fetch(`${BASE_URL}/mcp`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json, text/event-stream',
-      },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id,
-        method: 'tools/call',
-        params: { name: toolName, arguments: args },
-      }),
-    });
+  beforeAll(async () => {
+    const conn = await createMcpSdkClient();
+    mcpClient = conn.client;
+    mcpTransport = conn.transport;
+  });
 
-    const text = await res.text();
-    const events = parseSseEvents(text);
-    let result: any = null;
-    if (events.length > 0) {
-      result = events.find((e: any) => e.result || e.error);
-    }
-    if (!result) {
-      try { result = JSON.parse(text); } catch { result = null; }
-    }
-    return { status: res.status, result };
-  }
-
-  function extractMcpToolResult(result: any): any {
-    if (!result?.result?.content) return null;
-    const textContent = result.result.content.find((c: any) => c.type === 'text');
-    if (!textContent) return null;
-    try {
-      return JSON.parse(textContent.text);
-    } catch {
-      return { text: textContent.text, isError: result.result.isError };
-    }
-  }
+  afterAll(async () => {
+    try { await mcpTransport.close(); } catch { /* ignore */ }
+  });
 
   it('Step 1: MCP request_signing returns requestId + signingUrl', async () => {
-    const { status, result } = await mcpToolCall(300, 'request_signing', {
-      circuitId: 'coinbase_attestation',
-      scope: 'mcp-flow-test.zkproofport.app',
+    const result = await mcpClient.callTool({
+      name: 'request_signing',
+      arguments: {
+        circuitId: 'coinbase_attestation',
+        scope: 'mcp-flow-test.zkproofport.app',
+      },
     });
 
-    expect(status).toBe(200);
-    expect(result).toBeDefined();
-
-    const data = extractMcpToolResult(result);
+    const data = parseToolResult(result);
     expect(data).not.toBeNull();
     expect(data.requestId).toBeDefined();
     expect(data.signingUrl).toBeDefined();
@@ -454,10 +477,12 @@ describe('Multi-Turn Flow — MCP Protocol', () => {
   it('Step 2: MCP check_status returns phase: signing', async () => {
     expect(requestId).toBeDefined();
 
-    const { status, result } = await mcpToolCall(301, 'check_status', { requestId });
-    expect(status).toBe(200);
+    const result = await mcpClient.callTool({
+      name: 'check_status',
+      arguments: { requestId },
+    });
 
-    const data = extractMcpToolResult(result);
+    const data = parseToolResult(result);
     expect(data).not.toBeNull();
     expect(data.phase).toBe('signing');
     expect(data.signing.status).toBe('pending');
@@ -466,13 +491,15 @@ describe('Multi-Turn Flow — MCP Protocol', () => {
   it('Step 3: MCP request_payment before signing fails', async () => {
     expect(requestId).toBeDefined();
 
-    const { status, result } = await mcpToolCall(302, 'request_payment', { requestId });
-    expect(status).toBe(200);
+    const result = await mcpClient.callTool({
+      name: 'request_payment',
+      arguments: { requestId },
+    });
 
     // Should be an error (isError: true or error field)
-    const data = extractMcpToolResult(result);
+    const data = parseToolResult(result);
     expect(data).not.toBeNull();
-    const hasError = result.result?.isError || data.error || data.isError;
+    const hasError = (result as any).isError || data.error || data.isError;
     expect(hasError).toBeTruthy();
   });
 
@@ -484,10 +511,12 @@ describe('Multi-Turn Flow — MCP Protocol', () => {
   it('Step 5: MCP check_status after signing shows correct phase', async () => {
     expect(requestId).toBeDefined();
 
-    const { status, result } = await mcpToolCall(303, 'check_status', { requestId });
-    expect(status).toBe(200);
+    const result = await mcpClient.callTool({
+      name: 'check_status',
+      arguments: { requestId },
+    });
 
-    const data = extractMcpToolResult(result);
+    const data = parseToolResult(result);
     expect(data).not.toBeNull();
     expect(data.signing.status).toBe('completed');
 
@@ -503,14 +532,16 @@ describe('Multi-Turn Flow — MCP Protocol', () => {
   it('Step 6: MCP request_payment after signing succeeds (or disabled)', async () => {
     expect(requestId).toBeDefined();
 
-    const { status, result } = await mcpToolCall(304, 'request_payment', { requestId });
-    expect(status).toBe(200);
+    const result = await mcpClient.callTool({
+      name: 'request_payment',
+      arguments: { requestId },
+    });
 
-    const data = extractMcpToolResult(result);
+    const data = parseToolResult(result);
     expect(data).not.toBeNull();
 
     if (paymentMode === 'disabled') {
-      const hasError = result.result?.isError || data.error || data.isError;
+      const hasError = (result as any).isError || data.error || data.isError;
       expect(hasError).toBeTruthy();
     } else {
       expect(data.requestId).toBe(requestId);
@@ -528,10 +559,12 @@ describe('Multi-Turn Flow — MCP Protocol', () => {
 
     await simulatePayment(requestId);
 
-    const { status, result } = await mcpToolCall(305, 'check_status', { requestId });
-    expect(status).toBe(200);
+    const result = await mcpClient.callTool({
+      name: 'check_status',
+      arguments: { requestId },
+    });
 
-    const data = extractMcpToolResult(result);
+    const data = parseToolResult(result);
     expect(data).not.toBeNull();
     expect(data.phase).toBe('ready');
     expect(data.payment.status).toBe('completed');
@@ -545,6 +578,18 @@ describe('Multi-Turn Flow — MCP Protocol', () => {
 
 describe('Multi-Turn Flow — Cross-Protocol', () => {
   let requestId: string;
+  let mcpClient: McpClient;
+  let mcpTransport: StreamableHTTPClientTransport;
+
+  beforeAll(async () => {
+    const conn = await createMcpSdkClient();
+    mcpClient = conn.client;
+    mcpTransport = conn.transport;
+  });
+
+  afterAll(async () => {
+    try { await mcpTransport.close(); } catch { /* ignore */ }
+  });
 
   it('Step 1: REST request_signing creates session', async () => {
     const { status, json } = await jsonPost('/api/v1/signing', {
@@ -559,28 +604,20 @@ describe('Multi-Turn Flow — Cross-Protocol', () => {
   it('Step 2: A2A check_status reads the same session', async () => {
     expect(requestId).toBeDefined();
 
-    const { status, json } = await jsonPost('/a2a', {
-      jsonrpc: '2.0',
-      id: 400,
-      method: 'message/send',
-      params: {
-        message: {
-          role: 'user',
-          parts: [{ kind: 'data', mimeType: 'application/json', data: { skill: 'check_status', requestId } }],
-        },
+    const result = await a2aClient.sendMessage({
+      message: {
+        kind: 'message',
+        messageId: randomUUID(),
+        role: 'user',
+        parts: [{ kind: 'data', data: { skill: 'check_status', requestId } }],
       },
     });
 
-    expect(status).toBe(200);
-    expect(json.result.status.state).toBe('completed');
+    const task = result as Task;
+    expect(task.status.state).toBe('input-required');
 
-    let phase: string | undefined;
-    for (const artifact of json.result.artifacts || []) {
-      for (const part of artifact.parts || []) {
-        if (part.kind === 'data' && part.data?.phase) phase = part.data.phase;
-      }
-    }
-    expect(phase).toBe('signing');
+    const data = extractDataFromArtifacts(task.artifacts);
+    expect(data.phase).toBe('signing');
   });
 
   it('Step 3: Simulate signing completion', async () => {
@@ -590,27 +627,12 @@ describe('Multi-Turn Flow — Cross-Protocol', () => {
   it('Step 4: MCP check_status after signing shows correct phase', async () => {
     expect(requestId).toBeDefined();
 
-    const res = await fetch(`${BASE_URL}/mcp`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json, text/event-stream',
-      },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 401,
-        method: 'tools/call',
-        params: { name: 'check_status', arguments: { requestId } },
-      }),
+    const result = await mcpClient.callTool({
+      name: 'check_status',
+      arguments: { requestId },
     });
 
-    expect(res.status).toBe(200);
-    const text = await res.text();
-    const events = parseSseEvents(text);
-    const result = events[0];
-    const textContent = result?.result?.content?.find((c: any) => c.type === 'text');
-    const data = JSON.parse(textContent.text);
-
+    const data = parseToolResult(result);
     expect(data.signing.status).toBe('completed');
     if (paymentMode === 'disabled') {
       expect(data.phase).toBe('ready');
@@ -699,32 +721,30 @@ describe('Multi-Turn Flow — Edge Cases', () => {
     const reqId = createRes.json.requestId;
     await simulateSigning(reqId);
 
-    // Call request_payment via message/stream
-    const res = await fetch(`${BASE_URL}/a2a`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 500,
-        method: 'message/stream',
-        params: {
-          message: {
-            role: 'user',
-            parts: [{ kind: 'data', mimeType: 'application/json', data: { skill: 'request_payment', requestId: reqId } }],
-          },
-        },
-      }),
+    // Call request_payment via sendMessageStream (SDK)
+    const events: any[] = [];
+
+    const stream = a2aClient.sendMessageStream({
+      message: {
+        kind: 'message',
+        messageId: randomUUID(),
+        role: 'user',
+        parts: [{ kind: 'data', data: { skill: 'request_payment', requestId: reqId } }],
+      },
     });
 
-    expect(res.status).toBe(200);
-    expect(res.headers.get('content-type')).toContain('text/event-stream');
+    for await (const event of stream) {
+      events.push(event);
+    }
 
-    const text = await res.text();
-    const events = parseSseEvents(text);
     expect(events.length).toBeGreaterThan(0);
 
-    // Should contain a completed task with paymentUrl
-    const completedEvent = events.find(e => e.result?.status?.state === 'completed');
+    // Should contain an input-required task or status-update (request_payment returns input-required)
+    const completedEvent = events.find(
+      (e) =>
+        (e.kind === 'status-update' && e.status?.state === 'input-required') ||
+        (e.kind === 'task' && e.status?.state === 'input-required'),
+    );
     expect(completedEvent).toBeDefined();
   });
 });
@@ -911,51 +931,28 @@ describe('REST Flow Endpoint — SSE Events', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// A2A Context Linking — contextId auto-resolves requestId
+// A2A Context Linking — contextId auto-resolves requestId (SDK Client)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('A2A Context Linking — contextId auto-resolution', () => {
   const contextId = `e2e-ctx-${Date.now()}`;
   let requestId: string;
 
-  function a2aCallWithContext(id: number, skill: string, params: Record<string, unknown>) {
-    return jsonPost('/a2a', {
-      jsonrpc: '2.0',
-      id,
-      method: 'message/send',
-      params: {
-        message: {
-          role: 'user',
-          contextId,
-          parts: [{ kind: 'data', mimeType: 'application/json', data: { skill, ...params } }],
-        },
+  it('Step 1: request_signing with contextId stores requestId mapping', async () => {
+    const result = await a2aClient.sendMessage({
+      message: {
+        kind: 'message',
+        messageId: randomUUID(),
+        role: 'user',
+        contextId,
+        parts: [{ kind: 'data', data: { skill: 'request_signing', circuitId: 'coinbase_attestation', scope: 'context-link-test.zkproofport.app' } }],
       },
     });
-  }
 
-  function extractDataFromArtifacts(artifacts: any[]): Record<string, unknown> {
-    const result: Record<string, unknown> = {};
-    for (const artifact of artifacts || []) {
-      for (const part of artifact.parts || []) {
-        if (part.kind === 'data' && part.data) {
-          Object.assign(result, part.data);
-        }
-      }
-    }
-    return result;
-  }
+    const task = result as Task;
+    expect(task.status.state).toBe('input-required');
 
-  it('Step 1: request_signing with contextId stores requestId mapping', async () => {
-    const { status, json } = await a2aCallWithContext(600, 'request_signing', {
-      circuitId: 'coinbase_attestation',
-      scope: 'context-link-test.zkproofport.app',
-    });
-
-    expect(status).toBe(200);
-    expect(json.result).toBeDefined();
-    expect(json.result.status.state).toBe('completed');
-
-    const data = extractDataFromArtifacts(json.result.artifacts);
+    const data = extractDataFromArtifacts(task.artifacts);
     expect(data.requestId).toBeDefined();
     expect(data.signingUrl).toBeDefined();
 
@@ -966,13 +963,20 @@ describe('A2A Context Linking — contextId auto-resolution', () => {
     expect(requestId).toBeDefined();
 
     // Note: no requestId in params — should be auto-resolved from contextId
-    const { status, json } = await a2aCallWithContext(601, 'check_status', {});
+    const result = await a2aClient.sendMessage({
+      message: {
+        kind: 'message',
+        messageId: randomUUID(),
+        role: 'user',
+        contextId,
+        parts: [{ kind: 'data', data: { skill: 'check_status' } }],
+      },
+    });
 
-    expect(status).toBe(200);
-    expect(json.result).toBeDefined();
-    expect(json.result.status.state).toBe('completed');
+    const task = result as Task;
+    expect(task.status.state).toBe('input-required');
 
-    const data = extractDataFromArtifacts(json.result.artifacts);
+    const data = extractDataFromArtifacts(task.artifacts);
     expect(data.phase).toBe('signing');
     expect(data.requestId).toBe(requestId);
   });
@@ -981,10 +985,18 @@ describe('A2A Context Linking — contextId auto-resolution', () => {
     expect(requestId).toBeDefined();
     await simulateSigning(requestId);
 
-    const { status, json } = await a2aCallWithContext(602, 'check_status', {});
+    const result = await a2aClient.sendMessage({
+      message: {
+        kind: 'message',
+        messageId: randomUUID(),
+        role: 'user',
+        contextId,
+        parts: [{ kind: 'data', data: { skill: 'check_status' } }],
+      },
+    });
 
-    expect(status).toBe(200);
-    const data = extractDataFromArtifacts(json.result.artifacts);
+    const task = result as Task;
+    const data = extractDataFromArtifacts(task.artifacts);
     expect((data.signing as any).status).toBe('completed');
 
     if (paymentMode === 'disabled') {
@@ -998,16 +1010,23 @@ describe('A2A Context Linking — contextId auto-resolution', () => {
     expect(requestId).toBeDefined();
 
     // No requestId in params — auto-resolved
-    const { status, json } = await a2aCallWithContext(603, 'request_payment', {});
+    const result = await a2aClient.sendMessage({
+      message: {
+        kind: 'message',
+        messageId: randomUUID(),
+        role: 'user',
+        contextId,
+        parts: [{ kind: 'data', data: { skill: 'request_payment' } }],
+      },
+    });
 
-    expect(status).toBe(200);
-    expect(json.result).toBeDefined();
+    const task = result as Task;
 
     if (paymentMode === 'disabled') {
-      expect(json.result.status.state).toBe('failed');
+      expect(task.status.state).toBe('failed');
     } else {
-      expect(json.result.status.state).toBe('completed');
-      const data = extractDataFromArtifacts(json.result.artifacts);
+      expect(task.status.state).toBe('input-required');
+      const data = extractDataFromArtifacts(task.artifacts);
       expect(data.paymentUrl).toBeDefined();
     }
   });
@@ -1016,152 +1035,130 @@ describe('A2A Context Linking — contextId auto-resolution', () => {
     expect(requestId).toBeDefined();
 
     // Explicitly passing requestId — should still work
-    const { status, json } = await a2aCallWithContext(604, 'check_status', { requestId });
+    const result = await a2aClient.sendMessage({
+      message: {
+        kind: 'message',
+        messageId: randomUUID(),
+        role: 'user',
+        contextId,
+        parts: [{ kind: 'data', data: { skill: 'check_status', requestId } }],
+      },
+    });
 
-    expect(status).toBe(200);
-    expect(json.result).toBeDefined();
-    expect(json.result.status.state).toBe('completed');
+    const task = result as Task;
+    // Phase depends on paymentMode: 'ready' → completed, 'payment' → input-required
+    if (paymentMode === 'disabled') {
+      expect(task.status.state).toBe('completed');
+    } else {
+      expect(task.status.state).toBe('input-required');
+    }
 
-    const data = extractDataFromArtifacts(json.result.artifacts);
+    const data = extractDataFromArtifacts(task.artifacts);
     expect(data.requestId).toBe(requestId);
   });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// A2A Context Linking — No contextId regression
+// A2A Context Linking — No contextId regression (SDK Client)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('A2A Context Linking — No contextId (backward compatible)', () => {
   it('check_status without contextId and without requestId returns error', async () => {
-    const { status, json } = await jsonPost('/a2a', {
-      jsonrpc: '2.0',
-      id: 700,
-      method: 'message/send',
-      params: {
-        message: {
-          role: 'user',
-          parts: [{ kind: 'data', mimeType: 'application/json', data: { skill: 'check_status' } }],
-        },
+    const result = await a2aClient.sendMessage({
+      message: {
+        kind: 'message',
+        messageId: randomUUID(),
+        role: 'user',
+        parts: [{ kind: 'data', data: { skill: 'check_status' } }],
       },
     });
 
-    expect(status).toBe(200);
-    expect(json.result).toBeDefined();
+    const task = result as Task;
     // Should fail because no requestId and no contextId to auto-resolve from
-    expect(json.result.status.state).toBe('failed');
+    expect(task.status.state).toBe('failed');
   });
 
   it('request_signing without contextId still works normally', async () => {
-    const { status, json } = await jsonPost('/a2a', {
-      jsonrpc: '2.0',
-      id: 701,
-      method: 'message/send',
-      params: {
-        message: {
-          role: 'user',
-          parts: [{
-            kind: 'data',
-            mimeType: 'application/json',
-            data: {
-              skill: 'request_signing',
-              circuitId: 'coinbase_attestation',
-              scope: 'no-context-test.zkproofport.app',
-            },
-          }],
-        },
+    const result = await a2aClient.sendMessage({
+      message: {
+        kind: 'message',
+        messageId: randomUUID(),
+        role: 'user',
+        parts: [{
+          kind: 'data',
+          data: {
+            skill: 'request_signing',
+            circuitId: 'coinbase_attestation',
+            scope: 'no-context-test.zkproofport.app',
+          },
+        }],
       },
     });
 
-    expect(status).toBe(200);
-    expect(json.result).toBeDefined();
-    expect(json.result.status.state).toBe('completed');
+    const task = result as Task;
+    expect(task.status.state).toBe('input-required');
 
-    let foundRequestId: string | undefined;
-    for (const artifact of json.result.artifacts || []) {
-      for (const part of artifact.parts || []) {
-        if (part.kind === 'data' && part.data?.requestId) {
-          foundRequestId = part.data.requestId;
-        }
-      }
-    }
-    expect(foundRequestId).toBeDefined();
+    const data = extractDataFromArtifacts(task.artifacts);
+    expect(data.requestId).toBeDefined();
   });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// A2A TextPart — LLM Inference E2E (Full Round-Trip via POST /a2a)
+// A2A TextPart — LLM Inference E2E (SDK Client)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('A2A TextPart — LLM Inference E2E', () => {
-  // Helper: send TextPart message to POST /a2a and get full response
-  async function a2aTextCall(id: number, text: string) {
-    return jsonPost('/a2a', {
-      jsonrpc: '2.0',
-      id,
-      method: 'message/send',
-      params: {
-        message: {
-          role: 'user',
-          parts: [{ kind: 'text', text }],
-        },
+  it('TextPart: "list supported circuits" → get_supported_circuits skill executed, returns circuits', { timeout: 30000 }, async () => {
+    const result = await a2aClient.sendMessage({
+      message: {
+        kind: 'message',
+        messageId: randomUUID(),
+        role: 'user',
+        parts: [{ kind: 'text', text: 'list supported circuits' }],
       },
     });
-  }
 
-  function extractDataFromArtifacts(artifacts: any[]): Record<string, unknown> {
-    const result: Record<string, unknown> = {};
-    for (const artifact of artifacts || []) {
-      for (const part of artifact.parts || []) {
-        if (part.kind === 'data' && part.data) {
-          Object.assign(result, part.data);
-        }
-      }
-    }
-    return result;
-  }
+    const task = result as Task;
+    expect(task.status.state).toBe('completed');
 
-  it('TextPart: "list supported circuits" → get_supported_circuits skill executed, returns circuits', { timeout: 30000 }, async () => {
-    const { status, json } = await a2aTextCall(700, 'list supported circuits');
-
-    expect(status).toBe(200);
-    expect(json.error).toBeUndefined();
-    expect(json.result).toBeDefined();
-    expect(json.result.status.state).toBe('completed');
-
-    const data = extractDataFromArtifacts(json.result.artifacts);
+    const data = extractDataFromArtifacts(task.artifacts);
     expect(data.circuits).toBeDefined();
     expect(Array.isArray(data.circuits)).toBe(true);
     expect((data.circuits as any[]).length).toBeGreaterThan(0);
   });
 
   it('TextPart: "verify proof 0xaabb for coinbase_attestation" → verify_proof skill executed', { timeout: 30000 }, async () => {
-    const { status, json } = await a2aTextCall(
-      701,
-      'verify proof 0xaabb with publicInputs 0x' + 'cc'.repeat(32) + ' for coinbase_attestation on chain 84532'
-    );
+    const result = await a2aClient.sendMessage({
+      message: {
+        kind: 'message',
+        messageId: randomUUID(),
+        role: 'user',
+        parts: [{ kind: 'text', text: 'verify proof 0xaabb with publicInputs 0x' + 'cc'.repeat(32) + ' for coinbase_attestation on chain 84532' }],
+      },
+    });
 
-    expect(status).toBe(200);
-    expect(json.error).toBeUndefined();
-    expect(json.result).toBeDefined();
+    const task = result as Task;
     // verify_proof may complete or fail depending on proof data, but skill should execute
-    expect(['completed', 'failed']).toContain(json.result.status.state);
+    expect(['completed', 'failed']).toContain(task.status.state);
   });
 
   it('TextPart: "generate proof for coinbase_attestation scope test.com" → request_signing flow started', { timeout: 30000 }, async () => {
-    const { status, json } = await a2aTextCall(
-      702,
-      'generate proof for coinbase_attestation with scope textpart-test.zkproofport.app'
-    );
+    const result = await a2aClient.sendMessage({
+      message: {
+        kind: 'message',
+        messageId: randomUUID(),
+        role: 'user',
+        parts: [{ kind: 'text', text: 'generate proof for coinbase_attestation with scope textpart-test.zkproofport.app' }],
+      },
+    });
 
-    expect(status).toBe(200);
-    expect(json.error).toBeUndefined();
-    expect(json.result).toBeDefined();
-    // LLM routes to request_signing (start of flow) or generate_proof
-    // Both are valid — the key is the skill executed successfully
-    expect(['completed', 'failed']).toContain(json.result.status.state);
+    const task = result as Task;
+    // LLM routes to request_signing (input-required) or generate_proof (completed/failed)
+    // All are valid — the key is the skill executed successfully
+    expect(['completed', 'failed', 'input-required']).toContain(task.status.state);
 
-    if (json.result.status.state === 'completed') {
-      const data = extractDataFromArtifacts(json.result.artifacts);
+    if (task.status.state === 'completed') {
+      const data = extractDataFromArtifacts(task.artifacts);
       // If routed to request_signing: should have requestId + signingUrl
       // If routed to generate_proof: would fail (no signing done yet) but still returns
       if (data.requestId) {
@@ -1173,16 +1170,19 @@ describe('A2A TextPart — LLM Inference E2E', () => {
 
   it('TextPart multi-turn: request_signing → check_status via natural language', { timeout: 60000 }, async () => {
     // Step 1: Start signing via TextPart
-    const { status: s1, json: j1 } = await a2aTextCall(
-      710,
-      'I need a KYC proof for coinbase_attestation with scope textpart-multi.zkproofport.app'
-    );
+    const result1 = await a2aClient.sendMessage({
+      message: {
+        kind: 'message',
+        messageId: randomUUID(),
+        role: 'user',
+        parts: [{ kind: 'text', text: 'I need a KYC proof for coinbase_attestation with scope textpart-multi.zkproofport.app' }],
+      },
+    });
 
-    expect(s1).toBe(200);
-    expect(j1.result).toBeDefined();
-    expect(j1.result.status.state).toBe('completed');
+    const task1 = result1 as Task;
+    expect(task1.status.state).toBe('input-required');
 
-    const data1 = extractDataFromArtifacts(j1.result.artifacts);
+    const data1 = extractDataFromArtifacts(task1.artifacts);
     // LLM should route to request_signing
     if (!data1.requestId) {
       // If LLM routed to generate_proof instead, that's also valid but we can't continue multi-turn
@@ -1192,33 +1192,37 @@ describe('A2A TextPart — LLM Inference E2E', () => {
     const requestId = data1.requestId as string;
 
     // Step 2: Check status using DataPart (reliable) to verify the request exists
-    const { status: s2, json: j2 } = await jsonPost('/a2a', {
-      jsonrpc: '2.0',
-      id: 711,
-      method: 'message/send',
-      params: {
-        message: {
-          role: 'user',
-          parts: [{ kind: 'data', mimeType: 'application/json', data: { skill: 'check_status', requestId } }],
-        },
+    const result2 = await a2aClient.sendMessage({
+      message: {
+        kind: 'message',
+        messageId: randomUUID(),
+        role: 'user',
+        parts: [{ kind: 'data', data: { skill: 'check_status', requestId } }],
       },
     });
 
-    expect(s2).toBe(200);
-    expect(j2.result.status.state).toBe('completed');
+    const task2 = result2 as Task;
+    expect(task2.status.state).toBe('input-required');
 
-    const data2 = extractDataFromArtifacts(j2.result.artifacts);
+    const data2 = extractDataFromArtifacts(task2.artifacts);
     expect(data2.phase).toBe('signing');
   });
 
   it('TextPart: message with no LLM configured returns error gracefully', { timeout: 15000 }, async () => {
-    // If LLM is configured, this will succeed. If not, should return a JSON-RPC error.
+    // If LLM is configured, this will succeed. If not, should return a failed task.
     // Either way, the server should NOT crash or return 500.
-    const { status, json } = await a2aTextCall(720, 'hello world');
+    const result = await a2aClient.sendMessage({
+      message: {
+        kind: 'message',
+        messageId: randomUUID(),
+        role: 'user',
+        parts: [{ kind: 'text', text: 'hello world' }],
+      },
+    });
 
-    expect(status).toBe(200);
-    // Either a result (LLM routed to a skill) or an error (LLM not configured / couldn't determine skill)
-    expect(json.jsonrpc).toBe('2.0');
-    expect(json.result !== undefined || json.error !== undefined).toBe(true);
+    // SDK returns a Task (either completed or failed)
+    const task = result as Task;
+    expect(task.status).toBeDefined();
+    expect(task.status.state).toBeDefined();
   });
 });

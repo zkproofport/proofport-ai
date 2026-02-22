@@ -10,6 +10,7 @@ import {
   handleGetSupportedCircuits,
   type SkillDeps,
 } from '../skills/skillHandler.js';
+import { getTaskOutcome } from '../skills/flowGuidance.js';
 import type { RateLimiter } from '../redis/rateLimiter.js';
 import type { ProofCache } from '../redis/proofCache.js';
 import type { RedisClient } from '../redis/client.js';
@@ -56,8 +57,12 @@ function buildSkillDeps(deps: McpServerDeps, config: ReturnType<typeof loadConfi
 /**
  * Create and configure the MCP server with all tool registrations.
  * Separated from startServer() to allow testing without starting stdio transport.
+ *
+ * @param deps - Optional runtime dependencies (Redis, rate limiter, etc.)
+ * @param config - Optional pre-loaded config. When provided, skips loadConfig()
+ *                 inside each tool handler (required for testing without env vars).
  */
-export function createMcpServer(deps: McpServerDeps = {}): McpServer {
+export function createMcpServer(deps: McpServerDeps = {}, config?: ReturnType<typeof loadConfig>): McpServer {
   const server = new McpServer(
     {
       name: 'zkproofport-prover',
@@ -74,7 +79,7 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
   // ─── request_signing ────────────────────────────────────────────────
   server.tool(
     'request_signing',
-    '[STEP 1/4] Start a proof generation session. Creates a signing request and returns a URL where the user opens in their browser to connect their wallet and sign. After calling this, wait for the user to complete signing, then call check_status with the returned requestId.',
+    '[STEP 1/5] Start a proof generation session. Creates a signing request and returns a URL where the user opens in their browser to connect their wallet and sign. After calling this, wait for the user to complete signing, then call check_status with the returned requestId.',
     {
       circuitId: z.string().describe('Circuit identifier: coinbase_attestation or coinbase_country_attestation'),
       scope: z.string().describe('Privacy scope string for nullifier computation'),
@@ -83,10 +88,14 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
     },
     async (args) => {
       try {
-        const config = loadConfig();
-        const skillDeps = buildSkillDeps(deps, config);
+        const resolvedConfig = config || loadConfig();
+        const skillDeps = buildSkillDeps(deps, resolvedConfig);
         const result = await handleRequestSigning(args, skillDeps);
-        return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+        const { guidance } = getTaskOutcome('request_signing', result);
+        return { content: [
+          { type: 'text' as const, text: guidance },
+          { type: 'text' as const, text: JSON.stringify(result, null, 2) },
+        ] };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return { content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }], isError: true };
@@ -97,16 +106,20 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
   // ─── check_status ────────────────────────────────────────────────────
   server.tool(
     'check_status',
-    '[STEP 2/4] Check the signing and payment status of a proof request. Call with the requestId from request_signing. Returns phase: "signing" (user hasn\'t signed yet), "payment" (signed, needs payment), "ready" (can generate proof), or "expired". When phase is "payment", call request_payment. When phase is "ready", call generate_proof.',
+    '[STEP 2/5] Check the signing and payment status of a proof request. Call with the requestId from request_signing. Returns phase: "signing" (user hasn\'t signed yet), "payment" (signed, needs payment), "ready" (can generate proof), or "expired". When phase is "payment", call request_payment. When phase is "ready", call generate_proof.',
     {
       requestId: z.string().describe('Request ID from request_signing'),
     },
     async (args) => {
       try {
-        const config = loadConfig();
-        const skillDeps = buildSkillDeps(deps, config);
+        const resolvedConfig = config || loadConfig();
+        const skillDeps = buildSkillDeps(deps, resolvedConfig);
         const result = await handleCheckStatus(args, skillDeps);
-        return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+        const { guidance } = getTaskOutcome('check_status', result);
+        return { content: [
+          { type: 'text' as const, text: guidance },
+          { type: 'text' as const, text: JSON.stringify(result, null, 2) },
+        ] };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return { content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }], isError: true };
@@ -117,16 +130,20 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
   // ─── request_payment ─────────────────────────────────────────────────
   server.tool(
     'request_payment',
-    '[STEP 3/4] Initiate USDC payment for proof generation. Returns a payment URL the user opens in their browser. Only call when check_status returns phase "payment". After user pays, call check_status again to verify phase is "ready".',
+    '[STEP 3/5] Initiate USDC payment for proof generation. Returns a payment URL the user opens in their browser. Only call when check_status returns phase "payment". After user pays, call check_status again to verify phase is "ready".',
     {
       requestId: z.string().describe('Request ID from request_signing'),
     },
     async (args) => {
       try {
-        const config = loadConfig();
-        const skillDeps = buildSkillDeps(deps, config);
+        const resolvedConfig = config || loadConfig();
+        const skillDeps = buildSkillDeps(deps, resolvedConfig);
         const result = await handleRequestPayment(args, skillDeps);
-        return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+        const { guidance } = getTaskOutcome('request_payment', result);
+        return { content: [
+          { type: 'text' as const, text: guidance },
+          { type: 'text' as const, text: JSON.stringify(result, null, 2) },
+        ] };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return { content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }], isError: true };
@@ -137,13 +154,7 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
   // ─── generate_proof ─────────────────────────────────────────────────
   server.tool(
     'generate_proof',
-    `[STEP 4/4] Generate a zero-knowledge proof for a given circuit. This is a 2-step process when no signature is provided:
-
-Step 1: Call without signature/requestId → returns {status: "awaiting_signature", signingUrl, requestId}. Open the signingUrl in a browser and ask the user to connect their wallet and sign.
-
-Step 2: After the user signs, call again with the same scope/circuitId and the requestId from Step 1 → returns the generated proof with publicInputs, nullifier, and signalHash.
-
-If you already have a signature and address, provide them directly to skip the signing flow and generate the proof in a single call.
+    `[STEP 4/5] Generate a zero-knowledge proof for a given circuit. When using the standard flow, provide the requestId from request_signing after check_status confirms phase is "ready". Alternatively, provide address and signature directly to skip the signing flow. If called without requestId or signature, a web signing request is created automatically. Proof generation takes 30-90 seconds.
 
 The response includes a TEE attestation when running in a trusted execution environment (local simulation or AWS Nitro Enclave).`,
     {
@@ -157,8 +168,8 @@ The response includes a TEE attestation when running in a trusted execution envi
     },
     async (args) => {
       try {
-        const config = loadConfig();
-        const skillDeps = buildSkillDeps(deps, config);
+        const resolvedConfig = config || loadConfig();
+        const skillDeps = buildSkillDeps(deps, resolvedConfig);
         const result = await handleGenerateProof({
           address: args.address,
           signature: args.signature,
@@ -168,7 +179,11 @@ The response includes a TEE attestation when running in a trusted execution envi
           isIncluded: args.isIncluded,
           requestId: args.requestId,
         }, skillDeps);
-        return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+        const { guidance } = getTaskOutcome('generate_proof', result);
+        return { content: [
+          { type: 'text' as const, text: guidance },
+          { type: 'text' as const, text: JSON.stringify(result, null, 2) },
+        ] };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return { content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }], isError: true };
@@ -179,24 +194,30 @@ The response includes a TEE attestation when running in a trusted execution envi
   // ─── verify_proof ───────────────────────────────────────────────────
   server.tool(
     'verify_proof',
-    '[OPTIONAL] Verify a previously generated zero-knowledge proof on-chain against the deployed verifier contract. Not part of the standard proof generation flow — call only when the user explicitly requests verification.',
+    '[STEP 5/5 — OPTIONAL] Verify a previously generated zero-knowledge proof on-chain against the deployed verifier contract. Not part of the standard proof generation flow — call only when the user explicitly requests verification. Provide either proofId (from generate_proof result) or the triplet circuitId+proof+publicInputs.',
     {
-      proof: z.string().describe('The proof bytes (0x-prefixed hex string)'),
-      publicInputs: z.array(z.string()).describe('The public inputs as bytes32 hex strings'),
-      circuitId: z.string().describe('Circuit identifier: coinbase_attestation or coinbase_country_attestation'),
+      proofId: z.string().optional().describe('Proof ID from generate_proof result. When provided, proof/publicInputs/circuitId are loaded from storage automatically.'),
+      proof: z.string().optional().describe('The proof bytes (0x-prefixed hex string). Not needed when proofId is provided.'),
+      publicInputs: z.array(z.string()).optional().describe('The public inputs as bytes32 hex strings. Not needed when proofId is provided.'),
+      circuitId: z.string().optional().describe('Circuit identifier: coinbase_attestation or coinbase_country_attestation. Not needed when proofId is provided.'),
       chainId: z.string().optional().describe('Chain ID (default: 84532 for Base Sepolia)'),
     },
     async (args) => {
       try {
-        const config = loadConfig();
-        const skillDeps = buildSkillDeps(deps, config);
+        const resolvedConfig = config || loadConfig();
+        const skillDeps = buildSkillDeps(deps, resolvedConfig);
         const result = await handleVerifyProof({
+          proofId: args.proofId,
           circuitId: args.circuitId,
           proof: args.proof,
           publicInputs: args.publicInputs,
           chainId: args.chainId,
         }, skillDeps);
-        return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+        const { guidance } = getTaskOutcome('verify_proof', result);
+        return { content: [
+          { type: 'text' as const, text: guidance },
+          { type: 'text' as const, text: JSON.stringify(result, null, 2) },
+        ] };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return { content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }], isError: true };
@@ -210,7 +231,11 @@ The response includes a TEE attestation when running in a trusted execution envi
     '[DISCOVERY] List all supported ZK circuits with their metadata, descriptions, required inputs, and verifier addresses. Call this first to discover available circuits before starting a proof generation flow.',
     async () => {
       const result = handleGetSupportedCircuits({});
-      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+      const { guidance } = getTaskOutcome('get_supported_circuits', result);
+      return { content: [
+        { type: 'text' as const, text: guidance },
+        { type: 'text' as const, text: JSON.stringify(result, null, 2) },
+      ] };
     },
   );
 
@@ -250,13 +275,12 @@ Then call check_status again until phase is "ready".
 → Returns: { proof, publicInputs, nullifier, signalHash, proofId, verifyUrl }
 Takes 30-90 seconds. Present the verifyUrl for on-chain verification.
 
-### Optional
-**verify_proof(proof, publicInputs, circuitId)**
+**Step 5: verify_proof(proofId) — Optional**
 → Returns: { valid, verifierAddress, chainId }
-Only when user explicitly asks for on-chain verification.
+Only when user explicitly asks for on-chain verification. Provide proofId from Step 4, or the triplet circuitId+proof+publicInputs.
 
 ### Notes
-- The requestId links all steps together
+- The requestId links Steps 1–4 together
 - Each step must complete before the next
 - Signing URLs expire after 5 minutes by default`
         }

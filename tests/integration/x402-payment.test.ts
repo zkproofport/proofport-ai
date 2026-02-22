@@ -72,24 +72,13 @@ vi.mock('@x402/core/server', () => ({
 
 // vi.hoisted() runs before vi.mock() factory hoisting, so these values are
 // available inside the ioredis mock factory without TDZ errors.
-const { _redisStore, _redisListStore, _mockRedisHolder } = vi.hoisted(() => ({
+const { _redisStore, _redisListStore } = vi.hoisted(() => ({
   _redisStore: new Map<string, string>(),
   _redisListStore: new Map<string, string[]>(),
-  _mockRedisHolder: { instance: null as any },
 }));
 
-// Mock ioredis with list operation support (task queue uses lpush/rpop).
-// mockRedis is a singleton — all new Redis() calls return the same object.
-// beforeEach restores redis.lpush to the original vi.fn after TaskWorker.start()
-// patches it, preventing stale closure accumulation across tests.
+// Mock ioredis — mockRedis is a singleton shared across all new Redis() calls.
 vi.mock('ioredis', () => {
-  const _lpushOriginal = vi.fn((key: string, value: string) => {
-    const list = _redisListStore.get(key) || [];
-    list.push(value);
-    _redisListStore.set(key, list);
-    return Promise.resolve(list.length);
-  });
-
   const mockRedis: any = {
     get: vi.fn((key: string) => Promise.resolve(_redisStore.get(key) || null)),
     set: vi.fn((...args: any[]) => {
@@ -105,7 +94,12 @@ vi.mock('ioredis', () => {
       if (list && list.length > 0) return Promise.resolve(list.pop()!);
       return Promise.resolve(null);
     }),
-    lpush: _lpushOriginal,
+    lpush: vi.fn((key: string, value: string) => {
+      const list = _redisListStore.get(key) || [];
+      list.push(value);
+      _redisListStore.set(key, list);
+      return Promise.resolve(list.length);
+    }),
     rpush: vi.fn((key: string, value: string) => {
       const list = _redisListStore.get(key) || [];
       list.push(value);
@@ -117,10 +111,7 @@ vi.mock('ioredis', () => {
     expire: vi.fn().mockResolvedValue(1),
     quit: vi.fn().mockResolvedValue('OK'),
     status: 'ready',
-    // Store original lpush so beforeEach can restore it after each test patches it
-    _originalLpushFn: _lpushOriginal,
   };
-  _mockRedisHolder.instance = mockRedis;
   return { default: vi.fn(() => mockRedis), Redis: vi.fn(() => mockRedis) };
 });
 
@@ -215,137 +206,7 @@ vi.mock('../../src/config/contracts.js', async () => {
   };
 });
 
-// Mock TaskWorker — intercepts task creation via the queue and immediately emits
-// task completion so waitForTaskCompletion() resolves without real proof generation.
-//
-// Strategy: `start()` patches the taskStore's redis lpush so that whenever a task
-// is pushed to `a2a:queue:submitted`, the worker immediately processes it in the
-// next microtask (after waitForTaskCompletion has registered its listener).
-// The mock is skill-aware: it produces correct artifacts per skill and fails on
-// missing required parameters, matching the real TaskWorker behavior.
-vi.mock('../../src/a2a/taskWorker.js', () => {
-  return {
-    TaskWorker: vi.fn().mockImplementation((deps: any) => {
-      return {
-        start: vi.fn(() => {
-          const { taskStore, taskEventEmitter } = deps;
-          const redis = (taskStore as any).redis;
-          const originalLpush = redis.lpush.bind(redis);
-          redis.lpush = async (key: string, value: string) => {
-            const result = await originalLpush(key, value);
-            if (key === 'a2a:queue:submitted') {
-              setImmediate(async () => {
-                try {
-                  const task = await taskStore.getTask(value);
-                  if (!task || task.status.state !== 'queued') return;
-                  await taskStore.updateTaskStatus(value, 'running');
-
-                  const skill = task.skill;
-                  const params = task.params || {};
-
-                  if (skill === 'get_supported_circuits') {
-                    await taskStore.addArtifact(value, {
-                      id: 'circuits-artifact',
-                      mimeType: 'application/json',
-                      parts: [
-                        { kind: 'text', text: 'Found 2 supported circuits on chain 84532.' },
-                        {
-                          kind: 'data',
-                          mimeType: 'application/json',
-                          data: {
-                            circuits: [
-                              { id: 'coinbase_attestation', displayName: 'Coinbase KYC', description: 'Coinbase identity attestation' },
-                              { id: 'coinbase_country_attestation', displayName: 'Coinbase Country', description: 'Coinbase country attestation' },
-                            ],
-                            chainId: params.chainId || '84532',
-                          },
-                        },
-                      ],
-                    });
-                    const finalTask = await taskStore.updateTaskStatus(value, 'completed');
-                    taskEventEmitter.emitTaskComplete(value, finalTask);
-                  } else if (skill === 'verify_proof') {
-                    if (!params.circuitId || !params.proof || !params.publicInputs) {
-                      await taskStore.addArtifact(value, {
-                        id: 'error-artifact',
-                        mimeType: 'application/json',
-                        parts: [{ kind: 'text', text: 'Missing required parameters: circuitId, proof, publicInputs' }],
-                      });
-                      const failedTask = await taskStore.updateTaskStatus(value, 'failed');
-                      taskEventEmitter.emitTaskComplete(value, failedTask);
-                      return;
-                    }
-                    await taskStore.addArtifact(value, {
-                      id: 'verify-artifact',
-                      mimeType: 'application/json',
-                      parts: [
-                        { kind: 'text', text: `Proof verification complete: valid (circuit: ${params.circuitId}, chain: ${params.chainId || '84532'}).` },
-                        {
-                          kind: 'data',
-                          mimeType: 'application/json',
-                          data: {
-                            valid: true,
-                            circuitId: params.circuitId,
-                            verifierAddress: '0x0036B61dBFaB8f3CfEEF77dD5D45F7EFBFE2035c',
-                            chainId: params.chainId || '84532',
-                          },
-                        },
-                      ],
-                    });
-                    const finalTask = await taskStore.updateTaskStatus(value, 'completed');
-                    taskEventEmitter.emitTaskComplete(value, finalTask);
-                  } else if (skill === 'generate_proof') {
-                    if (!params.scope || !params.circuitId) {
-                      await taskStore.addArtifact(value, {
-                        id: 'error-artifact',
-                        mimeType: 'application/json',
-                        parts: [{ kind: 'text', text: 'Missing required parameters: scope, circuitId' }],
-                      });
-                      const failedTask = await taskStore.updateTaskStatus(value, 'failed');
-                      taskEventEmitter.emitTaskComplete(value, failedTask);
-                      return;
-                    }
-                    await taskStore.addArtifact(value, {
-                      id: 'proof-artifact',
-                      mimeType: 'application/json',
-                      parts: [
-                        { kind: 'text', text: `Proof generated successfully for circuit ${params.circuitId}.` },
-                        {
-                          kind: 'data',
-                          mimeType: 'application/json',
-                          data: {
-                            proof: '0xmockproof',
-                            publicInputs: '0x' + 'cc'.repeat(32),
-                            nullifier: '0x' + 'dd'.repeat(32),
-                            signalHash: '0x' + 'ee'.repeat(32),
-                          },
-                        },
-                      ],
-                    });
-                    const finalTask = await taskStore.updateTaskStatus(value, 'completed');
-                    taskEventEmitter.emitTaskComplete(value, finalTask);
-                  } else {
-                    await taskStore.addArtifact(value, {
-                      id: 'error-artifact',
-                      mimeType: 'application/json',
-                      parts: [{ kind: 'text', text: `Unknown skill: ${skill}` }],
-                    });
-                    const failedTask = await taskStore.updateTaskStatus(value, 'failed');
-                    taskEventEmitter.emitTaskComplete(value, failedTask);
-                  }
-                } catch (err) {
-                  console.error('[TaskWorker mock] setImmediate error:', err);
-                }
-              });
-            }
-            return result;
-          };
-        }),
-        stop: vi.fn(),
-      };
-    }),
-  };
-});
+// TaskWorker mock removed — SDK migration uses ProofportExecutor (synchronous execution via DefaultRequestHandler)
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -414,19 +275,8 @@ describe('x402 Payment Gating E2E', () => {
     _redisStore.clear();
     _redisListStore.clear();
 
-    // Restore the original lpush vi.fn on the shared mockRedis singleton.
-    // Each test's TaskWorker.start() patches redis.lpush with a new async wrapper
-    // that closes over that test's taskStore/taskEventEmitter. Without this restore,
-    // wrappers accumulate and inner closures reference stale instances from previous
-    // tests, causing waitForTaskCompletion() to never receive the completion event.
-    if (_mockRedisHolder.instance?._originalLpushFn) {
-      _mockRedisHolder.instance.lpush = _mockRedisHolder.instance._originalLpushFn;
-    }
-
     const appBundle = createApp(testConfig, 123456n);
     app = appBundle.app;
-    // Start the task worker — this patches redis.lpush for this test's app instance
-    appBundle.taskWorker.start();
   });
 
   // ─── A2A Payment Gating ─────────────────────────────────────────────────
@@ -443,11 +293,12 @@ describe('x402 Payment Gating E2E', () => {
           method: 'message/send',
           params: {
             message: {
+              kind: 'message',
+              messageId: 'test-msg-1',
               role: 'user',
               parts: [
                 {
                   kind: 'data',
-                  mimeType: 'application/json',
                   data: {
                     skill: 'generate_proof',
                     scope: 'test.com',
@@ -475,11 +326,12 @@ describe('x402 Payment Gating E2E', () => {
           method: 'message/send',
           params: {
             message: {
+              kind: 'message',
+              messageId: 'test-msg-2',
               role: 'user',
               parts: [
                 {
                   kind: 'data',
-                  mimeType: 'application/json',
                   data: {
                     skill: 'generate_proof',
                     scope: 'test.com',
@@ -518,11 +370,12 @@ describe('x402 Payment Gating E2E', () => {
           method: 'message/send',
           params: {
             message: {
+              kind: 'message',
+              messageId: 'test-msg-3',
               role: 'user',
               parts: [
                 {
                   kind: 'data',
-                  mimeType: 'application/json',
                   data: {
                     skill: 'get_supported_circuits',
                     chainId: '84532',
@@ -552,11 +405,12 @@ describe('x402 Payment Gating E2E', () => {
           method: 'message/send',
           params: {
             message: {
+              kind: 'message',
+              messageId: 'test-msg-4',
               role: 'user',
               parts: [
                 {
                   kind: 'data',
-                  mimeType: 'application/json',
                   data: {
                     skill: 'verify_proof',
                     circuitId: 'coinbase_attestation',
@@ -593,14 +447,10 @@ describe('x402 Payment Gating E2E', () => {
       // tasks/get is always free — should return 200 with a "task not found" error,
       // NOT 402 payment required
       expect(response.status).toBe(200);
-      expect(response.body).toMatchObject({
-        jsonrpc: '2.0',
-        id: 5,
-        error: {
-          code: -32001,
-          message: 'Task not found',
-        },
-      });
+      expect(response.body.jsonrpc).toBe('2.0');
+      expect(response.body.id).toBe(5);
+      expect(response.body.error.code).toBe(-32001);
+      expect(response.body.error.message).toContain('Task not found');
     });
 
     it('tasks/cancel WITHOUT payment returns 200 (always free, not 402)', async () => {
@@ -618,17 +468,13 @@ describe('x402 Payment Gating E2E', () => {
       // tasks/cancel is always free — should return 200 with a "task not found" error,
       // NOT 402 payment required
       expect(response.status).toBe(200);
-      expect(response.body).toMatchObject({
-        jsonrpc: '2.0',
-        id: 6,
-        error: {
-          code: -32001,
-          message: 'Task not found',
-        },
-      });
+      expect(response.body.jsonrpc).toBe('2.0');
+      expect(response.body.id).toBe(6);
+      expect(response.body.error.code).toBe(-32001);
+      expect(response.body.error.message).toContain('Task not found');
     });
 
-    it('tasks/resubscribe WITHOUT payment → 200 (always free)', async () => {
+    it('tasks/resubscribe WITHOUT payment → not 402 (always free)', async () => {
       const response = await request(app)
         .post('/a2a')
         .send({
@@ -639,16 +485,8 @@ describe('x402 Payment Gating E2E', () => {
         });
 
       // Should NOT be 402 — tasks/resubscribe is always free
+      // SDK returns SSE stream for resubscribe, so response may not be JSON
       expect(response.status).not.toBe(402);
-      expect(response.status).toBe(200);
-      expect(response.body).toMatchObject({
-        jsonrpc: '2.0',
-        id: 107,
-        error: {
-          code: -32001,
-          message: 'Task not found',
-        },
-      });
     });
   });
 
@@ -732,9 +570,9 @@ describe('x402 Payment Gating E2E', () => {
       expect(data.result).toBeDefined();
       expect(data.result.content).toBeDefined();
       // Content should mention coinbase_attestation
-      const textContent = data.result.content.find((c: any) => c.type === 'text');
-      expect(textContent).toBeDefined();
-      expect(textContent.text).toContain('coinbase_attestation');
+      const textContents = data.result.content.filter((c: any) => c.type === 'text');
+      expect(textContents.length).toBeGreaterThan(0);
+      expect(textContents[textContents.length - 1].text).toContain('coinbase_attestation');
     });
 
     it('tools/call verify_proof WITHOUT payment returns 200 (free)', async () => {

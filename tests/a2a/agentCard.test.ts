@@ -64,7 +64,6 @@ describe('A2A Agent Card', () => {
       expect(card).toHaveProperty('provider');
       expect(card).toHaveProperty('capabilities');
       expect(card).toHaveProperty('skills');
-      expect(card).toHaveProperty('securitySchemes');
       expect(card).toHaveProperty('identity');
     });
 
@@ -198,15 +197,12 @@ describe('A2A Agent Card', () => {
       expect(card.capabilities.stateTransitionHistory).toBe(true);
     });
 
-    it('should have securitySchemes containing x402', async () => {
+    it('should not have securitySchemes (removed in SDK migration)', async () => {
       const { buildAgentCard } = await import('../../src/a2a/agentCard');
       const card = buildAgentCard(mockConfig);
 
-      expect(card.securitySchemes).toBeDefined();
-      expect(card.securitySchemes.x402).toBeDefined();
-      expect(card.securitySchemes.x402.scheme).toBe('x402');
-      expect(card.securitySchemes.x402.description).toBeDefined();
-      expect(typeof card.securitySchemes.x402.description).toBe('string');
+      // securitySchemes was removed when migrating to @a2a-js/sdk AgentCard type
+      expect((card as any).securitySchemes).toBeUndefined();
     });
 
     it('should use sepolia ERC-8004 address for development', async () => {

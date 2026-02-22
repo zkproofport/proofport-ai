@@ -207,7 +207,7 @@ function makeTestConfig(overrides?: Partial<Config>): Config {
     privyAppId: '',
     privyApiSecret: '',
     privyApiUrl: '',
-    signPageUrl: '',
+    signPageUrl: 'https://sign.zkproofport.app',
     signingTtlSeconds: 300,
     teeMode: 'disabled' as const,
     enclaveCid: undefined,
@@ -602,6 +602,333 @@ describe('Chat Endpoint E2E', () => {
           code: 'not_configured',
         },
       });
+    });
+  });
+
+  // ─── Tool execution loop ─────────────────────────────────────────────────
+
+  describe('POST /v1/chat/completions — Tool execution loop', () => {
+    it('executes request_signing tool call and includes skill result DSL block in response', async () => {
+      // LLM first returns a request_signing tool call, then a final content response
+      mockChat.mockReset();
+      mockChat
+        .mockResolvedValueOnce({
+          content: 'Let me start signing...',
+          toolCalls: [{ id: 'call_1', name: 'request_signing', args: { circuitId: 'coinbase_attestation', scope: 'test.com' } }],
+        })
+        .mockResolvedValueOnce({
+          content: 'I created a signing request for you.',
+          toolCalls: [],
+        });
+
+      const response = await request(app)
+        .post('/v1/chat/completions')
+        .send({
+          messages: [{ role: 'user', content: 'generate a proof for coinbase_attestation scope test.com' }],
+        });
+
+      expect(response.status).toBe(200);
+      const content: string = response.body.choices[0].message.content;
+      // The final response should include LLM's content
+      expect(content).toContain('I created a signing request for you.');
+    });
+
+    it('appends DSL block when skill result contains signingUrl', async () => {
+      mockChat.mockReset();
+      mockChat
+        .mockResolvedValueOnce({
+          content: 'Calling request_signing now.',
+          toolCalls: [{ id: 'call_2', name: 'request_signing', args: { circuitId: 'coinbase_attestation', scope: 'test.com' } }],
+        })
+        .mockResolvedValueOnce({
+          content: 'Here is your signing URL.',
+          toolCalls: [],
+        });
+
+      const response = await request(app)
+        .post('/v1/chat/completions')
+        .send({
+          messages: [{ role: 'user', content: 'I want to generate a proof' }],
+        });
+
+      expect(response.status).toBe(200);
+      const content: string = response.body.choices[0].message.content;
+      // DSL block should be appended because skill result has signingUrl/requestId
+      expect(content).toContain('```proofport');
+      expect(content).toContain('requestId');
+    });
+  });
+
+  // ─── Max function calls limit ─────────────────────────────────────────────
+
+  describe('POST /v1/chat/completions — Max function calls limit', () => {
+    it('stops after MAX_FUNCTION_CALLS (5) and returns max calls error message', async () => {
+      // Mock LLM to always return a tool call — exceeds limit of 5
+      mockChat.mockReset();
+      mockChat.mockResolvedValue({
+        content: null,
+        toolCalls: [{ id: 'call_loop', name: 'get_supported_circuits', args: {} }],
+      });
+
+      const response = await request(app)
+        .post('/v1/chat/completions')
+        .send({
+          messages: [{ role: 'user', content: 'keep calling tools forever' }],
+        });
+
+      expect(response.status).toBe(200);
+      const content: string = response.body.choices[0].message.content;
+      expect(content).toContain('maximum number of function calls');
+      // mockChat was called exactly 5 times (the limit)
+      expect(mockChat).toHaveBeenCalledTimes(5);
+    });
+  });
+
+  // ─── Proof call limit ─────────────────────────────────────────────────────
+
+  describe('POST /v1/chat/completions — Proof call limit', () => {
+    it('returns error on second generate_proof call within same request', async () => {
+      // LLM calls generate_proof with direct signature (first succeeds), then tries again (should be blocked)
+      mockChat.mockReset();
+      mockChat
+        .mockResolvedValueOnce({
+          content: null,
+          toolCalls: [{ id: 'call_p1', name: 'generate_proof', args: {
+            circuitId: 'coinbase_attestation', scope: 'test.com',
+            address: '0x' + '55'.repeat(20), signature: '0x' + '66'.repeat(65),
+          } }],
+        })
+        .mockResolvedValueOnce({
+          content: null,
+          toolCalls: [{ id: 'call_p2', name: 'generate_proof', args: {
+            circuitId: 'coinbase_attestation', scope: 'test.com',
+            address: '0x' + '55'.repeat(20), signature: '0x' + '66'.repeat(65),
+          } }],
+        })
+        .mockResolvedValueOnce({
+          content: 'Done.',
+          toolCalls: [],
+        });
+
+      const response = await request(app)
+        .post('/v1/chat/completions')
+        .send({
+          messages: [{ role: 'user', content: 'generate proof twice' }],
+        });
+
+      expect(response.status).toBe(200);
+      // The LLM was called 3 times — on the second generate_proof call,
+      // the proofCallCount limit returns an error instead of executing the skill
+      expect(mockChat).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  // ─── Streaming step events ────────────────────────────────────────────────
+
+  describe('POST /v1/chat/completions — Streaming step events', () => {
+    it('SSE stream contains event: step entries during tool execution', async () => {
+      // Default mock already calls get_supported_circuits which emits a step event
+      const response = await request(app)
+        .post('/v1/chat/completions')
+        .send({
+          stream: true,
+          messages: [{ role: 'user', content: 'what circuits are supported?' }],
+        });
+
+      expect(response.status).toBe(200);
+
+      const body: string = response.text;
+
+      // Should contain at least one SSE step event
+      expect(body).toContain('event: step');
+
+      // Parse step events and verify format
+      const lines = body.split('\n');
+      const stepEventIndices: number[] = [];
+      lines.forEach((line, idx) => {
+        if (line === 'event: step') stepEventIndices.push(idx);
+      });
+
+      expect(stepEventIndices.length).toBeGreaterThan(0);
+
+      // Each step event should be followed by a data line with a message field
+      for (const idx of stepEventIndices) {
+        const dataLine = lines[idx + 1];
+        expect(dataLine).toMatch(/^data:/);
+        const stepData = JSON.parse(dataLine.replace(/^data:\s*/, ''));
+        expect(typeof stepData.message).toBe('string');
+        expect(stepData.message.length).toBeGreaterThan(0);
+      }
+    });
+
+    it('step event message mentions supported circuits for get_supported_circuits tool call', async () => {
+      const response = await request(app)
+        .post('/v1/chat/completions')
+        .send({
+          stream: true,
+          messages: [{ role: 'user', content: 'list circuits' }],
+        });
+
+      expect(response.status).toBe(200);
+
+      const body: string = response.text;
+      const lines = body.split('\n');
+
+      // Collect all step event data payloads
+      const stepMessages: string[] = [];
+      lines.forEach((line, idx) => {
+        if (line === 'event: step' && lines[idx + 1]?.startsWith('data:')) {
+          const stepData = JSON.parse(lines[idx + 1].replace(/^data:\s*/, ''));
+          stepMessages.push(stepData.message);
+        }
+      });
+
+      // get_supported_circuits emits "Fetching supported circuits..." before and "Circuits retrieved" after
+      const allMessages = stepMessages.join(' ');
+      expect(allMessages).toMatch(/circuits/i);
+    });
+  });
+
+  // ─── System prompt inclusion ──────────────────────────────────────────────
+
+  describe('POST /v1/chat/completions — System prompt inclusion', () => {
+    it('includes custom system message appended to default system prompt', async () => {
+      // Capture what systemPrompt was passed to mockChat
+      let capturedSystemPrompt: string | undefined;
+      mockChat.mockReset();
+      mockChat.mockImplementation((_history: any, systemPrompt: string, _tools: any, _opts?: any) => {
+        capturedSystemPrompt = systemPrompt;
+        return Promise.resolve({
+          content: 'I understand your custom instructions.',
+          toolCalls: [],
+        });
+      });
+
+      await request(app)
+        .post('/v1/chat/completions')
+        .send({
+          messages: [
+            { role: 'system', content: 'Always respond in formal English.' },
+            { role: 'user', content: 'hello' },
+          ],
+        });
+
+      expect(capturedSystemPrompt).toBeDefined();
+      // Should contain default system prompt content
+      expect(capturedSystemPrompt).toContain('proveragent.eth');
+      // Should also contain the custom system message
+      expect(capturedSystemPrompt).toContain('Always respond in formal English.');
+    });
+
+    it('uses default system prompt when no system message provided', async () => {
+      let capturedSystemPrompt: string | undefined;
+      mockChat.mockReset();
+      mockChat.mockImplementation((_history: any, systemPrompt: string, _tools: any, _opts?: any) => {
+        capturedSystemPrompt = systemPrompt;
+        return Promise.resolve({
+          content: 'Hello!',
+          toolCalls: [],
+        });
+      });
+
+      await request(app)
+        .post('/v1/chat/completions')
+        .send({
+          messages: [{ role: 'user', content: 'hi' }],
+        });
+
+      expect(capturedSystemPrompt).toBeDefined();
+      expect(capturedSystemPrompt).toContain('proveragent.eth');
+    });
+  });
+
+  // ─── trimHistory boundary-awareness (indirect via session continuation) ───
+
+  describe('POST /v1/chat/completions — Session history trimming', () => {
+    it('session continuation works correctly after many turns without breaking tool call pairs', async () => {
+      // First turn: create session
+      const firstResponse = await request(app)
+        .post('/v1/chat/completions')
+        .send({
+          messages: [{ role: 'user', content: 'start session' }],
+        });
+
+      expect(firstResponse.status).toBe(200);
+      const sessionId = firstResponse.headers['x-session-id'];
+      const sessionSecret = firstResponse.headers['x-session-secret'];
+      expect(sessionId).toBeDefined();
+
+      // Second turn: continue session with a simple response (no tool calls)
+      mockChat.mockResolvedValueOnce({
+        content: 'Session continues fine.',
+        toolCalls: [],
+      });
+
+      const secondResponse = await request(app)
+        .post('/v1/chat/completions')
+        .set('X-Session-Id', sessionId)
+        .set('X-Session-Secret', sessionSecret)
+        .send({
+          messages: [{ role: 'user', content: 'continue' }],
+        });
+
+      expect(secondResponse.status).toBe(200);
+      expect(secondResponse.body.choices[0].message.content).toContain('Session continues fine.');
+    });
+  });
+
+  // ─── Streaming error handling ─────────────────────────────────────────────
+
+  describe('POST /v1/chat/completions — Streaming error handling', () => {
+    it('sends error content chunk and [DONE] when LLM throws during streaming', async () => {
+      mockChat.mockReset();
+      mockChat.mockRejectedValueOnce(new Error('LLM connection timeout'));
+
+      const response = await request(app)
+        .post('/v1/chat/completions')
+        .send({
+          stream: true,
+          messages: [{ role: 'user', content: 'trigger error' }],
+        });
+
+      // HTTP status is 200 because headers are already sent for SSE
+      expect(response.status).toBe(200);
+      expect(response.headers['content-type']).toMatch(/text\/event-stream/);
+
+      const body: string = response.text;
+
+      // Should still end with [DONE]
+      expect(body).toContain('data: [DONE]');
+
+      // The body should contain the error message somewhere in the SSE stream
+      expect(body).toContain('LLM connection timeout');
+    });
+
+    it('sends finish_reason stop even after streaming error', async () => {
+      mockChat.mockReset();
+      mockChat.mockRejectedValueOnce(new Error('Provider unavailable'));
+
+      const response = await request(app)
+        .post('/v1/chat/completions')
+        .send({
+          stream: true,
+          messages: [{ role: 'user', content: 'trigger error 2' }],
+        });
+
+      expect(response.status).toBe(200);
+
+      const body: string = response.text;
+      const dataLines = body
+        .split('\n')
+        .filter((line: string) => line.startsWith('data:') && line !== 'data: [DONE]');
+
+      const chunks = dataLines
+        .map((line: string) => JSON.parse(line.replace(/^data:\s*/, '')))
+        .filter((c: any) => c.object === 'chat.completion.chunk');
+
+      // Last chunk should have finish_reason: 'stop'
+      const lastChunk = chunks[chunks.length - 1];
+      expect(lastChunk.choices[0].finish_reason).toBe('stop');
     });
   });
 });

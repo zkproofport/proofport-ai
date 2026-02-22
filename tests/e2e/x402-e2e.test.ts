@@ -4,6 +4,10 @@
  * Tests against the REAL Docker container with PAYMENT_MODE=testnet.
  * NO vi.mock(), NO supertest — real HTTP to localhost:4002.
  *
+ * A2A tests use @a2a-js/sdk/client SDK.
+ * MCP tests use @modelcontextprotocol/sdk client SDK.
+ * REST and payment-wrapped tests remain raw fetch.
+ *
  * Prerequisites:
  *   docker compose -f docker-compose.yml -f docker-compose.e2e-payment.yml up -d
  *   Wait for: curl http://localhost:4002/health | grep testnet
@@ -12,9 +16,24 @@
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
+import { randomUUID } from 'crypto';
 import { ethers } from 'ethers';
 import { wrapFetchWithPaymentFromConfig } from '@x402/fetch';
 import { ExactEvmScheme } from '@x402/evm';
+
+// A2A SDK
+import { ClientFactory, TaskNotFoundError } from '@a2a-js/sdk/client';
+import type { Client as A2AClient } from '@a2a-js/sdk/client';
+import type {
+  Task,
+  Message,
+  DataPart,
+  Artifact,
+} from '@a2a-js/sdk';
+
+// MCP SDK
+import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:4002';
 
@@ -94,7 +113,56 @@ function parseSseEvents(text: string): any[] {
     .filter(Boolean);
 }
 
+// ─── A2A SDK Helpers ────────────────────────────────────────────────────
+
+function makeA2AMessage(data: Record<string, unknown>): { message: Message } {
+  return {
+    message: {
+      kind: 'message' as const,
+      messageId: randomUUID(),
+      role: 'user' as const,
+      parts: [{ kind: 'data' as const, data }],
+    },
+  };
+}
+
+function isTask(result: any): result is Task {
+  return result && result.kind === 'task';
+}
+
+function extractDataFromArtifacts(artifacts: Artifact[] | undefined): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const artifact of artifacts || []) {
+    for (const part of artifact.parts || []) {
+      if (part.kind === 'data' && (part as DataPart).data) {
+        Object.assign(result, (part as DataPart).data);
+      }
+    }
+  }
+  return result;
+}
+
+// ─── MCP SDK Helpers ────────────────────────────────────────────────────
+
+async function createMcpSdkClient(): Promise<{ client: McpClient; transport: StreamableHTTPClientTransport }> {
+  const client = new McpClient(
+    { name: 'e2e-payment-test', version: '1.0.0' },
+    { capabilities: {} },
+  );
+  const transport = new StreamableHTTPClientTransport(new URL(`${BASE_URL}/mcp`));
+  await client.connect(transport);
+  return { client, transport };
+}
+
+function parseToolResult(result: any): any {
+  const textContents = result.content?.filter((c: any) => c.type === 'text');
+  if (!textContents || textContents.length === 0) return null;
+  return JSON.parse(textContents[textContents.length - 1].text);
+}
+
 // ─── Connectivity + Payment Mode check ──────────────────────────────────
+
+let a2aClient: A2AClient;
 
 beforeAll(async () => {
   try {
@@ -116,6 +184,10 @@ beforeAll(async () => {
       `Original error: ${err}`
     );
   }
+
+  // Initialize A2A SDK client
+  const factory = new ClientFactory();
+  a2aClient = await factory.createFromUrl(BASE_URL);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -146,102 +218,70 @@ describe('Payment Mode Verification', () => {
 describe('A2A Payment Gating', () => {
   it('message/send generate_proof WITHOUT payment → not 402 (no x402 middleware gating)', async () => {
     // x402 middleware removed — payment enforced inside skillHandler via request_payment flow
-    const { status, json } = await jsonPost('/a2a', {
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'message/send',
-      params: {
-        message: {
-          role: 'user',
-          parts: [{
-            kind: 'data',
-            mimeType: 'application/json',
-            data: {
-              skill: 'generate_proof',
-              circuitId: 'coinbase_attestation',
-              scope: 'test.com',
-              address: '0x' + 'dd'.repeat(20),
-              signature: '0x' + 'ee'.repeat(65),
-            },
-          }],
-        },
-      },
-    });
-
-    // No longer 402 — reaches A2A handler directly
-    expect(status).not.toBe(402);
+    // SDK would throw if it gets a non-JSON-RPC response (like 402). Use try/catch.
+    try {
+      const result = await a2aClient.sendMessage(
+        makeA2AMessage({
+          skill: 'generate_proof',
+          circuitId: 'coinbase_attestation',
+          scope: 'test.com',
+          address: '0x' + 'dd'.repeat(20),
+          signature: '0x' + 'ee'.repeat(65),
+        }),
+      );
+      // If we get here, it didn't throw — not a 402
+      expect(result).toBeDefined();
+    } catch (err: any) {
+      // If the SDK throws, verify it's NOT a 402 error
+      expect(err?.message || '').not.toMatch(/402/);
+    }
   });
 
   it('message/send get_supported_circuits WITHOUT payment → 200 (free)', async () => {
-    const { status, json } = await jsonPost('/a2a', {
-      jsonrpc: '2.0',
-      id: 2,
-      method: 'message/send',
-      params: {
-        message: {
-          role: 'user',
-          parts: [{
-            kind: 'data',
-            mimeType: 'application/json',
-            data: { skill: 'get_supported_circuits', chainId: '84532' },
-          }],
-        },
-      },
-    });
+    const result = await a2aClient.sendMessage(
+      makeA2AMessage({ skill: 'get_supported_circuits', chainId: '84532' }),
+    );
 
-    expect(status).toBe(200);
-    expect(json.result).toBeDefined();
-    expect(json.result.status.state).toBe('completed');
+    expect(isTask(result)).toBe(true);
+    const task = result as Task;
+    expect(task.status.state).toBe('completed');
   });
 
   it('message/send verify_proof WITHOUT payment → 200 (free)', async () => {
-    const { status, json } = await jsonPost('/a2a', {
-      jsonrpc: '2.0',
-      id: 3,
-      method: 'message/send',
-      params: {
-        message: {
-          role: 'user',
-          parts: [{
-            kind: 'data',
-            mimeType: 'application/json',
-            data: { skill: 'verify_proof' },
-          }],
-        },
-      },
-    });
+    // verify_proof is free — will fail due to invalid proof data, but should NOT be 402
+    const result = await a2aClient.sendMessage(
+      makeA2AMessage({ skill: 'verify_proof' }),
+    );
 
-    // Should NOT be 402 — verify_proof is free (will fail due to missing params, but that's OK)
-    expect(status).not.toBe(402);
-    expect(status).toBe(200);
+    // Should NOT throw 402 — verify_proof is free (will fail due to missing params, but that's OK)
+    expect(result).toBeDefined();
+    expect(isTask(result)).toBe(true);
   });
 
-  it('tasks/get WITHOUT payment → 200 (always free)', async () => {
-    const { status, json } = await jsonPost('/a2a', {
-      jsonrpc: '2.0',
-      id: 4,
-      method: 'tasks/get',
-      params: { id: 'nonexistent' },
-    });
-
-    expect(status).toBe(200);
-    expect(json.error.code).toBe(-32001); // not found, but NOT 402
+  it('tasks/get WITHOUT payment → not 402 (always free)', async () => {
+    // getTask throws TaskNotFoundError for nonexistent IDs — but NOT 402
+    try {
+      await a2aClient.getTask({ id: 'nonexistent' });
+      // Should not reach here — task doesn't exist
+      expect.unreachable('Expected TaskNotFoundError');
+    } catch (err: any) {
+      expect(err).toBeInstanceOf(TaskNotFoundError);
+    }
   });
 
-  it('tasks/cancel WITHOUT payment → 200 (always free)', async () => {
-    const { status, json } = await jsonPost('/a2a', {
-      jsonrpc: '2.0',
-      id: 5,
-      method: 'tasks/cancel',
-      params: { id: 'nonexistent' },
-    });
-
-    expect(status).toBe(200);
-    expect(json.error.code).toBe(-32001);
+  it('tasks/cancel WITHOUT payment → not 402 (always free)', async () => {
+    // cancelTask throws TaskNotFoundError for nonexistent IDs — but NOT 402
+    try {
+      await a2aClient.cancelTask({ id: 'nonexistent' });
+      expect.unreachable('Expected error');
+    } catch (err: any) {
+      expect(err).toBeInstanceOf(TaskNotFoundError);
+    }
   });
 
-  it('tasks/resubscribe WITHOUT payment → 200 (always free)', async () => {
-    const { status, json } = await jsonPost('/a2a', {
+  it('tasks/resubscribe WITHOUT payment → error (always free)', async () => {
+    // Keep as raw fetch — SSE streaming, no direct SDK method that returns simple JSON
+    const { status, text } = await jsonPost('/a2a', {
       jsonrpc: '2.0',
       id: 6,
       method: 'tasks/resubscribe',
@@ -249,7 +289,10 @@ describe('A2A Payment Gating', () => {
     });
 
     expect(status).toBe(200);
-    expect(json.error.code).toBe(-32001);
+    const sseEvents = parseSseEvents(text);
+    const errorEvent = sseEvents.find((e: any) => e?.error);
+    expect(errorEvent).toBeDefined();
+    expect(errorEvent.error.code).toBe(-32001);
   });
 });
 
@@ -260,116 +303,82 @@ describe('A2A Payment Gating', () => {
 describe('MCP Payment Gating', () => {
   it('tools/call generate_proof WITHOUT payment → 200 (no x402 middleware gating)', async () => {
     // x402 middleware removed — payment enforced inside skillHandler via request_payment flow
-    const res = await fetch(`${BASE_URL}/mcp`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json, text/event-stream',
-      },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 10,
-        method: 'tools/call',
-        params: {
-          name: 'generate_proof',
-          arguments: {
-            circuitId: 'coinbase_attestation',
-            scope: 'test.com',
-          },
+    const { client, transport } = await createMcpSdkClient();
+    try {
+      const result = await client.callTool({
+        name: 'generate_proof',
+        arguments: {
+          circuitId: 'coinbase_attestation',
+          scope: 'test.com',
         },
-      }),
-    });
-
-    expect(res.status).toBe(200);
+      });
+      // If we get here, the call succeeded (not 402)
+      expect(result).toBeDefined();
+    } catch (err: any) {
+      // Should NOT be 402
+      expect(err?.message || '').not.toMatch(/402/);
+    } finally {
+      await transport.close();
+    }
   });
 
   it('tools/call get_supported_circuits WITHOUT payment → 200 (free)', async () => {
-    const res = await fetch(`${BASE_URL}/mcp`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json, text/event-stream',
-      },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 11,
-        method: 'tools/call',
-        params: {
-          name: 'get_supported_circuits',
-          arguments: {},
-        },
-      }),
-    });
+    const { client, transport } = await createMcpSdkClient();
+    try {
+      const result = await client.callTool({
+        name: 'get_supported_circuits',
+        arguments: {},
+      });
 
-    expect(res.status).toBe(200);
-    const text = await res.text();
-    const events = parseSseEvents(text);
-    expect(events.length).toBeGreaterThan(0);
+      expect(result).toBeDefined();
+      expect(result.content).toBeDefined();
+      expect((result.content as any[]).length).toBeGreaterThan(0);
+    } finally {
+      await transport.close();
+    }
   });
 
   it('tools/call verify_proof WITHOUT payment → 200 (free)', async () => {
-    const res = await fetch(`${BASE_URL}/mcp`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json, text/event-stream',
-      },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 12,
-        method: 'tools/call',
-        params: {
-          name: 'verify_proof',
-          arguments: {
-            circuitId: 'coinbase_attestation',
-            proof: '0xaabb',
-            publicInputs: ['0x' + 'cc'.repeat(32)],
-          },
+    const { client, transport } = await createMcpSdkClient();
+    try {
+      const result = await client.callTool({
+        name: 'verify_proof',
+        arguments: {
+          circuitId: 'coinbase_attestation',
+          proof: '0xaabb',
+          publicInputs: ['0x' + 'cc'.repeat(32)],
         },
-      }),
-    });
+      });
 
-    expect(res.status).toBe(200);
+      expect(result).toBeDefined();
+    } finally {
+      await transport.close();
+    }
   });
 
   it('initialize WITHOUT payment → 200 (free)', async () => {
-    const res = await fetch(`${BASE_URL}/mcp`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json, text/event-stream',
-      },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 13,
-        method: 'initialize',
-        params: {
-          protocolVersion: '2024-11-05',
-          capabilities: {},
-          clientInfo: { name: 'e2e-payment-test', version: '1.0.0' },
-        },
-      }),
-    });
-
-    expect(res.status).toBe(200);
+    // MCP SDK client.connect() performs initialize automatically
+    const { client, transport } = await createMcpSdkClient();
+    try {
+      // If connect() succeeded, initialize passed
+      const serverVersion = client.getServerVersion();
+      expect(serverVersion).toBeDefined();
+    } finally {
+      await transport.close();
+    }
   });
 
   it('tools/list WITHOUT payment → 200 (free)', async () => {
-    const res = await fetch(`${BASE_URL}/mcp`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json, text/event-stream',
-      },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 14,
-        method: 'tools/list',
-        params: {},
-      }),
-    });
+    const { client, transport } = await createMcpSdkClient();
+    try {
+      const result = await client.listTools();
 
-    expect(res.status).toBe(200);
+      expect(result).toBeDefined();
+      expect(result.tools).toBeDefined();
+      expect(result.tools.length).toBeGreaterThan(0);
+    } finally {
+      await transport.close();
+    }
   });
 });
 
@@ -465,34 +474,23 @@ describe('No x402 Middleware Gating (payment via request_payment flow)', () => {
 
   it('A2A generate_proof → not 402 (no x402 middleware)', async () => {
     // x402 middleware removed — payment enforced inside skillHandler via request_payment flow
-    const res = await fetch(`${BASE_URL}/a2a`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 100,
-        method: 'message/send',
-        params: {
-          message: {
-            role: 'user',
-            parts: [{
-              kind: 'data',
-              mimeType: 'application/json',
-              data: {
-                skill: 'generate_proof',
-                circuitId: 'coinbase_attestation',
-                scope: 'test.com',
-                address: '0x' + 'dd'.repeat(20),
-                signature: '0x' + 'ee'.repeat(65),
-              },
-            }],
-          },
-        },
-      }),
-    });
-
-    // No longer 402 — reaches A2A handler directly
-    expect(res.status).not.toBe(402);
+    // Use A2A SDK client
+    try {
+      const result = await a2aClient.sendMessage(
+        makeA2AMessage({
+          skill: 'generate_proof',
+          circuitId: 'coinbase_attestation',
+          scope: 'test.com',
+          address: '0x' + 'dd'.repeat(20),
+          signature: '0x' + 'ee'.repeat(65),
+        }),
+      );
+      // No longer 402 — reaches A2A handler directly
+      expect(result).toBeDefined();
+    } catch (err: any) {
+      // If the SDK throws, verify it's NOT a 402 error
+      expect(err?.message || '').not.toMatch(/402/);
+    }
   });
 });
 
@@ -732,18 +730,19 @@ describe.skipIf(!ATTESTATION_KEY || !ATTESTATION_ADDRESS)(
         expect(result.result).toBeDefined();
         expect(result.result.content).toBeDefined();
 
-        // Verify actual proof data in response
-        const textContent = result.result.content.find((c: any) => c.type === 'text');
-        expect(textContent).toBeDefined();
+        // Verify actual proof data in response (last text content is JSON data, first is guidance)
+        const textContents = result.result.content.filter((c: any) => c.type === 'text');
+        expect(textContents.length).toBeGreaterThan(0);
+        const lastText = textContents[textContents.length - 1];
 
         try {
-          const parsed = JSON.parse(textContent.text);
+          const parsed = JSON.parse(lastText.text);
           expect(parsed.proof).toBeDefined();
           expect(parsed.proof.startsWith('0x')).toBe(true);
           expect(parsed.publicInputs).toBeDefined();
         } catch {
           // If not JSON, must at least contain hex proof data
-          expect(textContent.text).toMatch(/0x[0-9a-fA-F]{10,}/);
+          expect(lastText.text).toMatch(/0x[0-9a-fA-F]{10,}/);
         }
       },
       300_000,
@@ -770,6 +769,7 @@ describe.skipIf(!ATTESTATION_KEY || !ATTESTATION_ADDRESS)(
             method: 'message/send',
             params: {
               message: {
+                messageId: randomUUID(),
                 role: 'user',
                 parts: [{
                   kind: 'data',

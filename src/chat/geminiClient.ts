@@ -1,3 +1,10 @@
+import { GoogleGenerativeAI, FunctionCallingMode } from '@google/generative-ai';
+import type {
+  Content,
+  Part,
+  Tool as GeminiSDKTool,
+  GenerativeModel,
+} from '@google/generative-ai';
 import type { LLMProvider, LLMMessage, LLMTool, LLMResponse, ChatOptions } from './llmProvider.js';
 
 export interface GeminiMessage {
@@ -40,12 +47,11 @@ export interface GeminiResponse {
 }
 
 export class GeminiClient {
-  private apiKey: string;
+  private genAI: GoogleGenerativeAI;
   private model: string;
-  private baseUrl = 'https://generativelanguage.googleapis.com/v1beta';
 
   constructor(config: GeminiConfig) {
-    this.apiKey = config.apiKey;
+    this.genAI = new GoogleGenerativeAI(config.apiKey);
     this.model = config.model || 'gemini-2.0-flash-lite';
   }
 
@@ -55,46 +61,65 @@ export class GeminiClient {
     tools?: GeminiTool[],
     toolChoice?: 'auto' | 'required'
   ): Promise<GeminiMessage> {
-    const url = `${this.baseUrl}/models/${this.model}:generateContent?key=${this.apiKey}`;
-
-    const body: Record<string, unknown> = {
-      contents: messages,
-      systemInstruction: {
-        parts: [{ text: systemInstruction }],
-      },
+    const modelParams: Parameters<GoogleGenerativeAI['getGenerativeModel']>[0] = {
+      model: this.model,
+      systemInstruction,
     };
 
     if (tools && tools.length > 0) {
-      body.tools = tools;
+      modelParams.tools = tools as unknown as GeminiSDKTool[];
     }
 
     if (toolChoice === 'required') {
-      body.toolConfig = { functionCallingConfig: { mode: 'ANY' } };
+      modelParams.toolConfig = {
+        functionCallingConfig: { mode: FunctionCallingMode.ANY },
+      };
     }
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    });
+    const generativeModel: GenerativeModel = this.genAI.getGenerativeModel(modelParams);
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Gemini API error (${response.status}): ${errorText}`);
+    // Convert GeminiMessage[] to SDK Content[]
+    const contents: Content[] = messages.map((msg) => ({
+      role: msg.role,
+      parts: msg.parts as Part[],
+    }));
+
+    let result;
+    try {
+      result = await generativeModel.generateContent({ contents });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(`Gemini API error: ${message}`);
     }
 
-    const data: GeminiResponse = await response.json();
+    const response = result.response;
+    const candidates = response.candidates;
 
-    if (!data.candidates || data.candidates.length === 0) {
+    if (!candidates || candidates.length === 0) {
       throw new Error('No candidates returned from Gemini API');
     }
 
-    const candidate = data.candidates[0];
+    const candidate = candidates[0];
+    // Convert SDK Parts back to GeminiMessage parts shape
+    const parts: GeminiMessage['parts'] = candidate.content.parts.map((p) => {
+      if ('functionCall' in p && p.functionCall) {
+        return {
+          functionCall: {
+            name: p.functionCall.name,
+            args: p.functionCall.args as Record<string, unknown>,
+          },
+        };
+      }
+      if ('text' in p && typeof p.text === 'string') {
+        return { text: p.text };
+      }
+      // Fallback: treat as text
+      return { text: '' };
+    });
+
     return {
       role: 'model',
-      parts: candidate.content.parts,
+      parts,
     };
   }
 }

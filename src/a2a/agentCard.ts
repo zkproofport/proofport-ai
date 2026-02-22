@@ -1,36 +1,10 @@
 import type { Config } from '../config/index.js';
 import type { Request, Response } from 'express';
+import type { AgentCard as SDKAgentCard } from '@a2a-js/sdk';
 import { ERC8004_ADDRESSES } from '../config/contracts.js';
 
-export type AgentCard = {
-  name: string;
-  description: string;
-  url: string;
-  version: string;
-  protocolVersion: string;
-  preferredTransport: string;
-  provider: {
-    organization: string;
-    url: string;
-  };
-  capabilities: {
-    streaming: boolean;
-    pushNotifications: boolean;
-    stateTransitionHistory?: boolean;
-  };
-  skills: Array<{
-    id: string;
-    name: string;
-    description: string;
-    tags: string[];
-    examples?: string[];
-    inputModes: string[];
-    outputModes: string[];
-  }>;
-  securitySchemes?: Record<string, { scheme: string; description: string }>;
-  defaultInputModes: string[];
-  defaultOutputModes: string[];
-  identity: {
+export type AgentCard = SDKAgentCard & {
+  identity?: {
     erc8004: {
       contractAddress: string;
       chainId: number;
@@ -43,8 +17,6 @@ export type AgentCard = {
     attestationFormat: string;
   };
 };
-
-export type RequestHandler = (req: Request, res: Response) => void | Promise<void>;
 
 /**
  * Build Agent Card JSON structure from config
@@ -83,7 +55,7 @@ export function buildAgentCard(config: Config, tokenId?: bigint | null): AgentCa
       {
         id: 'request_signing',
         name: 'Request Wallet Signing',
-        description: '[STEP 1/4] Start a proof generation session. Returns a URL where the user connects their wallet and signs. Use the same contextId for all subsequent calls (check_status, request_payment, generate_proof) to auto-link the session.',
+        description: '[STEP 1/5] Start a proof generation session. Returns a URL where the user connects their wallet and signs. Use the same contextId for all subsequent calls (check_status, request_payment, generate_proof) to auto-link the session.',
         tags: ['signing', 'wallet', 'session'],
         examples: [
           'I want to generate a KYC proof',
@@ -95,7 +67,7 @@ export function buildAgentCard(config: Config, tokenId?: bigint | null): AgentCa
       {
         id: 'check_status',
         name: 'Check Request Status',
-        description: '[STEP 2/4] Check signing and payment status. Returns phase: signing | payment | ready | expired. If using the same contextId as request_signing, the requestId is auto-resolved. When phase is "payment", call request_payment. When "ready", call generate_proof.',
+        description: '[STEP 2/5] Check signing and payment status. Returns phase: signing | payment | ready | expired. If using the same contextId as request_signing, the requestId is auto-resolved. When phase is "payment", call request_payment. When "ready", call generate_proof.',
         tags: ['status', 'polling'],
         examples: [
           'Check if signing is complete',
@@ -107,7 +79,7 @@ export function buildAgentCard(config: Config, tokenId?: bigint | null): AgentCa
       {
         id: 'request_payment',
         name: 'Request Payment',
-        description: '[STEP 3/4] Initiate USDC payment for proof generation. Returns a payment URL. Only call when check_status shows phase "payment". Signing must be completed first.',
+        description: '[STEP 3/5] Initiate USDC payment for proof generation. Returns a payment URL. Only call when check_status shows phase "payment". Signing must be completed first.',
         tags: ['payment', 'usdc', 'x402'],
         examples: [
           'I need to pay for the proof',
@@ -119,7 +91,7 @@ export function buildAgentCard(config: Config, tokenId?: bigint | null): AgentCa
       {
         id: 'generate_proof',
         name: 'Generate ZK Proof',
-        description: '[STEP 4/4] Generate a zero-knowledge proof. Call when check_status shows phase "ready". If using the same contextId, the requestId is auto-resolved. Proof generation takes 30-90 seconds.',
+        description: '[STEP 4/5] Generate a zero-knowledge proof. Call when check_status shows phase "ready". If using the same contextId, the requestId is auto-resolved. Proof generation takes 30-90 seconds.',
         tags: ['zk-proof', 'privacy', 'coinbase', 'attestation', 'noir'],
         examples: [
           'Generate a KYC proof for my Coinbase account',
@@ -132,7 +104,7 @@ export function buildAgentCard(config: Config, tokenId?: bigint | null): AgentCa
       {
         id: 'verify_proof',
         name: 'Verify ZK Proof',
-        description: '[OPTIONAL] Verify a zero-knowledge proof on-chain against the deployed verifier contract. Not part of the standard generation flow.',
+        description: '[STEP 5/5 — OPTIONAL] Verify a zero-knowledge proof on-chain against the deployed verifier contract. Not part of the standard generation flow.',
         tags: ['verification', 'on-chain', 'smart-contract'],
         examples: [
           'Verify this proof on Base Sepolia',
@@ -154,9 +126,6 @@ export function buildAgentCard(config: Config, tokenId?: bigint | null): AgentCa
         outputModes: ['application/json'],
       },
     ],
-    securitySchemes: {
-      x402: { scheme: 'x402', description: 'x402 micropayments via USDC on Base' },
-    },
     defaultInputModes: ['application/json'],
     defaultOutputModes: ['application/json'],
     identity: {
@@ -196,7 +165,7 @@ export function buildMcpDiscovery(config: Config) {
     tools: [
       {
         name: 'request_signing',
-        description: '[STEP 1/4] Start a proof generation session. Returns a signing URL and requestId. After user signs, call check_status with the requestId.',
+        description: '[STEP 1/5] Start a proof generation session. Returns a signing URL and requestId. After user signs, call check_status with the requestId.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -210,7 +179,7 @@ export function buildMcpDiscovery(config: Config) {
       },
       {
         name: 'check_status',
-        description: '[STEP 2/4] Check signing and payment status of a proof request. Returns phase: signing | payment | ready | expired. When "payment", call request_payment. When "ready", call generate_proof.',
+        description: '[STEP 2/5] Check signing and payment status of a proof request. Returns phase: signing | payment | ready | expired. When "payment", call request_payment. When "ready", call generate_proof.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -221,7 +190,7 @@ export function buildMcpDiscovery(config: Config) {
       },
       {
         name: 'request_payment',
-        description: '[STEP 3/4] Initiate USDC payment for proof generation. Returns a payment URL. Only call when check_status shows phase "payment".',
+        description: '[STEP 3/5] Initiate USDC payment for proof generation. Returns a payment URL. Only call when check_status shows phase "payment".',
         inputSchema: {
           type: 'object',
           properties: {
@@ -232,7 +201,7 @@ export function buildMcpDiscovery(config: Config) {
       },
       {
         name: 'generate_proof',
-        description: '[STEP 4/4] Generate a zero-knowledge proof. Call with requestId when check_status shows phase "ready". Takes 30-90 seconds.',
+        description: '[STEP 4/5] Generate a zero-knowledge proof. Call with requestId when check_status shows phase "ready". Takes 30-90 seconds.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -262,7 +231,7 @@ export function buildMcpDiscovery(config: Config) {
       },
       {
         name: 'verify_proof',
-        description: '[OPTIONAL] Verify a zero-knowledge proof on-chain via deployed verifier contract. Not part of the standard generation flow.',
+        description: '[STEP 5/5 — OPTIONAL] Verify a zero-knowledge proof on-chain via deployed verifier contract. Not part of the standard generation flow.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -369,7 +338,7 @@ export function buildOasfAgent(config: Config, tokenId?: bigint | null) {
  * @param tokenId - Optional ERC-8004 tokenId (set after registration)
  * @returns Express request handler
  */
-export function getAgentCardHandler(config: Config, tokenId?: bigint | null): RequestHandler {
+export function getAgentCardHandler(config: Config, tokenId?: bigint | null): (req: Request, res: Response) => void | Promise<void> {
   const agentCard = buildAgentCard(config, tokenId);
 
   return (_req: Request, res: Response) => {
@@ -386,7 +355,7 @@ export function getAgentCardHandler(config: Config, tokenId?: bigint | null): Re
  * @param config - Application configuration
  * @returns Express request handler
  */
-export function getMcpDiscoveryHandler(config: Config): RequestHandler {
+export function getMcpDiscoveryHandler(config: Config): (req: Request, res: Response) => void | Promise<void> {
   const mcpDiscovery = buildMcpDiscovery(config);
 
   return (_req: Request, res: Response) => {
@@ -404,7 +373,7 @@ export function getMcpDiscoveryHandler(config: Config): RequestHandler {
  * @param tokenId - Optional ERC-8004 tokenId (set after registration)
  * @returns Express request handler
  */
-export function getOasfAgentHandler(config: Config, tokenId?: bigint | null): RequestHandler {
+export function getOasfAgentHandler(config: Config, tokenId?: bigint | null): (req: Request, res: Response) => void | Promise<void> {
   const oasfAgent = buildOasfAgent(config, tokenId);
 
   return (_req: Request, res: Response) => {

@@ -3,10 +3,11 @@
  * Tests the full HTTP endpoint flow for MCP (POST /mcp)
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, type MockInstance } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../../src/index.js';
 import type { Config } from '../../src/config/index.js';
+import { loadConfig } from '../../src/config/index.js';
 
 // ─── Mock modules ─────────────────────────────────────────────────────────
 
@@ -231,7 +232,7 @@ describe('MCP Endpoint E2E', () => {
       privyAppId: '',
       privyApiSecret: '',
       privyApiUrl: '',
-      signPageUrl: '',
+      signPageUrl: 'https://sign.zkproofport.app',
       signingTtlSeconds: 300,
       teeMode: 'disabled' as const,
       enclaveCid: undefined,
@@ -440,10 +441,11 @@ describe('MCP Endpoint E2E', () => {
         },
       });
 
-      // Result text is JSON — parse and assert chainId returned
-      const content = data.result.content[0];
-      expect(content.type).toBe('text');
-      const parsed = JSON.parse(content.text);
+      // Result text is JSON — parse and assert chainId returned (last text block is JSON data)
+      const textContents = data.result.content.filter((c: any) => c.type === 'text');
+      const jsonContent = textContents[textContents.length - 1];
+      expect(jsonContent.type).toBe('text');
+      const parsed = JSON.parse(jsonContent.text);
       expect(parsed).toHaveProperty('chainId', '84532');
     });
 
@@ -564,9 +566,10 @@ describe('MCP Endpoint E2E', () => {
         ]),
       );
 
-      const content = result.content[0];
-      expect(content.type).toBe('text');
-      const parsed = JSON.parse(content.text);
+      const textContents = result.content.filter((c: any) => c.type === 'text');
+      const jsonContent = textContents[textContents.length - 1];
+      expect(jsonContent.type).toBe('text');
+      const parsed = JSON.parse(jsonContent.text);
       expect(parsed).toHaveProperty('proof');
       expect(result.isError).toBeFalsy();
     });
@@ -655,6 +658,380 @@ describe('MCP Endpoint E2E', () => {
         'request_signing',
         'verify_proof',
       ]);
+    });
+  });
+
+  // ─── New test cases ───────────────────────────────────────────────────────
+
+  describe('tools/call for request_signing', () => {
+    it('should handle tools/call for request_signing successfully', async () => {
+
+      const response = await request(app)
+        .post('/mcp')
+        .set('Accept', 'application/json, text/event-stream')
+        .send({
+          jsonrpc: '2.0',
+          id: 20,
+          method: 'tools/call',
+          params: {
+            name: 'request_signing',
+            arguments: { circuitId: 'coinbase_attestation', scope: 'test.com' },
+          },
+        });
+
+      expect(response.status).toBe(200);
+
+      const data = parseSSEResponse(response.text);
+      expect(data).toMatchObject({ jsonrpc: '2.0', id: 20 });
+      expect(data.result.isError).toBeFalsy();
+
+      const textContents = data.result.content.filter((c: any) => c.type === 'text');
+      const parsed = JSON.parse(textContents[textContents.length - 1].text);
+      expect(parsed).toHaveProperty('requestId');
+      expect(parsed).toHaveProperty('signingUrl');
+      expect(typeof parsed.requestId).toBe('string');
+      expect(parsed.signingUrl).toContain('/s/');
+      expect(parsed).toHaveProperty('expiresAt');
+      expect(parsed.circuitId).toBe('coinbase_attestation');
+      expect(parsed.scope).toBe('test.com');
+    });
+
+    it('should return isError:true for request_signing with invalid circuitId', async () => {
+      const response = await request(app)
+        .post('/mcp')
+        .set('Accept', 'application/json, text/event-stream')
+        .send({
+          jsonrpc: '2.0',
+          id: 21,
+          method: 'tools/call',
+          params: {
+            name: 'request_signing',
+            arguments: { circuitId: 'nonexistent_circuit', scope: 'test.com' },
+          },
+        });
+
+      expect(response.status).toBe(200);
+
+      const data = parseSSEResponse(response.text);
+      expect(data).toMatchObject({ jsonrpc: '2.0', id: 21 });
+      expect(data.result.isError).toBe(true);
+      expect(data.result.content).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'text',
+            text: expect.stringContaining('Unknown circuit'),
+          }),
+        ]),
+      );
+    });
+
+    it('should return isError:true for request_signing with missing scope', async () => {
+      const response = await request(app)
+        .post('/mcp')
+        .set('Accept', 'application/json, text/event-stream')
+        .send({
+          jsonrpc: '2.0',
+          id: 22,
+          method: 'tools/call',
+          params: {
+            name: 'request_signing',
+            // scope intentionally omitted — zod will reject with a parse error
+            arguments: { circuitId: 'coinbase_attestation' },
+          },
+        });
+
+      expect(response.status).toBe(200);
+
+      const data = parseSSEResponse(response.text);
+      expect(data).toMatchObject({ jsonrpc: '2.0', id: 22 });
+      // MCP SDK returns either a JSON-RPC error (missing required param) or isError: true
+      const isRpcError = !!data.error;
+      const isToolError = data.result?.isError === true;
+      expect(isRpcError || isToolError).toBe(true);
+    });
+  });
+
+  describe('tools/call for check_status', () => {
+    it('should return isError:true for check_status with non-existent requestId', async () => {
+      const response = await request(app)
+        .post('/mcp')
+        .set('Accept', 'application/json, text/event-stream')
+        .send({
+          jsonrpc: '2.0',
+          id: 23,
+          method: 'tools/call',
+          params: {
+            name: 'check_status',
+            arguments: { requestId: 'nonexistent-request-id-12345' },
+          },
+        });
+
+      expect(response.status).toBe(200);
+
+      const data = parseSSEResponse(response.text);
+      expect(data).toMatchObject({ jsonrpc: '2.0', id: 23 });
+      expect(data.result.isError).toBe(true);
+      expect(data.result.content).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'text',
+            text: expect.stringContaining('not found'),
+          }),
+        ]),
+      );
+    });
+  });
+
+  describe('tools/call for request_payment', () => {
+    it('should return isError:true for request_payment with non-existent requestId', async () => {
+      // paymentMode is 'disabled' in test config, so the skill throws "Payment is not required"
+      // after failing to find the record (record not found throws first)
+      const response = await request(app)
+        .post('/mcp')
+        .set('Accept', 'application/json, text/event-stream')
+        .send({
+          jsonrpc: '2.0',
+          id: 24,
+          method: 'tools/call',
+          params: {
+            name: 'request_payment',
+            arguments: { requestId: 'nonexistent-payment-request-id' },
+          },
+        });
+
+      expect(response.status).toBe(200);
+
+      const data = parseSSEResponse(response.text);
+      expect(data).toMatchObject({ jsonrpc: '2.0', id: 24 });
+      expect(data.result.isError).toBe(true);
+      expect(data.result.content).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: 'text' }),
+        ]),
+      );
+    });
+  });
+
+  describe('tools/call for generate_proof with country attestation', () => {
+    it('should handle generate_proof for coinbase_country_attestation with direct signature', async () => {
+      const response = await request(app)
+        .post('/mcp')
+        .set('Accept', 'application/json, text/event-stream')
+        .send({
+          jsonrpc: '2.0',
+          id: 25,
+          method: 'tools/call',
+          params: {
+            name: 'generate_proof',
+            arguments: {
+              circuitId: 'coinbase_country_attestation',
+              scope: 'test.com',
+              address: '0x' + 'dd'.repeat(20),
+              signature: '0x' + 'ee'.repeat(65),
+              countryList: ['US', 'KR'],
+              isIncluded: true,
+            },
+          },
+        });
+
+      expect(response.status).toBe(200);
+
+      const data = parseSSEResponse(response.text);
+      expect(data).toMatchObject({ jsonrpc: '2.0', id: 25 });
+
+      // Mock prover returns proof data — should succeed with country params
+      const result = data.result;
+      expect(result.content).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: 'text' }),
+        ]),
+      );
+
+      const textContents = result.content.filter((c: any) => c.type === 'text');
+      const parsed = JSON.parse(textContents[textContents.length - 1].text);
+      expect(parsed).toHaveProperty('proof');
+      expect(result.isError).toBeFalsy();
+    });
+
+    it('should return isError:true for generate_proof with country circuit but missing countryList', async () => {
+      const response = await request(app)
+        .post('/mcp')
+        .set('Accept', 'application/json, text/event-stream')
+        .send({
+          jsonrpc: '2.0',
+          id: 26,
+          method: 'tools/call',
+          params: {
+            name: 'generate_proof',
+            arguments: {
+              circuitId: 'coinbase_country_attestation',
+              scope: 'test.com',
+              address: '0x' + 'dd'.repeat(20),
+              signature: '0x' + 'ee'.repeat(65),
+              // countryList and isIncluded intentionally omitted
+            },
+          },
+        });
+
+      expect(response.status).toBe(200);
+
+      const data = parseSSEResponse(response.text);
+      expect(data).toMatchObject({ jsonrpc: '2.0', id: 26 });
+      expect(data.result.isError).toBe(true);
+      expect(data.result.content).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'text',
+            text: expect.stringContaining('countryList'),
+          }),
+        ]),
+      );
+    });
+  });
+
+  describe('tools/call for verify_proof with proofId', () => {
+    it('should return isError:true for verify_proof with non-existent proofId', async () => {
+      // Redis mock store is empty — getProofResult returns null — skill throws
+      const response = await request(app)
+        .post('/mcp')
+        .set('Accept', 'application/json, text/event-stream')
+        .send({
+          jsonrpc: '2.0',
+          id: 27,
+          method: 'tools/call',
+          params: {
+            name: 'verify_proof',
+            arguments: {
+              proofId: 'nonexistent-proof-id-00000000-0000-0000-0000-000000000000',
+            },
+          },
+        });
+
+      expect(response.status).toBe(200);
+
+      const data = parseSSEResponse(response.text);
+      expect(data).toMatchObject({ jsonrpc: '2.0', id: 27 });
+      expect(data.result.isError).toBe(true);
+      expect(data.result.content).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'text',
+            text: expect.stringContaining('not found'),
+          }),
+        ]),
+      );
+    });
+  });
+
+  describe('prompts/list', () => {
+    it('should handle prompts/list request and include proof_flow prompt', async () => {
+      const response = await request(app)
+        .post('/mcp')
+        .set('Accept', 'application/json, text/event-stream')
+        .send({
+          jsonrpc: '2.0',
+          id: 30,
+          method: 'prompts/list',
+          params: {},
+        });
+
+      expect(response.status).toBe(200);
+
+      const data = parseSSEResponse(response.text);
+      expect(data).toMatchObject({
+        jsonrpc: '2.0',
+        id: 30,
+        result: {
+          prompts: expect.arrayContaining([
+            expect.objectContaining({ name: 'proof_flow' }),
+          ]),
+        },
+      });
+    });
+
+    it('should return proof_flow prompt content via prompts/get', async () => {
+      const response = await request(app)
+        .post('/mcp')
+        .set('Accept', 'application/json, text/event-stream')
+        .send({
+          jsonrpc: '2.0',
+          id: 31,
+          method: 'prompts/get',
+          params: { name: 'proof_flow', arguments: {} },
+        });
+
+      expect(response.status).toBe(200);
+
+      const data = parseSSEResponse(response.text);
+      expect(data).toMatchObject({ jsonrpc: '2.0', id: 31 });
+      expect(data.result).toBeDefined();
+      expect(data.result.messages).toBeInstanceOf(Array);
+      expect(data.result.messages.length).toBeGreaterThan(0);
+
+      const firstMessage = data.result.messages[0];
+      expect(firstMessage.role).toBe('user');
+      expect(firstMessage.content.type).toBe('text');
+      expect(firstMessage.content.text).toContain('request_signing');
+      expect(firstMessage.content.text).toContain('generate_proof');
+    });
+  });
+
+  describe('tools/list — inputSchema structure validation', () => {
+    it('should have correct inputSchema structure for each tool', async () => {
+      const response = await request(app)
+        .post('/mcp')
+        .set('Accept', 'application/json, text/event-stream')
+        .send({
+          jsonrpc: '2.0',
+          id: 40,
+          method: 'tools/list',
+          params: {},
+        });
+
+      expect(response.status).toBe(200);
+
+      const data = parseSSEResponse(response.text);
+      const tools: any[] = data.result.tools;
+
+      // Every tool must have a valid inputSchema
+      for (const tool of tools) {
+        expect(tool).toHaveProperty('name');
+        expect(tool).toHaveProperty('inputSchema');
+        expect(tool.inputSchema).toHaveProperty('type', 'object');
+        expect(tool.inputSchema).toHaveProperty('properties');
+        expect(typeof tool.inputSchema.properties).toBe('object');
+      }
+
+      // Spot-check specific tool schemas
+      const requestSigning = tools.find((t: any) => t.name === 'request_signing');
+      expect(requestSigning).toBeDefined();
+      expect(requestSigning.inputSchema.properties).toHaveProperty('circuitId');
+      expect(requestSigning.inputSchema.properties).toHaveProperty('scope');
+
+      const checkStatus = tools.find((t: any) => t.name === 'check_status');
+      expect(checkStatus).toBeDefined();
+      expect(checkStatus.inputSchema.properties).toHaveProperty('requestId');
+
+      const requestPayment = tools.find((t: any) => t.name === 'request_payment');
+      expect(requestPayment).toBeDefined();
+      expect(requestPayment.inputSchema.properties).toHaveProperty('requestId');
+
+      const generateProof = tools.find((t: any) => t.name === 'generate_proof');
+      expect(generateProof).toBeDefined();
+      expect(generateProof.inputSchema.properties).toHaveProperty('circuitId');
+      expect(generateProof.inputSchema.properties).toHaveProperty('scope');
+      expect(generateProof.inputSchema.properties).toHaveProperty('address');
+      expect(generateProof.inputSchema.properties).toHaveProperty('signature');
+
+      const verifyProof = tools.find((t: any) => t.name === 'verify_proof');
+      expect(verifyProof).toBeDefined();
+      expect(verifyProof.inputSchema.properties).toHaveProperty('proof');
+      expect(verifyProof.inputSchema.properties).toHaveProperty('publicInputs');
+      expect(verifyProof.inputSchema.properties).toHaveProperty('circuitId');
+
+      const getSupportedCircuits = tools.find((t: any) => t.name === 'get_supported_circuits');
+      expect(getSupportedCircuits).toBeDefined();
+      expect(getSupportedCircuits.inputSchema).toHaveProperty('type', 'object');
     });
   });
 });

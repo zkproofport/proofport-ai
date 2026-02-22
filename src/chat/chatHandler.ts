@@ -1,6 +1,4 @@
 import type { RedisClient } from '../redis/client.js';
-import type { TaskStore } from '../a2a/taskStore.js';
-import type { TaskEventEmitter } from '../a2a/streaming.js';
 import type { LLMProvider } from './llmProvider.js';
 import type { RateLimiter } from '../redis/rateLimiter.js';
 import type { ProofCache } from '../redis/proofCache.js';
@@ -17,8 +15,6 @@ import {
 
 export interface ChatHandlerDeps {
   redis: RedisClient;
-  taskStore: TaskStore;
-  taskEventEmitter: TaskEventEmitter;
   a2aBaseUrl: string;
   llmProvider: LLMProvider;
   // Fields for skillHandler:

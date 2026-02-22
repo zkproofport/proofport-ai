@@ -1,18 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import express, { type Express } from 'express';
 import request from 'supertest';
-import { getAgentCardHandler } from '../../src/a2a/agentCard.js';
-import { createA2aHandler } from '../../src/a2a/taskHandler.js';
-import { TaskStore } from '../../src/a2a/taskStore.js';
-import { TaskEventEmitter } from '../../src/a2a/streaming.js';
+import type { Task } from '@a2a-js/sdk';
+import { DefaultRequestHandler } from '@a2a-js/sdk/server';
+import { jsonRpcHandler, UserBuilder } from '@a2a-js/sdk/server/express';
+import { getAgentCardHandler, buildAgentCard } from '../../src/a2a/agentCard.js';
+import { RedisTaskStore } from '../../src/a2a/redisTaskStore.js';
+import { ProofportExecutor } from '../../src/a2a/proofportExecutor.js';
 import type { Config } from '../../src/config/index.js';
 
 describe('A2A Integration Tests', () => {
   let app: Express;
   let mockConfig: Config;
   let mockRedis: any;
-  let taskStore: TaskStore;
-  let taskEventEmitter: TaskEventEmitter;
+  let taskStore: RedisTaskStore;
 
   beforeEach(() => {
     // Create Express app
@@ -59,7 +60,7 @@ describe('A2A Integration Tests', () => {
       settlementUsdcAddress: '',
     } as Config;
 
-    // Mock Redis client
+    // Mock Redis client (Map-based)
     const taskData = new Map<string, string>();
     mockRedis = {
       set: vi.fn(async (key: string, value: string) => {
@@ -74,12 +75,16 @@ describe('A2A Integration Tests', () => {
     };
 
     // Create real instances with mocked Redis
-    taskStore = new TaskStore(mockRedis, 86400);
-    taskEventEmitter = new TaskEventEmitter();
+    taskStore = new RedisTaskStore(mockRedis, 86400);
 
-    // Mount A2A routes
+    // Build A2A SDK handler
+    const executor = new ProofportExecutor({ taskStore, config: mockConfig });
+    const agentCard = buildAgentCard(mockConfig);
+    const requestHandler = new DefaultRequestHandler(agentCard, taskStore, executor);
+
+    // Mount routes
     app.get('/.well-known/agent-card.json', getAgentCardHandler(mockConfig));
-    app.post('/a2a', createA2aHandler({ taskStore, taskEventEmitter }));
+    app.use('/a2a', jsonRpcHandler({ requestHandler, userBuilder: UserBuilder.noAuthentication }));
 
     // Add MCP route for coexistence test
     app.post('/mcp', (_req, res) => {
@@ -117,9 +122,6 @@ describe('A2A Integration Tests', () => {
             examples: expect.any(Array),
           }),
         ]),
-        securitySchemes: {
-          x402: { scheme: 'x402', description: expect.any(String) },
-        },
         identity: {
           erc8004: {
             contractAddress: expect.any(String),
@@ -133,15 +135,30 @@ describe('A2A Integration Tests', () => {
 
   describe('POST /a2a', () => {
     it('returns task for valid tasks/get request', async () => {
-      // First create a task directly via taskStore
-      const userMessage = {
-        role: 'user' as const,
-        parts: [{ kind: 'data' as const, mimeType: 'application/json', data: { skill: 'generate_proof', circuitId: 'coinbase_attestation' } }],
-        timestamp: new Date().toISOString(),
+      // Manually save a Task object via taskStore.save()
+      const taskId = 'test-task-001';
+      const task: Task = {
+        id: taskId,
+        contextId: 'test-context-001',
+        kind: 'task',
+        status: {
+          state: 'submitted',
+          timestamp: new Date().toISOString(),
+        },
+        history: [
+          {
+            kind: 'message',
+            messageId: 'msg-001',
+            role: 'user',
+            parts: [
+              { kind: 'data', data: { skill: 'generate_proof', circuitId: 'coinbase_attestation' } },
+            ],
+          },
+        ],
       };
-      const task = await taskStore.createTask('generate_proof', { circuitId: 'coinbase_attestation' }, userMessage);
+      await taskStore.save(task);
 
-      // Now retrieve it via tasks/get
+      // Now retrieve it via tasks/get JSON-RPC
       const response = await request(app)
         .post('/a2a')
         .send({
@@ -149,7 +166,7 @@ describe('A2A Integration Tests', () => {
           id: 1,
           method: 'tasks/get',
           params: {
-            id: task.id,
+            id: taskId,
           },
         });
 
@@ -158,11 +175,10 @@ describe('A2A Integration Tests', () => {
         jsonrpc: '2.0',
         id: 1,
         result: {
-          id: task.id,
+          id: taskId,
           status: {
-            state: 'queued',
+            state: 'submitted',
           },
-          skill: 'generate_proof',
           kind: 'task',
         },
       });
@@ -184,9 +200,9 @@ describe('A2A Integration Tests', () => {
         id: 1,
         error: {
           code: -32601,
-          message: expect.stringContaining('Method not found'),
         },
       });
+      expect(response.body.error.message).toBeDefined();
     });
 
     it('returns error for tasks/cancel on non-existent task', async () => {
@@ -207,12 +223,10 @@ describe('A2A Integration Tests', () => {
         id: 1,
         error: {
           code: -32001,
-          message: 'Task not found',
         },
       });
     });
   });
-
 
   describe('Route Coexistence', () => {
     it('A2A and MCP routes both respond correctly', async () => {
@@ -234,12 +248,25 @@ describe('A2A Integration Tests', () => {
       expect(agentCardResponse.body.name).toBe('proveragent.eth');
 
       // Test A2A JSON-RPC route (use tasks/get which is non-blocking)
-      const userMessage = {
-        role: 'user' as const,
-        parts: [{ kind: 'text' as const, text: 'verify proof' }],
-        timestamp: new Date().toISOString(),
+      const taskId = 'coexistence-task-001';
+      const task: Task = {
+        id: taskId,
+        contextId: 'coexistence-context-001',
+        kind: 'task',
+        status: {
+          state: 'submitted',
+          timestamp: new Date().toISOString(),
+        },
+        history: [
+          {
+            kind: 'message',
+            messageId: 'msg-coexist-001',
+            role: 'user',
+            parts: [{ kind: 'text', text: 'verify proof' }],
+          },
+        ],
       };
-      const task = await taskStore.createTask('verify_proof', {}, userMessage);
+      await taskStore.save(task);
 
       const a2aResponse = await request(app)
         .post('/a2a')
@@ -247,7 +274,7 @@ describe('A2A Integration Tests', () => {
           jsonrpc: '2.0',
           id: 1,
           method: 'tasks/get',
-          params: { id: task.id },
+          params: { id: taskId },
         });
 
       expect(a2aResponse.status).toBe(200);

@@ -45,16 +45,17 @@ Once you have circuitId and scope, show the process overview AND call request_si
 > Cost: $0.10 USDC (x402 payment protocol)
 >
 > Steps:
-> 1. Wallet signing — connect wallet and sign authorization
-> 2. Payment — $0.10 USDC via x402
-> 3. Proof generation — run Noir circuit (UltraHonk)
-> 4. Proof delivery — return proof + verification QR
+> 1. Session setup — signing URL generated
+> 2. Wallet signing — connect wallet and sign authorization
+> 3. Payment — $0.10 USDC via x402
+> 4. Proof generation — run Noir circuit (UltraHonk)
+> 5. Proof delivery — return proof + verification link
 >
 > Starting... (Your identity is never revealed)
 
 Present the signing URL from the response:
 
-> Step 1/4: Wallet Authorization Required
+> Step 2/5: Wallet Authorization Required
 >
 > Open this link to connect your wallet and sign:
 > [signingUrl]
@@ -71,7 +72,7 @@ When the user says they signed, call check_status with the requestId.
 - If phase is "signing": "Signing not yet completed. Please open the signing URL and complete the process."
 - If phase is "payment": Call request_payment to get the payment URL, then present it:
 
-> Step 2/4: Payment Required
+> Step 3/5: Payment Required
 >
 > Open this link to pay $0.10 USDC:
 > [paymentUrl]
@@ -93,9 +94,9 @@ When the user says they paid, call check_status again.
 
 After successful proof generation:
 
-> Step 2/4: Payment ✓ ($0.10 USDC settled via x402)
-> Step 3/4: Proof generated ✓ (Noir UltraHonk)
-> Step 4/4: Proof delivered ✓
+> Step 3/5: Payment ✓ ($0.10 USDC settled via x402)
+> Step 4/5: Proof generated ✓ (Noir UltraHonk)
+> Step 5/5: Proof delivered ✓
 >
 > PROOF GENERATED
 > Circuit: [circuit name]

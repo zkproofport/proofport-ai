@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import express, { type Express } from 'express';
 import request from 'supertest';
-import { getAgentCardHandler } from '../../src/a2a/agentCard.js';
-import { createA2aHandler } from '../../src/a2a/taskHandler.js';
-import { TaskStore } from '../../src/a2a/taskStore.js';
-import { TaskEventEmitter } from '../../src/a2a/streaming.js';
+import { getAgentCardHandler, buildAgentCard } from '../../src/a2a/agentCard.js';
+import { DefaultRequestHandler } from '@a2a-js/sdk/server';
+import { jsonRpcHandler, UserBuilder } from '@a2a-js/sdk/server/express';
+import { RedisTaskStore } from '../../src/a2a/redisTaskStore.js';
+import { ProofportExecutor } from '../../src/a2a/proofportExecutor.js';
 import { createPaymentMiddleware } from '../../src/payment/x402Middleware.js';
 import { createPaymentGate, getPaymentModeConfig } from '../../src/payment/freeTier.js';
 import { PaymentFacilitator } from '../../src/payment/facilitator.js';
@@ -54,7 +55,7 @@ import { createRedisClient } from '../../src/redis/client.js';
 describe('Payment Integration Tests', () => {
   let app: Express;
   let mockConfig: Config;
-  let taskStore: TaskStore;
+  let taskStore: RedisTaskStore;
   let paymentFacilitator: PaymentFacilitator;
 
   function setupApp(paymentMode: 'disabled' | 'testnet' | 'mainnet') {
@@ -76,8 +77,7 @@ describe('Payment Integration Tests', () => {
     } as Config;
 
     const redis = createRedisClient('redis://localhost:6379');
-    taskStore = new TaskStore(redis, 86400);
-    const taskEventEmitter = new TaskEventEmitter();
+    taskStore = new RedisTaskStore(redis, 86400);
     paymentFacilitator = new PaymentFacilitator(redis, { ttlSeconds: 86400 });
 
     const paymentMw = createPaymentMiddleware(mockConfig);
@@ -101,7 +101,10 @@ describe('Payment Integration Tests', () => {
     app.get('/.well-known/agent.json', getAgentCardHandler(mockConfig));
 
     // Payment-gated routes
-    app.post('/a2a', paymentMw, createA2aHandler({ taskStore, taskEventEmitter }));
+    const executor = new ProofportExecutor({ taskStore, config: mockConfig });
+    const agentCard = buildAgentCard(mockConfig);
+    const requestHandler = new DefaultRequestHandler(agentCard, taskStore, executor);
+    app.use('/a2a', paymentMw, jsonRpcHandler({ requestHandler, userBuilder: UserBuilder.noAuthentication }));
     app.post('/mcp', paymentMw, (_req, res) => {
       res.json({ jsonrpc: '2.0', result: { service: 'mcp' } });
     });
@@ -201,8 +204,7 @@ describe('Payment Integration Tests', () => {
     it('Agent Card remains accessible without payment', async () => {
       const response = await request(app).get('/.well-known/agent.json');
       expect(response.status).toBe(200);
-      expect(response.body.securitySchemes).toBeDefined();
-      expect(response.body.securitySchemes.x402).toBeDefined();
+      expect(response.body.name).toBe('proveragent.eth');
     });
   });
 

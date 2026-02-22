@@ -1,6 +1,5 @@
 import express, { type Router, type Request, type Response } from 'express';
-import type { TaskStore } from '../a2a/taskStore.js';
-import type { TaskEventEmitter } from '../a2a/streaming.js';
+import type { RedisTaskStore } from '../a2a/redisTaskStore.js';
 import { createRedisClient, type RedisClient } from '../redis/client.js';
 import type { RateLimiter } from '../redis/rateLimiter.js';
 import type { ProofCache } from '../redis/proofCache.js';
@@ -35,8 +34,7 @@ function splitHexToBytes32(hex: string): string[] {
 }
 
 export interface RestRoutesDeps {
-  taskStore: TaskStore;
-  taskEventEmitter: TaskEventEmitter;
+  taskStore: RedisTaskStore;
   redis: RedisClient;
   config: Config;
   rateLimiter?: RateLimiter;
@@ -169,7 +167,7 @@ export function createRestRoutes(deps: RestRoutesDeps): Router {
     const { taskId } = req.params;
 
     try {
-      const task = await deps.taskStore.getTask(taskId);
+      const task = await deps.taskStore.load(taskId);
 
       if (!task) {
         res.status(404).json({ error: 'Task not found' });

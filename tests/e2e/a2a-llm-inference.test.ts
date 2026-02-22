@@ -11,7 +11,7 @@ import { describe, it, expect } from 'vitest';
 import { GeminiProvider } from '../../src/chat/geminiClient.js';
 import { CHAT_TOOLS } from '../../src/chat/tools.js';
 import type { LLMProvider, LLMResponse } from '../../src/chat/llmProvider.js';
-import { A2A_INFERENCE_PROMPT } from '../../src/a2a/taskHandler.js';
+import { A2A_INFERENCE_PROMPT } from '../../src/a2a/proofportExecutor.js';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 

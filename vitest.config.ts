@@ -5,6 +5,22 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     setupFiles: ['./tests/setup.ts'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'text-summary', 'lcov'],
+      include: ['src/**/*.ts'],
+      exclude: [
+        'src/**/*.d.ts',
+        'src/types/**',
+        'src/tee/enclave/**',
+      ],
+      thresholds: {
+        lines: 80,
+        functions: 80,
+        branches: 70,
+        statements: 80,
+      },
+    },
     projects: [
       // ── E2E tests: hit real Docker container at localhost:4002 ────────────
       // These MUST run sequentially — all files share one container and the

@@ -26,7 +26,7 @@ import type { ProofCache } from '../redis/proofCache.js';
 import type { TeeProvider } from '../tee/types.js';
 import { BbProver } from '../prover/bbProver.js';
 import { computeCircuitParams } from '../input/inputBuilder.js';
-import { storeProofResult } from '../redis/proofResultStore.js';
+import { storeProofResult, getProofResult } from '../redis/proofResultStore.js';
 
 // ─── Dependencies ─────────────────────────────────────────────────────────────
 
@@ -690,9 +690,10 @@ export async function handleGenerateProof(
 
 /** Parameters for on-chain proof verification. */
 export interface VerifyProofParams {
-  circuitId: string;
-  proof: string;
-  publicInputs: string | string[];
+  proofId?: string;
+  circuitId?: string;
+  proof?: string;
+  publicInputs?: string | string[];
   chainId?: string;
 }
 
@@ -722,7 +723,22 @@ export async function handleVerifyProof(
   params: VerifyProofParams,
   deps: SkillDeps,
 ): Promise<VerifyProofResult> {
-  const { circuitId, proof } = params;
+  let circuitId = params.circuitId;
+  let proof = params.proof;
+  let publicInputs = params.publicInputs;
+
+  // If proofId is provided, look up stored proof data from Redis
+  if (params.proofId) {
+    const stored = await getProofResult(deps.redis, params.proofId);
+    if (!stored) {
+      throw new Error(
+        `Proof not found for proofId "${params.proofId}". The proof may have expired (24h TTL). Generate a new proof with generate_proof.`,
+      );
+    }
+    proof = stored.proof;
+    publicInputs = stored.publicInputs;
+    circuitId = stored.circuitId;
+  }
 
   // Validate required params
   if (!circuitId) {
@@ -731,7 +747,7 @@ export async function handleVerifyProof(
   if (!proof) {
     throw new Error('proof is required. Provide the hex-encoded proof from generate_proof.');
   }
-  if (params.publicInputs === undefined || params.publicInputs === null) {
+  if (publicInputs === undefined || publicInputs === null) {
     throw new Error('publicInputs is required. Provide the hex-encoded public inputs from generate_proof.');
   }
 
@@ -755,7 +771,7 @@ export async function handleVerifyProof(
   const verifierAddress = chainVerifiers[circuitId];
 
   // Normalize publicInputs to array of 32-byte hex chunks
-  const publicInputsArray = normalizePublicInputs(params.publicInputs);
+  const publicInputsArray = normalizePublicInputs(publicInputs);
 
   // Create provider and contract
   const provider = new ethers.JsonRpcProvider(deps.chainRpcUrl);

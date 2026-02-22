@@ -15,9 +15,11 @@ import { RateLimiter } from './redis/rateLimiter.js';
 import { ProofCache } from './redis/proofCache.js';
 import { CleanupWorker } from './redis/cleanupWorker.js';
 import { getAgentCardHandler, getMcpDiscoveryHandler, getOasfAgentHandler } from './a2a/agentCard.js';
-import { createA2aHandler } from './a2a/taskHandler.js';
-import { TaskStore } from './a2a/taskStore.js';
-import { TaskEventEmitter } from './a2a/streaming.js';
+import { DefaultRequestHandler } from '@a2a-js/sdk/server';
+import { jsonRpcHandler, UserBuilder } from '@a2a-js/sdk/server/express';
+import { buildAgentCard } from './a2a/agentCard.js';
+import { RedisTaskStore } from './a2a/redisTaskStore.js';
+import { ProofportExecutor } from './a2a/proofportExecutor.js';
 import { PAYMENT_NETWORKS } from './payment/x402Middleware.js';
 import { HTTPFacilitatorClient } from '@x402/core/server';
 import { PaymentFacilitator } from './payment/facilitator.js';
@@ -26,7 +28,6 @@ import { validatePaymentConfig, getPaymentModeConfig } from './payment/freeTier.
 import { createSigningCallbackHandler } from './signing/webSigning.js';
 import { createBatchSigningHandler } from './signing/eip7702Signing.js';
 import { getTeeConfig, createTeeProvider, resolveTeeMode } from './tee/index.js';
-import { TaskWorker } from './a2a/taskWorker.js';
 import { ensureAgentRegistered } from './identity/autoRegister.js';
 import { computeSignalHash } from './input/inputBuilder.js';
 import { ethers } from 'ethers';
@@ -81,8 +82,7 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   const proofCache = new ProofCache(redis, { ttlSeconds: 3600 });
 
   // A2A setup
-  const taskStore = new TaskStore(redis, 86400);
-  const taskEventEmitter = new TaskEventEmitter();
+  const taskStore = new RedisTaskStore(redis, 86400);
 
   // Cleanup worker setup
   const cleanupWorker = new CleanupWorker(redis);
@@ -96,9 +96,6 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   const resolvedMode = resolveTeeMode(teeConfig.mode);
   console.log(`[TEE] Mode: ${teeConfig.mode} → resolved to: ${resolvedMode}`);
   const teeProvider = createTeeProvider({ ...teeConfig, mode: resolvedMode });
-
-  // Task worker setup
-  const taskWorker = new TaskWorker({ taskStore, taskEventEmitter, config, teeProvider });
 
   // Settlement worker setup (only if payment mode is not disabled)
   let settlementWorker: SettlementWorker | null = null;
@@ -222,12 +219,17 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   }
   const llmProvider = llmProviders.length > 0 ? new MultiLLMProvider(llmProviders) : undefined;
 
+  // A2A SDK setup
+  const executor = new ProofportExecutor({ taskStore, config, teeProvider, llmProvider });
+  const agentCard = buildAgentCard(config, agentTokenId);
+  const requestHandler = new DefaultRequestHandler(agentCard, taskStore, executor);
+
   // Single POST /a2a handles all A2A v0.3 JSON-RPC methods
   // Payment is handled inside skillHandler via request_payment flow (no HTTP-level x402 gate)
-  app.post('/a2a', createA2aHandler({ taskStore, taskEventEmitter, llmProvider }));
+  app.use('/a2a', jsonRpcHandler({ requestHandler, userBuilder: UserBuilder.noAuthentication }));
 
   // REST API routes — payment is handled inside skillHandler via request_payment flow
-  app.use('/api/v1', createRestRoutes({ taskStore, taskEventEmitter, redis, config, rateLimiter, proofCache, teeProvider }));
+  app.use('/api/v1', createRestRoutes({ taskStore, redis, config, rateLimiter, proofCache, teeProvider }));
 
   // CORS for signing routes (sign-page on port 3200 → AI server on port 4002)
   app.use('/api/signing', (req, res, next) => {
@@ -361,7 +363,7 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
     next();
   }, async (req, res) => {
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-    const server = createMcpServer({ rateLimiter, proofCache, redis, teeProvider });
+    const server = createMcpServer({ rateLimiter, proofCache, redis, teeProvider }, config);
     await server.connect(transport);
     await transport.handleRequest(req, res, req.body);
   });
@@ -378,7 +380,7 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   // Payment is handled inside skillHandler via request_payment flow (no HTTP-level x402 gate)
   if (llmProvider) {
     const chatDeps = {
-      redis, taskStore, taskEventEmitter, a2aBaseUrl: config.a2aBaseUrl, llmProvider,
+      redis, taskStore, a2aBaseUrl: config.a2aBaseUrl, llmProvider,
       signPageUrl: config.signPageUrl,
       signingTtlSeconds: config.signingTtlSeconds,
       paymentMode: config.paymentMode,
@@ -662,7 +664,7 @@ el.innerHTML=
   app.use('/pay', createSignPageProxy());
   app.use('/_next', createSignPageProxy());
 
-  return { app, paymentFacilitator, teeProvider, taskWorker, settlementWorker, cleanupWorker };
+  return { app, paymentFacilitator, teeProvider, settlementWorker, cleanupWorker };
 }
 
 async function startServer() {
@@ -683,7 +685,7 @@ async function startServer() {
     const agentTokenId = await ensureAgentRegistered(config, earlyTeeProvider);
 
     // Create app with tokenId
-    const { app, paymentFacilitator, teeProvider, taskWorker, settlementWorker, cleanupWorker } = createApp(
+    const { app, paymentFacilitator, teeProvider, settlementWorker, cleanupWorker } = createApp(
       config,
       agentTokenId
     );
@@ -696,9 +698,6 @@ async function startServer() {
       if (paymentModeConfig.requiresPayment) {
         console.log(`Payment network: ${paymentModeConfig.network}`);
       }
-
-      taskWorker.start();
-      console.log('TaskWorker started');
 
       cleanupWorker.start();
       console.log('CleanupWorker started');
