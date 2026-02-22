@@ -47,7 +47,11 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
         if (info.metadataUri) {
           try {
             const currentMetadata = parseMetadataUri(info.metadataUri);
+            const expectedName = 'proveragent.base.eth';
+            const expectedImage = `${config.a2aBaseUrl}/icon.png`;
             const needsUpdate = currentMetadata && (
+              currentMetadata.name !== expectedName ||
+              currentMetadata.image !== expectedImage ||
               currentMetadata.agentUrl !== config.a2aBaseUrl ||
               currentMetadata.x402Support !== (config.paymentMode !== 'disabled') ||
               !currentMetadata.services ||
@@ -58,6 +62,12 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
             );
             if (needsUpdate) {
               console.log('Agent metadata needs updating on-chain...');
+              if (currentMetadata.name !== expectedName) {
+                console.log(`  name mismatch: on-chain="${currentMetadata.name}", expected="${expectedName}"`);
+              }
+              if (currentMetadata.image !== expectedImage) {
+                console.log(`  image mismatch: on-chain="${currentMetadata.image || 'none'}", expected="${expectedImage}"`);
+              }
               if (currentMetadata.agentUrl !== config.a2aBaseUrl) {
                 console.log(`  URL mismatch: on-chain="${currentMetadata.agentUrl}", current="${config.a2aBaseUrl}"`);
               }
