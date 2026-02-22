@@ -1,7 +1,7 @@
 # A2A 프로토콜 테스팅 프레임워크 심층 분석
 
 > 작성일: 2026-02-21
-> 대상: proofport-ai (ZKProofport Prover Agent)
+> 대상: proofport-ai (proveragent.base.eth)
 > 목적: A2A 프로토콜 검증 도구의 한계 분석 및 프로덕션 에이전트의 테스팅 패턴 조사
 
 ---

@@ -163,7 +163,7 @@ describe('ensureAgentRegistered', () => {
       const calledMetadata = mockRegister.mock.calls[0][0];
 
       expect(calledMetadata).toEqual({
-        name: 'proveragent.eth',
+        name: 'proveragent.base.eth',
         description: 'Zero-knowledge proof generation and verification for Coinbase attestations',
         agentUrl: validConfig.a2aBaseUrl,
         capabilities: [

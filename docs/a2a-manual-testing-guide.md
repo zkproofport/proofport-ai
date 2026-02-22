@@ -56,7 +56,7 @@ Open [http://localhost:3001](http://localhost:3001) in a browser.
 3. In the dialog, enter the agent URL: `http://localhost:4002`
 4. Click **Create Agent**.
 
-**Expected result:** The agent `proveragent.eth` appears in the Agents list with status **Active** and **6 messages** (reflecting the 6 registered skills: `get_supported_circuits`, `request_signing`, `check_status`, `request_payment`, `generate_proof`, `verify_proof`).
+**Expected result:** The agent `proveragent.base.eth` appears in the Agents list with status **Active** and **6 messages** (reflecting the 6 registered skills: `get_supported_circuits`, `request_signing`, `check_status`, `request_payment`, `generate_proof`, `verify_proof`).
 
 If the agent fails to register, see the Troubleshooting section for CORS and connectivity issues.
 
@@ -77,10 +77,10 @@ On the agent row, the three icon buttons are (left to right): **delete**, **edit
 1. Click the **Conversations** tab in the top navigation bar.
 2. Click the **Add** button.
 3. Conversation name: leave as default ("New conversation") or enter a custom name.
-4. Agent selector: `proveragent.eth (http://localhost:4002/a2a)` should be auto-selected from the registered agents.
+4. Agent selector: `proveragent.base.eth (http://localhost:4002/a2a)` should be auto-selected from the registered agents.
 5. Click **Create Conversation**.
 
-**Expected result:** The new conversation appears in the list, showing `Agent: proveragent.eth`.
+**Expected result:** The new conversation appears in the list, showing `Agent: proveragent.base.eth`.
 
 #### Delete a Conversation
 
@@ -764,7 +764,7 @@ Open [http://localhost:6006](http://localhost:6006) in a browser.
 
 **Steps:**
 
-1. On the Phoenix home screen, locate the **proveragent.eth** project. This project is auto-created when the agent emits its first OTLP trace.
+1. On the Phoenix home screen, locate the **proveragent.base.eth** project. This project is auto-created when the agent emits its first OTLP trace.
 2. Click on the project to view the trace list.
 3. Each conversation message generates a new trace. Select a trace to inspect its spans.
 

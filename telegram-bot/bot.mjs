@@ -9,7 +9,7 @@ if (!BOT_TOKEN) {
   process.exit(1);
 }
 
-console.log('proveragent.eth Telegram Bot starting...');
+console.log('proveragent.base.eth Telegram Bot starting...');
 console.log(`Chat API: ${CHAT_API_URL}`);
 
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
@@ -297,7 +297,7 @@ async function sendLongMessage(chatId, text, options = {}) {
 
 // ─── /start command ──────────────────────────────────────────────────
 bot.onText(/\/start/, (msg) => {
-  const welcome = `*proveragent.eth*
+  const welcome = `*proveragent.base.eth*
 
 Zero-knowledge proof generation and verification agent.
 

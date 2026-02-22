@@ -188,7 +188,7 @@ describe('Discovery Endpoints', () => {
   it('GET /.well-known/agent-card.json returns A2A agent card with 6 skills', async () => {
     const { status, json } = await jsonGet('/.well-known/agent-card.json');
     expect(status).toBe(200);
-    expect(json.name).toBe('proveragent.eth');
+    expect(json.name).toBe('proveragent.base.eth');
     expect(json.protocolVersion).toBe('0.3.0');
     expect(Array.isArray(json.skills)).toBe(true);
     expect(json.skills.length).toBe(6);
@@ -207,7 +207,7 @@ describe('Discovery Endpoints', () => {
     const { status, json } = await jsonGet('/.well-known/agent.json');
     expect(status).toBe(200);
     expect(json.name).toBeDefined();
-    expect(json.name).toBe('proveragent.eth');
+    expect(json.name).toBe('proveragent.base.eth');
     expect(Array.isArray(json.skills)).toBe(true);
   });
 

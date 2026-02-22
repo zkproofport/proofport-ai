@@ -1,6 +1,6 @@
 # ZKProofport Telegram Bot
 
-A Telegram bot interface for [proveragent.eth](https://stg-ai.zkproofport.app) — generate and verify zero-knowledge proofs through natural language conversation.
+A Telegram bot interface for [proveragent.base.eth](https://stg-ai.zkproofport.app) — generate and verify zero-knowledge proofs through natural language conversation.
 
 ## Features
 
@@ -64,7 +64,7 @@ Telegram User
 Telegram Bot (this repo)
     │  POST /api/v1/chat
     ▼
-proveragent.eth
+proveragent.base.eth
     │  LLM function calling
     ▼
 ZK Proof Generation / Verification

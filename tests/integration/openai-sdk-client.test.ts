@@ -290,7 +290,7 @@ describe('OpenAI SDK Client Integration', () => {
   describe('Non-streaming Completions', () => {
     it('simple text response', async () => {
       mockChat.mockResolvedValueOnce({
-        content: 'Hello! I am proveragent.eth, your ZK proof assistant.',
+        content: 'Hello! I am proveragent.base.eth, your ZK proof assistant.',
       });
 
       const completion = await openai.chat.completions.create({
@@ -307,7 +307,7 @@ describe('OpenAI SDK Client Integration', () => {
       expect(completion.choices[0].index).toBe(0);
       expect(completion.choices[0].finish_reason).toBe('stop');
       expect(completion.choices[0].message.role).toBe('assistant');
-      expect(completion.choices[0].message.content).toContain('proveragent.eth');
+      expect(completion.choices[0].message.content).toContain('proveragent.base.eth');
     });
 
     it('empty messages returns 400 error', async () => {
@@ -573,7 +573,7 @@ describe('OpenAI SDK Client Integration', () => {
   describe('Session Management', () => {
     it('first request returns X-Session-Id and X-Session-Secret headers', async () => {
       mockChat.mockResolvedValueOnce({
-        content: 'Hello! I am proveragent.eth.',
+        content: 'Hello! I am proveragent.base.eth.',
       });
 
       // Use raw fetch to access headers (OpenAI SDK doesn't expose response headers directly)

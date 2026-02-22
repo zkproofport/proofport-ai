@@ -1,7 +1,7 @@
 {
   "name": "proofport-telegram-bot",
   "version": "1.0.0",
-  "description": "Telegram bot interface for proveragent.eth — generate and verify zero-knowledge proofs via natural language",
+  "description": "Telegram bot interface for proveragent.base.eth — generate and verify zero-knowledge proofs via natural language",
   "type": "module",
   "main": "bot.mjs",
   "scripts": {

@@ -309,7 +309,7 @@ describe('A2A SDK Client Integration', () => {
       // Verify the agent card through the client
       const agentCard = await client.getAgentCard();
       expect(agentCard).toBeDefined();
-      expect(agentCard.name).toBe('proveragent.eth');
+      expect(agentCard.name).toBe('proveragent.base.eth');
       expect(agentCard.protocolVersion).toBe('0.3.0');
       expect(agentCard.preferredTransport).toBe('JSONRPC');
     });

@@ -20,9 +20,9 @@ if (endpoint) {
 
   const provider = new NodeTracerProvider({
     resource: resourceFromAttributes({
-      [ATTR_SERVICE_NAME]: 'proveragent.eth',
-      'project.name': 'proveragent.eth',
-      'openinference.project.name': 'proveragent.eth',
+      [ATTR_SERVICE_NAME]: 'proveragent.base.eth',
+      'project.name': 'proveragent.base.eth',
+      'openinference.project.name': 'proveragent.base.eth',
     }),
     spanProcessors: [
       new SimpleSpanProcessor(exporter),

@@ -160,7 +160,7 @@ describe('Payment Integration Tests', () => {
     it('Agent Card is accessible without payment', async () => {
       const response = await request(app).get('/.well-known/agent.json');
       expect(response.status).toBe(200);
-      expect(response.body.name).toBe('proveragent.eth');
+      expect(response.body.name).toBe('proveragent.base.eth');
     });
   });
 
@@ -204,7 +204,7 @@ describe('Payment Integration Tests', () => {
     it('Agent Card remains accessible without payment', async () => {
       const response = await request(app).get('/.well-known/agent.json');
       expect(response.status).toBe(200);
-      expect(response.body.name).toBe('proveragent.eth');
+      expect(response.body.name).toBe('proveragent.base.eth');
     });
   });
 

@@ -427,7 +427,7 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>proveragent.eth — Proof Verification</title>
+<title>proveragent.base.eth — Proof Verification</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#0a0a0a;color:#f0f0f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1rem}
@@ -450,7 +450,7 @@ h1{font-size:1.25rem;font-weight:600;margin-bottom:.5rem;text-align:center}
 </head>
 <body>
 <div class="card">
-<h1>proveragent.eth</h1>
+<h1>proveragent.base.eth</h1>
 <p class="subtitle">On-chain ZK Proof Verification</p>
 <div id="result"><div class="status loading">Verifying proof on-chain...</div></div>
 </div>

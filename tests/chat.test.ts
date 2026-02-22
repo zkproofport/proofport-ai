@@ -131,7 +131,7 @@ describe('Chat Integration', () => {
 
   describe('SYSTEM_PROMPT', () => {
     it('should contain key instructions', () => {
-      expect(SYSTEM_PROMPT).toContain('proveragent.eth');
+      expect(SYSTEM_PROMPT).toContain('proveragent.base.eth');
       expect(SYSTEM_PROMPT).toContain('generate_proof');
       expect(SYSTEM_PROMPT).toContain('verify_proof');
       expect(SYSTEM_PROMPT).toContain('get_supported_circuits');

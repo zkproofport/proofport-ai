@@ -815,7 +815,7 @@ describe('Chat Endpoint E2E', () => {
 
       expect(capturedSystemPrompt).toBeDefined();
       // Should contain default system prompt content
-      expect(capturedSystemPrompt).toContain('proveragent.eth');
+      expect(capturedSystemPrompt).toContain('proveragent.base.eth');
       // Should also contain the custom system message
       expect(capturedSystemPrompt).toContain('Always respond in formal English.');
     });
@@ -838,7 +838,7 @@ describe('Chat Endpoint E2E', () => {
         });
 
       expect(capturedSystemPrompt).toBeDefined();
-      expect(capturedSystemPrompt).toContain('proveragent.eth');
+      expect(capturedSystemPrompt).toContain('proveragent.base.eth');
     });
   });
 

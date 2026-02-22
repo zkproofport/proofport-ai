@@ -71,7 +71,7 @@ describe('A2A Agent Card', () => {
       const { buildAgentCard } = await import('../../src/a2a/agentCard');
       const card = buildAgentCard(mockConfig);
 
-      expect(card.name).toBe('proveragent.eth');
+      expect(card.name).toBe('proveragent.base.eth');
     });
 
     it('should have preferredTransport set to JSONRPC', async () => {

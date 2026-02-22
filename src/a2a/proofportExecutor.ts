@@ -32,7 +32,7 @@ const tracer = trace.getTracer('a2a-executor');
 
 const VALID_SKILLS = ['request_signing', 'check_status', 'request_payment', 'generate_proof', 'verify_proof', 'get_supported_circuits'];
 
-export const A2A_INFERENCE_PROMPT = `You are a skill router for proveragent.eth. Given user text, determine which tool to call and extract parameters. ALWAYS respond with a tool call — never with plain text.
+export const A2A_INFERENCE_PROMPT = `You are a skill router for proveragent.base.eth. Given user text, determine which tool to call and extract parameters. ALWAYS respond with a tool call — never with plain text.
 
 Tool selection rules:
 - verify_proof: User wants to VERIFY or VALIDATE an existing proof. Keywords: verify, validate, check proof, 검증, 확인, 검사. Often includes a hex proof value (0x...) or proofId. When the user provides a hex string and asks to verify/check it, ALWAYS use verify_proof.

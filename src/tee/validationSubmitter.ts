@@ -93,7 +93,8 @@ export async function ensureAgentValidated(
         }
       } else {
         const result = await validationRegistration.register({
-          name: 'proveragent.eth',
+          name: 'proveragent.base.eth',
+          image: `${config.a2aBaseUrl}/icon.png`,
           description: 'Zero-knowledge proof generation and verification for Coinbase attestations',
           agentUrl: config.a2aBaseUrl,
           capabilities: ['proof_generation', 'proof_verification'],

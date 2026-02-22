@@ -209,7 +209,7 @@ describe('A2A Endpoint E2E', () => {
       expect(response.status).toBe(200);
       expect(response.headers['content-type']).toMatch(/application\/json/);
       expect(response.body).toMatchObject({
-        name: 'proveragent.eth',
+        name: 'proveragent.base.eth',
         protocolVersion: '0.3.0',
         preferredTransport: 'JSONRPC',
         skills: expect.any(Array),
@@ -489,13 +489,13 @@ describe('A2A Endpoint E2E', () => {
       // Test A2A Agent Card at standard URL
       const oasfResponse = await request(app).get('/.well-known/agent.json');
       expect(oasfResponse.status).toBe(200);
-      expect(oasfResponse.body.name).toBe('proveragent.eth');
+      expect(oasfResponse.body.name).toBe('proveragent.base.eth');
       expect(oasfResponse.body.protocolVersion).toBe('0.3.0');
 
       // Test A2A Agent Card at alias URL
       const agentCardResponse = await request(app).get('/.well-known/agent-card.json');
       expect(agentCardResponse.status).toBe(200);
-      expect(agentCardResponse.body.name).toBe('proveragent.eth');
+      expect(agentCardResponse.body.name).toBe('proveragent.base.eth');
       expect(agentCardResponse.body.preferredTransport).toBe('JSONRPC');
 
       // Test A2A JSON-RPC (use tasks/get which is non-blocking)

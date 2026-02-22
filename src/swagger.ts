@@ -2,7 +2,7 @@ export function buildSwaggerSpec(baseUrl: string) {
   return {
     openapi: '3.0.3',
     info: {
-      title: 'proveragent.eth - ZK Proof Generation Agent',
+      title: 'proveragent.base.eth - ZK Proof Generation Agent',
       version: '0.1.0',
       description:
         'Agent-native ZK proof infrastructure. Provides MCP (Model Context Protocol) tools for zero-knowledge proof generation and verification using Noir circuits + bb CLI.',

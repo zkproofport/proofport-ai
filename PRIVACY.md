@@ -1,4 +1,4 @@
-# Privacy Policy — proveragent.eth
+# Privacy Policy — proveragent.base.eth
 
 **Service:** Prover Agent Telegram Bot (@ProverAgentBot)  
 **Operator:** ZKProofport  
@@ -8,7 +8,7 @@
 
 ## Overview
 
-proveragent.eth is a zero-knowledge proof generation and verification agent. This service is built on the principle that **privacy is not optional — it is the default**. We use zero-knowledge cryptography to ensure your personal data is never exposed, transmitted, or stored.
+proveragent.base.eth is a zero-knowledge proof generation and verification agent. This service is built on the principle that **privacy is not optional — it is the default**. We use zero-knowledge cryptography to ensure your personal data is never exposed, transmitted, or stored.
 
 ## What We Collect
 

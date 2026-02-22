@@ -218,7 +218,7 @@ Publicly accessible agent identity document. Used by other agents to discover ca
 
 ```json
 {
-  "name": "proveragent.eth",
+  "name": "proveragent.base.eth",
   "description": "Generate and verify zero-knowledge proofs for KYC attestations",
   "version": "1.0.0",
   "capabilities": {
@@ -796,11 +796,11 @@ npm run test:e2e
 
 1. Open `http://localhost:3001`
 2. Go to **Agents** tab → click **Add** → enter `http://localhost:4002` → click **Create Agent**
-3. Go to **Conversations** tab → click **Add** → select **proveragent.eth** → click **Create Conversation**
+3. Go to **Conversations** tab → click **Add** → select **proveragent.base.eth** → click **Create Conversation**
 4. Click the third icon button (open/expand) on the conversation row to enter chat view
 5. Type `list supported circuits` in the "Ask anything" field → press Enter
 6. Verify: agent returns artifact with `coinbase_attestation` and `coinbase_country_attestation` circuit data
-7. Check Phoenix traces at `http://localhost:6006` (project: `proveragent.eth`)
+7. Check Phoenix traces at `http://localhost:6006` (project: `proveragent.base.eth`)
 
 ### Architecture
 

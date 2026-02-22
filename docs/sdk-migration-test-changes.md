@@ -119,7 +119,7 @@
 |----------|---------|---------|----------|------|
 | Import 경로 | `createA2aHandler`, `TaskStore`, `TaskEventEmitter` | SDK 동등 항목 | 소스 교체 | 정당 |
 | App 설정 | `app.post('/a2a', createA2aHandler({...}))` | SDK `DefaultRequestHandler` + `jsonRpcHandler` | SDK wiring | 정당 |
-| Agent Card assertion | `expect(body.securitySchemes).toBeDefined()` | `expect(body.name).toBe('proveragent.eth')` | securitySchemes 제거됨. 대신 agent card name 확인 — 실제로 더 강력한 assertion | 정당 — 더 구체적인 assertion |
+| Agent Card assertion | `expect(body.securitySchemes).toBeDefined()` | `expect(body.name).toBe('proveragent.base.eth')` | securitySchemes 제거됨. 대신 agent card name 확인 — 실제로 더 강력한 assertion | 정당 — 더 구체적인 assertion |
 
 ---
 

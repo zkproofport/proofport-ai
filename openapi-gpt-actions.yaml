@@ -1,6 +1,6 @@
 openapi: 3.1.0
 info:
-  title: proveragent.eth
+  title: proveragent.base.eth
   version: 1.0.0
   description: |
     Zero-knowledge proof generation and verification for Coinbase attestations.

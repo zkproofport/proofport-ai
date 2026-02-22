@@ -36,7 +36,7 @@ export function buildAgentCard(config: Config, tokenId?: bigint | null): AgentCa
   const chainId = isProduction ? 8453 : 84532; // Base Mainnet : Base Sepolia
 
   return {
-    name: 'proveragent.eth',
+    name: 'proveragent.base.eth',
     description: 'Zero-knowledge proof generation and verification for Coinbase attestations',
     url: `${config.a2aBaseUrl}/a2a`,
     version: config.agentVersion,
@@ -155,9 +155,9 @@ export function buildMcpDiscovery(config: Config) {
   return {
     protocolVersion: '2025-11-25',
     serverInfo: {
-      name: 'proveragent.eth',
+      name: 'proveragent.base.eth',
       version: config.agentVersion,
-      description: 'proveragent.eth — Zero-knowledge proof generation and verification for Coinbase attestations',
+      description: 'proveragent.base.eth — Zero-knowledge proof generation and verification for Coinbase attestations',
     },
     capabilities: {
       tools: {},
@@ -280,9 +280,10 @@ export function buildOasfAgent(config: Config, tokenId?: bigint | null) {
 
   return {
     type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
-    name: 'proveragent.eth',
+    name: 'proveragent.base.eth',
     description:
       'Zero-knowledge proof generation and verification for Coinbase attestations. Supports x402 micropayments and ERC-8004 on-chain identity.',
+    image: `${config.a2aBaseUrl}/icon.png`,
     agentType: 'service',
     tags: ['ZK', 'Privacy', 'Proof', 'Coinbase', 'KYC', 'Attestation', 'x402'],
     services: [
