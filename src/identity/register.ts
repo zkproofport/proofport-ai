@@ -13,6 +13,7 @@ const IDENTITY_ABI = [
   'function tokenURI(uint256 tokenId) external view returns (string)',
   'function ownerOf(uint256 tokenId) external view returns (address)',
   'function balanceOf(address owner) external view returns (uint256)',
+  'function totalSupply() external view returns (uint256)',
   'function tokenOfOwnerByIndex(address owner, uint256 index) external view returns (uint256)',
   'event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)',
 ];
@@ -96,8 +97,11 @@ export class AgentRegistration {
       return null;
     }
 
-    // Find tokenId — try tokenOfOwnerByIndex first (ERC-721 Enumerable), then event scan
+    // Find tokenId — try multiple strategies in order of reliability
     let tokenId = await this.findTokenIdByEnumerable();
+    if (tokenId === null) {
+      tokenId = await this.findTokenIdByTotalSupply();
+    }
     if (tokenId === null) {
       tokenId = await this.findTokenId();
     }
@@ -148,8 +152,8 @@ export class AgentRegistration {
         continue;
       }
 
-      // Only scan last 50k blocks max to avoid long startup
-      if (currentBlock - fromBlock > 50000) break;
+      // Scan up to 2M blocks (~46 days on Base Sepolia at 2s/block)
+      if (currentBlock - fromBlock > 2000000) break;
     }
 
     return null;
@@ -157,16 +161,43 @@ export class AgentRegistration {
 
   /**
    * Find tokenId using ERC-721 Enumerable tokenOfOwnerByIndex
-   * Most reliable method — returns the first token owned by the signer
    */
   private async findTokenIdByEnumerable(): Promise<bigint | null> {
     try {
       const tokenId = await this.contract.tokenOfOwnerByIndex(this.signer.address, 0);
+      console.log(`[Identity] Found tokenId via tokenOfOwnerByIndex: ${tokenId}`);
       return BigInt(tokenId);
     } catch {
-      // Contract may not implement ERC-721 Enumerable
       return null;
     }
+  }
+
+  /**
+   * Find tokenId by iterating totalSupply and checking ownerOf
+   * Works for contracts without ERC-721 Enumerable but with totalSupply
+   */
+  private async findTokenIdByTotalSupply(): Promise<bigint | null> {
+    try {
+      const totalSupply = await this.contract.totalSupply();
+      const total = Number(totalSupply);
+      console.log(`[Identity] Scanning ownerOf for ${total} tokens...`);
+
+      // Scan in reverse (most recent first — our token is likely near the end)
+      for (let i = total - 1; i >= 0; i--) {
+        try {
+          const owner = await this.contract.ownerOf(BigInt(i));
+          if (owner.toLowerCase() === this.signer.address.toLowerCase()) {
+            console.log(`[Identity] Found tokenId via ownerOf scan: ${i}`);
+            return BigInt(i);
+          }
+        } catch {
+          continue;
+        }
+      }
+    } catch {
+      // Contract may not implement totalSupply
+    }
+    return null;
   }
 
   /**
