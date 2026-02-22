@@ -164,7 +164,7 @@ describe('ensureAgentRegistered', () => {
 
       expect(calledMetadata).toEqual({
         name: 'proveragent.base.eth',
-        description: 'Zero-knowledge proof generation and verification for Coinbase attestations',
+        description: 'Autonomous ZK proof generation. ERC-8004 identity. x402 payments. Powered by ZKProofport',
         agentUrl: validConfig.a2aBaseUrl,
         capabilities: [
           'proof_generation',

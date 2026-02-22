@@ -95,7 +95,7 @@ export async function ensureAgentValidated(
         const result = await validationRegistration.register({
           name: 'proveragent.base.eth',
           image: `${config.a2aBaseUrl}/icon.png`,
-          description: 'Zero-knowledge proof generation and verification for Coinbase attestations',
+          description: 'Autonomous ZK proof generation. ERC-8004 identity. x402 payments. Powered by ZKProofport',
           agentUrl: config.a2aBaseUrl,
           capabilities: ['proof_generation', 'proof_verification'],
           protocols: ['mcp', 'a2a'],

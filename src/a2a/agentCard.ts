@@ -37,7 +37,7 @@ export function buildAgentCard(config: Config, tokenId?: bigint | null): AgentCa
 
   return {
     name: 'proveragent.base.eth',
-    description: 'Zero-knowledge proof generation and verification for Coinbase attestations',
+    description: 'Autonomous ZK proof generation. ERC-8004 identity. x402 payments. Powered by ZKProofport',
     url: `${config.a2aBaseUrl}/a2a`,
     version: config.agentVersion,
     protocolVersion: '0.3.0',
@@ -157,7 +157,7 @@ export function buildMcpDiscovery(config: Config) {
     serverInfo: {
       name: 'proveragent.base.eth',
       version: config.agentVersion,
-      description: 'proveragent.base.eth — Zero-knowledge proof generation and verification for Coinbase attestations',
+      description: 'proveragent.base.eth — Autonomous ZK proof generation. ERC-8004 identity. x402 payments. Powered by ZKProofport',
     },
     capabilities: {
       tools: {},
@@ -282,7 +282,7 @@ export function buildOasfAgent(config: Config, tokenId?: bigint | null) {
     type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
     name: 'proveragent.base.eth',
     description:
-      'Zero-knowledge proof generation and verification for Coinbase attestations. Supports x402 micropayments and ERC-8004 on-chain identity.',
+      'Autonomous ZK proof generation. ERC-8004 identity. x402 payments. Powered by ZKProofport',
     image: `${config.a2aBaseUrl}/icon.png`,
     agentType: 'service',
     tags: ['ZK', 'Privacy', 'Proof', 'Coinbase', 'KYC', 'Attestation', 'x402'],

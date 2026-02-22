@@ -3,7 +3,7 @@ info:
   title: proveragent.base.eth
   version: 1.0.0
   description: |
-    Zero-knowledge proof generation and verification for Coinbase attestations.
+    Autonomous ZK proof generation. ERC-8004 identity. x402 payments. Powered by ZKProofport.
     Generates privacy-preserving proofs using Noir circuits and verifies them on-chain (Base network).
 
     ## Proof Generation Flow (Web Signing)

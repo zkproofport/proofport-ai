@@ -89,7 +89,7 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
 
               const metadata: AgentMetadata = {
                 name: 'proveragent.base.eth',
-                description: 'Zero-knowledge proof generation and verification for Coinbase attestations',
+                description: 'Autonomous ZK proof generation. ERC-8004 identity. x402 payments. Powered by ZKProofport',
                 agentUrl: config.a2aBaseUrl,
                 capabilities: [
                   'proof_generation',
@@ -140,7 +140,7 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
     // Build metadata
     const metadata: AgentMetadata = {
       name: 'proveragent.base.eth',
-      description: 'Zero-knowledge proof generation and verification for Coinbase attestations',
+      description: 'Autonomous ZK proof generation. ERC-8004 identity. x402 payments. Powered by ZKProofport',
       agentUrl: config.a2aBaseUrl,
       capabilities: [
         'proof_generation',
