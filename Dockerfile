@@ -86,6 +86,9 @@ RUN npm ci --production
 # Copy built JavaScript from builder stage
 COPY --from=builder /app/dist ./dist
 
+# Copy public static assets (agent icon, etc.)
+COPY public/ ./public/
+
 # Create circuits directory
 RUN mkdir -p /app/circuits
 
