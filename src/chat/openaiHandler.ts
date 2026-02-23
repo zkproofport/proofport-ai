@@ -89,7 +89,7 @@ function buildDslBlock(lastSkillResult: unknown, signingUrl: string | undefined)
         'state', 'proofId', 'verifyUrl', 'paymentReceiptUrl', 'paymentTxHash',
         'nullifier', 'signalHash', 'signingUrl', 'requestId',
         'amount', 'network', 'message', 'error', 'valid',
-        'circuitId', 'verifierAddress', 'chainId',
+        'circuitId', 'verifierAddress', 'verifierExplorerUrl', 'chainId',
       ];
       for (const key of SUMMARY_FIELDS) {
         if (sr[key] !== undefined) filtered[key] = sr[key];

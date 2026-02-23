@@ -45,11 +45,17 @@ export function getTaskOutcome(skill: string, result: unknown): TaskOutcome {
             state: 'input-required',
             guidance: `Signing complete. Payment is required before proof generation. Call request_payment with requestId "${r.requestId}" to get the payment URL.`,
           };
-        case 'ready':
-          return {
-            state: 'completed',
-            guidance: `All prerequisites met. Call generate_proof with requestId "${r.requestId}" to generate the zero-knowledge proof.`,
-          };
+        case 'ready': {
+          let readyGuidance = `All prerequisites met. Call generate_proof with requestId "${r.requestId}" to generate the zero-knowledge proof.`;
+          if (r.verifierExplorerUrl) {
+            readyGuidance += ` | Verifier contract: ${r.verifierExplorerUrl}`;
+          }
+          if (r.payment.paymentReceiptUrl) {
+            readyGuidance += ` | Payment receipt: ${r.payment.paymentReceiptUrl}`;
+          }
+          readyGuidance += ` | Session expires: ${r.expiresAt}`;
+          return { state: 'completed', guidance: readyGuidance };
+        }
         case 'expired':
           return {
             state: 'failed',
@@ -70,19 +76,28 @@ export function getTaskOutcome(skill: string, result: unknown): TaskOutcome {
 
     case 'generate_proof': {
       const r = result as GenerateProofResult;
-      return {
-        state: 'completed',
-        guidance: `Proof generated successfully. ProofId: ${r.proofId}. Optionally call verify_proof with proofId "${r.proofId}" to verify on-chain.`,
-      };
+      let guidance = `Proof generated successfully. ProofId: ${r.proofId}. Verification page: ${r.verifyUrl}`;
+      if (r.verifierExplorerUrl) {
+        guidance += ` | Verifier contract: ${r.verifierExplorerUrl}`;
+      }
+      if (r.paymentReceiptUrl) {
+        guidance += ` | Payment receipt: ${r.paymentReceiptUrl}`;
+      }
+      guidance += ` — Optionally call verify_proof with proofId "${r.proofId}" to verify on-chain.`;
+      return { state: 'completed', guidance };
     }
 
     case 'verify_proof': {
       const r = result as VerifyProofResult;
       const validText = r.valid ? 'valid' : 'invalid';
-      return {
-        state: 'completed',
-        guidance: `Verification complete. The proof is ${validText} on chain ${r.chainId} (verifier: ${r.verifierAddress}).${r.error ? ` Error: ${r.error}` : ''}`,
-      };
+      let guidance = `Verification complete. The proof is ${validText} on chain ${r.chainId} (verifier: ${r.verifierAddress}).`;
+      if (r.verifierExplorerUrl) {
+        guidance += ` View contract: ${r.verifierExplorerUrl}`;
+      }
+      if (r.error) {
+        guidance += ` Error: ${r.error}`;
+      }
+      return { state: 'completed', guidance };
     }
 
     case 'get_supported_circuits': {

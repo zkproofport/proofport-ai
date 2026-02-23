@@ -87,7 +87,7 @@ export async function executeSkill(
   }
 
   if (skillName === 'generate_proof') {
-    const result = await handleGenerateProof({
+    return handleGenerateProof({
       requestId: args.requestId as string | undefined,
       address: args.address as string | undefined,
       signature: args.signature as string | undefined,
@@ -96,14 +96,6 @@ export async function executeSkill(
       countryList: args.countryList as string[] | undefined,
       isIncluded: args.isIncluded as boolean | undefined,
     }, skillDeps);
-
-    // Add payment receipt URL if we have a tx hash
-    if (result.paymentTxHash) {
-      (result as unknown as Record<string, unknown>).paymentReceiptUrl =
-        `https://sepolia.basescan.org/tx/${result.paymentTxHash}`;
-    }
-
-    return result;
   }
 
   if (skillName === 'verify_proof') {

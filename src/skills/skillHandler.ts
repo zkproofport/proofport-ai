@@ -100,6 +100,26 @@ function normalizePublicInputs(raw: string | string[]): string[] {
   return chunks;
 }
 
+/**
+ * Build a Basescan transaction URL based on payment mode.
+ * testnet → sepolia.basescan.org, mainnet → basescan.org
+ */
+function getBasescanTxUrl(paymentMode: string, txHash: string): string {
+  return paymentMode === 'mainnet'
+    ? `https://basescan.org/tx/${txHash}`
+    : `https://sepolia.basescan.org/tx/${txHash}`;
+}
+
+/**
+ * Build a Basescan address URL based on chain ID.
+ * 8453 (Base) → basescan.org, default (84532 Base Sepolia) → sepolia.basescan.org
+ */
+function getBasescanAddressUrl(chainId: string, address: string): string {
+  return chainId === '8453'
+    ? `https://basescan.org/address/${address}`
+    : `https://sepolia.basescan.org/address/${address}`;
+}
+
 // ─── Skill 1: request_signing ─────────────────────────────────────────────────
 
 /** Parameters for requesting a new signing session. */
@@ -221,7 +241,11 @@ export interface CheckStatusResult {
     status: 'not_required' | 'pending' | 'completed';
     paymentUrl?: string;
     txHash?: string;
+    paymentReceiptUrl?: string;
   };
+  circuitId?: string;
+  verifierAddress?: string;
+  verifierExplorerUrl?: string;
   expiresAt: string;
 }
 
@@ -273,7 +297,11 @@ export async function handleCheckStatus(
   if (deps.paymentMode === 'disabled') {
     paymentStatus = { status: 'not_required' };
   } else if (record.paymentStatus === 'completed') {
-    paymentStatus = { status: 'completed', txHash: record.paymentTxHash };
+    paymentStatus = {
+      status: 'completed',
+      txHash: record.paymentTxHash,
+      ...(record.paymentTxHash && { paymentReceiptUrl: getBasescanTxUrl(deps.paymentMode, record.paymentTxHash) }),
+    };
   } else {
     paymentStatus = {
       status: 'pending',
@@ -291,11 +319,26 @@ export async function handleCheckStatus(
     phase = 'ready';
   }
 
+  // Include verifier info when phase is ready
+  let verifierInfo: { circuitId: string; verifierAddress: string; verifierExplorerUrl: string } | undefined;
+  if (phase === 'ready') {
+    const defaultChainId = '84532';
+    const addr = VERIFIER_ADDRESSES[defaultChainId]?.[record.circuitId];
+    if (addr) {
+      verifierInfo = {
+        circuitId: record.circuitId,
+        verifierAddress: addr,
+        verifierExplorerUrl: getBasescanAddressUrl(defaultChainId, addr),
+      };
+    }
+  }
+
   return {
     requestId,
     phase,
     signing: signingStatus,
     payment: paymentStatus,
+    ...(verifierInfo && verifierInfo),
     expiresAt: record.expiresAt,
   };
 }
@@ -413,6 +456,9 @@ export interface GenerateProofResult {
   cached?: boolean;
   attestation?: Record<string, unknown>;
   paymentTxHash?: string;
+  paymentReceiptUrl?: string;
+  verifierAddress?: string;
+  verifierExplorerUrl?: string;
 }
 
 /**
@@ -550,6 +596,9 @@ export async function handleGenerateProof(
         signalHash: cached.signalHash,
       });
 
+      const defaultChainId = '84532';
+      const cachedVerifierAddress = VERIFIER_ADDRESSES[defaultChainId]?.[resolvedCircuitId];
+
       return {
         proof: cached.proof,
         publicInputs: cached.publicInputs,
@@ -558,7 +607,8 @@ export async function handleGenerateProof(
         proofId,
         verifyUrl: deps.signPageUrl.replace(/\/$/, '') + '/v/' + proofId,
         cached: true,
-        ...(paymentTxHash && { paymentTxHash }),
+        ...(paymentTxHash && { paymentTxHash, paymentReceiptUrl: getBasescanTxUrl(deps.paymentMode, paymentTxHash) }),
+        ...(cachedVerifierAddress && { verifierAddress: cachedVerifierAddress, verifierExplorerUrl: getBasescanAddressUrl(defaultChainId, cachedVerifierAddress) }),
       };
     }
   }
@@ -674,6 +724,9 @@ export async function handleGenerateProof(
     hasAttestation: !!attestation,
   }));
 
+  const defaultChainId = '84532';
+  const resolvedVerifierAddress = VERIFIER_ADDRESSES[defaultChainId]?.[resolvedCircuitId];
+
   return {
     proof: proofResult.proof,
     publicInputs: proofResult.publicInputs,
@@ -682,7 +735,8 @@ export async function handleGenerateProof(
     proofId,
     verifyUrl,
     ...(attestation && { attestation }),
-    ...(paymentTxHash && { paymentTxHash }),
+    ...(paymentTxHash && { paymentTxHash, paymentReceiptUrl: getBasescanTxUrl(deps.paymentMode, paymentTxHash) }),
+    ...(resolvedVerifierAddress && { verifierAddress: resolvedVerifierAddress, verifierExplorerUrl: getBasescanAddressUrl(defaultChainId, resolvedVerifierAddress) }),
   };
 }
 
@@ -703,6 +757,7 @@ export interface VerifyProofResult {
   circuitId: string;
   verifierAddress: string;
   chainId: string;
+  verifierExplorerUrl?: string;
   error?: string;
 }
 
@@ -792,6 +847,7 @@ export async function handleVerifyProof(
       circuitId,
       verifierAddress,
       chainId,
+      verifierExplorerUrl: getBasescanAddressUrl(chainId, verifierAddress),
     };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
@@ -802,6 +858,7 @@ export async function handleVerifyProof(
       circuitId,
       verifierAddress,
       chainId,
+      verifierExplorerUrl: getBasescanAddressUrl(chainId, verifierAddress),
       error: message,
     };
   }
