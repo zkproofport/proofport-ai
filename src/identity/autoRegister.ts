@@ -2,7 +2,7 @@
  * Auto-registration on ERC-8004 Identity contract at server startup
  */
 
-import { AgentRegistration, createMetadataUri, parseMetadataUri } from './register.js';
+import { AgentRegistration, parseMetadataUri } from './register.js';
 import type { Config } from '../config/index.js';
 import type { AgentMetadata } from './types.js';
 import type { TeeProvider } from '../tee/types.js';
