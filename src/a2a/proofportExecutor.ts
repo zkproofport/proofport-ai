@@ -134,6 +134,7 @@ export class ProofportExecutor implements AgentExecutor {
       eventBus.publish(initialTask);
 
       const { skill, params: skillParams, source } = await resolveSkill(ctx.userMessage, this.deps.llmProvider);
+      console.log(`[a2a] Resolved skill=${skill}, source=${source}, params=${JSON.stringify(skillParams)}, contextId=${ctx.contextId}`);
 
       if (!VALID_SKILLS.includes(skill)) {
         throw new Error(`Invalid skill: ${skill}. Valid skills: ${VALID_SKILLS.join(', ')}`);
@@ -150,6 +151,7 @@ export class ProofportExecutor implements AgentExecutor {
           const storedRequestId = await this.deps.taskStore.getContextFlow(ctx.contextId);
           if (storedRequestId && ['check_status', 'request_payment', 'generate_proof'].includes(skill)) {
             if (source === 'text' || !skillParams.requestId) {
+              console.log(`[a2a] Auto-resolved requestId=${storedRequestId} from context flow (source=${source}, overridden=${!!skillParams.requestId})`);
               skillParams.requestId = storedRequestId;
             }
           }
