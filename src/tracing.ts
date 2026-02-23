@@ -10,6 +10,9 @@ import { SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-proto';
 import { resourceFromAttributes } from '@opentelemetry/resources';
 import { ATTR_SERVICE_NAME } from '@opentelemetry/semantic-conventions';
+import { createLogger } from './logger.js';
+
+const log = createLogger('Tracing');
 
 const endpoint = process.env.PHOENIX_COLLECTOR_ENDPOINT;
 
@@ -30,7 +33,7 @@ if (endpoint) {
   });
 
   provider.register();
-  console.log(`[tracing] OTLP protobuf exporter initialized → ${endpoint}/v1/traces`);
+  log.info({ endpoint: `${endpoint}/v1/traces` }, 'OTLP protobuf exporter initialized');
 } else {
-  console.log('[tracing] PHOENIX_COLLECTOR_ENDPOINT not set, tracing disabled');
+  log.info('PHOENIX_COLLECTOR_ENDPOINT not set, tracing disabled');
 }

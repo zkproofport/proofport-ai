@@ -3,6 +3,9 @@ import type { RedisTaskStore } from '../a2a/redisTaskStore.js';
 import { createRedisClient, type RedisClient } from '../redis/client.js';
 import type { RateLimiter } from '../redis/rateLimiter.js';
 import type { ProofCache } from '../redis/proofCache.js';
+import { createLogger } from '../logger.js';
+
+const log = createLogger('REST');
 import type { TeeProvider } from '../tee/types.js';
 import type { Config } from '../config/index.js';
 import { getProofResult } from '../redis/proofResultStore.js';
@@ -219,7 +222,7 @@ export function createRestRoutes(deps: RestRoutesDeps): Router {
 
       res.json(response);
     } catch (error) {
-      console.error('Task retrieval error:', error);
+      log.error({ err: error }, 'Task retrieval error');
       res.status(500).json({
         error: error instanceof Error ? error.message : 'Internal server error',
       });
@@ -298,7 +301,7 @@ export function createRestRoutes(deps: RestRoutesDeps): Router {
         chainId,
       });
     } catch (error) {
-      console.error('[Verify] Error:', error);
+      log.error({ err: error }, 'Proof verification error');
       res.status(500).json({
         error: error instanceof Error ? error.message : 'Verification failed',
       });

@@ -1,5 +1,8 @@
 import './tracing.js';
 import express from 'express';
+import { createLogger } from './logger.js';
+
+const log = createLogger('Server');
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -94,7 +97,7 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   // TEE setup
   const teeConfig = getTeeConfig();
   const resolvedMode = resolveTeeMode(teeConfig.mode);
-  console.log(`[TEE] Mode: ${teeConfig.mode} → resolved to: ${resolvedMode}`);
+  log.info({ teeMode: teeConfig.mode, resolvedMode }, 'TEE mode resolved');
   const teeProvider = createTeeProvider({ ...teeConfig, mode: resolvedMode });
 
   // Settlement worker setup (only if payment mode is not disabled)
@@ -398,8 +401,8 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
     };
 
     app.use('/v1', createOpenAIRoutes(chatDeps));
-    console.log(`[Chat] LLM chat endpoint enabled (providers: ${llmProviders.map(p => p.name).join(' -> ')})`);
-    console.log('[OpenAI] Compatible endpoint enabled at /v1/chat/completions');
+    log.info({ providers: llmProviders.map(p => p.name) }, 'LLM chat endpoint enabled');
+    log.info('OpenAI-compatible endpoint enabled at /v1/chat/completions');
   } else {
     app.post('/v1/chat/completions', (_req, res) => {
       res.status(503).json({ error: { message: 'Chat not configured. Set OPENAI_API_KEY or GEMINI_API_KEY.', type: 'server_error', code: 'not_configured' } });
@@ -553,10 +556,10 @@ el.innerHTML=
         await publishFlowEvent(redis, flow.flowId, { ...flow, updatedAt: new Date().toISOString() });
       }
     } catch (e) {
-      console.error('[payment] Failed to publish flow event:', e);
+      log.error({ err: e }, 'Failed to publish flow event');
     }
 
-    console.log(`[Payment] Confirmed for ${requestId}: ${txHash}`);
+    log.info({ requestId, txHash }, 'Payment confirmed');
     res.json({ status: 'confirmed' });
   });
 
@@ -614,6 +617,8 @@ el.innerHTML=
     };
 
     try {
+      log.debug({ requestId, paymentPayload, paymentRequirements }, 'Payment settle payload');
+
       const facilitatorClient = new HTTPFacilitatorClient({
         url: config.paymentFacilitatorUrl,
       });
@@ -634,23 +639,23 @@ el.innerHTML=
             await publishFlowEvent(redis, flow.flowId, { ...flow, updatedAt: new Date().toISOString() });
           }
         } catch (e) {
-          console.error('[payment] Failed to publish flow event:', e);
+          log.error({ err: e }, 'Failed to publish flow event');
         }
 
-        console.log(`[Payment] Facilitator settled for ${requestId}: ${settleResult.transaction}`);
+        log.info({ requestId, txHash: settleResult.transaction }, 'Facilitator settled payment');
         res.json({
           success: true,
           txHash: settleResult.transaction,
           network: settleResult.network,
         });
       } else {
-        console.error(`[Payment] Facilitator settlement failed for ${requestId}: ${settleResult.errorMessage}`);
+        log.error({ requestId, settleResult }, 'Facilitator settlement failed');
         res.status(400).json({
           error: settleResult.errorMessage || settleResult.errorReason || 'Payment settlement failed',
         });
       }
     } catch (error: any) {
-      console.error('[Payment] Facilitator settle error:', error);
+      log.error({ err: error }, 'Facilitator settle error');
       res.status(500).json({
         error: error.message || 'Payment processing failed',
       });
@@ -674,7 +679,7 @@ async function startServer() {
   try {
     // Download circuit artifacts if not present
     await ensureArtifacts(config.circuitsDir, config.circuitsRepoUrl);
-    console.log('Circuit artifacts ready');
+    log.info('Circuit artifacts ready');
 
     // Create TEE provider early (needed for both registration and app)
     const teeConfig = getTeeConfig();
@@ -691,26 +696,25 @@ async function startServer() {
     );
 
     app.listen(config.port, () => {
-      console.log(`proofport-ai server listening on port ${config.port}`);
-      console.log(`MCP endpoint: http://localhost:${config.port}/mcp`);
-      console.log(`Environment: ${config.nodeEnv}`);
-      console.log(`Payment mode: ${paymentModeConfig.mode} (${paymentModeConfig.description})`);
+      log.info({ port: config.port }, 'proofport-ai server listening');
+      log.info({ mcpEndpoint: `http://localhost:${config.port}/mcp` }, 'MCP endpoint ready');
+      log.info({ nodeEnv: config.nodeEnv, paymentMode: paymentModeConfig.mode, paymentDescription: paymentModeConfig.description }, 'Server configuration');
       if (paymentModeConfig.requiresPayment) {
-        console.log(`Payment network: ${paymentModeConfig.network}`);
+        log.info({ network: paymentModeConfig.network }, 'Payment network');
       }
 
       cleanupWorker.start();
-      console.log('CleanupWorker started');
+      log.info('CleanupWorker started');
 
       if (settlementWorker) {
         settlementWorker.start();
-        console.log('SettlementWorker started');
+        log.info('SettlementWorker started');
       } else if (paymentModeConfig.mode !== 'disabled') {
-        console.warn('SettlementWorker not configured (missing settlement env vars)');
+        log.warn('SettlementWorker not configured (missing settlement env vars)');
       }
     });
   } catch (error) {
-    console.error('Failed to start server:', error);
+    log.error({ err: error }, 'Failed to start server');
     process.exit(1);
   }
 }
