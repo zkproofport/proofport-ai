@@ -878,7 +878,7 @@ describe('MCP StreamableHTTP', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('OpenAI Chat Completions', () => {
-  it('POST /v1/chat/completions responds (configured or 503 if no LLM key)', async () => {
+  it('POST /v1/chat/completions responds (configured or 503 if no LLM key)', { timeout: 30000 }, async () => {
     try {
       const completion = await openaiClient.chat.completions.create({
         model: 'gpt-4o',

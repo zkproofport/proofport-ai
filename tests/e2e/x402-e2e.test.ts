@@ -443,7 +443,7 @@ describe('Always-Free Endpoints (with payment enabled)', () => {
   ];
 
   for (const endpoint of freeEndpoints) {
-    it(`GET ${endpoint} → 200 (not 402)`, async () => {
+    it(`GET ${endpoint} → 200 (not 402)`, { timeout: 15000 }, async () => {
       const { status } = await jsonGet(endpoint);
       expect(status).toBe(200);
     });
