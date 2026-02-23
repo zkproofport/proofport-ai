@@ -1,4 +1,7 @@
 import type { LLMProvider, LLMMessage, LLMTool, LLMResponse, ChatOptions } from './llmProvider.js';
+import { createLogger } from '../logger.js';
+
+const log = createLogger('LLM');
 
 export class MultiLLMProvider implements LLMProvider {
   name = 'multi';
@@ -16,14 +19,14 @@ export class MultiLLMProvider implements LLMProvider {
 
     for (const provider of this.providers) {
       try {
-        console.log(`[Chat] Trying ${provider.name}...`);
+        log.info({ provider: provider.name }, 'Trying LLM provider');
         const response = await provider.chat(messages, systemPrompt, tools, options);
-        console.log(`[Chat] ${provider.name} succeeded`);
+        log.info({ provider: provider.name }, 'LLM provider succeeded');
         return response;
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
         const errorMsg = lastError.message.replace(/\n/g, ' ');
-        console.warn(`[Chat] ${provider.name} failed: ${errorMsg}, trying next...`);
+        log.warn({ provider: provider.name, error: errorMsg }, 'LLM provider failed, trying next');
         continue;
       }
     }

@@ -5,6 +5,9 @@ import type { LLMMessage } from './llmProvider.js';
 import { CHAT_TOOLS } from './tools.js';
 import { SYSTEM_PROMPT } from './systemPrompt.js';
 import { executeSkill, type ChatHandlerDeps } from './chatHandler.js';
+import { createLogger } from '../logger.js';
+
+const log = createLogger('OpenAI');
 
 const MAX_FUNCTION_CALLS = 5;
 const MODEL_NAME = 'zkproofport';
@@ -496,7 +499,7 @@ export function createOpenAIRoutes(deps: ChatHandlerDeps): Router {
         });
       }
     } catch (error) {
-      console.error('[OpenAI] Error:', error);
+      log.error({ err: error }, 'Chat completion error');
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       res.status(500).json({
         error: {

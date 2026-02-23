@@ -6,6 +6,9 @@ import { createHash } from 'crypto';
 import { connect, Socket } from 'net';
 import type { TeeConfig, TeeProvider, VsockRequest, VsockResponse, AttestationDocument } from './types.js';
 import { parseAttestationDocument } from './attestation.js';
+import { createLogger } from '../logger.js';
+
+const log = createLogger('Enclave');
 
 export class EnclaveClient implements TeeProvider {
   readonly mode: TeeConfig['mode'];
@@ -40,7 +43,7 @@ export class EnclaveClient implements TeeProvider {
       try {
         this.lastAttestation = parseAttestationDocument(response.attestationDocument);
       } catch (error) {
-        console.error('Failed to parse attestation document:', error);
+        log.error({ err: error }, 'Failed to parse attestation document');
       }
     }
 
@@ -62,7 +65,7 @@ export class EnclaveClient implements TeeProvider {
       const response = await this.sendVsockRequest(request);
       return response.type === 'health';
     } catch (error) {
-      console.error('Health check failed:', error);
+      log.error({ err: error }, 'Health check failed');
       return false;
     }
   }
@@ -127,7 +130,7 @@ export class EnclaveClient implements TeeProvider {
 
       return null;
     } catch (error) {
-      console.error('[TEE] Failed to get nitro attestation:', error);
+      log.error({ err: error }, 'Failed to get nitro attestation');
       return null;
     }
   }

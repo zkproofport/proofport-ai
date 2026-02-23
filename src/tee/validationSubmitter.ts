@@ -16,6 +16,9 @@ import { ethers } from 'ethers';
 import type { Config } from '../config/index.js';
 import type { TeeProvider } from './types.js';
 import { AgentRegistration } from '../identity/register.js';
+import { createLogger } from '../logger.js';
+
+const log = createLogger('TeeValidation');
 
 const VALIDATION_REGISTRY_ABI = [
   'function getIdentityRegistry() external view returns (address)',
@@ -49,12 +52,12 @@ export async function ensureAgentValidated(
   teeProvider: TeeProvider
 ): Promise<void> {
   if (!config.erc8004ValidationAddress) {
-    console.log('[TEE Validation] ValidationRegistry address not configured — skipping');
+    log.info('ValidationRegistry address not configured — skipping');
     return;
   }
 
   if (config.teeMode === 'disabled') {
-    console.log('[TEE Validation] TEE mode is disabled — skipping validation');
+    log.info('TEE mode is disabled — skipping validation');
     return;
   }
 
@@ -72,10 +75,10 @@ export async function ensureAgentValidated(
     let validationTokenId = agentTokenId;
 
     if (registryIdentity.toLowerCase() !== config.erc8004IdentityAddress.toLowerCase()) {
-      console.log(`[TEE Validation] ValidationRegistry uses different Identity contract`);
-      console.log(`  Registry Identity: ${registryIdentity}`);
-      console.log(`  Our Identity: ${config.erc8004IdentityAddress}`);
-      console.log(`[TEE Validation] Registering on ValidationRegistry's Identity contract...`);
+      log.info(
+        { registryIdentity, ourIdentity: config.erc8004IdentityAddress },
+        "ValidationRegistry uses different Identity contract — registering on ValidationRegistry's Identity contract"
+      );
 
       const validationRegistration = new AgentRegistration({
         identityContractAddress: registryIdentity,
@@ -89,7 +92,7 @@ export async function ensureAgentValidated(
         const info = await validationRegistration.getRegistration();
         if (info) {
           validationTokenId = info.tokenId;
-          console.log(`[TEE Validation] Already registered on ValidationRegistry's Identity (tokenId: ${validationTokenId})`);
+          log.info({ validationTokenId: validationTokenId.toString() }, "Already registered on ValidationRegistry's Identity");
         }
       } else {
         const result = await validationRegistration.register({
@@ -102,7 +105,10 @@ export async function ensureAgentValidated(
           circuits: ['coinbase_attestation', 'coinbase_country_attestation'],
         });
         validationTokenId = result.tokenId;
-        console.log(`[TEE Validation] Registered on ValidationRegistry's Identity (tokenId: ${validationTokenId}, tx: ${result.transactionHash})`);
+        log.info(
+          { validationTokenId: validationTokenId.toString(), tx: result.transactionHash },
+          "Registered on ValidationRegistry's Identity"
+        );
       }
     }
 
@@ -114,7 +120,7 @@ export async function ensureAgentValidated(
         const status = await contract.getValidationStatus(hash);
         // status[2] is the response (uint8), status[4] is the tag (bytes32)
         if (Number(status[2]) > 0 && status[4] === ethers.encodeBytes32String(TEE_TAG)) {
-          console.log(`[TEE Validation] Agent already has TEE validation (requestHash: ${hash})`);
+          log.info({ requestHash: hash }, 'Agent already has TEE validation');
           return;
         }
       } catch {
@@ -124,14 +130,14 @@ export async function ensureAgentValidated(
     }
 
     // Generate attestation
-    console.log('[TEE Validation] Generating TEE attestation...');
+    log.info('Generating TEE attestation');
     const proofHash = ethers.keccak256(
       ethers.toUtf8Bytes(`agent:${validationTokenId}:${Date.now()}`)
     );
     const attestation = await teeProvider.generateAttestation(proofHash);
 
     if (!attestation) {
-      console.error('[TEE Validation] Failed to generate attestation — TEE provider returned null');
+      log.error('Failed to generate attestation — TEE provider returned null');
       return;
     }
 
@@ -153,7 +159,7 @@ export async function ensureAgentValidated(
     const requestHash = ethers.keccak256(ethers.toUtf8Bytes(requestJson));
 
     // Step 1: Submit validation request (agent address as validator for self-validation)
-    console.log('[TEE Validation] Submitting validationRequest to ValidationRegistry...');
+    log.info('Submitting validationRequest to ValidationRegistry');
     const reqTx = await contract.validationRequest(
       signer.address, // self-validate: use own address as validator
       validationTokenId,
@@ -161,7 +167,7 @@ export async function ensureAgentValidated(
       requestHash
     );
     await reqTx.wait();
-    console.log(`[TEE Validation] validationRequest submitted (tx: ${reqTx.hash})`);
+    log.info({ tx: reqTx.hash }, 'validationRequest submitted');
 
     // Step 2: Submit validation response (self-validate with score 100)
     const responseData = {
@@ -175,7 +181,7 @@ export async function ensureAgentValidated(
     const responseURI = `data:application/json;base64,${responseBase64}`;
     const responseHash = ethers.keccak256(ethers.toUtf8Bytes(responseJson));
 
-    console.log('[TEE Validation] Submitting validationResponse to ValidationRegistry...');
+    log.info('Submitting validationResponse to ValidationRegistry');
     const resTx = await contract.validationResponse(
       requestHash,
       100, // score: 100 = fully validated
@@ -184,13 +190,9 @@ export async function ensureAgentValidated(
       ethers.encodeBytes32String(TEE_TAG)
     );
     await resTx.wait();
-    console.log(`[TEE Validation] validationResponse submitted (tx: ${resTx.hash})`);
-    console.log('[TEE Validation] TEE attestation registered on-chain successfully');
+    log.info({ tx: resTx.hash }, 'validationResponse submitted');
+    log.info('TEE attestation registered on-chain successfully');
   } catch (error) {
-    if (error instanceof Error) {
-      console.error(`[TEE Validation] Failed to submit TEE validation: ${error.message}`);
-    } else {
-      console.error('[TEE Validation] Failed to submit TEE validation: unknown error');
-    }
+    log.error({ err: error }, 'Failed to submit TEE validation');
   }
 }

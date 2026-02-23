@@ -5,6 +5,9 @@ import type {
   AgentRegistrationResult,
   AgentIdentityInfo,
 } from './types.js';
+import { createLogger } from '../logger.js';
+
+const log = createLogger('Identity');
 
 // Minimal ABI for ERC-8004 Identity contract (includes ERC-721 Enumerable)
 const IDENTITY_ABI = [
@@ -106,7 +109,7 @@ export class AgentRegistration {
       tokenId = await this.findTokenId();
     }
     if (tokenId === null) {
-      console.warn('Agent is registered but tokenId could not be resolved — metadata update will be skipped');
+      log.warn('Agent is registered but tokenId could not be resolved — metadata update will be skipped');
       return {
         tokenId: 0n,
         owner: this.signer.address,
@@ -114,7 +117,7 @@ export class AgentRegistration {
         isRegistered: true,
       };
     }
-    console.log(`Resolved tokenId: ${tokenId}`);
+    log.info({ tokenId: tokenId.toString() }, 'Resolved tokenId');
 
     const metadataUri = await this.contract.tokenURI(tokenId);
 
@@ -164,7 +167,7 @@ export class AgentRegistration {
   private async findTokenIdByEnumerable(): Promise<bigint | null> {
     try {
       const tokenId = await this.contract.tokenOfOwnerByIndex(this.signer.address, 0);
-      console.log(`[Identity] Found tokenId via tokenOfOwnerByIndex: ${tokenId}`);
+      log.debug({ tokenId: tokenId.toString() }, 'Found tokenId via tokenOfOwnerByIndex');
       return BigInt(tokenId);
     } catch {
       return null;
@@ -179,14 +182,14 @@ export class AgentRegistration {
     try {
       const totalSupply = await this.contract.totalSupply();
       const total = Number(totalSupply);
-      console.log(`[Identity] Scanning ownerOf for ${total} tokens...`);
+      log.debug({ total }, 'Scanning ownerOf for tokens');
 
       // Scan in reverse (most recent first — our token is likely near the end)
       for (let i = total - 1; i >= 0; i--) {
         try {
           const owner = await this.contract.ownerOf(BigInt(i));
           if (owner.toLowerCase() === this.signer.address.toLowerCase()) {
-            console.log(`[Identity] Found tokenId via ownerOf scan: ${i}`);
+            log.debug({ tokenId: i }, 'Found tokenId via ownerOf scan');
             return BigInt(i);
           }
         } catch {

@@ -1,4 +1,7 @@
 import type { RedisClient } from './client.js';
+import { createLogger } from '../logger.js';
+
+const log = createLogger('Cleanup');
 
 export interface CleanupConfig {
   pollIntervalMs?: number;
@@ -16,20 +19,20 @@ export class CleanupWorker {
 
   start(): void {
     if (this.intervalHandle) {
-      console.log('CleanupWorker already running');
+      log.info('CleanupWorker already running');
       return;
     }
 
-    console.log(`CleanupWorker started (poll interval: ${this.pollIntervalMs}ms)`);
+    log.info({ pollIntervalMs: this.pollIntervalMs }, 'CleanupWorker started');
     this.intervalHandle = setInterval(() => {
       this.cleanupStaleEntries().catch((error) => {
-        console.error('Error in cleanup processing cycle:', error);
+        log.error({ err: error }, 'Error in cleanup processing cycle');
       });
     }, this.pollIntervalMs);
 
     // Run first cycle immediately
     this.cleanupStaleEntries().catch((error) => {
-      console.error('Error in initial cleanup processing cycle:', error);
+      log.error({ err: error }, 'Error in initial cleanup processing cycle');
     });
   }
 
@@ -37,7 +40,7 @@ export class CleanupWorker {
     if (this.intervalHandle) {
       clearInterval(this.intervalHandle);
       this.intervalHandle = null;
-      console.log('CleanupWorker stopped');
+      log.info('CleanupWorker stopped');
     }
   }
 
@@ -49,8 +52,9 @@ export class CleanupWorker {
 
     // Only log if something was actually cleaned
     if (staleTaskCount > 0 || stalePaymentCount > 0) {
-      console.log(
-        `[Cleanup] Removed ${staleTaskCount} stale task IDs from queue, ${stalePaymentCount} stale payment IDs from status sets`,
+      log.info(
+        { staleTaskCount, stalePaymentCount },
+        'Removed stale task IDs from queue and stale payment IDs from status sets',
       );
     }
   }

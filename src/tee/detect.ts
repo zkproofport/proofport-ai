@@ -4,6 +4,9 @@
 
 import { existsSync } from 'fs';
 import type { TeeMode, ResolvedTeeMode } from './types.js';
+import { createLogger } from '../logger.js';
+
+const log = createLogger('TEE');
 
 /**
  * Detect TEE hardware environment
@@ -12,10 +15,10 @@ import type { TeeMode, ResolvedTeeMode } from './types.js';
  */
 export function detectTeeEnvironment(): ResolvedTeeMode {
   if (existsSync('/dev/nsm')) {
-    console.log('[TEE] Auto-detected: nitro (/dev/nsm found)');
+    log.info('Auto-detected: nitro (/dev/nsm found)');
     return 'nitro';
   }
-  console.log('[TEE] Auto-detected: local (no TEE hardware)');
+  log.info('Auto-detected: local (no TEE hardware)');
   return 'local';
 }
 
