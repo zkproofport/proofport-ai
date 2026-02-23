@@ -6,6 +6,9 @@ import type {
   SigningResult,
   SigningRequestRecord,
 } from './types.js';
+import { createLogger } from '../logger.js';
+
+const log = createLogger('Signing');
 
 export interface WebSigningConfig {
   redis: RedisClient;
@@ -53,7 +56,7 @@ export class WebSigningProvider implements SigningProvider {
     await this.redis.set(key, JSON.stringify(record), 'EX', this.ttlSeconds);
 
     const signingUrl = getSigningUrl(this.signPageUrl, requestId);
-    console.log(`Web signing URL: ${signingUrl}`);
+    log.info({ signingUrl }, 'Web signing URL generated');
 
     return new Promise((resolve, reject) => {
       const checkInterval = setInterval(async () => {
@@ -174,7 +177,7 @@ export function createSigningCallbackHandler(redis: RedisClient) {
       }
     } catch (e) {
       // Non-blocking — flow event publishing must not break the signing callback
-      console.error('[webSigning] Failed to publish flow event:', e);
+      log.error({ err: e }, 'Failed to publish flow event');
     }
 
     return res.status(200).json({ success: true });

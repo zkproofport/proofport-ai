@@ -16,7 +16,10 @@
  */
 
 import { randomUUID } from 'crypto';
+import { createLogger } from '../logger.js';
 import type { RedisClient } from '../redis/client.js';
+
+const log = createLogger('Flow');
 import {
   type SkillDeps,
   type GenerateProofResult,
@@ -108,11 +111,7 @@ export async function publishFlowEvent(
 ): Promise<void> {
   const channel = `flow:events:${flowId}`;
   await redis.publish(channel, JSON.stringify(flow));
-  console.log('[flowManager] Published flow event:', JSON.stringify({
-    channel,
-    flowId,
-    phase: flow.phase,
-  }));
+  log.info({ channel, flowId, phase: flow.phase }, 'Published flow event');
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -176,13 +175,7 @@ export async function createFlow(
     deps.signingTtlSeconds,
   );
 
-  console.log('[flowManager] Created flow:', JSON.stringify({
-    flowId,
-    requestId: signingResult.requestId,
-    circuitId: params.circuitId,
-    scope: params.scope,
-    expiresAt: signingResult.expiresAt,
-  }));
+  log.info({ flowId, requestId: signingResult.requestId, circuitId: params.circuitId, scope: params.scope, expiresAt: signingResult.expiresAt }, 'Created flow');
 
   return flow;
 }
@@ -214,7 +207,7 @@ export async function advanceFlow(flowId: string, deps: SkillDeps): Promise<Proo
 
   // Terminal phases — nothing to advance
   if (isTerminalPhase(flow.phase)) {
-    console.log('[flowManager] Flow already in terminal phase:', JSON.stringify({ flowId, phase: flow.phase }));
+    log.info({ flowId, phase: flow.phase }, 'Flow already in terminal phase');
     return flow;
   }
 
@@ -229,14 +222,14 @@ export async function advanceFlow(flowId: string, deps: SkillDeps): Promise<Proo
     flow.updatedAt = now;
     await saveFlow(deps.redis, flow, deps.signingTtlSeconds);
     await publishFlowEvent(deps.redis, flowId, flow);
-    console.log('[flowManager] Flow expired:', JSON.stringify({ flowId, requestId: flow.requestId }));
+    log.info({ flowId, requestId: flow.requestId }, 'Flow expired');
     return flow;
   }
 
   // ── Still waiting for signing ─────────────────────────────────────────────
   if (statusResult.phase === 'signing') {
     // No transition — return current state
-    console.log('[flowManager] Flow awaiting signing:', JSON.stringify({ flowId, requestId: flow.requestId }));
+    log.info({ flowId, requestId: flow.requestId }, 'Flow awaiting signing');
     return flow;
   }
 
@@ -248,17 +241,13 @@ export async function advanceFlow(flowId: string, deps: SkillDeps): Promise<Proo
     flow.updatedAt = now;
     await saveFlow(deps.redis, flow, deps.signingTtlSeconds);
     await publishFlowEvent(deps.redis, flowId, flow);
-    console.log('[flowManager] Flow transitioned to payment:', JSON.stringify({
-      flowId,
-      requestId: flow.requestId,
-      paymentUrl: paymentResult.paymentUrl,
-    }));
+    log.info({ flowId, requestId: flow.requestId, paymentUrl: paymentResult.paymentUrl }, 'Flow transitioned to payment');
     return flow;
   }
 
   // ── Payment phase, still waiting ──────────────────────────────────────────
   if (statusResult.phase === 'payment' && flow.phase === 'payment') {
-    console.log('[flowManager] Flow awaiting payment:', JSON.stringify({ flowId, requestId: flow.requestId }));
+    log.info({ flowId, requestId: flow.requestId }, 'Flow awaiting payment');
     return flow;
   }
 
@@ -273,34 +262,20 @@ export async function advanceFlow(flowId: string, deps: SkillDeps): Promise<Proo
     flow.updatedAt = now;
     await saveFlow(deps.redis, flow, deps.signingTtlSeconds);
     await publishFlowEvent(deps.redis, flowId, flow);
-    console.log('[flowManager] Flow transitioning to generating:', JSON.stringify({
-      flowId,
-      requestId: flow.requestId,
-    }));
+    log.info({ flowId, requestId: flow.requestId }, 'Flow transitioning to generating');
 
     try {
       const proofResult = await handleGenerateProof({ requestId: flow.requestId }, deps);
       flow.phase = 'completed';
       flow.proofResult = proofResult;
       flow.updatedAt = new Date().toISOString();
-      console.log('[flowManager] Flow completed, proof generated:', JSON.stringify({
-        flowId,
-        proofId: proofResult.proofId,
-        nullifier: proofResult.nullifier,
-        signalHash: proofResult.signalHash,
-        verifyUrl: proofResult.verifyUrl,
-        cached: proofResult.cached,
-      }));
+      log.info({ flowId, proofId: proofResult.proofId, nullifier: proofResult.nullifier, signalHash: proofResult.signalHash, verifyUrl: proofResult.verifyUrl, cached: proofResult.cached }, 'Flow completed, proof generated');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       flow.phase = 'failed';
       flow.error = message;
       flow.updatedAt = new Date().toISOString();
-      console.error('[flowManager] Flow failed during proof generation:', JSON.stringify({
-        flowId,
-        requestId: flow.requestId,
-        error: message,
-      }));
+      log.error({ flowId, requestId: flow.requestId, error: message }, 'Flow failed during proof generation');
     }
 
     await saveFlow(deps.redis, flow, deps.signingTtlSeconds);
@@ -310,12 +285,12 @@ export async function advanceFlow(flowId: string, deps: SkillDeps): Promise<Proo
 
   // ── Already generating (concurrent call) ─────────────────────────────────
   if (flow.phase === 'generating') {
-    console.log('[flowManager] Flow already generating:', JSON.stringify({ flowId, requestId: flow.requestId }));
+    log.info({ flowId, requestId: flow.requestId }, 'Flow already generating');
     return flow;
   }
 
   // Fallback — return current flow unchanged
-  console.log('[flowManager] Flow advance no-op:', JSON.stringify({ flowId, phase: flow.phase, statusPhase: statusResult.phase }));
+  log.info({ flowId, phase: flow.phase, statusPhase: statusResult.phase }, 'Flow advance no-op');
   return flow;
 }
 

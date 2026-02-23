@@ -5,6 +5,9 @@ import * as path from 'node:path';
 import type { CircuitParams } from '../input/inputBuilder.js';
 import { toProverToml } from './tomlBuilder.js';
 import { createWorkDir, cleanupWorkDir } from '../circuit/artifactManager.js';
+import { createLogger } from '../logger.js';
+
+const log = createLogger('Prover');
 
 const execFileAsync = promisify(execFile);
 
@@ -133,7 +136,7 @@ export class BbProver {
       );
       return true;
     } catch (error: any) {
-      console.error(`[bb verify] failed: ${error.stderr || error.message}`);
+      log.error({ detail: error.stderr || error.message }, 'bb verify failed');
       return false;
     }
   }

@@ -17,6 +17,9 @@
 
 import { randomUUID } from 'crypto';
 import { ethers } from 'ethers';
+import { createLogger } from '../logger.js';
+
+const log = createLogger('Skill');
 import { CIRCUITS, type CircuitId } from '../config/circuits.js';
 import { VERIFIER_ADDRESSES } from '../config/contracts.js';
 import type { ProofRequestRecord } from '../signing/types.js';
@@ -211,7 +214,7 @@ export async function handleRequestSigning(
 
   const signingUrl = deps.signPageUrl.replace(/\/$/, '') + '/s/' + requestId;
 
-  console.log('[request_signing] Created session:', JSON.stringify({ requestId, circuitId, scope, expiresAt }));
+  log.info({ requestId, circuitId, scope, expiresAt }, 'Created signing session');
 
   return {
     requestId,
@@ -414,7 +417,7 @@ export async function handleRequestPayment(
   const paymentUrl = deps.signPageUrl.replace(/\/$/, '') + '/pay/' + requestId;
   const network = deps.paymentMode === 'testnet' ? 'Base Sepolia' : 'Base';
 
-  console.log('[request_payment] Payment initiated:', JSON.stringify({ requestId, network, amount: deps.paymentProofPrice }));
+  log.info({ requestId, network, amount: deps.paymentProofPrice }, 'Payment initiated');
 
   return {
     requestId,
@@ -586,7 +589,7 @@ export async function handleGenerateProof(
       isIncluded: resolvedIsIncluded,
     });
     if (cached) {
-      console.log('[generate_proof] Cache hit for:', JSON.stringify({ circuitId: resolvedCircuitId, address: resolvedAddress }));
+      log.debug({ circuitId: resolvedCircuitId, address: resolvedAddress }, 'Cache hit for proof');
 
       const proofId = await storeProofResult(deps.redis, {
         proof: cached.proof,
@@ -613,12 +616,7 @@ export async function handleGenerateProof(
     }
   }
 
-  console.log('[generate_proof] Starting proof generation:', JSON.stringify({
-    circuitId: resolvedCircuitId,
-    address: resolvedAddress,
-    scope: resolvedScope,
-    teeMode: deps.teeMode,
-  }));
+  log.info({ circuitId: resolvedCircuitId, address: resolvedAddress, scope: resolvedScope, teeMode: deps.teeMode }, 'Starting proof generation');
 
   // Compute circuit params (fetches attestation from chain, builds Merkle tree, etc.)
   const circuitParams = await computeCircuitParams(
@@ -680,7 +678,7 @@ export async function handleGenerateProof(
       });
       if (att) attestation = att as unknown as Record<string, unknown>;
     } catch (error) {
-      console.error('[TEE] Failed to generate attestation:', error);
+      log.error({ err: error }, 'Failed to generate TEE attestation');
     }
   }
 
@@ -716,13 +714,7 @@ export async function handleGenerateProof(
 
   const verifyUrl = deps.signPageUrl.replace(/\/$/, '') + '/v/' + proofId;
 
-  console.log('[generate_proof] Proof generated:', JSON.stringify({
-    proofId,
-    circuitId: resolvedCircuitId,
-    nullifier,
-    signalHash,
-    hasAttestation: !!attestation,
-  }));
+  log.info({ proofId, circuitId: resolvedCircuitId, nullifier, signalHash, hasAttestation: !!attestation }, 'Proof generated');
 
   const defaultChainId = '84532';
   const resolvedVerifierAddress = VERIFIER_ADDRESSES[defaultChainId]?.[resolvedCircuitId];
@@ -832,12 +824,7 @@ export async function handleVerifyProof(
   const provider = new ethers.JsonRpcProvider(deps.chainRpcUrl);
   const verifierContract = new ethers.Contract(verifierAddress, VERIFIER_ABI, provider);
 
-  console.log('[verify_proof] Verifying on-chain:', JSON.stringify({
-    circuitId,
-    chainId,
-    verifierAddress,
-    publicInputsCount: publicInputsArray.length,
-  }));
+  log.info({ circuitId, chainId, verifierAddress, publicInputsCount: publicInputsArray.length }, 'Verifying proof on-chain');
 
   try {
     const isValid: boolean = await verifierContract.verify(proof, publicInputsArray);
@@ -851,7 +838,7 @@ export async function handleVerifyProof(
     };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error('[verify_proof] Contract call reverted:', message);
+    log.error({ detail: message }, 'Proof verification contract call reverted');
 
     return {
       valid: false,

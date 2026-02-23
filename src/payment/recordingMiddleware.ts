@@ -1,6 +1,9 @@
 import type { Request, Response, NextFunction } from 'express';
 import type { PaymentFacilitator } from './facilitator.js';
 import { getPaymentModeConfig } from './freeTier.js';
+import { createLogger } from '../logger.js';
+
+const log = createLogger('Payment');
 
 export interface PaymentRecordingConfig {
   paymentMode: 'disabled' | 'testnet' | 'mainnet';
@@ -47,7 +50,7 @@ export function createPaymentRecordingMiddleware(config: PaymentRecordingConfig)
       next();
     } catch (error) {
       // Log error but don't block request — x402 already validated it
-      console.error('Failed to parse payment header:', error);
+      log.error({ err: error }, 'Failed to parse payment header');
       next();
     }
   };
