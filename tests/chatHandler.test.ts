@@ -183,7 +183,7 @@ describe('executeSkill — chatHandler adapter', () => {
     expect(result.paymentReceiptUrl).toBeUndefined();
   });
 
-  it('adds paymentReceiptUrl to generate_proof result when paymentTxHash is present', async () => {
+  it('passes through paymentReceiptUrl from skillHandler result', async () => {
     const mockResult = {
       proof: '0xdeadbeef',
       publicInputs: '0xabcd',
@@ -192,6 +192,7 @@ describe('executeSkill — chatHandler adapter', () => {
       proofId: 'proof-id-2',
       verifyUrl: 'http://localhost:4002/v/proof-id-2',
       paymentTxHash: '0xabcdef1234567890',
+      paymentReceiptUrl: 'https://sepolia.basescan.org/tx/0xabcdef1234567890',
     };
     vi.mocked(handleGenerateProof).mockResolvedValue(mockResult);
 

@@ -227,14 +227,14 @@ describe('A2A Agent Card', () => {
       expect(card.identity.erc8004.tokenId).toBe(null);
     });
 
-    it('should have proper description mentioning zero-knowledge and Coinbase', async () => {
+    it('should have proper description mentioning ZK proof and ZKProofport', async () => {
       const { buildAgentCard } = await import('../../src/a2a/agentCard');
       const card = buildAgentCard(mockConfig);
 
       expect(card.description).toBeDefined();
       expect(typeof card.description).toBe('string');
-      expect(card.description.toLowerCase()).toContain('zero-knowledge');
-      expect(card.description.toLowerCase()).toContain('coinbase');
+      expect(card.description.toLowerCase()).toContain('zk proof');
+      expect(card.description.toLowerCase()).toContain('zkproofport');
     });
   });
 
