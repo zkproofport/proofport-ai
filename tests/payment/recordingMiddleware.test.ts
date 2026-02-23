@@ -1,6 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Request, Response, NextFunction } from 'express';
 
+// Mock logger (vi.hoisted ensures availability before vi.mock hoisting)
+const mockLog = vi.hoisted(() => ({
+  info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn(),
+}));
+vi.mock('../../src/logger.js', () => ({
+  createLogger: () => mockLog,
+}));
+
 // Mock freeTier — the only external dependency we need to control
 vi.mock('../../src/payment/freeTier.js', () => ({
   getPaymentModeConfig: vi.fn(),
@@ -153,8 +161,6 @@ describe('createPaymentRecordingMiddleware', () => {
   it('calls next() on parse error (non-blocking)', async () => {
     mockGetPaymentModeConfig.mockReturnValue(testnetConfig());
 
-    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
     const middleware = createPaymentRecordingMiddleware({
       paymentMode: 'testnet',
       facilitator: makeFacilitator(),
@@ -169,9 +175,7 @@ describe('createPaymentRecordingMiddleware', () => {
     await middleware(mockReq, mockRes, mockNext);
 
     expect(mockNext).toHaveBeenCalledOnce();
-    expect(consoleSpy).toHaveBeenCalled();
-
-    consoleSpy.mockRestore();
+    expect(mockLog.error).toHaveBeenCalled();
   });
 
   it('sets default amount $0.10 when payment has no amount field', async () => {
@@ -255,8 +259,6 @@ describe('parsePaymentHeader edge cases (tested via middleware)', () => {
   });
 
   it('handles invalid base64/CBOR and calls next() without throwing', async () => {
-    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
     const middleware = createPaymentRecordingMiddleware({
       paymentMode: 'testnet',
       facilitator: makeFacilitator(),
@@ -270,14 +272,10 @@ describe('parsePaymentHeader edge cases (tested via middleware)', () => {
     await middleware(mockReq, mockRes, mockNext);
 
     expect(mockNext).toHaveBeenCalledOnce();
-    expect(consoleSpy).toHaveBeenCalled();
-
-    consoleSpy.mockRestore();
+    expect(mockLog.error).toHaveBeenCalled();
   });
 
   it('handles CBOR with missing from field — logs error, calls next()', async () => {
-    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
     const middleware = createPaymentRecordingMiddleware({
       paymentMode: 'testnet',
       facilitator: makeFacilitator(),
@@ -292,14 +290,10 @@ describe('parsePaymentHeader edge cases (tested via middleware)', () => {
     await middleware(mockReq, mockRes, mockNext);
 
     expect(mockNext).toHaveBeenCalledOnce();
-    expect(consoleSpy).toHaveBeenCalled();
-
-    consoleSpy.mockRestore();
+    expect(mockLog.error).toHaveBeenCalled();
   });
 
   it('handles CBOR decoding to null — logs error, calls next()', async () => {
-    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
     const middleware = createPaymentRecordingMiddleware({
       paymentMode: 'testnet',
       facilitator: makeFacilitator(),
@@ -314,8 +308,6 @@ describe('parsePaymentHeader edge cases (tested via middleware)', () => {
     await middleware(mockReq, mockRes, mockNext);
 
     expect(mockNext).toHaveBeenCalledOnce();
-    expect(consoleSpy).toHaveBeenCalled();
-
-    consoleSpy.mockRestore();
+    expect(mockLog.error).toHaveBeenCalled();
   });
 });

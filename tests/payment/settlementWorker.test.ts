@@ -3,6 +3,14 @@ import { ethers } from 'ethers';
 import { SettlementWorker, parseUsdcAmount } from '../../src/payment/settlementWorker.js';
 import type { PaymentFacilitator, PaymentRecord } from '../../src/payment/facilitator.js';
 
+// Mock logger (vi.hoisted ensures availability before vi.mock hoisting)
+const mockLog = vi.hoisted(() => ({
+  info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn(),
+}));
+vi.mock('../../src/logger.js', () => ({
+  createLogger: () => mockLog,
+}));
+
 // Mock ethers
 vi.mock('ethers', () => {
   const mockContract = {
@@ -100,37 +108,26 @@ describe('SettlementWorker', () => {
   });
 
   it('start() begins polling', () => {
-    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-
     worker.start();
 
-    expect(consoleSpy).toHaveBeenCalledWith(
-      expect.stringContaining('SettlementWorker started'),
+    expect(mockLog.info).toHaveBeenCalledWith(
+      expect.objectContaining({ pollIntervalMs: expect.any(Number) }),
+      'SettlementWorker started',
     );
-
-    consoleSpy.mockRestore();
   });
 
   it('stop() clears interval', () => {
-    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-
     worker.start();
     worker.stop();
 
-    expect(consoleSpy).toHaveBeenCalledWith('SettlementWorker stopped');
-
-    consoleSpy.mockRestore();
+    expect(mockLog.info).toHaveBeenCalledWith('SettlementWorker stopped');
   });
 
   it('start() when already running logs and returns', () => {
-    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-
     worker.start();
     worker.start();
 
-    expect(consoleSpy).toHaveBeenCalledWith('SettlementWorker already running');
-
-    consoleSpy.mockRestore();
+    expect(mockLog.info).toHaveBeenCalledWith('SettlementWorker already running');
   });
 
   it('processPendingSettlements with no pending payments returns early', async () => {
@@ -237,16 +234,12 @@ describe('SettlementWorker', () => {
     mockContract.transfer.mockRejectedValue(new Error('Transfer failed'));
     (mockFacilitator.listPayments as any).mockResolvedValue([mockPayment]);
 
-    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
     await worker.processPendingSettlements();
 
-    expect(consoleErrorSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Failed to settle payment payment-fail'),
-      expect.any(Error),
+    expect(mockLog.error).toHaveBeenCalledWith(
+      expect.objectContaining({ paymentId: 'payment-fail' }),
+      'Failed to settle payment',
     );
-
-    consoleErrorSpy.mockRestore();
   });
 
   it('payment exceeding max retries (3) is skipped', async () => {
@@ -261,8 +254,6 @@ describe('SettlementWorker', () => {
 
     mockContract.transfer.mockRejectedValue(new Error('Always fail'));
     (mockFacilitator.listPayments as any).mockResolvedValue([mockPayment]);
-
-    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     // Attempt 1
     await worker.processPendingSettlements();
@@ -280,10 +271,9 @@ describe('SettlementWorker', () => {
     await worker.processPendingSettlements();
     expect(mockContract.transfer).toHaveBeenCalledTimes(3); // Still 3, not 4
 
-    expect(consoleErrorSpy).toHaveBeenCalledWith(
-      expect.stringContaining('exceeded max retries (3)'),
+    expect(mockLog.error).toHaveBeenCalledWith(
+      expect.objectContaining({ paymentId: 'payment-max-retry', maxRetries: 3 }),
+      expect.stringContaining('exceeded max retries'),
     );
-
-    consoleErrorSpy.mockRestore();
   });
 });
