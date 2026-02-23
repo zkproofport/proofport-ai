@@ -1,4 +1,7 @@
 import { randomUUID } from 'crypto';
+import { createLogger } from '../logger.js';
+
+const log = createLogger('A2A');
 import type { AgentExecutor, RequestContext, ExecutionEventBus } from '@a2a-js/sdk/server';
 import type {
   Task,
@@ -34,12 +37,18 @@ const VALID_SKILLS = ['request_signing', 'check_status', 'request_payment', 'gen
 
 export const A2A_INFERENCE_PROMPT = `You are a skill router for proveragent.base.eth. Given user text, determine which tool to call and extract parameters. ALWAYS respond with a tool call — never with plain text.
 
+CRITICAL — requestId handling:
+- The server automatically resolves requestId from the session context. You do NOT need to provide it.
+- NEVER guess, fabricate, or use placeholder values like "YOUR_REQUEST_ID", "<request_id>", or "unknown".
+- Only include requestId if the user explicitly provides a specific UUID value (e.g., "check status of abc-123").
+- For follow-up messages like "done", "check status", "pay", "결제해줘" — call the tool WITHOUT requestId. The server fills it in.
+
 Tool selection rules:
 - verify_proof: User wants to VERIFY or VALIDATE an existing proof. Keywords: verify, validate, check proof, 검증, 확인, 검사. Often includes a hex proof value (0x...) or proofId. When the user provides a hex string and asks to verify/check it, ALWAYS use verify_proof.
 - generate_proof: User wants to CREATE or GENERATE a new proof. Keywords: generate, create, make, prove, 생성, 만들어, 증명해.
 - request_signing: User wants to initiate a signing request for proof generation (alternative entry point to generate_proof flow).
 - get_supported_circuits: User asks about available circuits. Keywords: list, show, what circuits, which circuits, 목록, 지원, 뭐 있어, 어떤.
-- check_status: User wants to check the status of an existing request. Keywords: status, progress, done yet, 상태, 완료됐어.
+- check_status: User wants to check the status of an existing request. Keywords: status, progress, done yet, done, 상태, 완료됐어, 됐어, 확인.
 - request_payment: User wants to pay for a proof request. Keywords: pay, payment, 결제, 지불.
 
 Critical distinction — 검증 vs 생성: "검증해줘" = verify_proof. "생성해줘" = generate_proof. If the user provides a hex value (0x...) and uses words like 검증/확인/verify/validate, always route to verify_proof.`;
@@ -134,7 +143,8 @@ export class ProofportExecutor implements AgentExecutor {
       eventBus.publish(initialTask);
 
       const { skill, params: skillParams, source } = await resolveSkill(ctx.userMessage, this.deps.llmProvider);
-      console.log(`[a2a] Resolved skill=${skill}, source=${source}, params=${JSON.stringify(skillParams)}, contextId=${ctx.contextId}`);
+      log.info({ skill, source, contextId: ctx.contextId }, 'Resolved skill');
+      log.debug({ skill, params: skillParams }, 'Skill params');
 
       if (!VALID_SKILLS.includes(skill)) {
         throw new Error(`Invalid skill: ${skill}. Valid skills: ${VALID_SKILLS.join(', ')}`);
@@ -151,12 +161,12 @@ export class ProofportExecutor implements AgentExecutor {
           const storedRequestId = await this.deps.taskStore.getContextFlow(ctx.contextId);
           if (storedRequestId && ['check_status', 'request_payment', 'generate_proof'].includes(skill)) {
             if (source === 'text' || !skillParams.requestId) {
-              console.log(`[a2a] Auto-resolved requestId=${storedRequestId} from context flow (source=${source}, overridden=${!!skillParams.requestId})`);
+              log.info({ requestId: storedRequestId, source, overridden: !!skillParams.requestId }, 'Auto-resolved requestId from context flow');
               skillParams.requestId = storedRequestId;
             }
           }
         } catch (e) {
-          console.error('[a2a] Failed to resolve context flow:', e);
+          log.error({ err: e }, 'Failed to resolve context flow');
         }
       }
 
@@ -204,7 +214,7 @@ export class ProofportExecutor implements AgentExecutor {
             await this.deps.taskStore.setContextFlow(ctx.contextId, requestId);
           }
         } catch (e) {
-          console.error('[executor] Failed to link context flow:', e);
+          log.error({ err: e }, 'Failed to link context flow');
         }
       }
 
@@ -251,14 +261,14 @@ export class ProofportExecutor implements AgentExecutor {
           },
           signer.address,
         ).catch((error) => {
-          console.error('Background reputation update failed:', error);
+          log.error({ err: error }, 'Background reputation update failed');
         });
       }
 
       span.setStatus({ code: SpanStatusCode.OK });
     } catch (error: any) {
       span.setStatus({ code: SpanStatusCode.ERROR, message: error.message || String(error) });
-      console.error(`Task ${ctx.taskId} failed:`, error);
+      log.error({ err: error, taskId: ctx.taskId }, 'Task failed');
 
       const errorMessage = error.message || String(error);
 

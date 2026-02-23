@@ -37,10 +37,10 @@ export const CHAT_TOOLS: LLMTool[] = [
       properties: {
         requestId: {
           type: 'string',
-          description: 'The request ID returned from request_signing.',
+          description: 'The request ID returned from request_signing. Omit if unknown — the server auto-resolves it from the session context.',
         },
       },
-      required: ['requestId'],
+      required: [],
     },
   },
   {
@@ -51,10 +51,10 @@ export const CHAT_TOOLS: LLMTool[] = [
       properties: {
         requestId: {
           type: 'string',
-          description: 'The request ID returned from request_signing.',
+          description: 'The request ID returned from request_signing. Omit if unknown — the server auto-resolves it from the session context.',
         },
       },
-      required: ['requestId'],
+      required: [],
     },
   },
   {
