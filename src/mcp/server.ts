@@ -79,7 +79,14 @@ export function createMcpServer(deps: McpServerDeps = {}, config?: ReturnType<ty
   // ─── request_signing ────────────────────────────────────────────────
   server.tool(
     'request_signing',
-    '[STEP 1/5] Start a proof generation session. Creates a signing request and returns a URL where the user opens in their browser to connect their wallet and sign. After calling this, wait for the user to complete signing, then call check_status with the returned requestId.',
+    `[STEP 1/5] Start a proof generation session. Creates a signing request and returns a URL where the user opens in their browser to connect their wallet and sign. After calling this, wait for the user to complete signing, then call check_status with the returned requestId.
+
+Response fields:
+- requestId (string): Unique session ID — use this in all subsequent steps
+- signingUrl (string): URL for the user to open in browser to connect wallet and sign
+- expiresAt (string): ISO 8601 expiration timestamp for this session
+- circuitId (string): The circuit being used
+- scope (string): The privacy scope`,
     {
       circuitId: z.string().describe('Circuit identifier: coinbase_attestation or coinbase_country_attestation'),
       scope: z.string().describe('Privacy scope string for nullifier computation'),
@@ -106,7 +113,20 @@ export function createMcpServer(deps: McpServerDeps = {}, config?: ReturnType<ty
   // ─── check_status ────────────────────────────────────────────────────
   server.tool(
     'check_status',
-    '[STEP 2/5] Check the signing and payment status of a proof request. Call with the requestId from request_signing. Returns phase: "signing" (user hasn\'t signed yet), "payment" (signed, needs payment), "ready" (can generate proof), or "expired". When phase is "payment", call request_payment. When phase is "ready", call generate_proof.',
+    `[STEP 2/5] Check the signing and payment status of a proof request. Call with the requestId from request_signing. When phase is "payment", call request_payment. When phase is "ready", call generate_proof.
+
+Response fields:
+- requestId (string): The session ID
+- phase (string): Current phase — "signing" | "payment" | "ready" | "expired"
+- signing.status (string): "pending" or "completed"
+- signing.address (string?): User wallet address once signed
+- payment.status (string): "not_required" | "pending" | "completed"
+- payment.txHash (string?): USDC payment transaction hash
+- payment.paymentReceiptUrl (string?): Basescan link to payment transaction
+- circuitId (string?): Circuit ID (present when phase is "ready")
+- verifierAddress (string?): On-chain verifier contract address (present when phase is "ready")
+- verifierExplorerUrl (string?): Basescan link to verifier contract (present when phase is "ready")
+- expiresAt (string): ISO 8601 session expiration timestamp`,
     {
       requestId: z.string().describe('Request ID from request_signing'),
     },
@@ -130,7 +150,14 @@ export function createMcpServer(deps: McpServerDeps = {}, config?: ReturnType<ty
   // ─── request_payment ─────────────────────────────────────────────────
   server.tool(
     'request_payment',
-    '[STEP 3/5] Initiate USDC payment for proof generation. Returns a payment URL the user opens in their browser. Only call when check_status returns phase "payment". After user pays, call check_status again to verify phase is "ready".',
+    `[STEP 3/5] Initiate USDC payment for proof generation. Only call when check_status returns phase "payment". After user pays, call check_status again to verify phase is "ready".
+
+Response fields:
+- requestId (string): The session ID
+- paymentUrl (string): URL for the user to open in browser to pay via x402 (EIP-3009, no gas needed)
+- amount (string): Payment amount (e.g., "$0.10")
+- currency (string): "USDC"
+- network (string): "Base Sepolia" or "Base"`,
     {
       requestId: z.string().describe('Request ID from request_signing'),
     },
@@ -154,9 +181,21 @@ export function createMcpServer(deps: McpServerDeps = {}, config?: ReturnType<ty
   // ─── generate_proof ─────────────────────────────────────────────────
   server.tool(
     'generate_proof',
-    `[STEP 4/5] Generate a zero-knowledge proof for a given circuit. When using the standard flow, provide the requestId from request_signing after check_status confirms phase is "ready". Alternatively, provide address and signature directly to skip the signing flow. If called without requestId or signature, a web signing request is created automatically. Proof generation takes 30-90 seconds.
+    `[STEP 4/5] Generate a zero-knowledge proof. Provide the requestId from request_signing after check_status confirms phase is "ready". Alternatively, provide address and signature directly. Proof generation takes 30-90 seconds.
 
-The response includes a TEE attestation when running in a trusted execution environment (local simulation or AWS Nitro Enclave).`,
+Response fields:
+- proofId (string): Unique proof ID — use this for verify_proof or share the verifyUrl
+- verifyUrl (string): Web page URL for interactive on-chain verification
+- verifierAddress (string?): On-chain verifier contract address
+- verifierExplorerUrl (string?): Basescan link to verifier contract
+- nullifier (string): 0x-prefixed nullifier hash (privacy-preserving unique identifier)
+- signalHash (string): 0x-prefixed signal hash
+- paymentTxHash (string?): USDC payment transaction hash (when payment was required)
+- paymentReceiptUrl (string?): Basescan link to payment transaction
+- proof (string): Raw proof bytes (0x-prefixed hex)
+- publicInputs (string): Raw public inputs (0x-prefixed hex)
+- cached (boolean?): True if served from proof cache
+- attestation (object?): TEE attestation (when running in trusted execution environment)`,
     {
       address: z.string().optional().describe('KYC wallet address (0x-prefixed, 20 bytes). Required when providing signature directly. Omit for web signing flow.'),
       signature: z.string().optional().describe('User signature over the signal hash (0x-prefixed, 65 bytes). If omitted, a web signing request is created.'),
@@ -194,7 +233,15 @@ The response includes a TEE attestation when running in a trusted execution envi
   // ─── verify_proof ───────────────────────────────────────────────────
   server.tool(
     'verify_proof',
-    '[STEP 5/5 — OPTIONAL] Verify a previously generated zero-knowledge proof on-chain against the deployed verifier contract. Not part of the standard proof generation flow — call only when the user explicitly requests verification. Provide either proofId (from generate_proof result) or the triplet circuitId+proof+publicInputs.',
+    `[STEP 5/5 — OPTIONAL] Verify a proof on-chain against the deployed verifier contract. Call only when the user explicitly requests verification. Provide either proofId (from generate_proof) or the triplet circuitId+proof+publicInputs.
+
+Response fields:
+- valid (boolean): Whether the proof passed on-chain verification
+- circuitId (string): The circuit that was verified
+- verifierAddress (string): On-chain verifier contract address
+- verifierExplorerUrl (string): Basescan link to verifier contract
+- chainId (string): Chain ID where verification was performed
+- error (string?): Error message if verification failed`,
     {
       proofId: z.string().optional().describe('Proof ID from generate_proof result. When provided, proof/publicInputs/circuitId are loaded from storage automatically.'),
       proof: z.string().optional().describe('The proof bytes (0x-prefixed hex string). Not needed when proofId is provided.'),
@@ -228,7 +275,16 @@ The response includes a TEE attestation when running in a trusted execution envi
   // ─── get_supported_circuits ─────────────────────────────────────────
   server.tool(
     'get_supported_circuits',
-    '[DISCOVERY] List all supported ZK circuits with their metadata, descriptions, required inputs, and verifier addresses. Call this first to discover available circuits before starting a proof generation flow.',
+    `[DISCOVERY] List all supported ZK circuits. Call this first to discover available circuits before starting a proof generation flow.
+
+Response fields:
+- circuits (array): List of supported circuits, each containing:
+  - id (string): Canonical circuit identifier (use as circuitId parameter)
+  - displayName (string): Human-readable circuit name
+  - description (string): What this circuit proves
+  - requiredInputs (string[]): Required input field names
+  - verifierAddress (string?): Deployed verifier contract address
+- chainId (string): Chain ID for verifier addresses`,
     async () => {
       const result = handleGetSupportedCircuits({});
       const { guidance } = getTaskOutcome('get_supported_circuits', result);
