@@ -89,10 +89,10 @@ async function inferSkillFromText(text: string, llmProvider: LLMProvider): Promi
 async function resolveSkill(
   message: Message,
   llmProvider?: LLMProvider,
-): Promise<{ skill: string; params: Record<string, unknown> }> {
+): Promise<{ skill: string; params: Record<string, unknown>; source: 'data' | 'text' }> {
   const dataPartResult = extractSkillFromDataPart(message);
   if (dataPartResult) {
-    return dataPartResult;
+    return { ...dataPartResult, source: 'data' };
   }
 
   const textContent = message.parts
@@ -108,7 +108,8 @@ async function resolveSkill(
     throw new Error('Text inference requires LLM configuration. Use a DataPart with { "skill": "..." } for direct routing.');
   }
 
-  return inferSkillFromText(textContent, llmProvider);
+  const result = await inferSkillFromText(textContent, llmProvider);
+  return { ...result, source: 'text' };
 }
 
 export class ProofportExecutor implements AgentExecutor {
@@ -132,7 +133,7 @@ export class ProofportExecutor implements AgentExecutor {
       };
       eventBus.publish(initialTask);
 
-      const { skill, params: skillParams } = await resolveSkill(ctx.userMessage, this.deps.llmProvider);
+      const { skill, params: skillParams, source } = await resolveSkill(ctx.userMessage, this.deps.llmProvider);
 
       if (!VALID_SKILLS.includes(skill)) {
         throw new Error(`Invalid skill: ${skill}. Valid skills: ${VALID_SKILLS.join(', ')}`);
@@ -140,12 +141,15 @@ export class ProofportExecutor implements AgentExecutor {
 
       span.setAttribute('a2a.skill', skill);
 
-      // Auto-resolve requestId from context flow
+      // Auto-resolve requestId from context flow.
+      // For text-inferred skills, ALWAYS override requestId with context flow
+      // because LLMs often hallucinate placeholder requestIds like "YOUR_REQUEST_ID".
+      // For DataPart skills, only fill in if not explicitly provided.
       if (ctx.contextId) {
         try {
           const storedRequestId = await this.deps.taskStore.getContextFlow(ctx.contextId);
-          if (storedRequestId && !skillParams.requestId) {
-            if (['check_status', 'request_payment', 'generate_proof'].includes(skill)) {
+          if (storedRequestId && ['check_status', 'request_payment', 'generate_proof'].includes(skill)) {
+            if (source === 'text' || !skillParams.requestId) {
               skillParams.requestId = storedRequestId;
             }
           }
