@@ -66,6 +66,21 @@ describe('getTaskOutcome', () => {
       expect(outcome.guidance).toContain('All prerequisites met');
     });
 
+    it('phase=ready includes verifierExplorerUrl in guidance when present', () => {
+      const result: CheckStatusResult = {
+        requestId: 'req-ready',
+        phase: 'ready',
+        signing: { status: 'completed', address: '0xabc' },
+        payment: { status: 'completed', paymentReceiptUrl: 'https://sepolia.basescan.org/tx/0xtx' },
+        verifierExplorerUrl: 'https://sepolia.basescan.org/address/0xVerifier',
+        expiresAt: '2025-01-01T00:00:00Z',
+      };
+      const outcome = getTaskOutcome('check_status', result);
+      expect(outcome.guidance).toContain('https://sepolia.basescan.org/address/0xVerifier');
+      expect(outcome.guidance).toContain('https://sepolia.basescan.org/tx/0xtx');
+      expect(outcome.guidance).toContain('2025-01-01T00:00:00Z');
+    });
+
     it('phase=expired returns failed mentioning expired', () => {
       const result: CheckStatusResult = {
         requestId: 'req-expired',
@@ -109,6 +124,35 @@ describe('getTaskOutcome', () => {
       expect(outcome.state).toBe('completed');
       expect(outcome.guidance).toContain('proof-abc-789');
     });
+
+    it('includes verifyUrl and verifierExplorerUrl in guidance', () => {
+      const result: GenerateProofResult = {
+        proof: '0xdeadbeef',
+        publicInputs: '0x1234',
+        nullifier: '0xnull',
+        signalHash: '0xsig',
+        proofId: 'proof-abc-789',
+        verifyUrl: 'https://example.com/v/proof-abc-789',
+        verifierExplorerUrl: 'https://sepolia.basescan.org/address/0xVerifier',
+      };
+      const outcome = getTaskOutcome('generate_proof', result);
+      expect(outcome.guidance).toContain('https://example.com/v/proof-abc-789');
+      expect(outcome.guidance).toContain('https://sepolia.basescan.org/address/0xVerifier');
+    });
+
+    it('includes paymentReceiptUrl in guidance when present', () => {
+      const result: GenerateProofResult = {
+        proof: '0xdeadbeef',
+        publicInputs: '0x1234',
+        nullifier: '0xnull',
+        signalHash: '0xsig',
+        proofId: 'proof-abc-789',
+        verifyUrl: 'https://example.com/v/proof-abc-789',
+        paymentReceiptUrl: 'https://sepolia.basescan.org/tx/0xtxhash',
+      };
+      const outcome = getTaskOutcome('generate_proof', result);
+      expect(outcome.guidance).toContain('https://sepolia.basescan.org/tx/0xtxhash');
+    });
   });
 
   describe('verify_proof', () => {
@@ -134,6 +178,18 @@ describe('getTaskOutcome', () => {
       const outcome = getTaskOutcome('verify_proof', result);
       expect(outcome.state).toBe('completed');
       expect(outcome.guidance).toContain('invalid');
+    });
+
+    it('includes verifierExplorerUrl in guidance when present', () => {
+      const result: VerifyProofResult = {
+        valid: true,
+        circuitId: 'coinbase_attestation',
+        verifierAddress: '0xVerifier',
+        chainId: '84532',
+        verifierExplorerUrl: 'https://sepolia.basescan.org/address/0xVerifier',
+      };
+      const outcome = getTaskOutcome('verify_proof', result);
+      expect(outcome.guidance).toContain('https://sepolia.basescan.org/address/0xVerifier');
     });
   });
 

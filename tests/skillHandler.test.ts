@@ -460,6 +460,82 @@ describe('skillHandler', () => {
       expect(result.expiresAt).toBe(expiresAt);
     });
 
+    it('should include paymentReceiptUrl when payment is completed (testnet)', async () => {
+      const record = makeRecord({
+        status: 'completed',
+        address: '0xabc',
+        paymentStatus: 'completed',
+        paymentTxHash: '0xtxhash123',
+      });
+      const deps = createMockDeps({ paymentMode: 'testnet' });
+      (deps.redis.get as ReturnType<typeof vi.fn>).mockResolvedValue(JSON.stringify(record));
+
+      const result = await handleCheckStatus({ requestId: 'req-123' }, deps);
+
+      expect(result.payment.paymentReceiptUrl).toBe('https://sepolia.basescan.org/tx/0xtxhash123');
+    });
+
+    it('should include paymentReceiptUrl with mainnet basescan URL', async () => {
+      const record = makeRecord({
+        status: 'completed',
+        address: '0xabc',
+        paymentStatus: 'completed',
+        paymentTxHash: '0xtxhash456',
+      });
+      const deps = createMockDeps({ paymentMode: 'mainnet' });
+      (deps.redis.get as ReturnType<typeof vi.fn>).mockResolvedValue(JSON.stringify(record));
+
+      const result = await handleCheckStatus({ requestId: 'req-123' }, deps);
+
+      expect(result.payment.paymentReceiptUrl).toBe('https://basescan.org/tx/0xtxhash456');
+    });
+
+    it('should not include paymentReceiptUrl when payment has no txHash', async () => {
+      const record = makeRecord({
+        status: 'completed',
+        address: '0xabc',
+        paymentStatus: 'completed',
+        // no paymentTxHash
+      });
+      const deps = createMockDeps({ paymentMode: 'testnet' });
+      (deps.redis.get as ReturnType<typeof vi.fn>).mockResolvedValue(JSON.stringify(record));
+
+      const result = await handleCheckStatus({ requestId: 'req-123' }, deps);
+
+      expect(result.payment.paymentReceiptUrl).toBeUndefined();
+    });
+
+    it('should include verifier info when phase is ready', async () => {
+      const record = makeRecord({
+        status: 'completed',
+        address: '0xabc',
+      });
+      const deps = createMockDeps({ paymentMode: 'disabled' });
+      (deps.redis.get as ReturnType<typeof vi.fn>).mockResolvedValue(JSON.stringify(record));
+
+      const result = await handleCheckStatus({ requestId: 'req-123' }, deps);
+
+      expect(result.phase).toBe('ready');
+      expect(result.circuitId).toBe('coinbase_attestation');
+      expect(result.verifierAddress).toBeDefined();
+      expect(result.verifierExplorerUrl).toBe(
+        `https://sepolia.basescan.org/address/${result.verifierAddress}`
+      );
+    });
+
+    it('should not include verifier info when phase is not ready', async () => {
+      const record = makeRecord({ status: 'pending' });
+      const deps = createMockDeps();
+      (deps.redis.get as ReturnType<typeof vi.fn>).mockResolvedValue(JSON.stringify(record));
+
+      const result = await handleCheckStatus({ requestId: 'req-123' }, deps);
+
+      expect(result.phase).toBe('signing');
+      expect(result.circuitId).toBeUndefined();
+      expect(result.verifierAddress).toBeUndefined();
+      expect(result.verifierExplorerUrl).toBeUndefined();
+    });
+
     it('should look up the correct Redis key', async () => {
       const deps = createMockDeps();
       await handleCheckStatus({ requestId: 'my-req-id' }, deps).catch(() => {});
@@ -759,6 +835,53 @@ describe('skillHandler', () => {
 
         expect(result.paymentTxHash).toBe('0xtxhash999');
       });
+
+      it('should include paymentReceiptUrl when paymentTxHash is present (testnet)', async () => {
+        const record = makeRecord({
+          status: 'completed',
+          address: '0xabc',
+          signature: '0xsig',
+          paymentStatus: 'completed',
+          paymentTxHash: '0xtxhash999',
+        });
+        const deps = createMockDeps({ paymentMode: 'testnet' });
+        (deps.redis.get as ReturnType<typeof vi.fn>).mockResolvedValue(JSON.stringify(record));
+
+        const result = await handleGenerateProof({ requestId: 'req-123' }, deps);
+
+        expect(result.paymentReceiptUrl).toBe('https://sepolia.basescan.org/tx/0xtxhash999');
+      });
+
+      it('should include paymentReceiptUrl with mainnet URL when paymentMode is mainnet', async () => {
+        const record = makeRecord({
+          status: 'completed',
+          address: '0xabc',
+          signature: '0xsig',
+          paymentStatus: 'completed',
+          paymentTxHash: '0xtxhash999',
+        });
+        const deps = createMockDeps({ paymentMode: 'mainnet' });
+        (deps.redis.get as ReturnType<typeof vi.fn>).mockResolvedValue(JSON.stringify(record));
+
+        const result = await handleGenerateProof({ requestId: 'req-123' }, deps);
+
+        expect(result.paymentReceiptUrl).toBe('https://basescan.org/tx/0xtxhash999');
+      });
+
+      it('should not include paymentReceiptUrl when no paymentTxHash', async () => {
+        const record = makeRecord({
+          status: 'completed',
+          address: '0xabc',
+          signature: '0xsig',
+        });
+        const deps = createMockDeps({ paymentMode: 'disabled' });
+        (deps.redis.get as ReturnType<typeof vi.fn>).mockResolvedValue(JSON.stringify(record));
+
+        const result = await handleGenerateProof({ requestId: 'req-123' }, deps);
+
+        expect(result.paymentReceiptUrl).toBeUndefined();
+        expect(result.paymentTxHash).toBeUndefined();
+      });
     });
 
     // ── Mode B: Direct flow ───────────────────────────────────────────────
@@ -781,6 +904,25 @@ describe('skillHandler', () => {
         expect(result.proofId).toBe(MOCK_PROOF_ID);
         // Should NOT have called redis.del (no session to consume)
         expect(deps.redis.del).not.toHaveBeenCalled();
+      });
+
+      it('should include verifierAddress and verifierExplorerUrl', async () => {
+        const deps = createMockDeps();
+
+        const result = await handleGenerateProof(
+          {
+            address: '0xUserAddr',
+            signature: '0xUserSig',
+            scope: 'my-scope',
+            circuitId: 'coinbase_attestation',
+          },
+          deps,
+        );
+
+        expect(result.verifierAddress).toBeDefined();
+        expect(result.verifierExplorerUrl).toBe(
+          `https://sepolia.basescan.org/address/${result.verifierAddress}`
+        );
       });
 
       it('should throw if address is missing in direct mode', async () => {
@@ -1170,6 +1312,34 @@ describe('skillHandler', () => {
       expect(result.verifierAddress).toBe(VERIFIER_ADDRESSES['84532']['coinbase_attestation']);
       expect(result.chainId).toBe('84532');
       expect(result.error).toBeUndefined();
+    });
+
+    it('should include verifierExplorerUrl for Base Sepolia', async () => {
+      mockVerifyFn.mockResolvedValue(true);
+      const deps = createMockDeps();
+
+      const result = await handleVerifyProof(
+        { circuitId: 'coinbase_attestation', proof: '0xproof', publicInputs: ['0x1111'] },
+        deps,
+      );
+
+      expect(result.verifierExplorerUrl).toBe(
+        `https://sepolia.basescan.org/address/${VERIFIER_ADDRESSES['84532']['coinbase_attestation']}`
+      );
+    });
+
+    it('should include verifierExplorerUrl even on contract revert', async () => {
+      mockVerifyFn.mockRejectedValue(new Error('execution reverted'));
+      const deps = createMockDeps();
+
+      const result = await handleVerifyProof(
+        { circuitId: 'coinbase_attestation', proof: '0xbad', publicInputs: ['0x1111'] },
+        deps,
+      );
+
+      expect(result.valid).toBe(false);
+      expect(result.verifierExplorerUrl).toBeDefined();
+      expect(result.verifierExplorerUrl).toContain('sepolia.basescan.org/address/');
     });
 
     it('should return valid: false for failed on-chain verification', async () => {
