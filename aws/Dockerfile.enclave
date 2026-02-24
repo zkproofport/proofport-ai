@@ -1,0 +1,78 @@
+# Multi-stage Dockerfile for AWS Nitro Enclave
+# Builds a minimal image with bb, nargo, circuit artifacts, and vsock server
+#
+# LOCKED VERSIONS (do NOT change):
+#   bb:    v1.0.0-nightly.20250723
+#   nargo: 1.0.0-beta.8
+#
+# Build:   docker build -f Dockerfile.enclave -t proofport-ai-enclave .
+# Convert: nitro-cli build-enclave --docker-uri proofport-ai-enclave:latest --output-file enclave.eif
+
+# ─────────────────────────────────────────────────────────────
+# Stage 1: Download and verify bb + nargo binaries
+# Ubuntu 24.04 required: bb needs glibc >= 2.38 (Ubuntu 24.04 ships 2.39)
+# ─────────────────────────────────────────────────────────────
+FROM ubuntu:24.04 AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    wget \
+    jq \
+    ca-certificates \
+    tar \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /downloads
+
+# Download bb (amd64-linux only — no arm64-linux build available)
+RUN curl -fsSL \
+    "https://github.com/AztecProtocol/aztec-packages/releases/download/v1.0.0-nightly.20250723/barretenberg-amd64-linux.tar.gz" \
+    -o barretenberg-amd64-linux.tar.gz \
+    && tar -xzf barretenberg-amd64-linux.tar.gz \
+    && chmod +x ./bb \
+    && ./bb --version
+
+# Download nargo (x86_64-linux)
+RUN curl -fsSL \
+    "https://github.com/noir-lang/noir/releases/download/v1.0.0-beta.8/nargo-x86_64-unknown-linux-gnu.tar.gz" \
+    -o nargo-x86_64-unknown-linux-gnu.tar.gz \
+    && tar -xzf nargo-x86_64-unknown-linux-gnu.tar.gz \
+    && chmod +x ./nargo \
+    && ./nargo --version
+
+# ─────────────────────────────────────────────────────────────
+# Stage 2: Runtime image — minimal Ubuntu 24.04
+# ─────────────────────────────────────────────────────────────
+FROM ubuntu:24.04
+
+# Install runtime dependencies
+# - jq:              bb uses it internally for JSON processing
+# - ca-certificates: for any TLS calls (SRS download, etc.)
+# - python3:         vsock server runtime
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    jq \
+    ca-certificates \
+    python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy binaries from builder stage
+COPY --from=builder /downloads/bb    /usr/local/bin/bb
+COPY --from=builder /downloads/nargo /usr/local/bin/nargo
+
+# Copy circuit artifacts
+# These must be present before running nitro-cli build-enclave.
+# The build-enclave.sh script copies them from the parent repo into
+# the build context (aws/circuits/) before running docker build.
+COPY circuits/ /app/circuits/
+
+# Copy vsock server
+COPY enclave-server.py /app/enclave-server.py
+RUN chmod +x /app/enclave-server.py
+
+# Vsock port 5000 (informational — vsock does not use TCP ports,
+# but this documents the convention used in EnclaveClient.ts)
+EXPOSE 5000
+
+CMD ["python3", "/app/enclave-server.py"]

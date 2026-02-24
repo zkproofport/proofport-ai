@@ -1,0 +1,57 @@
+[Unit]
+Description=proofport-ai MCP/A2A Server (Docker)
+Documentation=https://github.com/zkproofport/proofport-ai
+After=docker.service network-online.target proofport-ai-redis.service
+Wants=network-online.target
+Requires=docker.service proofport-ai-redis.service
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=proofport-ai
+
+# Environment file — contains TEE_MODE, ENCLAVE_CID, RPC URLs, private key, etc.
+# Operator must populate /opt/proofport-ai/.env before enabling this service.
+EnvironmentFile=/opt/proofport-ai/.env
+
+# Pull the latest image from ECR before starting.
+# Uses the instance IAM role for ECR authentication.
+ExecStartPre=/usr/local/bin/ecr-login.sh
+ExecStartPre=/usr/bin/docker pull ${AI_IMAGE}
+
+# Remove any stale container from a previous run
+ExecStartPre=-/usr/bin/docker rm -f proofport-ai
+
+# Run the app container.
+#
+# Flags:
+#   --name proofport-ai       — named container for ExecStop
+#   --network host            — required for vsock access to Nitro Enclave
+#   --env-file                — injects all vars from /opt/proofport-ai/.env
+#   -p 4002:4002              — MCP/A2A/REST API
+#   -p 3200:3200              — sign-page (Next.js signing UI)
+#   -v circuits               — compiled Noir circuit artifacts (bytecode + VK)
+#                               populated by the CI/CD pipeline or manually
+#
+# NOTE: --network host is intentional. The Node.js process communicates with
+# the Nitro Enclave via vsock (AF_VSOCK), which is a host-level transport.
+# Without host networking the container cannot open vsock connections.
+ExecStart=/usr/bin/docker run \
+  --name proofport-ai \
+  --rm \
+  --network host \
+  --env-file /opt/proofport-ai/.env \
+  -v /opt/proofport-ai/circuits:/app/circuits:ro \
+  -v /opt/proofport-ai/logs:/app/logs \
+  ${AI_IMAGE}
+
+ExecStop=/usr/bin/docker stop proofport-ai
+
+# Give the container 30 seconds to shut down gracefully before SIGKILL
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

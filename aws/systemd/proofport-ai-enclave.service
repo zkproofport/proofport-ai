@@ -1,0 +1,74 @@
+[Unit]
+Description=proofport-ai Nitro Enclave (ZK Prover)
+Documentation=https://github.com/zkproofport/proofport-ai
+# Enclave starts after the parent app is running so the vsock listener is ready
+After=proofport-ai.service
+Requires=proofport-ai.service
+
+[Service]
+# oneshot + RemainAfterExit: systemd considers the service "active" after
+# ExecStart exits successfully. This matches nitro-cli run-enclave behaviour
+# (the command returns immediately after the enclave is launched).
+Type=oneshot
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=proofport-ai-enclave
+
+# Restart the enclave on failure (e.g., EIF build failure), but not on
+# clean stop (e.g., operator ran systemctl stop).
+Restart=on-failure
+RestartSec=15
+
+# ---------------------------------------------------------------------------
+# Build the Enclave Image File (EIF) from the Docker image if it does not
+# yet exist. The EIF is built once and reused on subsequent starts.
+#
+# To force a rebuild (e.g., after a circuit update):
+#   rm /opt/proofport-ai/enclave.eif && systemctl restart proofport-ai-enclave
+#
+# The Docker image that gets baked into the EIF must be built separately:
+#   docker build -f proofport-ai/prover/Dockerfile.enclave \
+#                -t proofport-ai-enclave:latest \
+#                proofport-ai/prover
+# ---------------------------------------------------------------------------
+ExecStartPre=/bin/bash -c '\
+  if [ ! -f /opt/proofport-ai/enclave.eif ]; then \
+    echo "EIF not found — building from proofport-ai-enclave:latest ..."; \
+    nitro-cli build-enclave \
+      --docker-uri proofport-ai-enclave:latest \
+      --output-file /opt/proofport-ai/enclave.eif; \
+    echo "EIF built successfully."; \
+  else \
+    echo "EIF already exists at /opt/proofport-ai/enclave.eif — skipping build."; \
+  fi'
+
+# ---------------------------------------------------------------------------
+# Run the Nitro Enclave.
+#
+# Flags:
+#   --eif-path        — Pre-built Enclave Image File (circuits + VK baked in)
+#   --cpu-count 2     — Reserved vCPUs (must match allocator.yaml cpu_count)
+#   --memory 4096     — Reserved memory in MiB (must match allocator.yaml memory_mib)
+#   --enclave-cid 16  — vsock CID used by the parent app (ENCLAVE_CID env var)
+#                       CID 16 is a conventional non-reserved value; CID 3 is
+#                       reserved for the parent hypervisor, CID 4 is loopback.
+#
+# The enclave process communicates with the Node.js app via vsock on port 5000
+# (configurable via ENCLAVE_PORT env var in /opt/proofport-ai/.env).
+# ---------------------------------------------------------------------------
+ExecStart=/usr/bin/nitro-cli run-enclave \
+  --eif-path /opt/proofport-ai/enclave.eif \
+  --cpu-count 2 \
+  --memory 4096 \
+  --enclave-cid 16
+
+# Terminate ALL running enclaves on stop.
+# If multiple enclaves were somehow started, this cleans all of them.
+ExecStop=/usr/bin/nitro-cli terminate-enclave --all
+
+# Give the enclave 20 seconds to terminate gracefully
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target

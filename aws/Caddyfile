@@ -1,0 +1,129 @@
+# Caddyfile — Caddy reverse proxy for proofport-ai on EC2
+#
+# SSL termination is handled by Cloudflare (proxy mode, Full SSL).
+# Caddy listens on HTTP :80; Cloudflare terminates HTTPS externally.
+#
+# Traffic flow:
+#   Client → Cloudflare (HTTPS/443) → EC2 :80 (HTTP) → app containers
+#
+# Routing:
+#   /sign/*   → sign-page Next.js (port 3200)  — wallet signing UI
+#   /*        → proofport-ai Node.js (port 4002) — MCP/A2A/REST API
+#
+# Ports:
+#   4002 — Main app: MCP, A2A, REST API, health check, payment endpoints
+#   3200 — sign-page: Next.js static signing UI (/sign/*, /pay/*)
+
+{
+  # Global options
+  # Auto HTTPS is disabled because Cloudflare terminates SSL.
+  # Caddy only serves HTTP on the internal/EC2 side.
+  auto_https off
+
+  # Admin API on loopback only (for health checks and config reload)
+  admin localhost:2019
+
+  # Cloudflare trusted IP ranges for X-Forwarded-For / X-Real-IP
+  # Caddy trusts these headers only from Cloudflare's egress IPs.
+  # Ref: https://www.cloudflare.com/ips-v4 / https://www.cloudflare.com/ips-v6
+  servers {
+    trusted_proxies static \
+      103.21.244.0/22 \
+      103.22.200.0/22 \
+      103.31.4.0/22 \
+      104.16.0.0/13 \
+      104.24.0.0/14 \
+      108.162.192.0/18 \
+      131.0.72.0/22 \
+      141.101.64.0/18 \
+      162.158.0.0/15 \
+      172.64.0.0/13 \
+      173.245.48.0/20 \
+      188.114.96.0/20 \
+      190.93.240.0/20 \
+      197.234.240.0/22 \
+      198.41.128.0/17 \
+      2400:cb00::/32 \
+      2606:4700::/32 \
+      2803:f800::/32 \
+      2405:b500::/32 \
+      2405:8100::/32 \
+      2a06:98c0::/29 \
+      2c0f:f248::/32
+  }
+
+  # Structured JSON logging for CloudWatch integration
+  log {
+    output stdout
+    format json
+    level INFO
+  }
+}
+
+# Main HTTP listener — Cloudflare connects here after SSL termination
+:80 {
+
+  # ---------------------------------------------------------------------------
+  # sign-page routing — Next.js wallet signing UI
+  #
+  # Routes:
+  #   /sign/:requestId   — attestation signing page (EIP-712 typed data)
+  #   /pay/:requestId    — x402 payment signing page (EIP-3009 transfer auth)
+  #   /s/:requestId      — short alias for /sign/:requestId
+  # ---------------------------------------------------------------------------
+  handle /sign/* {
+    reverse_proxy localhost:3200 {
+      header_up X-Real-IP {remote_host}
+      header_up X-Forwarded-For {remote_host}
+      header_up X-Forwarded-Proto {scheme}
+    }
+  }
+
+  handle /pay/* {
+    reverse_proxy localhost:3200 {
+      header_up X-Real-IP {remote_host}
+      header_up X-Forwarded-For {remote_host}
+      header_up X-Forwarded-Proto {scheme}
+    }
+  }
+
+  handle /s/* {
+    reverse_proxy localhost:3200 {
+      header_up X-Real-IP {remote_host}
+      header_up X-Forwarded-For {remote_host}
+      header_up X-Forwarded-Proto {scheme}
+    }
+  }
+
+  # ---------------------------------------------------------------------------
+  # Default — all other traffic goes to the main app (MCP/A2A/REST)
+  #
+  # Includes:
+  #   /mcp                  — MCP StreamableHTTP endpoint
+  #   /a2a                  — A2A JSON-RPC endpoint
+  #   /events               — SSE streaming
+  #   /.well-known/*        — Agent card, MCP discovery, OASF
+  #   /api/*                — REST API (payment callbacks, status)
+  #   /rpc                  — A2A JSON-RPC alias
+  # ---------------------------------------------------------------------------
+  handle {
+    reverse_proxy localhost:4002 {
+      header_up X-Real-IP {remote_host}
+      header_up X-Forwarded-For {remote_host}
+      header_up X-Forwarded-Proto {scheme}
+
+      # Increase timeouts for ZK proof generation (can take several minutes)
+      transport http {
+        read_timeout  600s
+        write_timeout 600s
+      }
+    }
+  }
+
+  # Access log for debugging
+  log {
+    output stdout
+    format json
+    level INFO
+  }
+}

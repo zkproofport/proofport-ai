@@ -1,0 +1,45 @@
+[Unit]
+Description=proofport-ai Redis (Docker)
+Documentation=https://hub.docker.com/_/redis
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=proofport-ai-redis
+
+# Remove any stale container from a previous run
+ExecStartPre=-/usr/bin/docker rm -f proofport-ai-redis
+
+# Run Redis 7 (Alpine) with append-only persistence.
+#
+# Flags:
+#   --name proofport-ai-redis     — named container for ExecStop
+#   -p 127.0.0.1:6379:6379        — bind to loopback only; Redis must NOT be
+#                                    reachable from the network (security)
+#   -v redis-data                 — persist RDB/AOF files across container restarts
+#   redis:7-alpine                — minimal footprint, matches local dev image
+#   --appendonly yes              — enable AOF persistence for durability
+#
+# NOTE: The main app connects via REDIS_URL=redis://localhost:6379 because both
+# the app container and Redis run with --network host (see proofport-ai.service).
+ExecStart=/usr/bin/docker run \
+  --name proofport-ai-redis \
+  --rm \
+  -p 127.0.0.1:6379:6379 \
+  -v /opt/proofport-ai/redis-data:/data \
+  redis:7-alpine \
+  redis-server --appendonly yes
+
+ExecStop=/usr/bin/docker stop proofport-ai-redis
+
+# Give Redis 10 seconds to flush AOF to disk before SIGKILL
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

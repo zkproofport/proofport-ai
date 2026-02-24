@@ -1,0 +1,120 @@
+# docker-compose.aws.yml — Docker Compose for proofport-ai on AWS EC2
+#
+# Alternative to systemd unit files for operators who prefer Compose-based management.
+# The Nitro Enclave is NOT managed here — it is always managed by nitro-cli directly
+# (nitro-cli run-enclave / proofport-ai-enclave.service).
+#
+# Usage:
+#   docker compose -f docker-compose.aws.yml up -d
+#   docker compose -f docker-compose.aws.yml down
+#   docker compose -f docker-compose.aws.yml logs -f ai
+#
+# Prerequisites:
+#   - /opt/proofport-ai/.env populated with all required values
+#   - /opt/proofport-ai/circuits/ populated with compiled circuit artifacts
+#   - ECR authenticated: /usr/local/bin/ecr-login.sh
+#   - Nitro Enclave already started via: systemctl start proofport-ai-enclave
+#     (or: nitro-cli run-enclave --eif-path /opt/proofport-ai/enclave.eif
+#           --cpu-count 2 --memory 4096 --enclave-cid 16)
+
+version: "3.9"
+
+# ---------------------------------------------------------------------------
+# Named volumes
+# ---------------------------------------------------------------------------
+volumes:
+  redis-data:
+    # Persist Redis RDB/AOF data across container restarts.
+    # Stored at /opt/proofport-ai/redis-data on the host.
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/proofport-ai/redis-data
+
+# ---------------------------------------------------------------------------
+# Services
+# ---------------------------------------------------------------------------
+services:
+
+  # -------------------------------------------------------------------------
+  # Redis — task queue and session store
+  #
+  # Port 6379 is bound to loopback only (127.0.0.1) for security.
+  # The app connects via REDIS_URL=redis://localhost:6379 when using
+  # network_mode: host (see "ai" service below).
+  # -------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: proofport-ai-redis
+    restart: always
+    command: redis-server --appendonly yes
+    ports:
+      # Bind to loopback only — Redis must not be reachable from the network
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # -------------------------------------------------------------------------
+  # proofport-ai — MCP/A2A server + sign-page
+  #
+  # Image is pulled from ECR. Set AI_IMAGE in /opt/proofport-ai/.env.
+  #
+  # network_mode: host is required for vsock access to the Nitro Enclave.
+  # The Node.js process opens AF_VSOCK connections to the enclave (CID 16,
+  # port 5000). Docker bridge networking does not pass vsock sockets.
+  #
+  # If you do NOT need TEE/enclave access (e.g., staging without real hardware),
+  # comment out "network_mode: host" and uncomment the "networks" section to
+  # use a bridge network instead.
+  # -------------------------------------------------------------------------
+  ai:
+    image: ${AI_IMAGE}
+    container_name: proofport-ai
+    restart: always
+    depends_on:
+      redis:
+        condition: service_healthy
+    env_file:
+      # Must exist at /opt/proofport-ai/.env and contain all required values.
+      # See ai-dev.md "Environment Variables" section for the full list.
+      - /opt/proofport-ai/.env
+    ports:
+      - "4002:4002"  # MCP/A2A/REST API
+      - "3200:3200"  # sign-page (Next.js wallet signing UI)
+    volumes:
+      # Compiled Noir circuit artifacts (bytecode + verification key).
+      # Populated by the CI/CD pipeline (sync-circuits step) or manually.
+      - /opt/proofport-ai/circuits:/app/circuits:ro
+      # App logs — useful for debugging when not streaming to CloudWatch
+      - /opt/proofport-ai/logs:/app/logs
+    # network_mode: host is required for vsock access to the Nitro Enclave.
+    # Comment this out and uncomment "networks" below if TEE is not needed.
+    network_mode: host
+    # networks:
+    #   - ai-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+# ---------------------------------------------------------------------------
+# Internal bridge network (used when network_mode: host is disabled)
+# ---------------------------------------------------------------------------
+# networks:
+#   ai-net:
+#     driver: bridge
+#     name: proofport-ai-net
