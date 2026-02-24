@@ -30,6 +30,7 @@ ExecStartPre=-/usr/bin/docker rm -f proofport-ai
 # Flags:
 #   --name proofport-ai       — named container for ExecStop
 #   --network host            — required for vsock access to Nitro Enclave
+#   --device /dev/vsock       — vsock device for Nitro Enclave communication
 #   --env-file                — injects all vars from /opt/proofport-ai/.env
 #   -p 4002:4002              — MCP/A2A/REST API
 #   -p 3200:3200              — sign-page (Next.js signing UI)
@@ -43,6 +44,7 @@ ExecStart=/usr/bin/docker run \
   --name proofport-ai \
   --rm \
   --network host \
+  --device /dev/vsock \
   --env-file /opt/proofport-ai/.env \
   -v /opt/proofport-ai/circuits:/app/circuits \
   -v /opt/proofport-ai/logs:/app/logs \
