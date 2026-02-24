@@ -51,7 +51,12 @@ Tool selection rules:
 - check_status: User wants to check the status of an existing request. Keywords: status, progress, done yet, done, 상태, 완료됐어, 됐어, 확인.
 - request_payment: User wants to pay for a proof request. Keywords: pay, payment, 결제, 지불.
 
-Critical distinction — 검증 vs 생성: "검증해줘" = verify_proof. "생성해줘" = generate_proof. If the user provides a hex value (0x...) and uses words like 검증/확인/verify/validate, always route to verify_proof.`;
+Critical distinction — 검증 vs 생성: "검증해줘" = verify_proof. "생성해줘" = generate_proof. If the user provides a hex value (0x...) and uses words like 검증/확인/verify/validate, always route to verify_proof.
+
+CRITICAL — generate_proof vs request_signing:
+- generate_proof: Use when the user says "generate proof", "증명 생성", "make proof", "prove" as a FOLLOW-UP after signing/payment. If the user does NOT provide circuitId, scope, or address, they are asking to continue an existing session → use generate_proof. The server auto-resolves requestId, circuitId, and scope from the session.
+- request_signing: Use ONLY when the user provides specific parameters (wallet address, circuitId, scope) to START a NEW proof session. If the user gives a wallet address and circuit type, use request_signing.
+- When in doubt (no address, no circuitId given, just "증명 생성해줘" or "generate proof"), prefer generate_proof.`;
 
 export interface ExecutorDeps {
   taskStore: RedisTaskStore;
@@ -211,7 +216,13 @@ export class ProofportExecutor implements AgentExecutor {
         try {
           const requestId = (result as any)?.requestId;
           if (requestId) {
-            await this.deps.taskStore.setContextFlow(ctx.contextId, requestId);
+            // Only set context flow if no existing mapping (prevent accidental overwrite)
+            const existingRequestId = await this.deps.taskStore.getContextFlow(ctx.contextId);
+            if (!existingRequestId) {
+              await this.deps.taskStore.setContextFlow(ctx.contextId, requestId);
+            } else {
+              log.info({ existingRequestId, newRequestId: requestId, contextId: ctx.contextId }, 'Context flow already exists, not overwriting');
+            }
           }
         } catch (e) {
           log.error({ err: e }, 'Failed to link context flow');
