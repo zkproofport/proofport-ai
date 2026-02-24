@@ -1,0 +1,78 @@
+# Dockerfile.enclave — Nitro Enclave prover image for proofport-ai
+#
+# Builds a minimal image containing:
+#   - Rust vsock listener binary (handles vsock communication with parent)
+#   - bb CLI (Barretenberg backend for proof generation)
+#   - nargo CLI (Noir compiler for witness generation)
+#   - Circuit artifacts (bytecode + VK, baked in at build time)
+#
+# Build: docker build -f Dockerfile.enclave -t proofport-ai-enclave:latest .
+# The EIF is then created with: nitro-cli build-enclave --docker-uri proofport-ai-enclave:latest --output-file enclave.eif
+
+# ── Stage 1: Build Rust vsock listener ─────────────────────────────────────────
+FROM rust:1.82-bookworm AS builder
+
+WORKDIR /app
+
+# Copy manifests for dependency caching
+COPY Cargo.toml Cargo.lock* ./
+
+# Create dummy src to pre-build dependencies
+RUN mkdir src && echo 'fn main() { println!("stub"); }' > src/main.rs
+RUN cargo build --release --features enclave 2>/dev/null || true
+
+# Copy actual source and build
+COPY src/ src/
+RUN cargo build --release --features enclave
+
+# ── Stage 2: Download bb and nargo binaries ────────────────────────────────────
+FROM debian:bookworm-slim AS tools
+
+RUN apt-get update && apt-get install -y curl tar && rm -rf /var/lib/apt/lists/*
+
+# Download nargo (locked version)
+ARG NARGO_VERSION=1.0.0-beta.8
+RUN curl -sL "https://github.com/noir-lang/noir/releases/download/nargo-v${NARGO_VERSION}/nargo-x86_64-unknown-linux-gnu.tar.gz" \
+    | tar -xz -C /usr/local/bin/ \
+    && chmod +x /usr/local/bin/nargo
+
+# Download bb (locked version)
+ARG BB_VERSION=1.0.0-nightly.20250723
+RUN curl -sL "https://github.com/AztecProtocol/aztec-packages/releases/download/v${BB_VERSION}/barretenberg-x86_64-linux-gnu.tar.gz" \
+    | tar -xz -C /usr/local/bin/ \
+    && chmod +x /usr/local/bin/bb
+
+# ── Stage 3: Runtime ───────────────────────────────────────────────────────────
+# Ubuntu 24.04 for glibc >= 2.38 (required by bb)
+FROM ubuntu:24.04
+
+# Runtime dependencies
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    jq \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy the Rust binary
+COPY --from=builder /app/target/release/proofport-prover /usr/local/bin/proofport-prover
+
+# Copy bb and nargo
+COPY --from=tools /usr/local/bin/nargo /usr/local/bin/nargo
+COPY --from=tools /usr/local/bin/bb /usr/local/bin/bb
+
+# Circuit artifacts — baked into the enclave image
+# These are copied from the build context (prover/ directory)
+# The deploy pipeline must ensure circuits/ exists with compiled artifacts
+COPY circuits/ /app/circuits/
+
+# Environment
+ENV TRANSPORT=vsock
+ENV VSOCK_PORT=5000
+ENV CIRCUITS_DIR=/app/circuits
+ENV NARGO_PATH=/usr/local/bin/nargo
+ENV BB_PATH=/usr/local/bin/bb
+ENV RUST_LOG=info
+
+# The vsock listener doesn't expose network ports (enclave has no network)
+# Communication is via AF_VSOCK only
+
+CMD ["proofport-prover"]
