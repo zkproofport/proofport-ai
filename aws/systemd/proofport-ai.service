@@ -18,7 +18,7 @@ SyslogIdentifier=proofport-ai
 EnvironmentFile=/opt/proofport-ai/.env
 
 # Pull the latest image from ECR before starting.
-# Uses the instance IAM role for ECR authentication.
+# Uses the EC2 IAM instance profile for ECR authentication.
 ExecStartPre=/usr/local/bin/ecr-login.sh
 ExecStartPre=/usr/bin/docker pull ${AI_IMAGE}
 
