@@ -19,12 +19,14 @@ export function getTeeConfig(): TeeConfig {
 
   const enclaveCid = process.env.ENCLAVE_CID ? parseInt(process.env.ENCLAVE_CID, 10) : undefined;
   const enclavePort = process.env.ENCLAVE_PORT ? parseInt(process.env.ENCLAVE_PORT, 10) : 5000;
+  const enclaveBridgePort = process.env.ENCLAVE_BRIDGE_PORT ? parseInt(process.env.ENCLAVE_BRIDGE_PORT, 10) : 15000;
   const attestationEnabled = process.env.TEE_ATTESTATION === 'true';
 
   return {
     mode: teeMode,
     enclaveCid: isNaN(enclaveCid as number) ? undefined : enclaveCid,
     enclavePort: isNaN(enclavePort) ? 5000 : enclavePort,
+    enclaveBridgePort: isNaN(enclaveBridgePort) ? 15000 : enclaveBridgePort,
     attestationEnabled,
   };
 }

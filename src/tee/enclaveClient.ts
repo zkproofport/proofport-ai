@@ -138,31 +138,39 @@ export class EnclaveClient implements TeeProvider {
 
   private async sendVsockRequest(request: VsockRequest): Promise<VsockResponse> {
     return new Promise((resolve, reject) => {
-      const port = this.config.enclavePort || 5000;
-      const cid = this.config.enclaveCid!;
+      // Connect via TCP bridge (vsock-bridge.py on host forwards to enclave)
+      // Node.js net module doesn't support AF_VSOCK natively, so we use
+      // a TCP-to-vsock proxy running on the host at bridgePort (default 15000).
+      const bridgePort = this.config.enclaveBridgePort || 15000;
 
-      // Vsock connection via AF_VSOCK (address family for vsock)
-      // Node.js net module supports vsock but types don't reflect it
+      log.debug({ bridgePort }, 'Connecting to enclave via TCP bridge');
+
       const socket: Socket = connect({
-        path: `/dev/vsock`,
-        vsockCid: cid,
-        vsockPort: port,
-      } as any);
+        host: '127.0.0.1',
+        port: bridgePort,
+      });
 
       let responseData = '';
 
       socket.on('connect', () => {
         socket.write(JSON.stringify(request));
+        socket.end(); // Signal end of request so bridge forwards to enclave
       });
 
       socket.on('data', (data: Buffer) => {
         responseData += data.toString();
+      });
+
+      socket.on('end', () => {
+        if (!responseData) {
+          reject(new Error('Empty response from enclave'));
+          return;
+        }
         try {
           const response: VsockResponse = JSON.parse(responseData);
-          socket.end();
           resolve(response);
         } catch (error) {
-          // Partial data received, wait for more
+          reject(new Error(`Invalid JSON from enclave: ${responseData.substring(0, 200)}`));
         }
       });
 
@@ -176,8 +184,8 @@ export class EnclaveClient implements TeeProvider {
         reject(new Error('Connection timeout'));
       });
 
-      // Set 30 second timeout
-      socket.setTimeout(30000);
+      // Proof generation can take 30-90 seconds
+      socket.setTimeout(120000);
     });
   }
 

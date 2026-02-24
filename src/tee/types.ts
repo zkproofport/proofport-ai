@@ -18,6 +18,7 @@ export interface TeeConfig {
   mode: TeeMode;
   enclaveCid?: number; // Nitro Enclave CID (vsock address), required for nitro mode
   enclavePort?: number; // vsock port, default 5000
+  enclaveBridgePort?: number; // TCP bridge port for vsock proxy, default 15000
   attestationEnabled: boolean;
 }
 
