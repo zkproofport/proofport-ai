@@ -17,8 +17,8 @@ coverage/
 # Docker
 .dockerignore
 
-# Rust prover (unused, bb CLI used instead)
-prover/
+# Rust prover build artifacts
+prover/target/
 
 # Test environment (contains private keys)
 .env.test
