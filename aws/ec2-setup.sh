@@ -150,6 +150,9 @@ mkdir -p /etc/caddy
 # Set ownership so ec2-user can manage files
 chown -R ec2-user:ec2-user "${APP_DIR}"
 
+# Redis data dir must be owned by redis user (UID 999) inside the container
+chown -R 999:999 "${APP_DIR}/redis-data"
+
 # Placeholder .env — operator MUST replace with real values before starting services
 cat > "${APP_DIR}/.env" <<'EOF'
 # proofport-ai environment — REPLACE ALL PLACEHOLDER VALUES BEFORE USE

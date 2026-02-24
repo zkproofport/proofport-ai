@@ -1,13 +1,16 @@
 # Caddyfile — Caddy reverse proxy for proofport-ai on EC2
 #
-# SSL termination is handled by Cloudflare (proxy mode, Full SSL).
-# Caddy listens on HTTP :80; Cloudflare terminates HTTPS externally.
+# SSL: Caddy serves HTTPS :443 with a self-signed (internal) certificate.
+# Cloudflare connects in "Full" SSL mode — it accepts self-signed origin certs.
+# HTTP :80 is kept for local health checks and as fallback.
 #
 # Traffic flow:
-#   Client → Cloudflare (HTTPS/443) → EC2 :80 (HTTP) → app containers
+#   Client → Cloudflare (HTTPS/443) → EC2 :443 (HTTPS, self-signed) → app containers
+#   Local  → EC2 :80 (HTTP) → app containers (health checks)
 #
 # Routing:
 #   /sign/*   → sign-page Next.js (port 3200)  — wallet signing UI
+#   /_next/*  → sign-page Next.js (port 3200)  — static assets (optimization)
 #   /*        → proofport-ai Node.js (port 4002) — MCP/A2A/REST API
 #
 # Ports:
@@ -15,11 +18,6 @@
 #   3200 — sign-page: Next.js static signing UI (/sign/*, /pay/*)
 
 {
-  # Global options
-  # Auto HTTPS is disabled because Cloudflare terminates SSL.
-  # Caddy only serves HTTP on the internal/EC2 side.
-  auto_https off
-
   # Admin API on loopback only (for health checks and config reload)
   admin localhost:2019
 
@@ -60,8 +58,11 @@
   }
 }
 
-# Main HTTP listener — Cloudflare connects here after SSL termination
-:80 {
+# HTTPS listener — Cloudflare connects here in Full SSL mode
+# Uses Caddy's internal (self-signed) certificate — Full mode accepts this.
+# {$CADDY_DOMAIN} is set via systemd Environment= (e.g. stg-ai.zkproofport.app)
+{$CADDY_DOMAIN} {
+  tls internal
 
   # ---------------------------------------------------------------------------
   # sign-page routing — Next.js wallet signing UI
@@ -95,6 +96,15 @@
     }
   }
 
+  # Next.js static assets — direct to sign-page (avoids Express proxy hop)
+  handle /_next/* {
+    reverse_proxy localhost:3200 {
+      header_up X-Real-IP {remote_host}
+      header_up X-Forwarded-For {remote_host}
+      header_up X-Forwarded-Proto {scheme}
+    }
+  }
+
   # ---------------------------------------------------------------------------
   # Default — all other traffic goes to the main app (MCP/A2A/REST)
   #
@@ -121,6 +131,60 @@
   }
 
   # Access log for debugging
+  log {
+    output stdout
+    format json
+    level INFO
+  }
+}
+
+# HTTP listener — kept for local health checks (curl http://localhost/health)
+:80 {
+  handle /sign/* {
+    reverse_proxy localhost:3200 {
+      header_up X-Real-IP {remote_host}
+      header_up X-Forwarded-For {remote_host}
+      header_up X-Forwarded-Proto {scheme}
+    }
+  }
+
+  handle /pay/* {
+    reverse_proxy localhost:3200 {
+      header_up X-Real-IP {remote_host}
+      header_up X-Forwarded-For {remote_host}
+      header_up X-Forwarded-Proto {scheme}
+    }
+  }
+
+  handle /s/* {
+    reverse_proxy localhost:3200 {
+      header_up X-Real-IP {remote_host}
+      header_up X-Forwarded-For {remote_host}
+      header_up X-Forwarded-Proto {scheme}
+    }
+  }
+
+  handle /_next/* {
+    reverse_proxy localhost:3200 {
+      header_up X-Real-IP {remote_host}
+      header_up X-Forwarded-For {remote_host}
+      header_up X-Forwarded-Proto {scheme}
+    }
+  }
+
+  handle {
+    reverse_proxy localhost:4002 {
+      header_up X-Real-IP {remote_host}
+      header_up X-Forwarded-For {remote_host}
+      header_up X-Forwarded-Proto {scheme}
+
+      transport http {
+        read_timeout  600s
+        write_timeout 600s
+      }
+    }
+  }
+
   log {
     output stdout
     format json
