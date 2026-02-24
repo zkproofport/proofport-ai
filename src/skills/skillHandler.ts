@@ -29,6 +29,7 @@ import type { ProofCache } from '../redis/proofCache.js';
 import type { TeeProvider } from '../tee/types.js';
 import { BbProver } from '../prover/bbProver.js';
 import { computeCircuitParams } from '../input/inputBuilder.js';
+import { toProverToml } from '../prover/tomlBuilder.js';
 import { storeProofResult, getProofResult } from '../redis/proofResultStore.js';
 
 // ─── Dependencies ─────────────────────────────────────────────────────────────
@@ -636,9 +637,12 @@ export async function handleGenerateProof(
   let proofResult: { proof: string; publicInputs: string; proofWithInputs: string };
 
   if (deps.teeProvider && deps.teeMode === 'nitro') {
-    // TEE Enclave path (AWS Nitro)
-    const inputStrings = [JSON.stringify(circuitParams)];
-    const teeResponse = await deps.teeProvider.prove(resolvedCircuitId, inputStrings, randomUUID());
+    // TEE Enclave path (AWS Nitro) — send proverToml for bb CLI proving
+    const proverToml = toProverToml(
+      resolvedCircuitId as 'coinbase_attestation' | 'coinbase_country_attestation',
+      circuitParams
+    );
+    const teeResponse = await deps.teeProvider.prove(resolvedCircuitId, [], randomUUID(), proverToml);
 
     if (teeResponse.type === 'error') {
       throw new Error(teeResponse.error || 'TEE proof generation failed');

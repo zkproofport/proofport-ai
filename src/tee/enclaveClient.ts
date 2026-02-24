@@ -24,7 +24,7 @@ export class EnclaveClient implements TeeProvider {
     }
   }
 
-  async prove(circuitId: string, inputs: string[], requestId: string): Promise<VsockResponse> {
+  async prove(circuitId: string, inputs: string[], requestId: string, proverToml?: string): Promise<VsockResponse> {
     if (this.mode === 'local') {
       return this.simulateLocalProof(circuitId, inputs, requestId);
     }
@@ -33,6 +33,7 @@ export class EnclaveClient implements TeeProvider {
       type: 'prove',
       circuitId,
       inputs,
+      proverToml,
       requestId,
     };
 

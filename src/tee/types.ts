@@ -37,7 +37,8 @@ export interface EnclaveImageConfig {
 export interface VsockRequest {
   type: 'prove' | 'health';
   circuitId?: string;
-  inputs?: string[]; // decimal string format
+  inputs?: string[]; // DEPRECATED: kept for compatibility
+  proverToml?: string; // Prover.toml content for bb CLI path
   requestId: string;
 }
 
@@ -83,7 +84,7 @@ export interface AttestationDocument {
  */
 export interface TeeProvider {
   readonly mode: TeeMode;
-  prove(circuitId: string, inputs: string[], requestId: string): Promise<VsockResponse>;
+  prove(circuitId: string, inputs: string[], requestId: string, proverToml?: string): Promise<VsockResponse>;
   healthCheck(): Promise<boolean>;
   getAttestation(): Promise<AttestationDocument | null>;
   generateAttestation(proofHash: string, metadata?: Record<string, unknown>): Promise<AttestationResult | null>;
