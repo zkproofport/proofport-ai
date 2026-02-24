@@ -44,7 +44,7 @@ ExecStart=/usr/bin/docker run \
   --rm \
   --network host \
   --env-file /opt/proofport-ai/.env \
-  -v /opt/proofport-ai/circuits:/app/circuits:ro \
+  -v /opt/proofport-ai/circuits:/app/circuits \
   -v /opt/proofport-ai/logs:/app/logs \
   ${AI_IMAGE}
 
