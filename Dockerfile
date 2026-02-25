@@ -89,6 +89,10 @@ COPY --from=builder /app/dist ./dist
 # Copy public static assets (agent icon, etc.)
 COPY public/ ./public/
 
+# Copy AWS enclave build files (Dockerfile.enclave, enclave-server.py, vsock-bridge.py, systemd/)
+# These are extracted by deploy-ai-aws.yml during EC2 deployment.
+COPY aws/ ./aws/
+
 # Create circuits directory
 RUN mkdir -p /app/circuits
 

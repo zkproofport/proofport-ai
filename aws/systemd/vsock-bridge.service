@@ -1,0 +1,18 @@
+[Unit]
+Description=TCP-to-vsock bridge for Nitro Enclave
+After=network.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+Environment=ENCLAVE_CID=16
+Environment=ENCLAVE_PORT=5000
+Environment=BRIDGE_TCP_PORT=15000
+ExecStart=/usr/bin/python3 /opt/proofport-ai/vsock-bridge.py
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vsock-bridge
+
+[Install]
+WantedBy=multi-user.target
