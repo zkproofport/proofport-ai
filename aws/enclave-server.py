@@ -333,7 +333,8 @@ def generate_proof(circuit_id: str, inputs: list, request_id: str, prover_toml: 
         log_info("Witness file located", path=witness_path)
 
         # Step 4: Run bb prove
-        # bb prove -b <bytecode> -w <witness> -o <proof_output_dir> -k <vk>
+        # Flags MUST match bbProver.ts (src/prover/bbProver.ts) — keep in sync!
+        # --oracle_hash keccak is required for Solidity verifier compatibility
         proof_output = os.path.join(workdir, "proof")
         bb_cmd = [
             "bb", "prove",
@@ -341,6 +342,7 @@ def generate_proof(circuit_id: str, inputs: list, request_id: str, prover_toml: 
             "-w", witness_path,
             "-o", proof_output,
             "-k", vk_path,
+            "--oracle_hash", "keccak",
         ]
         log_info("Running bb prove", cmd=" ".join(bb_cmd))
         bb_result = subprocess.run(
