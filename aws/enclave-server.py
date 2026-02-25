@@ -377,24 +377,16 @@ def generate_proof(circuit_id: str, inputs: list, request_id: str, prover_toml: 
         log_info("Proof read", proof_bytes=len(proof_bytes))
 
         # Step 6: Extract public inputs from bb output
-        # bb writes public inputs as separate field — check for proof_fields file
+        # bb prove -o <dir> writes: <dir>/proof and <dir>/public_inputs
         public_inputs = []
-        fields_path = proof_file + "_fields"
-        if os.path.exists(fields_path):
-            with open(fields_path, "rb") as f:
-                fields_bytes = f.read()
-            # Public inputs are 32-byte chunks (one field element each)
-            chunk_size = 32
-            for i in range(0, len(fields_bytes), chunk_size):
-                chunk = fields_bytes[i:i + chunk_size]
-                if len(chunk) == chunk_size:
-                    public_inputs.append("0x" + chunk.hex())
+        public_inputs_path = os.path.join(proof_output, "public_inputs")
+        if os.path.exists(public_inputs_path):
+            with open(public_inputs_path, "rb") as f:
+                pi_bytes = f.read()
+            public_inputs = ["0x" + pi_bytes.hex()]
+            log_info("Public inputs read", bytes=len(pi_bytes))
         else:
-            # Derive public inputs from proof bytes (first N 32-byte fields)
-            # The proof format: first bytes are public inputs, rest is proof data
-            # For UltraHonk, split at a known offset is not trivial without VK info.
-            # Return empty list — the caller can verify on-chain with the full proof.
-            log_info("No proof_fields file — returning empty publicInputs array")
+            log_info("No public_inputs file — returning empty publicInputs array")
 
         # Step 7: NSM attestation (if available)
         attestation_b64 = None

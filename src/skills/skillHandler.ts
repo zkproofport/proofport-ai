@@ -635,6 +635,7 @@ export async function handleGenerateProof(
 
   // Generate proof (TEE enclave or bb CLI)
   let proofResult: { proof: string; publicInputs: string; proofWithInputs: string };
+  let teeAttestation: { document: string; mode: 'nitro'; proofHash: string; timestamp: number } | undefined;
 
   if (deps.teeProvider && deps.teeMode === 'nitro') {
     // TEE Enclave path (AWS Nitro) — send proverToml for bb CLI proving
@@ -651,11 +652,33 @@ export async function handleGenerateProof(
       throw new Error('Invalid TEE response: expected type "proof" with proof data');
     }
 
+    const rawPi = teeResponse.publicInputs;
+    let piHex: string;
+    if (rawPi && rawPi.length > 0) {
+      if (rawPi.length === 1) {
+        piHex = rawPi[0];
+      } else {
+        piHex = '0x' + rawPi.map(s => s.startsWith('0x') ? s.slice(2) : s).join('');
+      }
+    } else {
+      piHex = '0x';
+    }
+
     proofResult = {
       proof: teeResponse.proof,
-      publicInputs: teeResponse.publicInputs?.[0] || '0x',
-      proofWithInputs: teeResponse.proof + (teeResponse.publicInputs?.[0] || '0x').slice(2),
+      publicInputs: piHex,
+      proofWithInputs: teeResponse.proof + piHex.slice(2),
     };
+
+    // Use attestation from prove response (NSM attestation already included)
+    if (teeResponse.attestationDocument) {
+      teeAttestation = {
+        document: teeResponse.attestationDocument,
+        mode: 'nitro' as const,
+        proofHash: ethers.keccak256(ethers.getBytes(teeResponse.proof)),
+        timestamp: Date.now(),
+      };
+    }
   } else {
     // bb CLI path (local prover)
     const bbProver = new BbProver({
@@ -670,9 +693,11 @@ export async function handleGenerateProof(
   const nullifier = ethers.hexlify(circuitParams.nullifierBytes);
   const signalHash = ethers.hexlify(circuitParams.signalHash);
 
-  // Generate TEE attestation (if available and not disabled)
+  // Use TEE attestation from prove response, or generate separately for non-TEE paths
   let attestation: Record<string, unknown> | undefined;
-  if (deps.teeProvider && deps.teeMode !== 'disabled') {
+  if (teeAttestation) {
+    attestation = teeAttestation as unknown as Record<string, unknown>;
+  } else if (deps.teeProvider && deps.teeMode !== 'disabled') {
     try {
       const proofBytes = ethers.getBytes(proofResult.proof);
       const proofHash = ethers.keccak256(proofBytes);

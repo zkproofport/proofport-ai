@@ -281,6 +281,7 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
     const data = await redis.get(key);
 
     if (!data) {
+      log.warn({ requestId }, 'Signing request not found or expired');
       res.status(404).json({ error: 'Request not found or expired' });
       return;
     }
@@ -312,6 +313,7 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
     const data = await redis.get(key);
 
     if (!data) {
+      log.warn({ requestId }, 'Signing request not found or expired');
       res.status(404).json({ error: 'Request not found or expired' });
       return;
     }
@@ -487,6 +489,7 @@ el.innerHTML=
     const data = await redis.get(key);
 
     if (!data) {
+      log.warn({ requestId }, 'Payment request not found or expired');
       res.status(404).json({ error: 'Request not found or expired' });
       return;
     }
@@ -531,6 +534,7 @@ el.innerHTML=
     const data = await redis.get(key);
 
     if (!data) {
+      log.warn({ requestId }, 'Payment request not found or expired');
       res.status(404).json({ error: 'Request not found or expired' });
       return;
     }
@@ -577,6 +581,7 @@ el.innerHTML=
     const data = await redis.get(key);
 
     if (!data) {
+      log.warn({ requestId }, 'Payment request not found or expired');
       res.status(404).json({ error: 'Request not found or expired' });
       return;
     }
