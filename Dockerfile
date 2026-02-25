@@ -93,8 +93,12 @@ COPY public/ ./public/
 # These are extracted by deploy-ai-aws.yml during EC2 deployment.
 COPY aws/ ./aws/
 
-# Create circuits directory
-RUN mkdir -p /app/circuits
+# Copy circuit source (Nargo.toml + src/ + target/ + coinbase-libs).
+# Populated by CI (deploy-ai-aws.yml copies from parent repo before Docker build).
+# At runtime, /app/circuits is shadowed by a host volume mount with compiled artifacts.
+# The circuit source in the image is used by the enclave build step to bake circuits
+# into the EIF (Enclave Image File) with all dependencies resolved offline.
+COPY circuits/ /app/circuits/
 
 # Copy sign-page standalone build
 COPY --from=sign-page-builder /app/.next/standalone /app/sign-page
