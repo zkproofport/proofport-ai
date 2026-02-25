@@ -40,6 +40,19 @@ RUN curl -fsSL \
     && chmod +x ./nargo \
     && ./nargo --version
 
+# Pre-download SRS (BN254 CRS) — bb needs this for proving.
+# Enclave has NO network, so SRS must be baked into the image.
+# IMPORTANT: Do NOT download the full g1.dat (~6.4GB). Instead, run
+# `bb write_vk` on our circuit bytecodes which triggers bb to download
+# ONLY the SRS points needed for our circuit size (~32MB).
+COPY circuits/coinbase-attestation/target/coinbase_attestation.json /tmp/circuits/
+COPY circuits/coinbase-country-attestation/target/coinbase_country_attestation.json /tmp/circuits/
+RUN ./bb write_vk -b /tmp/circuits/coinbase_attestation.json -o /tmp/vk_dummy \
+    && ./bb write_vk -b /tmp/circuits/coinbase_country_attestation.json -o /tmp/vk_dummy2 \
+    && ls -la /root/.bb-crs/ \
+    && du -sh /root/.bb-crs/ \
+    && rm -rf /tmp/circuits /tmp/vk_dummy /tmp/vk_dummy2
+
 # ─────────────────────────────────────────────────────────────
 # Stage 2: Runtime image — minimal Ubuntu 24.04
 # ─────────────────────────────────────────────────────────────
@@ -60,6 +73,9 @@ WORKDIR /app
 # Copy binaries from builder stage
 COPY --from=builder /downloads/bb    /usr/local/bin/bb
 COPY --from=builder /downloads/nargo /usr/local/bin/nargo
+
+# Copy pre-downloaded SRS data (bb looks in ~/.bb-crs/)
+COPY --from=builder /root/.bb-crs/ /root/.bb-crs/
 
 # Copy circuit artifacts
 # These must be present before running nitro-cli build-enclave.

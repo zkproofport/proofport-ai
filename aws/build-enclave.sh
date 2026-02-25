@@ -78,13 +78,19 @@ command -v nitro-cli >/dev/null 2>&1 || die "nitro-cli is not installed. Run: am
 docker info >/dev/null 2>&1 || die "Docker daemon is not running"
 
 # ─────────────────────────────────────────────────────────────
-# Copy circuit artifacts into build context
+# Copy circuit packages into build context
+# nargo execute needs: Nargo.toml + src/ + target/ for each circuit,
+# plus all library dependencies (coinbase-libs, keccak256) with local paths.
+# The enclave has NO network, so git dependencies must be resolved here.
 # ─────────────────────────────────────────────────────────────
 
 CIRCUITS_DEST="$SCRIPT_DIR/circuits"
+KECCAK256_GIT="https://github.com/noir-lang/keccak256"
+KECCAK256_TAG="v0.1.1"
 
 if [[ "$SKIP_CIRCUITS" == "false" ]]; then
-    log "Copying circuit artifacts into build context..."
+    log "Preparing circuit packages for enclave build context..."
+    rm -rf "$CIRCUITS_DEST"
     mkdir -p "$CIRCUITS_DEST"
 
     CIRCUITS_SRC="$REPO_ROOT/circuits"
@@ -93,43 +99,79 @@ if [[ "$SKIP_CIRCUITS" == "false" ]]; then
     # Prefer proofport-ai/circuits/ (pre-copied), fall back to parent circuits/
     if [[ -d "$AI_CIRCUITS_SRC" ]]; then
         CIRCUITS_FROM="$AI_CIRCUITS_SRC"
-        log "Using circuit artifacts from proofport-ai/circuits/"
+        log "Using circuit source from proofport-ai/circuits/"
     elif [[ -d "$CIRCUITS_SRC" ]]; then
         CIRCUITS_FROM="$CIRCUITS_SRC"
-        log "Using circuit artifacts from circuits/ (parent repo)"
+        log "Using circuit source from circuits/ (parent repo)"
     else
-        die "No circuit artifacts found. Expected: $AI_CIRCUITS_SRC or $CIRCUITS_SRC"
+        die "No circuit source found. Expected: $AI_CIRCUITS_SRC or $CIRCUITS_SRC"
     fi
 
-    # Copy each circuit's target directory
+    # ── Copy main circuit packages (Nargo.toml + src/ + target/) ──
     REQUIRED_CIRCUITS=(
         "coinbase-attestation"
         "coinbase-country-attestation"
     )
 
     for circuit_dir in "${REQUIRED_CIRCUITS[@]}"; do
-        SRC_TARGET="$CIRCUITS_FROM/$circuit_dir/target"
-        DEST_TARGET="$CIRCUITS_DEST/$circuit_dir/target"
+        SRC="$CIRCUITS_FROM/$circuit_dir"
+        DEST="$CIRCUITS_DEST/$circuit_dir"
 
-        if [[ ! -d "$SRC_TARGET" ]]; then
-            die "Circuit artifacts missing: $SRC_TARGET — compile circuits first with /build-circuit"
-        fi
+        [[ -d "$SRC" ]] || die "Circuit package missing: $SRC"
+        [[ -d "$SRC/target" ]] || die "Circuit not compiled: $SRC/target — compile first with /build-circuit"
+        [[ -f "$SRC/Nargo.toml" ]] || die "Nargo.toml missing: $SRC/Nargo.toml"
+        [[ -d "$SRC/src" ]] || die "Source missing: $SRC/src"
 
-        # Check for required artifacts
         CIRCUIT_NAME="${circuit_dir//-/_}"
-        BYTECODE="$SRC_TARGET/${CIRCUIT_NAME}.json"
-        VK="$SRC_TARGET/vk"
+        BYTECODE="$SRC/target/${CIRCUIT_NAME}.json"
+        VK_DIR="$SRC/target/vk"
+        VK_FILE="$SRC/target/vk/vk"
 
         [[ -f "$BYTECODE" ]] || die "Bytecode missing: $BYTECODE"
-        [[ -f "$VK" ]] || die "VK missing: $VK"
+        [[ -d "$VK_DIR" ]] || die "VK directory missing: $VK_DIR"
+        [[ -f "$VK_FILE" ]] || die "VK file missing: $VK_FILE"
 
-        mkdir -p "$DEST_TARGET"
-        cp "$BYTECODE" "$DEST_TARGET/"
-        cp "$VK" "$DEST_TARGET/"
-        log "Copied $circuit_dir artifacts (bytecode + vk)"
+        mkdir -p "$DEST/target"
+        cp "$SRC/Nargo.toml" "$DEST/"
+        cp -r "$SRC/src" "$DEST/"
+        cp "$BYTECODE" "$DEST/target/"
+        cp -r "$VK_DIR" "$DEST/target/"
+        log "Copied $circuit_dir package (Nargo.toml + src/ + target/)"
     done
 
-    log "Circuit artifacts ready in $CIRCUITS_DEST"
+    # ── Copy coinbase-libs library (local dependency) ──
+    LIBS_SRC="$CIRCUITS_FROM/coinbase-libs"
+    LIBS_DEST="$CIRCUITS_DEST/coinbase-libs"
+    if [[ -d "$LIBS_SRC" ]]; then
+        mkdir -p "$LIBS_DEST"
+        cp "$LIBS_SRC/Nargo.toml" "$LIBS_DEST/"
+        cp -r "$LIBS_SRC/src" "$LIBS_DEST/"
+        log "Copied coinbase-libs library"
+    else
+        die "coinbase-libs missing: $LIBS_SRC"
+    fi
+
+    # ── Clone keccak256 library (git dependency → local) ──
+    KECCAK_DEST="$CIRCUITS_DEST/keccak256"
+    log "Cloning keccak256 $KECCAK256_TAG from GitHub..."
+    if command -v git >/dev/null 2>&1; then
+        git clone --depth 1 --branch "$KECCAK256_TAG" "$KECCAK256_GIT" "$KECCAK_DEST" 2>&1
+        rm -rf "$KECCAK_DEST/.git"
+        log "Cloned keccak256 $KECCAK256_TAG"
+    else
+        die "git is required to clone keccak256. Install git or provide keccak256/ in the build context."
+    fi
+
+    # ── Patch all Nargo.toml: replace git keccak256 with local path ──
+    log "Patching Nargo.toml files to use local keccak256 path..."
+    for toml_file in "$CIRCUITS_DEST"/*/Nargo.toml; do
+        if grep -q 'git = "https://github.com/noir-lang/keccak256"' "$toml_file" 2>/dev/null; then
+            sed -i 's|keccak256 = { tag = "[^"]*", git = "https://github.com/noir-lang/keccak256" }|keccak256 = { path = "../keccak256" }|g' "$toml_file"
+            log "Patched: $toml_file"
+        fi
+    done
+
+    log "Circuit packages ready in $CIRCUITS_DEST"
 else
     log "Skipping circuit copy (--skip-circuits)"
     if [[ ! -d "$CIRCUITS_DEST" ]]; then

@@ -16,9 +16,9 @@ Supported request types:
 
 Circuit layout (baked into image by Dockerfile.enclave):
   /app/circuits/coinbase-attestation/target/coinbase_attestation.json
-  /app/circuits/coinbase-attestation/target/vk
+  /app/circuits/coinbase-attestation/target/vk/vk
   /app/circuits/coinbase-country-attestation/target/coinbase_country_attestation.json
-  /app/circuits/coinbase-country-attestation/target/vk
+  /app/circuits/coinbase-country-attestation/target/vk/vk
 
 Proof pipeline per request:
   1. Write decimal inputs to Prover.toml in a temp circuit dir
@@ -57,12 +57,12 @@ CIRCUITS = {
     "coinbase_attestation": {
         "dir": "coinbase-attestation",
         "bytecode": "coinbase_attestation.json",
-        "vk": "vk",
+        "vk": "vk/vk",
     },
     "coinbase_country_attestation": {
         "dir": "coinbase-country-attestation",
         "bytecode": "coinbase_country_attestation.json",
-        "vk": "vk",
+        "vk": "vk/vk",
     },
 }
 
@@ -238,7 +238,7 @@ def write_prover_toml(inputs: list, workdir: str) -> str:
     return toml_path
 
 
-def generate_proof(circuit_id: str, inputs: list, request_id: str) -> dict:
+def generate_proof(circuit_id: str, inputs: list, request_id: str, prover_toml: str | None = None) -> dict:
     """
     Full proof pipeline:
       1. Resolve circuit artifacts
@@ -261,12 +261,20 @@ def generate_proof(circuit_id: str, inputs: list, request_id: str) -> dict:
         if not os.path.exists(path):
             raise RuntimeError(f"Circuit artifact missing: {label} at {path}")
 
-    with tempfile.TemporaryDirectory(prefix=f"proof-{request_id}-") as workdir:
+    with tempfile.TemporaryDirectory(prefix=f"proof-{request_id}-", dir=CIRCUIT_BASE_DIR) as workdir:
         log_info("Starting proof generation", request_id=request_id, circuit_id=circuit_id)
 
         # Step 1: Write Prover.toml
-        write_prover_toml(inputs, workdir)
-        log_info("Prover.toml written", input_count=len(inputs))
+        if prover_toml:
+            # Use pre-built Prover.toml content from the caller (proper field names)
+            toml_path = os.path.join(workdir, "Prover.toml")
+            with open(toml_path, "w") as f:
+                f.write(prover_toml)
+            log_info("Prover.toml written from proverToml field", bytes=len(prover_toml))
+        else:
+            # Fallback: generic input_N format
+            write_prover_toml(inputs, workdir)
+            log_info("Prover.toml written from inputs array", input_count=len(inputs))
 
         # Step 2: Copy Nargo.toml and src/ so nargo execute works in tmpdir
         # nargo execute requires a complete package — copy from circuit dir
@@ -340,7 +348,7 @@ def generate_proof(circuit_id: str, inputs: list, request_id: str) -> dict:
             capture_output=True,
             text=True,
             timeout=PROVE_TIMEOUT_SECONDS,
-            env={**os.environ, "HOME": workdir},
+            env={**os.environ, "HOME": "/root"},
         )
         if bb_result.returncode != 0:
             log_error(
@@ -356,10 +364,14 @@ def generate_proof(circuit_id: str, inputs: list, request_id: str) -> dict:
         log_info("bb prove succeeded")
 
         # Step 5: Read proof bytes
-        if not os.path.exists(proof_output):
-            raise RuntimeError(f"bb prove did not produce output at {proof_output}")
+        # bb prove outputs to a directory: <proof_output>/proof
+        proof_file = proof_output
+        if os.path.isdir(proof_output):
+            proof_file = os.path.join(proof_output, "proof")
+        if not os.path.exists(proof_file):
+            raise RuntimeError(f"bb prove did not produce output at {proof_file}")
 
-        with open(proof_output, "rb") as f:
+        with open(proof_file, "rb") as f:
             proof_bytes = f.read()
         proof_hex = "0x" + proof_bytes.hex()
         log_info("Proof read", proof_bytes=len(proof_bytes))
@@ -367,7 +379,7 @@ def generate_proof(circuit_id: str, inputs: list, request_id: str) -> dict:
         # Step 6: Extract public inputs from bb output
         # bb writes public inputs as separate field — check for proof_fields file
         public_inputs = []
-        fields_path = proof_output + "_fields"
+        fields_path = proof_file + "_fields"
         if os.path.exists(fields_path):
             with open(fields_path, "rb") as f:
                 fields_bytes = f.read()
@@ -422,15 +434,16 @@ def handle_health(request: dict) -> dict:
 def handle_prove(request: dict) -> dict:
     circuit_id = request.get("circuitId")
     inputs = request.get("inputs")
+    prover_toml = request.get("proverToml")
     request_id = request.get("requestId", "")
 
     if not circuit_id:
         return {"type": "error", "requestId": request_id, "error": "Missing circuitId"}
-    if not inputs or not isinstance(inputs, list):
-        return {"type": "error", "requestId": request_id, "error": "Missing or invalid inputs (must be array)"}
+    if not prover_toml and (not inputs or not isinstance(inputs, list)):
+        return {"type": "error", "requestId": request_id, "error": "Missing proverToml or inputs"}
 
     try:
-        result = generate_proof(circuit_id, inputs, request_id)
+        result = generate_proof(circuit_id, inputs or [], request_id, prover_toml=prover_toml)
         response = {
             "type": "proof",
             "requestId": request_id,
