@@ -6,6 +6,28 @@ import { decode as cborDecode, encode as cborEncode } from 'cbor-x';
 import { createVerify, X509Certificate } from 'crypto';
 import type { AttestationDocument } from './types.js';
 
+/**
+ * Official AWS Nitro Enclaves Root CA certificate
+ * Downloaded from: https://aws-nitro-enclaves.amazonaws.com/AWS_NitroEnclaves_Root-G1.zip
+ * Subject: C=US, O=Amazon, OU=AWS, CN=aws.nitro-enclaves
+ * Valid: 2019-10-28 to 2049-10-28
+ * SHA-256 Fingerprint: 64:1A:03:21:A3:E2:44:EF:E4:56:46:31:95:D6:06:31:7E:D7:CD:CC:3C:17:56:E0:98:93:F3:C6:8F:79:BB:5B
+ */
+const AWS_NITRO_ROOT_CA_PEM = `-----BEGIN CERTIFICATE-----
+MIICETCCAZagAwIBAgIRAPkxdWgbkK/hHUbMtOTn+FYwCgYIKoZIzj0EAwMwSTEL
+MAkGA1UEBhMCVVMxDzANBgNVBAoMBkFtYXpvbjEMMAoGA1UECwwDQVdTMRswGQYD
+VQQDDBJhd3Mubml0cm8tZW5jbGF2ZXMwHhcNMTkxMDI4MTMyODA1WhcNNDkxMDI4
+MTQyODA1WjBJMQswCQYDVQQGEwJVUzEPMA0GA1UECgwGQW1hem9uMQwwCgYDVQQL
+DANBV1MxGzAZBgNVBAMMEmF3cy5uaXRyby1lbmNsYXZlczB2MBAGByqGSM49AgEG
+BSuBBAAiA2IABPwCVOumCMHzaHDimtqQvkY4MpJzbolL//Zy2YlES1BR5TSksfbb
+48C8WBoyt7F2Bw7eEtaaP+ohG2bnUs990d0JX28TcPQXCEPZ3BABIeTPYwEoCWZE
+h8l5YoQwTcU/9KNCMEAwDwYDVR0TAQH/BAUwAwEB/zAdBgNVHQ4EFgQUkCW1DdkF
+R+eWw5b6cp3PmanfS5YwDgYDVR0PAQH/BAQDAgGGMAoGCCqGSM49BAMDA2kAMGYC
+MQCjfy+Rocm9Xue4YnwWmNJVA44fA0P5W2OpYow9OYCVRaEevL8uO1XYru5xtMPW
+rfMCMQCi85sWBbJwKKXdS6BptQFuZbT73o/gBh1qUxl/nNr12UO8Yfwr6wPLb+6N
+IwLz3/Y=
+-----END CERTIFICATE-----`;
+
 // Store raw COSE structure for signature verification
 let lastCoseStructure: {
   protected: Buffer;
@@ -115,9 +137,13 @@ export function parseAttestationDocument(base64Doc: string): AttestationDocument
     if (typeof payload.digest !== 'string') {
       throw new Error('Invalid attestation document: digest must be a string');
     }
-    if (typeof payload.timestamp !== 'number') {
+    // cbor-x decodes CBOR 8-byte unsigned integers as BigInt (e.g., NSM timestamp ~1.77 trillion)
+    // even when the value fits in Number.MAX_SAFE_INTEGER. Accept both number and bigint.
+    if (typeof payload.timestamp !== 'number' && typeof payload.timestamp !== 'bigint') {
       throw new Error('Invalid attestation document: timestamp must be a number');
     }
+    // Normalize bigint to number (safe — NSM timestamps are well within Number.MAX_SAFE_INTEGER)
+    payload.timestamp = Number(payload.timestamp);
     if (!(payload.certificate instanceof Uint8Array)) {
       throw new Error('Invalid attestation document: certificate must be byte string');
     }
@@ -191,6 +217,8 @@ export interface AttestationVerificationOptions {
 
 export interface AttestationVerificationResult {
   isValid: boolean;
+  rootCaValid?: boolean;
+  chainValid?: boolean;
   certificateValid?: boolean;
   signatureValid?: boolean;
   pcr0Valid?: boolean;
@@ -265,8 +293,10 @@ export async function verifyAttestationDocument(
       }
     }
 
-    // Verify certificate chain
-    // Certificate must be valid DER-encoded X.509
+    // ===== Full AWS Nitro Certificate Chain Verification =====
+    // Chain order in cabundle: [0]=Root, [1]=Regional, [2]=Zonal, [3]=Instance
+    // doc.certificate = Leaf (enclave certificate, signed by Instance CA)
+
     if (doc.certificate.length === 0) {
       result.isValid = false;
       result.certificateValid = false;
@@ -280,17 +310,10 @@ export async function verifyAttestationDocument(
     } catch (error) {
       result.isValid = false;
       result.certificateValid = false;
-      result.error = `Invalid certificate: ${error instanceof Error ? error.message : 'not DER-encoded X.509'}`;
+      result.error = `Invalid leaf certificate: ${error instanceof Error ? error.message : 'not DER-encoded X.509'}`;
       return result;
     }
 
-    // Verify certificate chains to one of the CA certificates in cabundle
-    // Note: Full certificate chain validation requires:
-    // 1. Verify cert is signed by one of the cabundle certificates
-    // 2. Verify cabundle certificates chain to AWS Nitro root CA
-    // 3. Check certificate validity periods
-    // 4. Check certificate key usage and extended key usage
-    // For now, we do structural validation only
     if (doc.cabundle.length === 0) {
       result.isValid = false;
       result.certificateValid = false;
@@ -298,16 +321,66 @@ export async function verifyAttestationDocument(
       return result;
     }
 
-    // Verify all cabundle entries are valid X.509 certificates
+    // Parse all CA certificates from cabundle
+    const caCerts: X509Certificate[] = [];
     for (let i = 0; i < doc.cabundle.length; i++) {
       try {
-        new X509Certificate(doc.cabundle[i]);
+        caCerts.push(new X509Certificate(doc.cabundle[i]));
       } catch (error) {
         result.isValid = false;
         result.certificateValid = false;
         result.error = `Invalid CA certificate at index ${i}: ${error instanceof Error ? error.message : 'not DER-encoded X.509'}`;
         return result;
       }
+    }
+
+    // Step 1: Verify root CA matches official AWS Nitro Root CA
+    const rootCert = caCerts[0];
+    const awsRootCa = new X509Certificate(AWS_NITRO_ROOT_CA_PEM);
+    if (rootCert.fingerprint256 !== awsRootCa.fingerprint256) {
+      result.isValid = false;
+      result.rootCaValid = false;
+      result.certificateValid = false;
+      result.error = `Root CA fingerprint mismatch: expected ${awsRootCa.fingerprint256}, got ${rootCert.fingerprint256}`;
+      return result;
+    }
+    result.rootCaValid = true;
+
+    // Step 2: Verify root is self-signed
+    if (!rootCert.verify(rootCert.publicKey)) {
+      result.isValid = false;
+      result.chainValid = false;
+      result.certificateValid = false;
+      result.error = 'Root CA self-signature verification failed';
+      return result;
+    }
+
+    // Step 3: Verify full certificate chain (Root → Regional → Zonal → Instance → Leaf)
+    // Each certificate must be cryptographically signed by its parent
+    const fullChain = [...caCerts, cert];
+    const chainNames = ['Root', ...caCerts.slice(1).map((_, i) => `CA[${i + 1}]`), 'Leaf'];
+    for (let i = 1; i < fullChain.length; i++) {
+      const child = fullChain[i];
+      const parent = fullChain[i - 1];
+      if (!child.verify(parent.publicKey)) {
+        result.isValid = false;
+        result.chainValid = false;
+        result.certificateValid = false;
+        result.error = `Certificate chain broken: ${chainNames[i]} not signed by ${chainNames[i - 1]}`;
+        return result;
+      }
+    }
+    result.chainValid = true;
+
+    // Step 4: Verify leaf certificate validity period against attestation timestamp
+    const attestTime = new Date(doc.timestamp);
+    const leafNotBefore = new Date(cert.validFrom);
+    const leafNotAfter = new Date(cert.validTo);
+    if (attestTime < leafNotBefore || attestTime > leafNotAfter) {
+      result.isValid = false;
+      result.certificateValid = false;
+      result.error = `Leaf certificate not valid at attestation time ${attestTime.toISOString()} (valid: ${cert.validFrom} to ${cert.validTo})`;
+      return result;
     }
 
     result.certificateValid = true;
