@@ -47,7 +47,7 @@ export default function PaymentPage() {
 
   const [payInfo, setPayInfo] = useState<PaymentInfo | null>(null);
   const [status, setStatus] = useState<
-    'loading' | 'idle' | 'wrong-chain' | 'switching-chain' | 'ready' | 'signing' | 'submitting' | 'success' | 'error'
+    'loading' | 'idle' | 'wrong-chain' | 'switching-chain' | 'ready' | 'signing' | 'submitting' | 'success' | 'error' | 'expired'
   >('loading');
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [txHash, setTxHash] = useState<string | null>(null);
@@ -58,6 +58,10 @@ export default function PaymentPage() {
       try {
         const response = await fetch(`${API_BASE_URL}/api/payment/${requestId}`);
         if (!response.ok) {
+          if (response.status === 404) {
+            setStatus('expired');
+            return;
+          }
           const error = await response.json();
           throw new Error(error.error || 'Payment request not found');
         }
@@ -81,11 +85,11 @@ export default function PaymentPage() {
 
   // Step 2: When wallet connects or chain changes, check if chain matches
   useEffect(() => {
-    if (!isConnected || !payInfo || status === 'loading' || status === 'success') return;
+    if (!isConnected || !payInfo || status === 'loading' || status === 'success' || status === 'expired') return;
 
     if (connectedChainId !== payInfo.chainId) {
       setStatus('wrong-chain');
-    } else if (status === 'wrong-chain' || status === 'idle' || status === 'error') {
+    } else if (status === 'wrong-chain' || status === 'idle') {
       setStatus('ready');
     }
   }, [isConnected, connectedChainId, payInfo, status]);
@@ -184,6 +188,17 @@ export default function PaymentPage() {
         <div className="card">
           <h1 className="title">ZKProofport Payment</h1>
           <div className="description">Loading payment request...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (status === 'expired') {
+    return (
+      <div className="container">
+        <div className="card">
+          <h1 className="title">ZKProofport Payment</h1>
+          <div className="error">This payment request has expired. Please request a new one.</div>
         </div>
       </div>
     );

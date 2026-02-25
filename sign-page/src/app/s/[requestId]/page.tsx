@@ -28,8 +28,12 @@ export default function SigningPage() {
       try {
         const response = await fetch(`${API_BASE_URL}/api/signing/${requestId}`);
         if (!response.ok) {
+          if (response.status === 404) {
+            setStatus('expired');
+            return;
+          }
           const error = await response.json();
-          throw new Error(error.error || 'Request not found or expired');
+          throw new Error(error.error || 'Failed to load signing request');
         }
         const data = await response.json();
 
@@ -71,6 +75,10 @@ export default function SigningPage() {
       });
 
       if (!response.ok) {
+        if (response.status === 404) {
+          setStatus('expired');
+          return;
+        }
         const error = await response.json();
         throw new Error(error.error || 'Failed to prepare signing request');
       }
@@ -86,7 +94,7 @@ export default function SigningPage() {
 
   // Auto-prepare when wallet connects
   useEffect(() => {
-    if (isConnected && address && (status === 'idle' || status === 'error')) {
+    if (isConnected && address && status === 'idle') {
       prepareSigningRequest(address);
     }
   }, [isConnected, address, status, prepareSigningRequest]);
