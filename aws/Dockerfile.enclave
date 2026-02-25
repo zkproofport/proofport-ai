@@ -62,11 +62,16 @@ FROM ubuntu:24.04
 # - jq:              bb uses it internally for JSON processing
 # - ca-certificates: for any TLS calls (SRS download, etc.)
 # - python3:         vsock server runtime
+# - cbor2:           CBOR encoding/decoding for NSM attestation ioctl
 RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     ca-certificates \
     python3 \
-    && rm -rf /var/lib/apt/lists/*
+    python3-pip \
+    && pip3 install --break-system-packages cbor2 \
+    && apt-get purge -y python3-pip \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/* /root/.cache/pip
 
 WORKDIR /app
 

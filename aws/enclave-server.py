@@ -92,111 +92,103 @@ def log_error(msg: str, **kwargs) -> None:
 # NSM attestation (AWS Nitro Security Module)
 # ─────────────────────────────────────────────────────────────
 
+# NSM ioctl constant: _IOWR(0x0A, 0, 32) where 32 = sizeof(nsm_raw)
+# = (3 << 30) | (32 << 16) | (0x0A << 8) | 0 = 0xC0200A00
+NSM_IOCTL_CMD = 0xC0200A00
+NSM_DEVICE = "/dev/nsm"
+NSM_RESPONSE_BUF_SIZE = 16384  # 16KB — attestation docs are typically ~3-5KB
+
+
 def get_nsm_attestation(user_data: bytes = b"", nonce: bytes = b"") -> bytes | None:
     """
     Request attestation document from AWS NSM device (/dev/nsm).
 
-    The NSM device accepts CBOR-encoded requests via ioctl and returns a
-    COSE Sign1 attestation document. Uses the nsm-lib Python bindings if
-    available; falls back to raw ioctl approach.
+    The NSM device is a miscdevice exposed by the Nitro hypervisor inside enclaves.
+    Communication uses ioctl with CBOR-encoded request/response and the nsm_raw struct:
 
-    Returns base64-encoded attestation document, or None if NSM unavailable.
+        struct nsm_raw {        // total 32 bytes on x86_64
+            __u64 request;      // pointer to CBOR request buffer
+            __u32 request_len;
+            __u32 _pad0;
+            __u64 response;     // pointer to CBOR response buffer
+            __u32 response_len; // in: buffer size, out: actual response size
+            __u32 _pad1;
+        };
+
+    Returns raw COSE_Sign1 attestation document bytes, or None if NSM unavailable.
     """
-    try:
-        # Try nsm-lib first (available in official AWS Nitro AMIs)
-        import nsm  # type: ignore
-        response = nsm.get_attestation_doc(
-            user_data=user_data if user_data else None,
-            nonce=nonce if nonce else None,
-            public_key=None,
-        )
-        return response
-    except ImportError:
-        pass
+    if not os.path.exists(NSM_DEVICE):
+        log_info("NSM device not available — skipping attestation")
+        return None
 
-    # Fallback: raw ioctl via /dev/nsm
-    # NSM ioctl request structure is CBOR-encoded
     try:
+        import cbor2
         import ctypes
         import fcntl
 
-        NSM_DEVICE = "/dev/nsm"
-        if not os.path.exists(NSM_DEVICE):
-            log_info("NSM device not available — skipping attestation")
-            return None
+        # Build CBOR attestation request
+        # NSM expects: {"Attestation": {"user_data": <bstr|null>, "nonce": <bstr|null>, "public_key": null}}
+        request_payload = {
+            "Attestation": {
+                "user_data": user_data if user_data else None,
+                "nonce": nonce if nonce else None,
+                "public_key": None,
+            }
+        }
+        cbor_request = cbor2.dumps(request_payload)
 
-        # Build CBOR request manually (minimal CBOR encoder for NSM)
-        # NSM request: { "Attestation": { "user_data": ..., "nonce": ... } }
-        cbor_request = _build_nsm_cbor_request(user_data, nonce)
+        # Allocate request and response buffers (must stay alive during ioctl)
+        req_buf = ctypes.create_string_buffer(cbor_request, len(cbor_request))
+        resp_buf = ctypes.create_string_buffer(NSM_RESPONSE_BUF_SIZE)
 
-        NSM_IOCTL_REQUEST = 0xC0000000 | (len(cbor_request) << 16) | (ord('N') << 8) | 0
-        buf = ctypes.create_string_buffer(cbor_request + b"\x00" * 8192)
+        # Pack nsm_raw struct: [u64 req_ptr, u32 req_len, u32 pad, u64 resp_ptr, u32 resp_len, u32 pad]
+        msg = bytearray(struct.pack(
+            "QIIQII",
+            ctypes.addressof(req_buf),
+            len(cbor_request),
+            0,
+            ctypes.addressof(resp_buf),
+            NSM_RESPONSE_BUF_SIZE,
+            0,
+        ))
 
         fd = os.open(NSM_DEVICE, os.O_RDWR)
         try:
-            result = fcntl.ioctl(fd, 0xC0004E00, buf)  # NSM_IOCTL_MAGIC
-            if result == 0:
-                # Response is CBOR-encoded, extract the attestation document bytes
-                return _extract_nsm_attestation_from_cbor(bytes(buf))
+            fcntl.ioctl(fd, NSM_IOCTL_CMD, msg)
         finally:
             os.close(fd)
 
+        # Read actual response length from the updated struct (offset 24 = response_len field)
+        actual_len = struct.unpack_from("I", msg, 24)[0]
+        if actual_len == 0:
+            log_error("NSM ioctl returned 0-length response")
+            return None
+
+        response_cbor = resp_buf.raw[:actual_len]
+        response = cbor2.loads(response_cbor)
+
+        # Success: {"Attestation": {"document": <bstr>}}
+        if "Attestation" in response:
+            att = response["Attestation"]
+            if "document" in att:
+                doc_bytes = att["document"]
+                log_info("NSM attestation obtained", doc_bytes=len(doc_bytes))
+                return doc_bytes
+
+        # Error: {"Error": {"Type": "..."}}
+        if "Error" in response:
+            log_error("NSM returned error", error=str(response["Error"]))
+            return None
+
+        log_error("Unexpected NSM response", keys=list(response.keys()))
+        return None
+
+    except ImportError:
+        log_error("cbor2 not installed — cannot request NSM attestation. Install: pip install cbor2")
+        return None
     except Exception as e:
-        log_error("NSM ioctl failed", error=str(e))
-
-    return None
-
-
-def _build_nsm_cbor_request(user_data: bytes, nonce: bytes) -> bytes:
-    """
-    Build minimal CBOR for NSM attestation request.
-    Format: {"Attestation": {"user_data": <bytes>, "nonce": <bytes>}}
-    """
-    # Minimal CBOR encoding — enough for NSM request
-    def cbor_bytes(b: bytes) -> bytes:
-        if len(b) == 0:
-            return b"\x40"  # empty byte string
-        if len(b) < 24:
-            return bytes([0x40 | len(b)]) + b
-        if len(b) < 256:
-            return bytes([0x58, len(b)]) + b
-        return bytes([0x59, len(b) >> 8, len(b) & 0xFF]) + b
-
-    def cbor_text(s: str) -> bytes:
-        b = s.encode("utf-8")
-        if len(b) < 24:
-            return bytes([0x60 | len(b)]) + b
-        return bytes([0x78, len(b)]) + b
-
-    def cbor_map(pairs: list) -> bytes:
-        header = bytes([0xA0 | len(pairs)])
-        body = b"".join(k + v for k, v in pairs)
-        return header + body
-
-    inner = cbor_map([
-        (cbor_text("user_data"), cbor_bytes(user_data)),
-        (cbor_text("nonce"), cbor_bytes(nonce)),
-    ])
-    outer = cbor_map([(cbor_text("Attestation"), inner)])
-    return outer
-
-
-def _extract_nsm_attestation_from_cbor(data: bytes) -> bytes | None:
-    """
-    Extract raw COSE Sign1 bytes from NSM ioctl response CBOR.
-    NSM response: {"Attestation": {"document": <cose_sign1_bytes>}}
-    Returns the raw document bytes or None.
-    """
-    # Simple scan for the COSE Sign1 tag (0xD2) in the buffer
-    for i, b in enumerate(data):
-        if b == 0xD2 and i + 1 < len(data):
-            # Found potential COSE_Sign1 tag — return remaining bytes
-            return data[i:]
-    # Fallback: return non-zero portion of buffer
-    end = len(data)
-    while end > 0 and data[end - 1] == 0:
-        end -= 1
-    return data[:end] if end > 0 else None
+        log_error("NSM attestation failed", error=str(e), traceback=traceback.format_exc())
+        return None
 
 
 # ─────────────────────────────────────────────────────────────
