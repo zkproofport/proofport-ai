@@ -188,66 +188,106 @@ function extractProofportBlock(content) {
 }
 
 /**
- * Extract signing/payment URLs from text and return cleaned text + button descriptors.
- * Matches /s/ (signing) and /pay/ (payment) URLs on zkproofport.app or localhost.
- * Removes the lines containing those URLs from the display text.
- * Returns { cleanedText, buttons } where buttons is [{ text, url }].
+ * Extract all HTTPS URLs from text, replace with HTML <a> links, and return inline keyboard buttons for sign/pay.
+ * Uses placeholder approach: URLs → placeholders → escapeHtml → replace placeholders with <a> tags.
+ * Returns { cleanedText, buttons, hasHtml }.
  */
 function extractAndReplaceUrls(text) {
-  // Only extract signing (/s/) and payment (/pay/) URLs as buttons.
-  // Verify (/v/) and attestation (/a/) URLs stay as plain text — they get QR photos with buttons instead.
-  const urlRegex = /https?:\/\/[^\s)]+\/(?:s|pay)\/[^\s),.:!?'"]+/g;
+  const urlRegex = /https?:\/\/[^\s)<>]+/g;
   const buttons = [];
+  const replacements = [];
   const seenUrls = new Set();
 
   const matches = [...text.matchAll(urlRegex)];
   for (const match of matches) {
-    const url = match[0];
+    let url = match[0];
+    // Strip trailing punctuation that's not part of URL
+    url = url.replace(/[.,;:!?'"]+$/, '');
     if (seenUrls.has(url)) continue;
     seenUrls.add(url);
-    // Telegram Bot API requires HTTPS for inline keyboard buttons — skip http/localhost URLs
     if (!url.startsWith('https://')) continue;
-    const isPayment = /\/pay\//.test(url);
-    buttons.push({
-      text: isPayment ? '💳 Pay with USDC' : '✍️ Connect Wallet & Sign',
-      url,
-    });
-  }
 
-  // Remove the extracted URLs from the text (keeping surrounding text intact)
-  let cleanedText = text;
-  for (const { url } of buttons) {
+    // Determine label and whether to create inline keyboard button
+    let label, emoji;
+    let addButton = false;
+    if (/\/pay\//.test(url)) {
+      label = 'Pay with USDC'; emoji = '💳'; addButton = true;
+    } else if (/\/s\//.test(url)) {
+      label = 'Connect Wallet & Sign'; emoji = '✍️'; addButton = true;
+    } else if (/\/v\//.test(url)) {
+      label = 'Verify Proof'; emoji = '✅';
+    } else if (/\/a\//.test(url)) {
+      label = 'View Attestation'; emoji = '🔒';
+    } else if (/basescan\.org/.test(url)) {
+      label = 'View on Basescan'; emoji = '🧾';
+    } else if (/8004scan/.test(url)) {
+      label = 'View on 8004scan'; emoji = '🔍';
+    } else {
+      label = 'Open Link'; emoji = '🔗';
+    }
+
+    if (addButton) {
+      buttons.push({ text: `${emoji} ${label}`, url });
+    }
+
+    // Replace URL with placeholder (safe for HTML escaping)
+    const placeholder = `__URL${replacements.length}__`;
+    replacements.push({ placeholder, html: `<a href="${url}">${emoji} ${label}</a>` });
+
     const escaped = url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    cleanedText = cleanedText.replace(new RegExp(escaped, 'g'), '');
+    text = text.replace(new RegExp(escaped, 'g'), placeholder);
   }
-  // Clean up lines that became empty after URL removal
-  cleanedText = cleanedText.replace(/^\s*$/gm, '');
 
-  // Collapse any newly created excessive blank lines
-  cleanedText = cleanedText.replace(/\n{3,}/g, '\n\n').trim();
+  // Clean up empty lines
+  text = text.replace(/^\s*$/gm, '');
+  text = text.replace(/\n{3,}/g, '\n\n').trim();
 
-  return { cleanedText, buttons };
+  // Escape HTML in text, then replace placeholders with actual <a> tags
+  if (replacements.length > 0) {
+    text = escapeHtml(text);
+    for (const { placeholder, html } of replacements) {
+      text = text.replace(new RegExp(placeholder, 'g'), html);
+    }
+  }
+
+  return { cleanedText: text, buttons, hasHtml: replacements.length > 0 };
 }
 
 /**
+ * Escape HTML special characters for Telegram HTML parse mode.
+ */
+function escapeHtml(text) {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+
+/**
  * Clean display text for Telegram:
+ * - Strips > blockquote markers
+ * - Strips **bold** markdown markers
  * - Strips generic ``` code block fences
- * - Converts [text](url) markdown links to plain: "text: url" or just url
+ * - Converts [text](url) markdown links to just the URL
  * - Collapses excessive blank lines (3+ → 2)
  */
 function cleanDisplayText(text) {
   let cleaned = text;
+
+  // Strip > blockquote markers at start of lines
+  cleaned = cleaned.replace(/^>\s?/gm, '');
+
+  // Strip markdown bold **text** → text
+  cleaned = cleaned.replace(/\*\*([^*]+)\*\*/g, '$1');
 
   // Strip generic code block fences
   cleaned = cleaned.replace(/^```\s*\n/gm, '');
   cleaned = cleaned.replace(/\n```\s*$/gm, '');
   cleaned = cleaned.replace(/\n```\n/g, '\n');
 
-  // Convert markdown links [text](url) to plain format
-  cleaned = cleaned.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, text, url) => {
-    if (text === url) return url;
-    return `${text}: ${url}`;
-  });
+  // Convert markdown links [text](url) to just the URL (extractAndReplaceUrls handles labels)
+  cleaned = cleaned.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$2');
 
   // Collapse 3+ consecutive blank lines to 2
   cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
@@ -386,8 +426,9 @@ bot.on('message', async (msg) => {
     // onStep callback: send each step as a SEPARATE Telegram message
     const onStep = async (stepMessage) => {
       try {
-        const { cleanedText: stepCleaned, buttons: stepButtons } = extractAndReplaceUrls(stepMessage);
+        const { cleanedText: stepCleaned, buttons: stepButtons, hasHtml } = extractAndReplaceUrls(stepMessage);
         const stepOptions = { disable_web_page_preview: true };
+        if (hasHtml) stepOptions.parse_mode = 'HTML';
         if (stepButtons.length > 0) {
           stepOptions.reply_markup = {
             inline_keyboard: stepButtons.map(b => [{ text: b.text, url: b.url }]),
@@ -428,12 +469,16 @@ bot.on('message', async (msg) => {
     const fullContent = result.content || '';
     const { text: displayText, data: proofportData } = extractProofportBlock(fullContent);
     const baseCleanedText = cleanDisplayText(displayText);
-    const { cleanedText, buttons } = extractAndReplaceUrls(baseCleanedText);
+    const { cleanedText, buttons, hasHtml } = extractAndReplaceUrls(baseCleanedText);
 
-    if (cleanedText) {
-      const msgOptions = buttons.length > 0
-        ? { reply_markup: { inline_keyboard: buttons.map(b => [{ text: b.text, url: b.url }]) } }
-        : {};
+    if (cleanedText || buttons.length > 0) {
+      const msgOptions = {};
+      if (hasHtml) msgOptions.parse_mode = 'HTML';
+      if (buttons.length > 0) {
+        msgOptions.reply_markup = {
+          inline_keyboard: buttons.map(b => [{ text: b.text, url: b.url }]),
+        };
+      }
       await sendLongMessage(chatId, cleanedText, msgOptions);
     }
 
