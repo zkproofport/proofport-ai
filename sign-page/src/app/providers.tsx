@@ -19,6 +19,7 @@ const config = getDefaultConfig({
     [base.id]: http(),
     [baseSepolia.id]: http(),
   },
+  ssr: true,
 });
 
 const queryClient = new QueryClient();
