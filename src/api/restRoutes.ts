@@ -299,6 +299,16 @@ export function createRestRoutes(deps: RestRoutesDeps): Router {
         isValid: result.isValid,
         verifierAddress: result.verifierAddress,
         chainId,
+        proof: stored.proof,
+        publicInputs,
+        ...(stored.attestation ? {
+          attestation: {
+            mode: stored.attestation.mode,
+            proofHash: stored.attestation.proofHash,
+            timestamp: stored.attestation.timestamp,
+            document: stored.attestation.document,
+          },
+        } : {}),
         createdAt: stored.createdAt,
         expiresAt: new Date(new Date(stored.createdAt).getTime() + 86400 * 1000).toISOString(),
       });
@@ -354,9 +364,21 @@ export function createRestRoutes(deps: RestRoutesDeps): Router {
         }
       }
 
+      // Parse publicInputs for independent on-chain verification
+      let publicInputs: string[];
+      try {
+        const parsed = JSON.parse(stored.publicInputs);
+        publicInputs = Array.isArray(parsed) ? parsed : splitHexToBytes32(stored.publicInputs);
+      } catch {
+        publicInputs = splitHexToBytes32(stored.publicInputs);
+      }
+
       res.json({
         proofId,
         circuitId: stored.circuitId,
+        nullifier: stored.nullifier,
+        proof: stored.proof,
+        publicInputs,
         createdAt: stored.createdAt,
         expiresAt: new Date(new Date(stored.createdAt).getTime() + 86400 * 1000).toISOString(),
         attestation: {
