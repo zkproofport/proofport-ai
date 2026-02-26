@@ -2,7 +2,7 @@
 
 import { useParams } from 'next/navigation';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { useAccount, useSwitchChain, useSignTypedData, useChainId, useDisconnect } from 'wagmi';
+import { useAccount, useSwitchChain, useSignTypedData, useDisconnect } from 'wagmi';
 import { useState, useEffect, useCallback } from 'react';
 import { toHex } from 'viem';
 
@@ -39,9 +39,9 @@ function formatPrice(priceDisplay: string): string {
 export default function PaymentPage() {
   const params = useParams();
   const requestId = params.requestId as string;
-  const { address, isConnected } = useAccount();
+  const { address, isConnected, chain } = useAccount();
   const { disconnect } = useDisconnect();
-  const connectedChainId = useChainId();
+  const connectedChainId = chain?.id;
   const { switchChainAsync } = useSwitchChain();
   const { signTypedDataAsync } = useSignTypedData();
 
