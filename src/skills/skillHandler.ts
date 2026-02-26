@@ -529,8 +529,8 @@ export async function handleGenerateProof(
     resolvedIsIncluded = record.isIncluded;
     paymentTxHash = record.paymentTxHash;
 
-    // Consume the signing record (one-time use)
-    await deps.redis.del(key);
+    // Extend TTL so user can retry if proof generation fails
+    await deps.redis.expire(key, deps.signingTtlSeconds);
   } else {
     // ── Mode B: Direct flow ───────────────────────────────────────────────
     if (!params.address || !params.signature) {
@@ -805,6 +805,12 @@ export async function handleGenerateProof(
   const verifyUrl = baseUrl + '/v/' + proofId;
 
   log.info({ proofId, circuitId: resolvedCircuitId, nullifier, signalHash, hasAttestation: !!attestation }, 'Proof generated');
+
+  // Consume the signing record only after successful proof generation
+  // (if proof fails, record stays so user can retry without re-signing/re-paying)
+  if (params.requestId) {
+    await deps.redis.del(signingKey(params.requestId));
+  }
 
   const defaultChainId = '84532';
   const resolvedVerifierAddress = VERIFIER_ADDRESSES[defaultChainId]?.[resolvedCircuitId];

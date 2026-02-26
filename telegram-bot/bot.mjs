@@ -198,6 +198,14 @@ function extractAndReplaceUrls(text) {
   const replacements = [];
   const seenUrls = new Set();
 
+  // RPC/infrastructure URLs that should NOT be converted to clickable links
+  const SKIP_DOMAINS = [
+    'mainnet.base.org', 'sepolia.base.org', 'base.org',
+    'eth-mainnet.g.alchemy.com', 'eth-sepolia.g.alchemy.com',
+    'mainnet.infura.io', 'sepolia.infura.io',
+    'rpc.ankr.com', 'cloudflare-eth.com',
+  ];
+
   const matches = [...text.matchAll(urlRegex)];
   for (const match of matches) {
     let url = match[0];
@@ -206,6 +214,9 @@ function extractAndReplaceUrls(text) {
     if (seenUrls.has(url)) continue;
     seenUrls.add(url);
     if (!url.startsWith('https://')) continue;
+
+    // Skip RPC/infrastructure URLs (keep them as plain text in error messages)
+    if (SKIP_DOMAINS.some(domain => url.includes(domain))) continue;
 
     // Determine label and whether to create inline keyboard button
     let label, emoji;

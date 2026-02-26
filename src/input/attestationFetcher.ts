@@ -101,36 +101,61 @@ export async function fetchRawTransaction(
     throw new Error('No RPC URLs provided');
   }
 
+  const MAX_RETRIES = 3;
+  const RETRY_DELAY_MS = 1000;
+  const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+
   const fetchFromRpc = async (rpcUrl: string): Promise<string> => {
-    const response = await fetch(rpcUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'eth_getTransactionByHash',
-        params: [txHash],
-      }),
-    });
+    let lastError: Error | undefined;
 
-    if (!response.ok) {
-      throw new Error(`RPC request to ${rpcUrl} failed: HTTP ${response.status}`);
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      try {
+        const response = await fetch(rpcUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'eth_getTransactionByHash',
+            params: [txHash],
+          }),
+        });
+
+        if (!response.ok) {
+          if (RETRYABLE_STATUS.has(response.status) && attempt < MAX_RETRIES - 1) {
+            lastError = new Error(`RPC request to ${rpcUrl} failed: HTTP ${response.status}`);
+            await new Promise(r => setTimeout(r, RETRY_DELAY_MS * (attempt + 1)));
+            continue;
+          }
+          throw new Error(`RPC request to ${rpcUrl} failed: HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        if (data.error) {
+          throw new Error(`RPC error from ${rpcUrl}: ${data.error.message}`);
+        }
+
+        if (!data.result) {
+          throw new Error(`Transaction ${txHash} not found on ${rpcUrl}`);
+        }
+
+        // Reconstruct the raw signed transaction from the RPC response fields
+        const tx = data.result;
+        const rawTx = reconstructRawTransaction(tx);
+        return rawTx;
+      } catch (err) {
+        lastError = err as Error;
+        // Only retry on network-level errors (fetch failures), not logic errors
+        if (attempt < MAX_RETRIES - 1 && (err as any)?.cause?.code === 'ECONNRESET' || (err as any)?.cause?.code === 'ETIMEDOUT') {
+          await new Promise(r => setTimeout(r, RETRY_DELAY_MS * (attempt + 1)));
+          continue;
+        }
+        throw err;
+      }
     }
 
-    const data = await response.json();
-
-    if (data.error) {
-      throw new Error(`RPC error from ${rpcUrl}: ${data.error.message}`);
-    }
-
-    if (!data.result) {
-      throw new Error(`Transaction ${txHash} not found on ${rpcUrl}`);
-    }
-
-    // Reconstruct the raw signed transaction from the RPC response fields
-    const tx = data.result;
-    const rawTx = reconstructRawTransaction(tx);
-    return rawTx;
+    throw lastError || new Error(`RPC request to ${rpcUrl} failed after ${MAX_RETRIES} retries`);
   };
 
   if (rpcUrls.length === 1) {
