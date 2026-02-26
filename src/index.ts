@@ -98,7 +98,7 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   // TEE setup
   const teeConfig = getTeeConfig();
   const resolvedMode = resolveTeeMode(teeConfig.mode);
-  log.info({ teeMode: teeConfig.mode, resolvedMode }, 'TEE mode resolved');
+  log.info({ action: 'server.tee.resolved', teeMode: teeConfig.mode, resolvedMode }, 'TEE mode resolved');
   const teeProvider = createTeeProvider({ ...teeConfig, mode: resolvedMode });
 
   // Settlement worker setup (only if payment mode is not disabled)
@@ -302,7 +302,7 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
     const data = await redis.get(key);
 
     if (!data) {
-      log.warn({ requestId }, 'Signing request not found or expired');
+      log.warn({ action: 'signing.request.not_found', requestId }, 'Signing request not found or expired');
       res.status(404).json({ error: 'Request not found or expired' });
       return;
     }
@@ -334,7 +334,7 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
     const data = await redis.get(key);
 
     if (!data) {
-      log.warn({ requestId }, 'Signing request not found or expired');
+      log.warn({ action: 'signing.prepare.not_found', requestId }, 'Signing request not found or expired');
       res.status(404).json({ error: 'Request not found or expired' });
       return;
     }
@@ -424,8 +424,8 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
     };
 
     app.use('/v1', createOpenAIRoutes(chatDeps));
-    log.info({ providers: llmProviders.map(p => p.name) }, 'LLM chat endpoint enabled');
-    log.info('OpenAI-compatible endpoint enabled at /v1/chat/completions');
+    log.info({ action: 'server.llm.enabled', providers: llmProviders.map(p => p.name) }, 'LLM chat endpoint enabled');
+    log.info({ action: 'server.openai.enabled' }, 'OpenAI-compatible endpoint enabled at /v1/chat/completions');
   } else {
     app.post('/v1/chat/completions', (_req, res) => {
       res.status(503).json({ error: { message: 'Chat not configured. Set OPENAI_API_KEY or GEMINI_API_KEY.', type: 'server_error', code: 'not_configured' } });
@@ -521,7 +521,7 @@ document.getElementById('dl-btn').onclick=function(){fetch('${config.a2aBaseUrl}
     const data = await redis.get(key);
 
     if (!data) {
-      log.warn({ requestId }, 'Payment request not found or expired');
+      log.warn({ action: 'payment.request.not_found', requestId }, 'Payment request not found or expired');
       res.status(404).json({ error: 'Request not found or expired' });
       return;
     }
@@ -566,7 +566,7 @@ document.getElementById('dl-btn').onclick=function(){fetch('${config.a2aBaseUrl}
     const data = await redis.get(key);
 
     if (!data) {
-      log.warn({ requestId }, 'Payment request not found or expired');
+      log.warn({ action: 'payment.confirm.not_found', requestId }, 'Payment request not found or expired');
       res.status(404).json({ error: 'Request not found or expired' });
       return;
     }
@@ -592,10 +592,10 @@ document.getElementById('dl-btn').onclick=function(){fetch('${config.a2aBaseUrl}
         await publishFlowEvent(redis, flow.flowId, { ...flow, updatedAt: new Date().toISOString() });
       }
     } catch (e) {
-      log.error({ err: e }, 'Failed to publish flow event');
+      log.error({ action: 'payment.flow_event.failed', err: e, requestId }, 'Failed to publish flow event');
     }
 
-    log.info({ requestId, txHash }, 'Payment confirmed');
+    log.info({ action: 'payment.confirmed', requestId, txHash }, 'Payment confirmed');
     res.json({ status: 'confirmed' });
   });
 
@@ -613,7 +613,7 @@ document.getElementById('dl-btn').onclick=function(){fetch('${config.a2aBaseUrl}
     const data = await redis.get(key);
 
     if (!data) {
-      log.warn({ requestId }, 'Payment request not found or expired');
+      log.warn({ action: 'payment.sign.not_found', requestId }, 'Payment request not found or expired');
       res.status(404).json({ error: 'Request not found or expired' });
       return;
     }
@@ -654,7 +654,7 @@ document.getElementById('dl-btn').onclick=function(){fetch('${config.a2aBaseUrl}
     };
 
     try {
-      log.debug({ requestId, paymentPayload, paymentRequirements }, 'Payment settle payload');
+      log.debug({ action: 'payment.settle.payload', requestId, paymentPayload, paymentRequirements }, 'Payment settle payload');
 
       const facilitatorClient = new HTTPFacilitatorClient({
         url: config.paymentFacilitatorUrl,
@@ -676,23 +676,23 @@ document.getElementById('dl-btn').onclick=function(){fetch('${config.a2aBaseUrl}
             await publishFlowEvent(redis, flow.flowId, { ...flow, updatedAt: new Date().toISOString() });
           }
         } catch (e) {
-          log.error({ err: e }, 'Failed to publish flow event');
+          log.error({ action: 'payment.flow_event.failed', err: e, requestId }, 'Failed to publish flow event');
         }
 
-        log.info({ requestId, txHash: settleResult.transaction }, 'Facilitator settled payment');
+        log.info({ action: 'payment.settle.succeeded', requestId, txHash: settleResult.transaction }, 'Facilitator settled payment');
         res.json({
           success: true,
           txHash: settleResult.transaction,
           network: settleResult.network,
         });
       } else {
-        log.error({ requestId, settleResult }, 'Facilitator settlement failed');
+        log.error({ action: 'payment.settle.failed', requestId, settleResult }, 'Facilitator settlement failed');
         res.status(400).json({
           error: settleResult.errorMessage || settleResult.errorReason || 'Payment settlement failed',
         });
       }
     } catch (error: any) {
-      log.error({ err: error }, 'Facilitator settle error');
+      log.error({ action: 'payment.settle.error', err: error, requestId }, 'Facilitator settle error');
       res.status(500).json({
         error: error.message || 'Payment processing failed',
       });
@@ -717,7 +717,7 @@ async function startServer() {
   try {
     // Download circuit artifacts if not present
     await ensureArtifacts(config.circuitsDir, config.circuitsRepoUrl);
-    log.info('Circuit artifacts ready');
+    log.info({ action: 'server.artifacts.ready' }, 'Circuit artifacts ready');
 
     // Create TEE provider early (needed for both registration and app)
     const teeConfig = getTeeConfig();
@@ -734,25 +734,25 @@ async function startServer() {
     );
 
     app.listen(config.port, () => {
-      log.info({ port: config.port }, 'proofport-ai server listening');
-      log.info({ mcpEndpoint: `http://localhost:${config.port}/mcp` }, 'MCP endpoint ready');
-      log.info({ nodeEnv: config.nodeEnv, paymentMode: paymentModeConfig.mode, paymentDescription: paymentModeConfig.description }, 'Server configuration');
+      log.info({ action: 'server.started', port: config.port }, 'proofport-ai server listening');
+      log.info({ action: 'server.mcp.ready', mcpEndpoint: `http://localhost:${config.port}/mcp` }, 'MCP endpoint ready');
+      log.info({ action: 'server.config', nodeEnv: config.nodeEnv, paymentMode: paymentModeConfig.mode, paymentDescription: paymentModeConfig.description }, 'Server configuration');
       if (paymentModeConfig.requiresPayment) {
-        log.info({ network: paymentModeConfig.network }, 'Payment network');
+        log.info({ action: 'server.payment.network', network: paymentModeConfig.network }, 'Payment network');
       }
 
       cleanupWorker.start();
-      log.info('CleanupWorker started');
+      log.info({ action: 'server.cleanup.started' }, 'CleanupWorker started');
 
       if (settlementWorker) {
         settlementWorker.start();
-        log.info('SettlementWorker started');
+        log.info({ action: 'server.settlement.started' }, 'SettlementWorker started');
       } else if (paymentModeConfig.mode !== 'disabled') {
-        log.warn('SettlementWorker not configured (missing settlement env vars)');
+        log.warn({ action: 'server.settlement.not_configured' }, 'SettlementWorker not configured (missing settlement env vars)');
       }
     });
   } catch (error) {
-    log.error({ err: error }, 'Failed to start server');
+    log.error({ action: 'server.start.failed', err: error }, 'Failed to start server');
     process.exit(1);
   }
 }

@@ -44,7 +44,7 @@ export class EnclaveClient implements TeeProvider {
       try {
         this.lastAttestation = parseAttestationDocument(response.attestationDocument);
       } catch (error) {
-        log.error({ err: error }, 'Failed to parse attestation document');
+        log.error({ action: 'enclave.attestation.parse_failed', err: error }, 'Failed to parse attestation document');
       }
     }
 
@@ -66,7 +66,7 @@ export class EnclaveClient implements TeeProvider {
       const response = await this.sendVsockRequest(request);
       return response.type === 'health';
     } catch (error) {
-      log.error({ err: error }, 'Health check failed');
+      log.error({ action: 'enclave.health.failed', err: error }, 'Health check failed');
       return false;
     }
   }
@@ -131,7 +131,7 @@ export class EnclaveClient implements TeeProvider {
 
       return null;
     } catch (error) {
-      log.error({ err: error }, 'Failed to get nitro attestation');
+      log.error({ action: 'enclave.attestation.failed', err: error }, 'Failed to get nitro attestation');
       return null;
     }
   }
@@ -143,7 +143,7 @@ export class EnclaveClient implements TeeProvider {
       // a TCP-to-vsock proxy running on the host at bridgePort (default 15000).
       const bridgePort = this.config.enclaveBridgePort || 15000;
 
-      log.debug({ bridgePort }, 'Connecting to enclave via TCP bridge');
+      log.debug({ action: 'enclave.connecting', bridgePort }, 'Connecting to enclave via TCP bridge');
 
       const socket: Socket = connect({
         host: '127.0.0.1',

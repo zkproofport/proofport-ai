@@ -16,17 +16,18 @@ export class MultiLLMProvider implements LLMProvider {
 
   async chat(messages: LLMMessage[], systemPrompt: string, tools: LLMTool[], options?: ChatOptions): Promise<LLMResponse> {
     let lastError: Error | undefined;
+    const logCtx = options?.logContext ?? {};
 
     for (const provider of this.providers) {
       try {
-        log.info({ provider: provider.name }, 'Trying LLM provider');
+        log.info({ action: 'llm.call.started', provider: provider.name, ...logCtx }, 'LLM call started');
         const response = await provider.chat(messages, systemPrompt, tools, options);
-        log.info({ provider: provider.name }, 'LLM provider succeeded');
+        log.info({ action: 'llm.call.succeeded', provider: provider.name, ...logCtx }, 'LLM call succeeded');
         return response;
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
         const errorMsg = lastError.message.replace(/\n/g, ' ');
-        log.warn({ provider: provider.name, error: errorMsg }, 'LLM provider failed, trying next');
+        log.warn({ action: 'llm.call.failed', provider: provider.name, error: errorMsg, ...logCtx }, 'LLM call failed, trying next');
         continue;
       }
     }

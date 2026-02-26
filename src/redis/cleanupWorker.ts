@@ -19,20 +19,20 @@ export class CleanupWorker {
 
   start(): void {
     if (this.intervalHandle) {
-      log.info('CleanupWorker already running');
+      log.info({ action: 'cleanup.worker.already_running' }, 'CleanupWorker already running');
       return;
     }
 
-    log.info({ pollIntervalMs: this.pollIntervalMs }, 'CleanupWorker started');
+    log.info({ action: 'cleanup.worker.started', pollIntervalMs: this.pollIntervalMs }, 'CleanupWorker started');
     this.intervalHandle = setInterval(() => {
       this.cleanupStaleEntries().catch((error) => {
-        log.error({ err: error }, 'Error in cleanup processing cycle');
+        log.error({ action: 'cleanup.worker.cycle_error', err: error }, 'Error in cleanup processing cycle');
       });
     }, this.pollIntervalMs);
 
     // Run first cycle immediately
     this.cleanupStaleEntries().catch((error) => {
-      log.error({ err: error }, 'Error in initial cleanup processing cycle');
+      log.error({ action: 'cleanup.worker.cycle_error', err: error }, 'Error in initial cleanup processing cycle');
     });
   }
 
@@ -40,7 +40,7 @@ export class CleanupWorker {
     if (this.intervalHandle) {
       clearInterval(this.intervalHandle);
       this.intervalHandle = null;
-      log.info('CleanupWorker stopped');
+      log.info({ action: 'cleanup.worker.stopped' }, 'CleanupWorker stopped');
     }
   }
 
@@ -53,7 +53,7 @@ export class CleanupWorker {
     // Only log if something was actually cleaned
     if (staleTaskCount > 0 || stalePaymentCount > 0) {
       log.info(
-        { staleTaskCount, stalePaymentCount },
+        { action: 'cleanup.stale.removed', staleTaskCount, stalePaymentCount },
         'Removed stale task IDs from queue and stale payment IDs from status sets',
       );
     }

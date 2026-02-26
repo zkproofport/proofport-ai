@@ -78,14 +78,14 @@ function extractSkillFromDataPart(message: Message): { skill: string; params: Re
   return null;
 }
 
-async function inferSkillFromText(text: string, llmProvider: LLMProvider): Promise<{ skill: string; params: Record<string, unknown> }> {
+async function inferSkillFromText(text: string, llmProvider: LLMProvider, logContext?: Record<string, string>): Promise<{ skill: string; params: Record<string, unknown> }> {
   const timeoutMs = 30000;
   const response = await Promise.race([
     llmProvider.chat(
       [{ role: 'user', content: text }],
       A2A_INFERENCE_PROMPT,
       CHAT_TOOLS,
-      { toolChoice: 'required' },
+      { toolChoice: 'required', logContext },
     ),
     new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error('LLM inference timed out after 30 seconds')), timeoutMs),
@@ -103,6 +103,7 @@ async function inferSkillFromText(text: string, llmProvider: LLMProvider): Promi
 async function resolveSkill(
   message: Message,
   llmProvider?: LLMProvider,
+  logContext?: Record<string, string>,
 ): Promise<{ skill: string; params: Record<string, unknown>; source: 'data' | 'text' }> {
   const dataPartResult = extractSkillFromDataPart(message);
   if (dataPartResult) {
@@ -122,7 +123,7 @@ async function resolveSkill(
     throw new Error('Text inference requires LLM configuration. Use a DataPart with { "skill": "..." } for direct routing.');
   }
 
-  const result = await inferSkillFromText(textContent, llmProvider);
+  const result = await inferSkillFromText(textContent, llmProvider, logContext);
   return { ...result, source: 'text' };
 }
 
@@ -134,6 +135,7 @@ export class ProofportExecutor implements AgentExecutor {
     span.setAttribute('a2a.task_id', ctx.taskId);
     span.setAttribute('a2a.context_id', ctx.contextId);
 
+    let resolvedSkill: string | undefined;
     try {
       // Publish initial Task event FIRST so the SDK ResultManager can track it.
       // This must happen before resolveSkill() because if resolveSkill throws,
@@ -147,9 +149,11 @@ export class ProofportExecutor implements AgentExecutor {
       };
       eventBus.publish(initialTask);
 
-      const { skill, params: skillParams, source } = await resolveSkill(ctx.userMessage, this.deps.llmProvider);
-      log.info({ skill, source, contextId: ctx.contextId }, 'Resolved skill');
-      log.debug({ skill, params: skillParams }, 'Skill params');
+      const logContext: Record<string, string> = { contextId: ctx.contextId, step: 'skill_resolution' };
+      const { skill, params: skillParams, source } = await resolveSkill(ctx.userMessage, this.deps.llmProvider, logContext);
+      resolvedSkill = skill;
+      log.info({ action: 'a2a.skill.resolved', skill, source, contextId: ctx.contextId }, 'Resolved skill');
+      log.debug({ action: 'a2a.skill.params', skill, params: skillParams, contextId: ctx.contextId }, 'Skill params');
 
       if (!VALID_SKILLS.includes(skill)) {
         throw new Error(`Invalid skill: ${skill}. Valid skills: ${VALID_SKILLS.join(', ')}`);
@@ -166,12 +170,12 @@ export class ProofportExecutor implements AgentExecutor {
           const storedRequestId = await this.deps.taskStore.getContextFlow(ctx.contextId);
           if (storedRequestId && ['check_status', 'request_payment', 'generate_proof'].includes(skill)) {
             if (source === 'text' || !skillParams.requestId) {
-              log.info({ requestId: storedRequestId, source, overridden: !!skillParams.requestId }, 'Auto-resolved requestId from context flow');
+              log.info({ action: 'a2a.context.resolved', requestId: storedRequestId, source, overridden: !!skillParams.requestId, contextId: ctx.contextId }, 'Auto-resolved requestId from context flow');
               skillParams.requestId = storedRequestId;
             }
           }
         } catch (e) {
-          log.error({ err: e }, 'Failed to resolve context flow');
+          log.error({ action: 'a2a.context.error', err: e, contextId: ctx.contextId }, 'Failed to resolve context flow');
         }
       }
 
@@ -221,11 +225,11 @@ export class ProofportExecutor implements AgentExecutor {
             if (!existingRequestId) {
               await this.deps.taskStore.setContextFlow(ctx.contextId, requestId);
             } else {
-              log.info({ existingRequestId, newRequestId: requestId, contextId: ctx.contextId }, 'Context flow already exists, not overwriting');
+              log.info({ action: 'a2a.context.exists', existingRequestId, newRequestId: requestId, contextId: ctx.contextId }, 'Context flow already exists, not overwriting');
             }
           }
         } catch (e) {
-          log.error({ err: e }, 'Failed to link context flow');
+          log.error({ action: 'a2a.context.link_failed', err: e, contextId: ctx.contextId }, 'Failed to link context flow');
         }
       }
 
@@ -272,14 +276,14 @@ export class ProofportExecutor implements AgentExecutor {
           },
           signer.address,
         ).catch((error) => {
-          log.error({ err: error }, 'Background reputation update failed');
+          log.error({ action: 'a2a.reputation.failed', err: error }, 'Background reputation update failed');
         });
       }
 
       span.setStatus({ code: SpanStatusCode.OK });
     } catch (error: any) {
       span.setStatus({ code: SpanStatusCode.ERROR, message: error.message || String(error) });
-      log.error({ err: error, taskId: ctx.taskId }, 'Task failed');
+      log.error({ action: 'a2a.task.failed', err: error, taskId: ctx.taskId, contextId: ctx.contextId, skill: resolvedSkill }, 'Task failed');
 
       const errorMessage = error.message || String(error);
 

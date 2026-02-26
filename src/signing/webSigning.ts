@@ -56,7 +56,7 @@ export class WebSigningProvider implements SigningProvider {
     await this.redis.set(key, JSON.stringify(record), 'EX', this.ttlSeconds);
 
     const signingUrl = getSigningUrl(this.signPageUrl, requestId);
-    log.info({ signingUrl }, 'Web signing URL generated');
+    log.info({ action: 'signing.url.generated', signingUrl }, 'Web signing URL generated');
 
     return new Promise((resolve, reject) => {
       const checkInterval = setInterval(async () => {
@@ -177,7 +177,7 @@ export function createSigningCallbackHandler(redis: RedisClient) {
       }
     } catch (e) {
       // Non-blocking — flow event publishing must not break the signing callback
-      log.error({ err: e }, 'Failed to publish flow event');
+      log.error({ action: 'signing.flow_event.failed', err: e }, 'Failed to publish flow event');
     }
 
     return res.status(200).json({ success: true });

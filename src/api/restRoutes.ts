@@ -222,7 +222,7 @@ export function createRestRoutes(deps: RestRoutesDeps): Router {
 
       res.json(response);
     } catch (error) {
-      log.error({ err: error }, 'Task retrieval error');
+      log.error({ action: 'rest.task.error', err: error }, 'Task retrieval error');
       res.status(500).json({
         error: error instanceof Error ? error.message : 'Internal server error',
       });
@@ -355,7 +355,7 @@ export function createRestRoutes(deps: RestRoutesDeps): Router {
         expiresAt: new Date(new Date(stored.createdAt).getTime() + 86400 * 1000).toISOString(),
       });
     } catch (error) {
-      log.error({ err: error }, 'Complete proof data error');
+      log.error({ action: 'rest.proof.error', err: error }, 'Complete proof data error');
       res.status(500).json({
         error: error instanceof Error ? error.message : 'Failed to retrieve proof data',
       });
@@ -412,7 +412,7 @@ export function createRestRoutes(deps: RestRoutesDeps): Router {
         expiresAt: new Date(new Date(stored.createdAt).getTime() + 86400 * 1000).toISOString(),
       });
     } catch (error) {
-      log.error({ err: error }, 'Proof verification error');
+      log.error({ action: 'rest.verify.error', err: error }, 'Proof verification error');
       res.status(500).json({
         error: error instanceof Error ? error.message : 'Verification failed',
       });
@@ -485,7 +485,7 @@ export function createRestRoutes(deps: RestRoutesDeps): Router {
         verification,
       });
     } catch (error) {
-      log.error({ err: error }, 'Attestation retrieval error');
+      log.error({ action: 'rest.attestation.error', err: error }, 'Attestation retrieval error');
       res.status(500).json({
         error: error instanceof Error ? error.message : 'Failed to retrieve attestation',
       });

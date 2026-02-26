@@ -15,10 +15,10 @@ const log = createLogger('TEE');
  */
 export function detectTeeEnvironment(): ResolvedTeeMode {
   if (existsSync('/dev/nsm')) {
-    log.info('Auto-detected: nitro (/dev/nsm found)');
+    log.info({ action: 'tee.detected.nitro' }, 'Auto-detected: nitro (/dev/nsm found)');
     return 'nitro';
   }
-  log.info('Auto-detected: local (no TEE hardware)');
+  log.info({ action: 'tee.detected.local' }, 'Auto-detected: local (no TEE hardware)');
   return 'local';
 }
 

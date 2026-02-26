@@ -26,7 +26,7 @@ const log = createLogger('AutoRegister');
 export async function ensureAgentRegistered(config: Config, teeProvider?: TeeProvider): Promise<bigint | null> {
   // Check if ERC-8004 is configured (both addresses required)
   if (!config.erc8004IdentityAddress || !config.erc8004ReputationAddress) {
-    log.info('ERC-8004 not configured — identity registration disabled');
+    log.info({ action: 'identity.not_configured' }, 'ERC-8004 not configured — identity registration disabled');
     return null;
   }
 
@@ -44,7 +44,7 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
     if (isRegistered) {
       const info = await registration.getRegistration();
       if (info) {
-        log.info({ tokenId: info.tokenId.toString() }, 'Agent already registered on ERC-8004 Identity contract');
+        log.info({ action: 'identity.registration.already_registered', tokenId: info.tokenId.toString() }, 'Agent already registered on ERC-8004 Identity contract');
 
         // Check if metadata needs updating (e.g., agentUrl changed from localhost to production)
         try {
@@ -63,30 +63,30 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
             currentMetadata.supportedTrust.length === 0
           );
           if (needsUpdate) {
-              log.info('Agent metadata needs updating on-chain');
+              log.info({ action: 'identity.metadata.needs_update' }, 'Agent metadata needs updating on-chain');
               if (!currentMetadata) {
-                log.info('No on-chain metadata found — will set full metadata');
+                log.info({ action: 'identity.metadata.not_found' }, 'No on-chain metadata found — will set full metadata');
               } else {
                 if (currentMetadata.name !== expectedName) {
-                  log.info({ onChain: currentMetadata.name, expected: expectedName }, 'Metadata name mismatch');
+                  log.info({ action: 'identity.metadata.name_mismatch', onChain: currentMetadata.name, expected: expectedName }, 'Metadata name mismatch');
                 }
                 if (currentMetadata.image !== expectedImage) {
-                  log.info({ onChain: currentMetadata.image || 'none', expected: expectedImage }, 'Metadata image mismatch');
+                  log.info({ action: 'identity.metadata.image_mismatch', onChain: currentMetadata.image || 'none', expected: expectedImage }, 'Metadata image mismatch');
                 }
                 if (currentMetadata.agentUrl !== config.a2aBaseUrl) {
-                  log.info({ onChain: currentMetadata.agentUrl, current: config.a2aBaseUrl }, 'Metadata URL mismatch');
+                  log.info({ action: 'identity.metadata.url_mismatch', onChain: currentMetadata.agentUrl, current: config.a2aBaseUrl }, 'Metadata URL mismatch');
                 }
                 if (currentMetadata.x402Support !== (config.paymentMode !== 'disabled')) {
-                  log.info({ onChain: currentMetadata.x402Support, current: config.paymentMode !== 'disabled' }, 'Metadata x402Support mismatch');
+                  log.info({ action: 'identity.metadata.x402_mismatch', onChain: currentMetadata.x402Support, current: config.paymentMode !== 'disabled' }, 'Metadata x402Support mismatch');
                 }
                 if (!currentMetadata.services || currentMetadata.services.length === 0) {
-                  log.info('Metadata services array missing or empty');
+                  log.info({ action: 'identity.metadata.services_missing' }, 'Metadata services array missing or empty');
                 }
                 if (!currentMetadata.type) {
-                  log.info('Metadata type field missing');
+                  log.info({ action: 'identity.metadata.type_missing' }, 'Metadata type field missing');
                 }
                 if (!currentMetadata.supportedTrust || currentMetadata.supportedTrust.length === 0) {
-                  log.info('Metadata supportedTrust field missing');
+                  log.info({ action: 'identity.metadata.trust_missing' }, 'Metadata supportedTrust field missing');
                 }
               }
 
@@ -123,11 +123,11 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
               };
 
               const txHash = await registration.updateMetadata(info.tokenId, metadata);
-              log.info({ txHash }, 'Metadata updated successfully');
+              log.info({ action: 'identity.metadata.updated', txHash }, 'Metadata updated successfully');
             }
           } catch (error) {
             if (error instanceof Error) {
-              log.error({ err: error }, 'Failed to update metadata');
+              log.error({ action: 'identity.metadata.update_failed', err: error }, 'Failed to update metadata');
             }
           }
 
@@ -169,11 +169,11 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
     };
 
     // Register on-chain
-    log.info('Registering agent on ERC-8004 Identity contract');
+    log.info({ action: 'identity.registration.started' }, 'Registering agent on ERC-8004 Identity contract');
     const result = await registration.register(metadata);
 
     log.info(
-      { tokenId: result.tokenId.toString(), agentAddress: result.agentAddress, transactionHash: result.transactionHash },
+      { action: 'identity.registration.completed', tokenId: result.tokenId.toString(), agentAddress: result.agentAddress, transactionHash: result.transactionHash },
       'Agent registered successfully',
     );
 
@@ -184,7 +184,7 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
 
     return result.tokenId;
   } catch (error) {
-    log.error({ err: error instanceof Error ? error : new Error(String(error)) }, 'Failed to register agent on ERC-8004');
+    log.error({ action: 'identity.registration.failed', err: error instanceof Error ? error : new Error(String(error)) }, 'Failed to register agent on ERC-8004');
     return null;
   }
 }

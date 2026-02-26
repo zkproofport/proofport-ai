@@ -7,4 +7,4 @@ const log = createLogger('MCP');
 const server = createMcpServer();
 const transport = new StdioServerTransport();
 await server.connect(transport);
-log.info('zkproofport-prover MCP server started on stdio');
+log.info({ action: 'mcp.stdio.started' }, 'zkproofport-prover MCP server started on stdio');

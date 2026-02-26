@@ -502,7 +502,7 @@ export function createOpenAIRoutes(deps: ChatHandlerDeps): Router {
         });
       }
     } catch (error) {
-      log.error({ err: error }, 'Chat completion error');
+      log.error({ action: 'openai.chat.error', err: error }, 'Chat completion error');
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       res.status(500).json({
         error: {

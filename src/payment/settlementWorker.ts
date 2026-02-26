@@ -46,23 +46,23 @@ export class SettlementWorker {
 
   start(): void {
     if (this.intervalHandle) {
-      log.info('SettlementWorker already running');
+      log.info({ action: 'settlement.worker.already_running' }, 'SettlementWorker already running');
       return;
     }
 
     log.info(
-      { pollIntervalMs: this.pollIntervalMs, operatorAddress: this.config.operatorAddress },
+      { action: 'settlement.worker.started', pollIntervalMs: this.pollIntervalMs, operatorAddress: this.config.operatorAddress },
       'SettlementWorker started',
     );
     this.intervalHandle = setInterval(() => {
       this.processPendingSettlements().catch((error) => {
-        log.error({ err: error }, 'Error in settlement processing cycle');
+        log.error({ action: 'settlement.worker.cycle_error', err: error }, 'Error in settlement processing cycle');
       });
     }, this.pollIntervalMs);
 
     // Run first cycle immediately
     this.processPendingSettlements().catch((error) => {
-      log.error({ err: error }, 'Error in initial settlement processing cycle');
+      log.error({ action: 'settlement.worker.cycle_error', err: error }, 'Error in initial settlement processing cycle');
     });
   }
 
@@ -70,7 +70,7 @@ export class SettlementWorker {
     if (this.intervalHandle) {
       clearInterval(this.intervalHandle);
       this.intervalHandle = null;
-      log.info('SettlementWorker stopped');
+      log.info({ action: 'settlement.worker.stopped' }, 'SettlementWorker stopped');
     }
   }
 
@@ -81,13 +81,13 @@ export class SettlementWorker {
       return;
     }
 
-    log.info({ count: pendingPayments.length }, 'Processing pending settlements');
+    log.info({ action: 'settlement.worker.processing', count: pendingPayments.length }, 'Processing pending settlements');
 
     for (const payment of pendingPayments) {
       try {
         await this.settleSinglePayment(payment);
       } catch (error) {
-        log.error({ err: error, paymentId: payment.id }, 'Failed to settle payment');
+        log.error({ action: 'settlement.payment.failed', err: error, paymentId: payment.id }, 'Failed to settle payment');
         // Don't update status - leave as 'pending' for retry in next cycle
       }
     }
@@ -98,7 +98,7 @@ export class SettlementWorker {
     const currentRetries = this.retryCount.get(payment.id) ?? 0;
     if (currentRetries >= this.MAX_RETRIES) {
       log.error(
-        { paymentId: payment.id, maxRetries: this.MAX_RETRIES },
+        { action: 'settlement.payment.max_retries', paymentId: payment.id, maxRetries: this.MAX_RETRIES },
         'Payment exceeded max retries, skipping until manual intervention',
       );
       return;
@@ -110,7 +110,7 @@ export class SettlementWorker {
       amountInUsdcUnits = parseUsdcAmount(payment.amount);
     } catch (error) {
       log.error(
-        { err: error, paymentId: payment.id, amount: payment.amount },
+        { action: 'settlement.payment.parse_error', err: error, paymentId: payment.id, amount: payment.amount },
         'Failed to parse amount for payment',
       );
       return;
@@ -118,23 +118,23 @@ export class SettlementWorker {
 
     // Execute transfer
     log.info(
-      { paymentId: payment.id, amount: payment.amount, usdcUnits: amountInUsdcUnits.toString(), operatorAddress: this.config.operatorAddress },
+      { action: 'settlement.payment.started', paymentId: payment.id, amount: payment.amount, usdcUnits: amountInUsdcUnits.toString(), operatorAddress: this.config.operatorAddress },
       'Settling payment',
     );
 
     try {
       const tx = await this.usdcContract.transfer(this.config.operatorAddress, amountInUsdcUnits);
-      log.info({ paymentId: payment.id, txHash: tx.hash }, 'Transaction submitted for payment');
+      log.info({ action: 'settlement.payment.tx_submitted', paymentId: payment.id, txHash: tx.hash }, 'Transaction submitted for payment');
 
       const receipt = await tx.wait();
       log.info(
-        { paymentId: payment.id, txHash: tx.hash, blockNumber: receipt.blockNumber },
+        { action: 'settlement.payment.tx_confirmed', paymentId: payment.id, txHash: tx.hash, blockNumber: receipt.blockNumber },
         'Transaction confirmed for payment',
       );
 
       // Update status in Redis
       await this.facilitator.settlePayment(payment.id);
-      log.info({ paymentId: payment.id }, 'Payment settled successfully');
+      log.info({ action: 'settlement.payment.settled', paymentId: payment.id }, 'Payment settled successfully');
 
       // Clear retry count on success
       this.retryCount.delete(payment.id);

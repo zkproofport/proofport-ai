@@ -42,6 +42,7 @@ import tempfile
 import threading
 import time
 import traceback
+from datetime import datetime, timezone
 
 # ─────────────────────────────────────────────────────────────
 # Constants
@@ -74,8 +75,19 @@ HEALTH_RESPONSE = {"type": "health", "status": "ok"}
 # Logging (stderr only — no files in enclave)
 # ─────────────────────────────────────────────────────────────
 
+def _iso_now() -> str:
+    now = datetime.now(timezone.utc)
+    return now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
+
+
 def log(level: str, msg: str, **kwargs) -> None:
-    entry = {"time": time.time(), "level": level, "msg": msg}
+    entry = {
+        "level": level,
+        "time": _iso_now(),
+        "service": "proofport-ai",
+        "component": "Enclave",
+        "msg": msg,
+    }
     entry.update(kwargs)
     print(json.dumps(entry), file=sys.stderr, flush=True)
 
@@ -118,7 +130,7 @@ def get_nsm_attestation(user_data: bytes = b"", nonce: bytes = b"") -> bytes | N
     Returns raw COSE_Sign1 attestation document bytes, or None if NSM unavailable.
     """
     if not os.path.exists(NSM_DEVICE):
-        log_info("NSM device not available — skipping attestation")
+        log_info("NSM device not available — skipping attestation", action="enclave.nsm.skipped")
         return None
 
     try:
@@ -161,7 +173,7 @@ def get_nsm_attestation(user_data: bytes = b"", nonce: bytes = b"") -> bytes | N
         # Read actual response length from the updated struct (offset 24 = response_len field)
         actual_len = struct.unpack_from("I", msg, 24)[0]
         if actual_len == 0:
-            log_error("NSM ioctl returned 0-length response")
+            log_error("NSM ioctl returned 0-length response", action="enclave.nsm.failed")
             return None
 
         response_cbor = resp_buf.raw[:actual_len]
@@ -172,22 +184,22 @@ def get_nsm_attestation(user_data: bytes = b"", nonce: bytes = b"") -> bytes | N
             att = response["Attestation"]
             if "document" in att:
                 doc_bytes = att["document"]
-                log_info("NSM attestation obtained", doc_bytes=len(doc_bytes))
+                log_info("NSM attestation obtained", action="enclave.nsm.obtained", docBytes=len(doc_bytes))
                 return doc_bytes
 
         # Error: {"Error": {"Type": "..."}}
         if "Error" in response:
-            log_error("NSM returned error", error=str(response["Error"]))
+            log_error("NSM returned error", action="enclave.nsm.failed", error=str(response["Error"]))
             return None
 
-        log_error("Unexpected NSM response", keys=list(response.keys()))
+        log_error("Unexpected NSM response", action="enclave.nsm.failed", keys=list(response.keys()))
         return None
 
     except ImportError:
-        log_error("cbor2 not installed — cannot request NSM attestation. Install: pip install cbor2")
+        log_error("cbor2 not installed — cannot request NSM attestation. Install: pip install cbor2", action="enclave.nsm.failed")
         return None
     except Exception as e:
-        log_error("NSM attestation failed", error=str(e), traceback=traceback.format_exc())
+        log_error("NSM attestation failed", action="enclave.nsm.failed", error=str(e), traceback=traceback.format_exc())
         return None
 
 
@@ -240,7 +252,7 @@ def generate_proof(circuit_id: str, inputs: list, request_id: str, prover_toml: 
       5. Optionally get NSM attestation
       6. Return proof hex + public inputs
 
-    Returns dict with keys: proof, publicInputs, attestationDocument (optional)
+    Returns dict with keys: proof, publicInputs, attestationDocument (optional), timing
     Raises RuntimeError on any step failure.
     """
     paths = get_circuit_paths(circuit_id)
@@ -254,7 +266,8 @@ def generate_proof(circuit_id: str, inputs: list, request_id: str, prover_toml: 
             raise RuntimeError(f"Circuit artifact missing: {label} at {path}")
 
     with tempfile.TemporaryDirectory(prefix=f"proof-{request_id}-", dir=CIRCUIT_BASE_DIR) as workdir:
-        log_info("Starting proof generation", request_id=request_id, circuit_id=circuit_id)
+        t_start = time.monotonic()
+        log_info("Proof generation started", action="enclave.prove.started", requestId=request_id, circuitId=circuit_id)
 
         # Step 1: Write Prover.toml
         if prover_toml:
@@ -262,11 +275,11 @@ def generate_proof(circuit_id: str, inputs: list, request_id: str, prover_toml: 
             toml_path = os.path.join(workdir, "Prover.toml")
             with open(toml_path, "w") as f:
                 f.write(prover_toml)
-            log_info("Prover.toml written from proverToml field", bytes=len(prover_toml))
+            log_info("Prover.toml written from proverToml", action="enclave.toml.written", requestId=request_id, bytes=len(prover_toml), source="proverToml")
         else:
             # Fallback: generic input_N format
             write_prover_toml(inputs, workdir)
-            log_info("Prover.toml written from inputs array", input_count=len(inputs))
+            log_info("Prover.toml written from inputs", action="enclave.toml.written", requestId=request_id, inputCount=len(inputs), source="inputs")
 
         # Step 2: Copy Nargo.toml and src/ so nargo execute works in tmpdir
         # nargo execute requires a complete package — copy from circuit dir
@@ -288,7 +301,7 @@ def generate_proof(circuit_id: str, inputs: list, request_id: str, prover_toml: 
             "nargo", "execute",
             "--program-dir", workdir,
         ]
-        log_info("Running nargo execute", cmd=" ".join(nargo_cmd))
+        log_info("nargo execute started", action="enclave.nargo.started", requestId=request_id, cmd=" ".join(nargo_cmd))
         nargo_result = subprocess.run(
             nargo_cmd,
             capture_output=True,
@@ -299,6 +312,8 @@ def generate_proof(circuit_id: str, inputs: list, request_id: str, prover_toml: 
         if nargo_result.returncode != 0:
             log_error(
                 "nargo execute failed",
+                action="enclave.nargo.failed",
+                requestId=request_id,
                 returncode=nargo_result.returncode,
                 stdout=nargo_result.stdout,
                 stderr=nargo_result.stderr,
@@ -307,7 +322,8 @@ def generate_proof(circuit_id: str, inputs: list, request_id: str, prover_toml: 
                 f"nargo execute failed (exit {nargo_result.returncode}): "
                 f"{nargo_result.stderr}"
             )
-        log_info("nargo execute succeeded", stdout=nargo_result.stdout)
+        t_nargo = time.monotonic()
+        log_info("nargo execute succeeded", action="enclave.nargo.succeeded", requestId=request_id, stdout=nargo_result.stdout)
 
         # Locate witness file (target/<circuit_name>.gz)
         circuit_name = circuit_id  # canonical ID matches Nargo.toml name field
@@ -322,7 +338,7 @@ def generate_proof(circuit_id: str, inputs: list, request_id: str, prover_toml: 
                     f"Witness file not found after nargo execute. "
                     f"Expected: {witness_path}"
                 )
-        log_info("Witness file located", path=witness_path)
+        log_info("Witness file located", action="enclave.witness.located", requestId=request_id, path=witness_path)
 
         # Step 4: Run bb prove
         # Flags MUST match bbProver.ts (src/prover/bbProver.ts) — keep in sync!
@@ -336,7 +352,7 @@ def generate_proof(circuit_id: str, inputs: list, request_id: str, prover_toml: 
             "-k", vk_path,
             "--oracle_hash", "keccak",
         ]
-        log_info("Running bb prove", cmd=" ".join(bb_cmd))
+        log_info("bb prove started", action="enclave.bb.started", requestId=request_id, cmd=" ".join(bb_cmd))
         bb_result = subprocess.run(
             bb_cmd,
             capture_output=True,
@@ -347,6 +363,8 @@ def generate_proof(circuit_id: str, inputs: list, request_id: str, prover_toml: 
         if bb_result.returncode != 0:
             log_error(
                 "bb prove failed",
+                action="enclave.bb.failed",
+                requestId=request_id,
                 returncode=bb_result.returncode,
                 stdout=bb_result.stdout,
                 stderr=bb_result.stderr,
@@ -355,7 +373,8 @@ def generate_proof(circuit_id: str, inputs: list, request_id: str, prover_toml: 
                 f"bb prove failed (exit {bb_result.returncode}): "
                 f"{bb_result.stderr}"
             )
-        log_info("bb prove succeeded")
+        t_bb = time.monotonic()
+        log_info("bb prove succeeded", action="enclave.bb.succeeded", requestId=request_id)
 
         # Step 5: Read proof bytes
         # bb prove outputs to a directory: <proof_output>/proof
@@ -368,7 +387,7 @@ def generate_proof(circuit_id: str, inputs: list, request_id: str, prover_toml: 
         with open(proof_file, "rb") as f:
             proof_bytes = f.read()
         proof_hex = "0x" + proof_bytes.hex()
-        log_info("Proof read", proof_bytes=len(proof_bytes))
+        log_info("Proof read", action="enclave.proof.read", requestId=request_id, proofBytes=len(proof_bytes))
 
         # Step 6: Extract public inputs from bb output
         # bb prove -o <dir> writes: <dir>/proof and <dir>/public_inputs
@@ -378,9 +397,9 @@ def generate_proof(circuit_id: str, inputs: list, request_id: str, prover_toml: 
             with open(public_inputs_path, "rb") as f:
                 pi_bytes = f.read()
             public_inputs = ["0x" + pi_bytes.hex()]
-            log_info("Public inputs read", bytes=len(pi_bytes))
+            log_info("Public inputs read", action="enclave.inputs.read", requestId=request_id, bytes=len(pi_bytes))
         else:
-            log_info("No public_inputs file — returning empty publicInputs array")
+            log_info("No public_inputs file — returning empty publicInputs array", action="enclave.inputs.empty", requestId=request_id)
 
         # Step 7: NSM attestation (REQUIRED inside Nitro enclave)
         # If we're inside a real enclave, /dev/nsm MUST exist and attestation MUST succeed.
@@ -392,17 +411,25 @@ def generate_proof(circuit_id: str, inputs: list, request_id: str, prover_toml: 
         if nsm_doc:
             import base64
             attestation_b64 = base64.b64encode(nsm_doc).decode("ascii")
-            log_info("NSM attestation obtained", doc_bytes=len(nsm_doc))
+            log_info("NSM attestation obtained", action="enclave.nsm.obtained", requestId=request_id, docBytes=len(nsm_doc))
         elif os.path.exists(NSM_DEVICE):
             # /dev/nsm exists but attestation failed — this should not happen
             raise RuntimeError("NSM device exists but attestation failed. Refusing to return proof without attestation.")
         else:
             # Not in a real enclave (e.g., local TCP fallback) — attestation not available
-            log_info("NSM device not present — attestation skipped (non-enclave environment)")
+            log_info("NSM device not present — attestation skipped (non-enclave environment)", action="enclave.nsm.skipped", requestId=request_id)
+
+        t_nsm = time.monotonic()
 
         result = {
             "proof": proof_hex,
             "publicInputs": public_inputs,
+            "timing": {
+                "nargoMs": round((t_nargo - t_start) * 1000),
+                "bbMs": round((t_bb - t_nargo) * 1000),
+                "nsmMs": round((t_nsm - t_bb) * 1000),
+                "totalMs": round((t_nsm - t_start) * 1000),
+            },
         }
         if attestation_b64:
             result["attestationDocument"] = attestation_b64
@@ -440,6 +467,7 @@ def handle_prove(request: dict) -> dict:
             "requestId": request_id,
             "proof": result["proof"],
             "publicInputs": result["publicInputs"],
+            "timing": result["timing"],
         }
         if "attestationDocument" in result:
             response["attestationDocument"] = result["attestationDocument"]
@@ -451,7 +479,7 @@ def handle_prove(request: dict) -> dict:
     except RuntimeError as e:
         return {"type": "error", "requestId": request_id, "error": str(e)}
     except Exception as e:
-        log_error("Unexpected error in handle_prove", error=str(e), traceback=traceback.format_exc())
+        log_error("Unexpected error in handle_prove", action="enclave.prove.error", error=str(e), traceback=traceback.format_exc())
         return {"type": "error", "requestId": request_id, "error": f"Internal error: {str(e)}"}
 
 
@@ -504,7 +532,7 @@ def dispatch(request: dict) -> dict:
 
 def handle_connection(conn: socket.socket, addr) -> None:
     """Handle a single vsock connection synchronously."""
-    log_info("Connection accepted", addr=str(addr))
+    log_info("Connection accepted", action="enclave.connection.accepted", addr=str(addr))
     try:
         # Read all data until EOF
         chunks = []
@@ -518,31 +546,31 @@ def handle_connection(conn: socket.socket, addr) -> None:
         except socket.timeout:
             pass  # No more data
         except Exception as e:
-            log_error("Error reading from socket", error=str(e))
+            log_error("Error reading from socket", action="enclave.connection.error", error=str(e))
 
         raw = b"".join(chunks)
         if not raw:
-            log_error("Empty request received")
+            log_error("Empty request received", action="enclave.request.empty")
             return
 
-        log_info("Received request", bytes=len(raw))
+        log_info("Request received", action="enclave.request.received", bytes=len(raw))
 
         try:
             request = json.loads(raw.decode("utf-8"))
         except json.JSONDecodeError as e:
-            log_error("Invalid JSON in request", error=str(e))
+            log_error("Invalid JSON in request", action="enclave.request.invalid", error=str(e))
             error_response = {"type": "error", "requestId": "", "error": f"Invalid JSON: {e}"}
             conn.sendall(json.dumps(error_response).encode("utf-8"))
             return
 
-        log_info("Dispatching request", type=request.get("type"), request_id=request.get("requestId"))
+        log_info("Request dispatched", action="enclave.request.dispatched", type=request.get("type"), requestId=request.get("requestId"))
         response = dispatch(request)
-        log_info("Sending response", type=response.get("type"), request_id=response.get("requestId"))
+        log_info("Response sent", action="enclave.response.sent", type=response.get("type"), requestId=response.get("requestId"))
 
         conn.sendall(json.dumps(response).encode("utf-8"))
 
     except Exception as e:
-        log_error("Unhandled error in connection handler", error=str(e), traceback=traceback.format_exc())
+        log_error("Unhandled error in connection handler", action="enclave.connection.error", error=str(e), traceback=traceback.format_exc())
         try:
             error_response = {"type": "error", "requestId": "", "error": f"Server error: {str(e)}"}
             conn.sendall(json.dumps(error_response).encode("utf-8"))
@@ -553,7 +581,7 @@ def handle_connection(conn: socket.socket, addr) -> None:
             conn.close()
         except Exception:
             pass
-        log_info("Connection closed")
+        log_info("Connection closed", action="enclave.connection.closed")
 
 
 def run_server() -> None:
@@ -565,7 +593,7 @@ def run_server() -> None:
     AF_VSOCK = 40
     VMADDR_CID_ANY = 0xFFFFFFFF
 
-    log_info("Starting enclave vsock server", port=VSOCK_PORT)
+    log_info("Starting enclave vsock server", action="enclave.server.starting", port=VSOCK_PORT)
 
     try:
         server = socket.socket(AF_VSOCK, socket.SOCK_STREAM)
@@ -573,17 +601,18 @@ def run_server() -> None:
         log_error(
             "Failed to create vsock socket. "
             "AF_VSOCK may not be supported in this environment.",
+            action="enclave.server.error",
             error=str(e),
         )
         # In non-enclave environments (local testing), fall back to TCP
-        log_info("Falling back to TCP socket for local testing on port 15000")
+        log_info("Falling back to TCP socket for local testing on port 15000", action="enclave.server.fallback")
         run_tcp_fallback()
         return
 
     try:
         server.bind((VMADDR_CID_ANY, VSOCK_PORT))
         server.listen(5)
-        log_info("Vsock server listening", cid="VMADDR_CID_ANY", port=VSOCK_PORT)
+        log_info("Vsock server listening", action="enclave.server.listening", cid="VMADDR_CID_ANY", port=VSOCK_PORT)
 
         while True:
             try:
@@ -595,10 +624,10 @@ def run_server() -> None:
                 )
                 t.start()
             except KeyboardInterrupt:
-                log_info("Server interrupted, shutting down")
+                log_info("Server interrupted, shutting down", action="enclave.server.stopping")
                 break
             except Exception as e:
-                log_error("Error accepting connection", error=str(e))
+                log_error("Error accepting connection", action="enclave.server.error", error=str(e))
 
     finally:
         server.close()
@@ -610,13 +639,13 @@ def run_tcp_fallback() -> None:
     Listens on 127.0.0.1:15000 with the same JSON protocol.
     """
     TCP_PORT = 15000
-    log_info("TCP fallback server starting", host="127.0.0.1", port=TCP_PORT)
+    log_info("TCP fallback server starting", action="enclave.server.starting", host="127.0.0.1", port=TCP_PORT)
 
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind(("127.0.0.1", TCP_PORT))
     server.listen(5)
-    log_info("TCP fallback server listening", port=TCP_PORT)
+    log_info("TCP fallback server listening", action="enclave.server.listening", port=TCP_PORT)
 
     while True:
         try:
@@ -628,10 +657,10 @@ def run_tcp_fallback() -> None:
             )
             t.start()
         except KeyboardInterrupt:
-            log_info("TCP fallback server shutting down")
+            log_info("TCP fallback server shutting down", action="enclave.server.stopping")
             break
         except Exception as e:
-            log_error("TCP accept error", error=str(e))
+            log_error("TCP accept error", action="enclave.server.error", error=str(e))
 
     server.close()
 
@@ -641,9 +670,9 @@ def run_tcp_fallback() -> None:
 # ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    log_info("Enclave server starting", python_version=sys.version)
-    log_info("Circuit base dir", path=CIRCUIT_BASE_DIR)
-    log_info("Available circuits", circuits=list(CIRCUITS.keys()))
+    log_info("Enclave server starting", action="enclave.started", python_version=sys.version)
+    log_info("Circuit base directory", action="enclave.config", path=CIRCUIT_BASE_DIR)
+    log_info("Available circuits", action="enclave.config", circuits=list(CIRCUITS.keys()))
 
     # Verify circuit artifacts at startup
     for circuit_id, meta in CIRCUITS.items():
@@ -651,10 +680,11 @@ if __name__ == "__main__":
         bytecode = os.path.join(base, "target", meta["bytecode"])
         vk = os.path.join(base, "target", meta["vk"])
         if os.path.exists(bytecode) and os.path.exists(vk):
-            log_info("Circuit artifacts OK", circuit_id=circuit_id)
+            log_info("Circuit artifacts OK", action="enclave.circuit.ok", circuit_id=circuit_id)
         else:
             log_error(
-                "Circuit artifacts MISSING — proof requests for this circuit will fail",
+                "Circuit artifacts missing",
+                action="enclave.circuit.missing",
                 circuit_id=circuit_id,
                 bytecode_exists=os.path.exists(bytecode),
                 vk_exists=os.path.exists(vk),

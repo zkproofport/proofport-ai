@@ -50,7 +50,7 @@ export function createPaymentRecordingMiddleware(config: PaymentRecordingConfig)
       next();
     } catch (error) {
       // Log error but don't block request — x402 already validated it
-      log.error({ err: error }, 'Failed to parse payment header');
+      log.error({ action: 'payment.header.parse_failed', err: error }, 'Failed to parse payment header');
       next();
     }
   };

@@ -109,7 +109,7 @@ export class AgentRegistration {
       tokenId = await this.findTokenId();
     }
     if (tokenId === null) {
-      log.warn('Agent is registered but tokenId could not be resolved — metadata update will be skipped');
+      log.warn({ action: 'identity.token.not_resolved' }, 'Agent is registered but tokenId could not be resolved — metadata update will be skipped');
       return {
         tokenId: 0n,
         owner: this.signer.address,
@@ -117,7 +117,7 @@ export class AgentRegistration {
         isRegistered: true,
       };
     }
-    log.info({ tokenId: tokenId.toString() }, 'Resolved tokenId');
+    log.info({ action: 'identity.token.resolved', tokenId: tokenId.toString() }, 'Resolved tokenId');
 
     const metadataUri = await this.contract.tokenURI(tokenId);
 
@@ -167,7 +167,7 @@ export class AgentRegistration {
   private async findTokenIdByEnumerable(): Promise<bigint | null> {
     try {
       const tokenId = await this.contract.tokenOfOwnerByIndex(this.signer.address, 0);
-      log.debug({ tokenId: tokenId.toString() }, 'Found tokenId via tokenOfOwnerByIndex');
+      log.debug({ action: 'identity.token.found_by_index', tokenId: tokenId.toString() }, 'Found tokenId via tokenOfOwnerByIndex');
       return BigInt(tokenId);
     } catch {
       return null;
@@ -182,14 +182,14 @@ export class AgentRegistration {
     try {
       const totalSupply = await this.contract.totalSupply();
       const total = Number(totalSupply);
-      log.debug({ total }, 'Scanning ownerOf for tokens');
+      log.debug({ action: 'identity.token.scanning', total }, 'Scanning ownerOf for tokens');
 
       // Scan in reverse (most recent first — our token is likely near the end)
       for (let i = total - 1; i >= 0; i--) {
         try {
           const owner = await this.contract.ownerOf(BigInt(i));
           if (owner.toLowerCase() === this.signer.address.toLowerCase()) {
-            log.debug({ tokenId: i }, 'Found tokenId via ownerOf scan');
+            log.debug({ action: 'identity.token.found_by_scan', tokenId: i }, 'Found tokenId via ownerOf scan');
             return BigInt(i);
           }
         } catch {

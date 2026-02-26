@@ -23,6 +23,8 @@ export interface LLMResponse {
 export interface ChatOptions {
   toolChoice?: 'auto' | 'required';
   timeoutMs?: number;
+  /** Logging context propagated to MultiLLMProvider for request tracing (requestId, contextId, step) */
+  logContext?: Record<string, string>;
 }
 
 export interface LLMProvider {

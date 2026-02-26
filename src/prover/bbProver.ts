@@ -136,7 +136,7 @@ export class BbProver {
       );
       return true;
     } catch (error: any) {
-      log.error({ detail: error.stderr || error.message }, 'bb verify failed');
+      log.error({ action: 'prover.bb.verify_failed', detail: error.stderr || error.message }, 'bb verify failed');
       return false;
     }
   }

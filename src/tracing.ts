@@ -33,7 +33,7 @@ if (endpoint) {
   });
 
   provider.register();
-  log.info({ endpoint: `${endpoint}/v1/traces` }, 'OTLP protobuf exporter initialized');
+  log.info({ action: 'tracing.initialized', endpoint: `${endpoint}/v1/traces` }, 'OTLP protobuf exporter initialized');
 } else {
-  log.info('PHOENIX_COLLECTOR_ENDPOINT not set, tracing disabled');
+  log.info({ action: 'tracing.disabled' }, 'PHOENIX_COLLECTOR_ENDPOINT not set, tracing disabled');
 }

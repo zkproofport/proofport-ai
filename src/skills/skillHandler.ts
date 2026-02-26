@@ -215,7 +215,7 @@ export async function handleRequestSigning(
 
   const signingUrl = deps.signPageUrl.replace(/\/$/, '') + '/s/' + requestId;
 
-  log.info({ requestId, circuitId, scope, expiresAt }, 'Created signing session');
+  log.info({ action: 'signing.session.created', requestId, circuitId, scope, expiresAt }, 'Signing session created');
 
   return {
     requestId,
@@ -418,7 +418,7 @@ export async function handleRequestPayment(
   const paymentUrl = deps.signPageUrl.replace(/\/$/, '') + '/pay/' + requestId;
   const network = deps.paymentMode === 'testnet' ? 'Base Sepolia' : 'Base';
 
-  log.info({ requestId, network, amount: deps.paymentProofPrice }, 'Payment initiated');
+  log.info({ action: 'payment.initiated', requestId, network, amount: deps.paymentProofPrice }, 'Payment initiated');
 
   return {
     requestId,
@@ -591,7 +591,7 @@ export async function handleGenerateProof(
       isIncluded: resolvedIsIncluded,
     });
     if (cached) {
-      log.info({ circuitId: resolvedCircuitId, address: resolvedAddress, hasAttestation: !!cached.attestation }, 'CACHE HIT — returning cached proof');
+      log.info({ action: 'proof.cache.hit', requestId: params.requestId, circuitId: resolvedCircuitId, address: resolvedAddress, scope: resolvedScope, hasAttestation: !!cached.attestation }, 'Cache hit, returning cached proof');
 
       const proofId = await storeProofResult(deps.redis, {
         proof: cached.proof,
@@ -609,7 +609,7 @@ export async function handleGenerateProof(
         }),
       });
 
-      log.info({ proofId, hasAttestation: !!cached.attestation }, 'Cached proof stored to Redis');
+      log.info({ action: 'proof.cache.stored', requestId: params.requestId, proofId, circuitId: resolvedCircuitId, hasAttestation: !!cached.attestation }, 'Cached proof stored to Redis');
 
       const defaultChainId = '84532';
       const cachedVerifierAddress = VERIFIER_ADDRESSES[defaultChainId]?.[resolvedCircuitId];
@@ -630,7 +630,7 @@ export async function handleGenerateProof(
     }
   }
 
-  log.info({ circuitId: resolvedCircuitId, address: resolvedAddress, scope: resolvedScope, teeMode: deps.teeMode }, 'Starting proof generation');
+  log.info({ action: 'proof.generate.started', requestId: params.requestId, circuitId: resolvedCircuitId, address: resolvedAddress, scope: resolvedScope, teeMode: deps.teeMode }, 'Proof generation started');
 
   // Compute circuit params (fetches attestation from chain, builds Merkle tree, etc.)
   const circuitParams = await computeCircuitParams(
@@ -650,7 +650,7 @@ export async function handleGenerateProof(
   let proofResult: { proof: string; publicInputs: string; proofWithInputs: string };
   let teeAttestation: { document: string; mode: 'nitro'; proofHash: string; timestamp: number } | undefined;
 
-  log.info({ teeMode: deps.teeMode, hasTeeProvider: !!deps.teeProvider, willUseTee: !!(deps.teeProvider && deps.teeMode === 'nitro') }, 'TEE routing decision');
+  log.info({ action: 'proof.tee.routing', requestId: params.requestId, teeMode: deps.teeMode, hasTeeProvider: !!deps.teeProvider, willUseTee: !!(deps.teeProvider && deps.teeMode === 'nitro') }, 'TEE routing decision');
 
   if (deps.teeProvider && deps.teeMode === 'nitro') {
     // TEE Enclave path (AWS Nitro) — send proverToml for bb CLI proving
@@ -675,7 +675,7 @@ export async function handleGenerateProof(
           throw new Error(`TEE enclave unreachable after ${attempt} attempt(s): ${errMsg}`);
         }
         const delay = TEE_RETRY_BASE_MS * attempt;
-        log.warn({ attempt, maxRetries: TEE_MAX_RETRIES, delay, error: errMsg }, 'TEE enclave connection failed, retrying...');
+        log.warn({ action: 'proof.tee.retry', requestId: params.requestId, attempt, maxRetries: TEE_MAX_RETRIES, delay, error: errMsg }, 'TEE enclave connection failed, retrying');
         await new Promise(r => setTimeout(r, delay));
       }
     }
@@ -684,7 +684,7 @@ export async function handleGenerateProof(
       throw new Error('TEE enclave unreachable: no response after retries');
     }
 
-    log.info({ responseType: teeResponse.type, hasProof: !!teeResponse.proof, hasAttestation: !!teeResponse.attestationDocument, requestId: teeResponse.requestId }, 'TEE enclave response received');
+    log.info({ action: 'proof.tee.response', requestId: params.requestId, circuitId: resolvedCircuitId, responseType: teeResponse.type, hasProof: !!teeResponse.proof, hasAttestation: !!teeResponse.attestationDocument }, 'TEE enclave response received');
 
     if (teeResponse.type === 'error') {
       throw new Error(teeResponse.error || 'TEE proof generation failed');
@@ -722,14 +722,14 @@ export async function handleGenerateProof(
     }
   } else {
     // bb CLI path (local prover)
-    log.info({ teeMode: deps.teeMode, circuitId: resolvedCircuitId }, 'Using bb CLI path (NOT TEE enclave)');
+    log.info({ action: 'proof.bb.started', requestId: params.requestId, teeMode: deps.teeMode, circuitId: resolvedCircuitId }, 'Using bb CLI prover (not TEE enclave)');
     const bbProver = new BbProver({
       bbPath: deps.bbPath,
       nargoPath: deps.nargoPath,
       circuitsDir: deps.circuitsDir,
     });
     proofResult = await bbProver.prove(resolvedCircuitId, circuitParams);
-    log.info({ circuitId: resolvedCircuitId }, 'bb CLI proof generation complete');
+    log.info({ action: 'proof.bb.completed', requestId: params.requestId, circuitId: resolvedCircuitId }, 'bb CLI proof generation completed');
   }
 
   // Convert computed values to hex
@@ -750,7 +750,7 @@ export async function handleGenerateProof(
       });
       if (att) attestation = att as unknown as Record<string, unknown>;
     } catch (error) {
-      log.error({ err: error }, 'Failed to generate TEE attestation');
+      log.error({ action: 'proof.attestation.failed', requestId: params.requestId, circuitId: resolvedCircuitId, err: error }, 'Failed to generate TEE attestation');
     }
   }
 
@@ -781,7 +781,7 @@ export async function handleGenerateProof(
       },
       cacheableResult,
     );
-    log.info({ circuitId: resolvedCircuitId, address: resolvedAddress, hasAttestation: !!attestation }, 'Proof cached');
+    log.info({ action: 'proof.cache.stored', requestId: params.requestId, circuitId: resolvedCircuitId, address: resolvedAddress, hasAttestation: !!attestation }, 'Proof cached');
   }
 
   // Store result for later retrieval/verification
@@ -804,7 +804,7 @@ export async function handleGenerateProof(
   const baseUrl = deps.signPageUrl.replace(/\/$/, '');
   const verifyUrl = baseUrl + '/v/' + proofId;
 
-  log.info({ proofId, circuitId: resolvedCircuitId, nullifier, signalHash, hasAttestation: !!attestation }, 'Proof generated');
+  log.info({ action: 'proof.completed', requestId: params.requestId, proofId, circuitId: resolvedCircuitId, nullifier, signalHash, hasAttestation: !!attestation, cached: false }, 'Proof generated');
 
   // Consume the signing record only after successful proof generation
   // (if proof fails, record stays so user can retry without re-signing/re-paying)
@@ -920,7 +920,7 @@ export async function handleVerifyProof(
   const provider = new ethers.JsonRpcProvider(deps.chainRpcUrl);
   const verifierContract = new ethers.Contract(verifierAddress, VERIFIER_ABI, provider);
 
-  log.info({ circuitId, chainId, verifierAddress, publicInputsCount: publicInputsArray.length }, 'Verifying proof on-chain');
+  log.info({ action: 'proof.verify.started', circuitId, chainId, verifierAddress, publicInputsCount: publicInputsArray.length }, 'Verifying proof on-chain');
 
   try {
     const isValid: boolean = await verifierContract.verify(proof, publicInputsArray);
@@ -934,7 +934,7 @@ export async function handleVerifyProof(
     };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
-    log.error({ detail: message }, 'Proof verification contract call reverted');
+    log.error({ action: 'proof.verify.reverted', circuitId, chainId, verifierAddress, detail: message }, 'Proof verification contract call reverted');
 
     return {
       valid: false,

@@ -52,12 +52,12 @@ export async function ensureAgentValidated(
   teeProvider: TeeProvider
 ): Promise<void> {
   if (!config.erc8004ValidationAddress) {
-    log.info('ValidationRegistry address not configured — skipping');
+    log.info({ action: 'tee.validation.not_configured' }, 'ValidationRegistry address not configured — skipping');
     return;
   }
 
   if (config.teeMode === 'disabled') {
-    log.info('TEE mode is disabled — skipping validation');
+    log.info({ action: 'tee.validation.disabled' }, 'TEE mode is disabled — skipping validation');
     return;
   }
 
@@ -76,7 +76,7 @@ export async function ensureAgentValidated(
 
     if (registryIdentity.toLowerCase() !== config.erc8004IdentityAddress.toLowerCase()) {
       log.info(
-        { registryIdentity, ourIdentity: config.erc8004IdentityAddress },
+        { action: 'tee.validation.identity_mismatch', registryIdentity, ourIdentity: config.erc8004IdentityAddress },
         "ValidationRegistry uses different Identity contract — registering on ValidationRegistry's Identity contract"
       );
 
@@ -92,7 +92,7 @@ export async function ensureAgentValidated(
         const info = await validationRegistration.getRegistration();
         if (info) {
           validationTokenId = info.tokenId;
-          log.info({ validationTokenId: validationTokenId.toString() }, "Already registered on ValidationRegistry's Identity");
+          log.info({ action: 'tee.validation.already_registered', validationTokenId: validationTokenId.toString() }, "Already registered on ValidationRegistry's Identity");
         }
       } else {
         const result = await validationRegistration.register({
@@ -106,7 +106,7 @@ export async function ensureAgentValidated(
         });
         validationTokenId = result.tokenId;
         log.info(
-          { validationTokenId: validationTokenId.toString(), tx: result.transactionHash },
+          { action: 'tee.validation.registered', validationTokenId: validationTokenId.toString(), tx: result.transactionHash },
           "Registered on ValidationRegistry's Identity"
         );
       }
@@ -120,7 +120,7 @@ export async function ensureAgentValidated(
         const status = await contract.getValidationStatus(hash);
         // status[2] is the response (uint8), status[4] is the tag (bytes32)
         if (Number(status[2]) > 0 && status[4] === ethers.encodeBytes32String(TEE_TAG)) {
-          log.info({ requestHash: hash }, 'Agent already has TEE validation');
+          log.info({ action: 'tee.validation.already_validated', requestHash: hash }, 'Agent already has TEE validation');
           return;
         }
       } catch {
@@ -130,14 +130,14 @@ export async function ensureAgentValidated(
     }
 
     // Generate attestation
-    log.info('Generating TEE attestation');
+    log.info({ action: 'tee.validation.attestation_started' }, 'Generating TEE attestation');
     const proofHash = ethers.keccak256(
       ethers.toUtf8Bytes(`agent:${validationTokenId}:${Date.now()}`)
     );
     const attestation = await teeProvider.generateAttestation(proofHash);
 
     if (!attestation) {
-      log.error('Failed to generate attestation — TEE provider returned null');
+      log.error({ action: 'tee.validation.attestation_failed' }, 'Failed to generate attestation — TEE provider returned null');
       return;
     }
 
@@ -159,7 +159,7 @@ export async function ensureAgentValidated(
     const requestHash = ethers.keccak256(ethers.toUtf8Bytes(requestJson));
 
     // Step 1: Submit validation request (agent address as validator for self-validation)
-    log.info('Submitting validationRequest to ValidationRegistry');
+    log.info({ action: 'tee.validation.request_submitting' }, 'Submitting validationRequest to ValidationRegistry');
     const reqTx = await contract.validationRequest(
       signer.address, // self-validate: use own address as validator
       validationTokenId,
@@ -167,7 +167,7 @@ export async function ensureAgentValidated(
       requestHash
     );
     await reqTx.wait();
-    log.info({ tx: reqTx.hash }, 'validationRequest submitted');
+    log.info({ action: 'tee.validation.request_submitted', tx: reqTx.hash }, 'validationRequest submitted');
 
     // Step 2: Submit validation response (self-validate with score 100)
     const responseData = {
@@ -181,7 +181,7 @@ export async function ensureAgentValidated(
     const responseURI = `data:application/json;base64,${responseBase64}`;
     const responseHash = ethers.keccak256(ethers.toUtf8Bytes(responseJson));
 
-    log.info('Submitting validationResponse to ValidationRegistry');
+    log.info({ action: 'tee.validation.response_submitting' }, 'Submitting validationResponse to ValidationRegistry');
     const resTx = await contract.validationResponse(
       requestHash,
       100, // score: 100 = fully validated
@@ -190,9 +190,9 @@ export async function ensureAgentValidated(
       ethers.encodeBytes32String(TEE_TAG)
     );
     await resTx.wait();
-    log.info({ tx: resTx.hash }, 'validationResponse submitted');
-    log.info('TEE attestation registered on-chain successfully');
+    log.info({ action: 'tee.validation.response_submitted', tx: resTx.hash }, 'validationResponse submitted');
+    log.info({ action: 'tee.validation.completed' }, 'TEE attestation registered on-chain successfully');
   } catch (error) {
-    log.error({ err: error }, 'Failed to submit TEE validation');
+    log.error({ action: 'tee.validation.submit_failed', err: error }, 'Failed to submit TEE validation');
   }
 }
