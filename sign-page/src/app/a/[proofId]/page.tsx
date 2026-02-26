@@ -102,16 +102,29 @@ export default function AttestationPage() {
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [data, setData] = useState<AttestationData | null>(null);
 
-  const handleDownload = useCallback(() => {
-    if (!data) return;
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `attestation-${proofId}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [data, proofId]);
+  const handleDownload = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/v1/proof/${proofId}`);
+      const fullData = await response.json();
+      const blob = new Blob([JSON.stringify(fullData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `proof-${proofId}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      // Fallback to display data if unified endpoint fails
+      if (!data) return;
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `proof-${proofId}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+  }, [proofId, data]);
 
   useEffect(() => {
     async function fetchAttestation() {
@@ -372,7 +385,7 @@ export default function AttestationPage() {
             marginBottom: '1rem',
           }}
         >
-          Download Attestation Data (JSON)
+          Download Complete Proof Data (JSON)
         </button>
 
         {/* Link to verify page */}

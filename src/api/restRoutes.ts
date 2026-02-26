@@ -254,6 +254,115 @@ export function createRestRoutes(deps: RestRoutesDeps): Router {
   });
 
   /**
+   * GET /api/v1/proof/:proofId
+   * Complete proof data package — on-chain verification + TEE attestation in one response.
+   * Used by both verification and attestation pages for unified JSON download.
+   */
+  router.get('/proof/:proofId', async (req: Request, res: Response) => {
+    const { proofId } = req.params;
+
+    try {
+      const stored = await getProofResult(redis, proofId);
+
+      if (!stored) {
+        res.status(404).json({ error: 'Proof not found or expired' });
+        return;
+      }
+
+      // Parse publicInputs
+      let publicInputs: string[];
+      try {
+        const parsed = JSON.parse(stored.publicInputs);
+        publicInputs = Array.isArray(parsed) ? parsed : splitHexToBytes32(stored.publicInputs);
+      } catch {
+        publicInputs = splitHexToBytes32(stored.publicInputs);
+      }
+
+      // On-chain verification
+      const chainId = '84532'; // Base Sepolia
+      let onChain: { isValid: boolean; verifierAddress: string; error?: string } | null = null;
+      const chainVerifiers = VERIFIER_ADDRESSES[chainId];
+      if (chainVerifiers && chainVerifiers[stored.circuitId]) {
+        try {
+          const result = await verifyOnChain({
+            proof: stored.proof,
+            publicInputs,
+            circuitId: stored.circuitId,
+            chainId,
+            rpcUrl: config.chainRpcUrl,
+          });
+          onChain = result;
+        } catch (err) {
+          onChain = {
+            isValid: false,
+            verifierAddress: chainVerifiers[stored.circuitId],
+            error: err instanceof Error ? err.message : 'Verification failed',
+          };
+        }
+      }
+
+      // TEE attestation verification
+      let attestation: any = null;
+      if (stored.attestation) {
+        let attestationDoc: any = null;
+        let verification: any = null;
+
+        try {
+          const { parseAttestationDocument, verifyAttestationDocument } = await import('../tee/attestation.js');
+          attestationDoc = parseAttestationDocument(stored.attestation.document);
+          verification = await verifyAttestationDocument(attestationDoc);
+        } catch (err) {
+          verification = {
+            isValid: false,
+            error: err instanceof Error ? err.message : 'Attestation verification failed',
+          };
+        }
+
+        const pcrs: Record<string, string> = {};
+        if (attestationDoc?.pcrs) {
+          for (const [key, value] of attestationDoc.pcrs.entries()) {
+            pcrs[`pcr${key}`] = (value as Buffer).toString('hex');
+          }
+        }
+
+        attestation = {
+          mode: stored.attestation.mode,
+          proofHash: stored.attestation.proofHash,
+          timestamp: stored.attestation.timestamp,
+          document: stored.attestation.document,
+          parsed: attestationDoc ? {
+            moduleId: attestationDoc.moduleId,
+            digest: attestationDoc.digest,
+            timestamp: attestationDoc.timestamp,
+            pcrs,
+            userData: attestationDoc.userData?.toString('hex') || null,
+            nonce: attestationDoc.nonce?.toString('hex') || null,
+          } : null,
+          verification,
+        };
+      }
+
+      res.json({
+        proofId,
+        circuitId: stored.circuitId,
+        nullifier: stored.nullifier,
+        proof: stored.proof,
+        publicInputs,
+        chainId,
+        onChain,
+        attestation,
+        createdAt: stored.createdAt,
+        expiresAt: new Date(new Date(stored.createdAt).getTime() + 86400 * 1000).toISOString(),
+      });
+    } catch (error) {
+      log.error({ err: error }, 'Complete proof data error');
+      res.status(500).json({
+        error: error instanceof Error ? error.message : 'Failed to retrieve proof data',
+      });
+    }
+  });
+
+  /**
    * GET /api/v1/verify/:proofId
    * Verify a stored proof on-chain by proofId (QR code / link verification).
    */
@@ -299,16 +408,6 @@ export function createRestRoutes(deps: RestRoutesDeps): Router {
         isValid: result.isValid,
         verifierAddress: result.verifierAddress,
         chainId,
-        proof: stored.proof,
-        publicInputs,
-        ...(stored.attestation ? {
-          attestation: {
-            mode: stored.attestation.mode,
-            proofHash: stored.attestation.proofHash,
-            timestamp: stored.attestation.timestamp,
-            document: stored.attestation.document,
-          },
-        } : {}),
         createdAt: stored.createdAt,
         expiresAt: new Date(new Date(stored.createdAt).getTime() + 86400 * 1000).toISOString(),
       });
@@ -364,21 +463,9 @@ export function createRestRoutes(deps: RestRoutesDeps): Router {
         }
       }
 
-      // Parse publicInputs for independent on-chain verification
-      let publicInputs: string[];
-      try {
-        const parsed = JSON.parse(stored.publicInputs);
-        publicInputs = Array.isArray(parsed) ? parsed : splitHexToBytes32(stored.publicInputs);
-      } catch {
-        publicInputs = splitHexToBytes32(stored.publicInputs);
-      }
-
       res.json({
         proofId,
         circuitId: stored.circuitId,
-        nullifier: stored.nullifier,
-        proof: stored.proof,
-        publicInputs,
         createdAt: stored.createdAt,
         expiresAt: new Date(new Date(stored.createdAt).getTime() + 86400 * 1000).toISOString(),
         attestation: {
