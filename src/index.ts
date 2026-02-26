@@ -485,7 +485,14 @@ const el=document.getElementById('result');
 try{
 const r=await fetch('${apiUrl}');
 const d=await r.json();
-if(!r.ok){el.innerHTML='<div class="status error">'+d.error+'</div>';return}
+if(!r.ok){
+if(r.status===404){
+el.innerHTML='<div class="status error">🕐 This proof data has expired or was not found.<br><br>Proof verification results are available for 24 hours after generation. To keep your results permanently, download the JSON data before expiration.</div>';
+}else{
+el.innerHTML='<div class="status error">'+d.error+'</div>';
+}
+return;
+}
 el.innerHTML=
 '<div class="status '+(d.isValid?'valid':'invalid')+'">'+
 '<span class="badge '+(d.isValid?'badge-valid':'badge-invalid')+'">'+(d.isValid?'\\u2713 VALID':'\\u2717 INVALID')+'</span>'+
@@ -494,8 +501,10 @@ el.innerHTML=
 '<div class="field"><div class="label">Nullifier</div><div class="value">'+d.nullifier+'</div></div>'+
 '<div class="field"><div class="label">Verifier Contract</div><div class="value">'+d.verifierAddress+'</div></div>'+
 '<div class="field"><div class="label">Chain</div><div class="value">Base Sepolia ('+d.chainId+')</div></div>'+
+'<div style="color:#666;font-size:.75rem;margin-top:.25rem;margin-bottom:.75rem">Data available until: '+new Date(d.expiresAt).toUTCString()+'</div>'+
 '<div class="privacy">0 bytes of personal data exposed</div>'+
-'<div style="text-align:center;margin-top:.75rem"><a href="/a/${proofId}" style="color:#93c5fd;font-size:.8rem;text-decoration:underline">View TEE Attestation →</a></div>';
+'<div style="text-align:center;margin-top:.75rem"><a href="/a/${proofId}" style="color:#93c5fd;font-size:.8rem;text-decoration:underline">View TEE Attestation →</a></div>'+
+'<button onclick="(function(){var blob=new Blob([JSON.stringify(d,null,2)],{type:\'application/json\'});var a=document.createElement(\'a\');a.href=URL.createObjectURL(blob);a.download=\'proof-\'+d.proofId+\'.json\';a.click();})()" style="background:#1e3a5f;border:1px solid #2563eb;color:#93c5fd;padding:.5rem 1rem;border-radius:6px;cursor:pointer;font-size:.8rem;width:100%;margin-top:.75rem">Download Proof Data (JSON)</button>';
 }catch(e){el.innerHTML='<div class="status error">Failed to verify: '+e.message+'</div>'}
 })();
 </script>

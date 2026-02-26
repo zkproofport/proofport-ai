@@ -33,6 +33,8 @@ interface AttestationVerification {
 interface AttestationData {
   proofId: string;
   circuitId: string;
+  createdAt?: string;
+  expiresAt?: string;
   attestation: {
     mode: string;
     proofHash: string;
@@ -100,6 +102,17 @@ export default function AttestationPage() {
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [data, setData] = useState<AttestationData | null>(null);
 
+  const handleDownload = useCallback(() => {
+    if (!data) return;
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `attestation-${proofId}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [data, proofId]);
+
   useEffect(() => {
     async function fetchAttestation() {
       try {
@@ -140,7 +153,9 @@ export default function AttestationPage() {
         <div className="card">
           <h1 className="title">TEE Attestation</h1>
           <div className="error">
-            Attestation not found. This proof may not have TEE attestation, or the proof ID is invalid.
+            This proof data has expired or was not found.
+            <br /><br />
+            Proof verification results are available for 24 hours after generation. To keep your results permanently, download the JSON data before expiration.
           </div>
         </div>
       </div>
@@ -329,6 +344,36 @@ export default function AttestationPage() {
             <CopyButton text={data.attestation.proofHash} />
           </div>
         </div>
+
+        {/* Expiration info */}
+        {data.expiresAt && (
+          <div className="info" style={{ marginBottom: '1rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ color: '#999', fontSize: '0.8rem' }}>Data available until</span>
+              <span style={{ fontSize: '0.8rem', color: '#666' }}>
+                {new Date(data.expiresAt).toUTCString()}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Download button */}
+        <button
+          onClick={handleDownload}
+          style={{
+            background: '#1e3a5f',
+            border: '1px solid #2563eb',
+            color: '#93c5fd',
+            padding: '0.5rem 1rem',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontSize: '0.8rem',
+            width: '100%',
+            marginBottom: '1rem',
+          }}
+        >
+          Download Attestation Data (JSON)
+        </button>
 
         {/* Link to verify page */}
         <div style={{ textAlign: 'center', marginTop: '0.5rem' }}>

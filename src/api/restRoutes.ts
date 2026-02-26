@@ -299,6 +299,8 @@ export function createRestRoutes(deps: RestRoutesDeps): Router {
         isValid: result.isValid,
         verifierAddress: result.verifierAddress,
         chainId,
+        createdAt: stored.createdAt,
+        expiresAt: new Date(new Date(stored.createdAt).getTime() + 86400 * 1000).toISOString(),
       });
     } catch (error) {
       log.error({ err: error }, 'Proof verification error');
@@ -355,6 +357,8 @@ export function createRestRoutes(deps: RestRoutesDeps): Router {
       res.json({
         proofId,
         circuitId: stored.circuitId,
+        createdAt: stored.createdAt,
+        expiresAt: new Date(new Date(stored.createdAt).getTime() + 86400 * 1000).toISOString(),
         attestation: {
           mode: stored.attestation.mode,
           proofHash: stored.attestation.proofHash,
