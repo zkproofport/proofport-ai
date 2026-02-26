@@ -382,18 +382,23 @@ def generate_proof(circuit_id: str, inputs: list, request_id: str, prover_toml: 
         else:
             log_info("No public_inputs file — returning empty publicInputs array")
 
-        # Step 7: NSM attestation (if available)
+        # Step 7: NSM attestation (REQUIRED inside Nitro enclave)
+        # If we're inside a real enclave, /dev/nsm MUST exist and attestation MUST succeed.
+        # Returning a proof without attestation defeats the purpose of TEE execution.
         attestation_b64 = None
-        try:
-            import hashlib
-            proof_hash = hashlib.sha256(proof_bytes).digest()
-            nsm_doc = get_nsm_attestation(user_data=proof_hash)
-            if nsm_doc:
-                import base64
-                attestation_b64 = base64.b64encode(nsm_doc).decode("ascii")
-                log_info("NSM attestation obtained", doc_bytes=len(nsm_doc))
-        except Exception as e:
-            log_error("NSM attestation failed (non-fatal)", error=str(e))
+        import hashlib
+        proof_hash = hashlib.sha256(proof_bytes).digest()
+        nsm_doc = get_nsm_attestation(user_data=proof_hash)
+        if nsm_doc:
+            import base64
+            attestation_b64 = base64.b64encode(nsm_doc).decode("ascii")
+            log_info("NSM attestation obtained", doc_bytes=len(nsm_doc))
+        elif os.path.exists(NSM_DEVICE):
+            # /dev/nsm exists but attestation failed — this should not happen
+            raise RuntimeError("NSM device exists but attestation failed. Refusing to return proof without attestation.")
+        else:
+            # Not in a real enclave (e.g., local TCP fallback) — attestation not available
+            log_info("NSM device not present — attestation skipped (non-enclave environment)")
 
         result = {
             "proof": proof_hex,

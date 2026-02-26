@@ -47,6 +47,11 @@ ExecStart=/usr/bin/docker run \
   --device /dev/vsock \
   --security-opt seccomp=unconfined \
   --env-file /opt/proofport-ai/.env \
+  --log-driver=awslogs \
+  --log-opt awslogs-region=ap-northeast-2 \
+  --log-opt awslogs-group=/proofport-ai/${DEPLOY_ENV} \
+  --log-opt awslogs-stream-prefix=app \
+  --log-opt awslogs-create-group=true \
   -v /opt/proofport-ai/circuits:/app/circuits \
   -v /opt/proofport-ai/logs:/app/logs \
   ${AI_IMAGE}

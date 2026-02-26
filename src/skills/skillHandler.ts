@@ -641,11 +641,35 @@ export async function handleGenerateProof(
 
   if (deps.teeProvider && deps.teeMode === 'nitro') {
     // TEE Enclave path (AWS Nitro) — send proverToml for bb CLI proving
+    // Retry on connection failures (enclave may be restarting during deployment)
     const proverToml = toProverToml(
       resolvedCircuitId as 'coinbase_attestation' | 'coinbase_country_attestation',
       circuitParams
     );
-    const teeResponse = await deps.teeProvider.prove(resolvedCircuitId, [], randomUUID(), proverToml);
+
+    const TEE_MAX_RETRIES = 5;
+    const TEE_RETRY_BASE_MS = 3000;
+    let teeResponse: Awaited<ReturnType<typeof deps.teeProvider.prove>> | undefined;
+
+    for (let attempt = 1; attempt <= TEE_MAX_RETRIES; attempt++) {
+      try {
+        teeResponse = await deps.teeProvider.prove(resolvedCircuitId, [], randomUUID(), proverToml);
+        break; // success
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        const isConnectionError = errMsg.includes('ECONNREFUSED') || errMsg.includes('ECONNRESET') || errMsg.includes('Connection timeout') || errMsg.includes('Empty response');
+        if (!isConnectionError || attempt === TEE_MAX_RETRIES) {
+          throw new Error(`TEE enclave unreachable after ${attempt} attempt(s): ${errMsg}`);
+        }
+        const delay = TEE_RETRY_BASE_MS * attempt;
+        log.warn({ attempt, maxRetries: TEE_MAX_RETRIES, delay, error: errMsg }, 'TEE enclave connection failed, retrying...');
+        await new Promise(r => setTimeout(r, delay));
+      }
+    }
+
+    if (!teeResponse) {
+      throw new Error('TEE enclave unreachable: no response after retries');
+    }
 
     if (teeResponse.type === 'error') {
       throw new Error(teeResponse.error || 'TEE proof generation failed');
