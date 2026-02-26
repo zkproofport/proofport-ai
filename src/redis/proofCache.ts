@@ -10,6 +10,12 @@ export interface CachedProofResult {
   publicInputs: string;
   nullifier: string;
   signalHash: string;
+  attestation?: {
+    document: string;
+    mode: string;
+    proofHash: string;
+    timestamp: number;
+  };
 }
 
 export interface ProofCacheInputs {

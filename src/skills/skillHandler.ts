@@ -591,7 +591,7 @@ export async function handleGenerateProof(
       isIncluded: resolvedIsIncluded,
     });
     if (cached) {
-      log.debug({ circuitId: resolvedCircuitId, address: resolvedAddress }, 'Cache hit for proof');
+      log.info({ circuitId: resolvedCircuitId, address: resolvedAddress, hasAttestation: !!cached.attestation }, 'CACHE HIT — returning cached proof');
 
       const proofId = await storeProofResult(deps.redis, {
         proof: cached.proof,
@@ -599,7 +599,17 @@ export async function handleGenerateProof(
         circuitId: resolvedCircuitId,
         nullifier: cached.nullifier,
         signalHash: cached.signalHash,
+        ...(cached.attestation && {
+          attestation: {
+            document: cached.attestation.document,
+            mode: cached.attestation.mode,
+            proofHash: cached.attestation.proofHash,
+            timestamp: cached.attestation.timestamp,
+          },
+        }),
       });
+
+      log.info({ proofId, hasAttestation: !!cached.attestation }, 'Cached proof stored to Redis');
 
       const defaultChainId = '84532';
       const cachedVerifierAddress = VERIFIER_ADDRESSES[defaultChainId]?.[resolvedCircuitId];
@@ -613,6 +623,7 @@ export async function handleGenerateProof(
         proofId,
         verifyUrl: baseUrl + '/v/' + proofId,
         cached: true,
+        ...(cached.attestation && { attestation: cached.attestation, attestationUrl: baseUrl + '/a/' + proofId }),
         ...(paymentTxHash && { paymentTxHash, paymentReceiptUrl: getBasescanTxUrl(deps.paymentMode, paymentTxHash) }),
         ...(cachedVerifierAddress && { verifierAddress: cachedVerifierAddress, verifierExplorerUrl: getBasescanAddressUrl(defaultChainId, cachedVerifierAddress) }),
       };
@@ -638,6 +649,8 @@ export async function handleGenerateProof(
   // Generate proof (TEE enclave or bb CLI)
   let proofResult: { proof: string; publicInputs: string; proofWithInputs: string };
   let teeAttestation: { document: string; mode: 'nitro'; proofHash: string; timestamp: number } | undefined;
+
+  log.info({ teeMode: deps.teeMode, hasTeeProvider: !!deps.teeProvider, willUseTee: !!(deps.teeProvider && deps.teeMode === 'nitro') }, 'TEE routing decision');
 
   if (deps.teeProvider && deps.teeMode === 'nitro') {
     // TEE Enclave path (AWS Nitro) — send proverToml for bb CLI proving
@@ -670,6 +683,8 @@ export async function handleGenerateProof(
     if (!teeResponse) {
       throw new Error('TEE enclave unreachable: no response after retries');
     }
+
+    log.info({ responseType: teeResponse.type, hasProof: !!teeResponse.proof, hasAttestation: !!teeResponse.attestationDocument, requestId: teeResponse.requestId }, 'TEE enclave response received');
 
     if (teeResponse.type === 'error') {
       throw new Error(teeResponse.error || 'TEE proof generation failed');
@@ -707,12 +722,14 @@ export async function handleGenerateProof(
     }
   } else {
     // bb CLI path (local prover)
+    log.info({ teeMode: deps.teeMode, circuitId: resolvedCircuitId }, 'Using bb CLI path (NOT TEE enclave)');
     const bbProver = new BbProver({
       bbPath: deps.bbPath,
       nargoPath: deps.nargoPath,
       circuitsDir: deps.circuitsDir,
     });
     proofResult = await bbProver.prove(resolvedCircuitId, circuitParams);
+    log.info({ circuitId: resolvedCircuitId }, 'bb CLI proof generation complete');
   }
 
   // Convert computed values to hex
@@ -737,12 +754,20 @@ export async function handleGenerateProof(
     }
   }
 
-  // Cache the result
+  // Cache the result (including attestation so cache hits preserve TEE evidence)
   const cacheableResult = {
     proof: proofResult.proof,
     publicInputs: proofResult.publicInputs,
     nullifier,
     signalHash,
+    ...(attestation && {
+      attestation: {
+        document: (attestation as any).document,
+        mode: (attestation as any).mode,
+        proofHash: (attestation as any).proofHash,
+        timestamp: (attestation as any).timestamp,
+      },
+    }),
   };
 
   if (deps.proofCache) {
@@ -756,6 +781,7 @@ export async function handleGenerateProof(
       },
       cacheableResult,
     );
+    log.info({ circuitId: resolvedCircuitId, address: resolvedAddress, hasAttestation: !!attestation }, 'Proof cached');
   }
 
   // Store result for later retrieval/verification

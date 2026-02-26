@@ -1,7 +1,6 @@
 import { randomUUID } from 'crypto';
 import type { RedisClient } from './client.js';
-
-const PROOF_RESULT_TTL = 86400; // 24 hours
+import { PROOF_RESULT_TTL } from './constants.js';
 const PROOF_RESULT_PREFIX = 'proof:result:';
 
 export interface StoredProofResult {

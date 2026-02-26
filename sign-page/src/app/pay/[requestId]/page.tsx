@@ -2,7 +2,7 @@
 
 import { useParams } from 'next/navigation';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { useAccount, useSwitchChain, useWalletClient, useDisconnect } from 'wagmi';
+import { useAccount, useSwitchChain, useSignTypedData, useChainId, useDisconnect } from 'wagmi';
 import { useState, useEffect, useCallback } from 'react';
 import { toHex } from 'viem';
 
@@ -39,10 +39,11 @@ function formatPrice(priceDisplay: string): string {
 export default function PaymentPage() {
   const params = useParams();
   const requestId = params.requestId as string;
-  const { address, isConnected, chainId: connectedChainId } = useAccount();
+  const { address, isConnected } = useAccount();
   const { disconnect } = useDisconnect();
+  const connectedChainId = useChainId();
   const { switchChainAsync } = useSwitchChain();
-  const { data: walletClient } = useWalletClient({ chainId: connectedChainId });
+  const { signTypedDataAsync } = useSignTypedData();
 
   const [payInfo, setPayInfo] = useState<PaymentInfo | null>(null);
   const [status, setStatus] = useState<
@@ -128,10 +129,7 @@ export default function PaymentPage() {
         nonce,
       };
 
-      if (!walletClient) throw new Error('Wallet not connected');
-
-      const signature = await walletClient.signTypedData({
-        account: address,
+      const signature = await signTypedDataAsync({
         domain: {
           name: payInfo.usdcName,
           version: payInfo.usdcVersion,
@@ -182,7 +180,7 @@ export default function PaymentPage() {
       setErrorMessage(err.message || 'Payment failed');
       setStatus('error');
     }
-  }, [address, payInfo, requestId, walletClient]);
+  }, [address, payInfo, requestId, signTypedDataAsync]);
 
   if (status === 'loading') {
     return (

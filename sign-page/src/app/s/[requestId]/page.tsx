@@ -2,7 +2,7 @@
 
 import { useParams } from 'next/navigation';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { useAccount, useWalletClient, useDisconnect } from 'wagmi';
+import { useAccount, useSignMessage, useDisconnect } from 'wagmi';
 import { useState, useEffect, useCallback } from 'react';
 import { toBytes } from 'viem';
 
@@ -14,9 +14,9 @@ if (!API_BASE_URL) {
 export default function SigningPage() {
   const params = useParams();
   const requestId = params.requestId as string;
-  const { address, isConnected, chainId: connectedChainId } = useAccount();
+  const { address, isConnected } = useAccount();
+  const { signMessageAsync } = useSignMessage();
   const { disconnect } = useDisconnect();
-  const { data: walletClient } = useWalletClient({ chainId: connectedChainId });
 
   const [signalHash, setSignalHash] = useState<string | null>(null);
   const [status, setStatus] = useState<'loading' | 'idle' | 'preparing' | 'ready' | 'signing' | 'submitting' | 'success' | 'error' | 'expired'>('loading');
@@ -109,8 +109,7 @@ export default function SigningPage() {
 
       // Sign the raw signalHash bytes using personal_sign
       // This matches the mobile app's signing behavior
-      if (!walletClient) throw new Error('Wallet not connected');
-      const signature = await walletClient.signMessage({
+      const signature = await signMessageAsync({
         message: { raw: toBytes(signalHash as `0x${string}`) },
       });
 

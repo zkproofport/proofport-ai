@@ -16,6 +16,7 @@ import { buildSwaggerSpec } from './swagger.js';
 import { createRedisClient } from './redis/client.js';
 import { RateLimiter } from './redis/rateLimiter.js';
 import { ProofCache } from './redis/proofCache.js';
+import { PROOF_CACHE_TTL } from './redis/constants.js';
 import { CleanupWorker } from './redis/cleanupWorker.js';
 import { getAgentCardHandler, getMcpDiscoveryHandler, getOasfAgentHandler } from './a2a/agentCard.js';
 import { DefaultRequestHandler } from '@a2a-js/sdk/server';
@@ -82,7 +83,7 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
     windowSeconds: 60,
     keyPrefix: 'rl:prove',
   });
-  const proofCache = new ProofCache(redis, { ttlSeconds: 3600 });
+  const proofCache = new ProofCache(redis, { ttlSeconds: PROOF_CACHE_TTL });
 
   // A2A setup
   const taskStore = new RedisTaskStore(redis, 86400);
