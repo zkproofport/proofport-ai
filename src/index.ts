@@ -504,7 +504,8 @@ el.innerHTML=
 '<div style="color:#666;font-size:.75rem;margin-top:.25rem;margin-bottom:.75rem">Data available until: '+new Date(d.expiresAt).toUTCString()+'</div>'+
 '<div class="privacy">0 bytes of personal data exposed</div>'+
 '<div style="text-align:center;margin-top:.75rem"><a href="/a/${proofId}" style="color:#93c5fd;font-size:.8rem;text-decoration:underline">View TEE Attestation →</a></div>'+
-'<button onclick="(function(){var blob=new Blob([JSON.stringify(d,null,2)],{type:\'application/json\'});var a=document.createElement(\'a\');a.href=URL.createObjectURL(blob);a.download=\'proof-\'+d.proofId+\'.json\';a.click();})()" style="background:#1e3a5f;border:1px solid #2563eb;color:#93c5fd;padding:.5rem 1rem;border-radius:6px;cursor:pointer;font-size:.8rem;width:100%;margin-top:.75rem">Download Proof Data (JSON)</button>';
+'<button id="dl-btn" style="background:#1e3a5f;border:1px solid #2563eb;color:#93c5fd;padding:.5rem 1rem;border-radius:6px;cursor:pointer;font-size:.8rem;width:100%;margin-top:.75rem">Download Proof Data (JSON)</button>';
+document.getElementById('dl-btn').onclick=function(){var blob=new Blob([JSON.stringify(d,null,2)],{type:'application/json'});var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='proof-'+d.proofId+'.json';a.click();};
 }catch(e){el.innerHTML='<div class="status error">Failed to verify: '+e.message+'</div>'}
 })();
 </script>
