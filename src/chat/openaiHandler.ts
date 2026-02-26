@@ -89,7 +89,7 @@ function buildDslBlock(lastSkillResult: unknown, signingUrl: string | undefined)
       const sr = lastSkillResult as Record<string, unknown>;
       const filtered: Record<string, unknown> = {};
       const SUMMARY_FIELDS = [
-        'state', 'proofId', 'verifyUrl', 'paymentReceiptUrl', 'paymentTxHash',
+        'state', 'proofId', 'verifyUrl', 'attestationUrl', 'paymentReceiptUrl', 'paymentTxHash',
         'nullifier', 'signalHash', 'signingUrl', 'requestId',
         'amount', 'network', 'message', 'error', 'valid',
         'circuitId', 'verifierAddress', 'verifierExplorerUrl', 'chainId',
@@ -100,6 +100,9 @@ function buildDslBlock(lastSkillResult: unknown, signingUrl: string | undefined)
 
       if (sr.verifyUrl) {
         filtered.qrImageUrl = `https://quickchart.io/qr?text=${encodeURIComponent(sr.verifyUrl as string)}&size=300&dark=4ade80&light=1a1a1a`;
+      }
+      if (sr.attestationUrl) {
+        filtered.attestationQrImageUrl = `https://quickchart.io/qr?text=${encodeURIComponent(sr.attestationUrl as string)}&size=300&dark=60a5fa&light=1a1a1a`;
       }
       if (sr.paymentReceiptUrl) {
         filtered.receiptQrImageUrl = `https://quickchart.io/qr?text=${encodeURIComponent(sr.paymentReceiptUrl as string)}&size=300&dark=4ade80&light=1a1a1a`;

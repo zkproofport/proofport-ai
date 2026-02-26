@@ -194,7 +194,7 @@ function extractProofportBlock(content) {
  * Returns { cleanedText, buttons } where buttons is [{ text, url }].
  */
 function extractAndReplaceUrls(text) {
-  const urlRegex = /https?:\/\/[^\s)]+\/(?:s|pay)\/[^\s),.:!?'"]+/g;
+  const urlRegex = /https?:\/\/[^\s)]+\/(?:s|pay|v|a)\/[^\s),.:!?'"]+/g;
   const buttons = [];
   const seenUrls = new Set();
 
@@ -206,10 +206,13 @@ function extractAndReplaceUrls(text) {
     // Telegram Bot API requires HTTPS for inline keyboard buttons — skip http/localhost URLs
     if (!url.startsWith('https://')) continue;
     const isPayment = /\/pay\//.test(url);
-    buttons.push({
-      text: isPayment ? 'Pay with USDC' : 'Connect Wallet & Sign',
-      url,
-    });
+    const isVerify = /\/v\//.test(url);
+    const isAttestation = /\/a\//.test(url);
+    let label = '✍️ Connect Wallet & Sign';
+    if (isPayment) label = '💳 Pay with USDC';
+    else if (isAttestation) label = '🔒 View TEE Attestation';
+    else if (isVerify) label = '✅ Verify Proof On-Chain';
+    buttons.push({ text: label, url });
   }
 
   // Remove the extracted URLs from the text (keeping surrounding text intact)
@@ -388,7 +391,7 @@ bot.on('message', async (msg) => {
         const stepOptions = { disable_web_page_preview: true };
         if (stepButtons.length > 0) {
           stepOptions.reply_markup = {
-            inline_keyboard: [stepButtons.map(b => ({ text: b.text, url: b.url }))],
+            inline_keyboard: stepButtons.map(b => [{ text: b.text, url: b.url }]),
           };
         }
         await bot.sendMessage(chatId, stepCleaned || stepMessage, stepOptions);
@@ -430,29 +433,52 @@ bot.on('message', async (msg) => {
 
     if (cleanedText) {
       const msgOptions = buttons.length > 0
-        ? { reply_markup: { inline_keyboard: [buttons.map(b => ({ text: b.text, url: b.url }))] } }
+        ? { reply_markup: { inline_keyboard: buttons.map(b => [{ text: b.text, url: b.url }]) } }
         : {};
       await sendLongMessage(chatId, cleanedText, msgOptions);
     }
 
-    // Send QR images from proofport DSL data
+    // Send QR images from proofport DSL data with inline keyboard buttons
     if (proofportData?.skillResult) {
       const sr = proofportData.skillResult;
 
-      if (sr.qrImageUrl) {
+      if (sr.qrImageUrl && sr.verifyUrl) {
         try {
+          const qrButtons = [
+            [{ text: '✅ Verify Proof On-Chain', url: sr.verifyUrl }],
+          ];
+          if (sr.attestationUrl) {
+            qrButtons.push([{ text: '🔒 View TEE Attestation', url: sr.attestationUrl }]);
+          }
           await bot.sendPhoto(chatId, sr.qrImageUrl, {
-            caption: `Verify on-chain: ${sr.verifyUrl || ''}`,
+            caption: 'Proof Verification',
+            reply_markup: { inline_keyboard: qrButtons },
           });
         } catch (e) {
           console.error(`[${chatId}] QR send failed:`, e.message);
         }
       }
 
-      if (sr.receiptQrImageUrl) {
+      if (sr.attestationQrImageUrl && sr.attestationUrl) {
+        try {
+          await bot.sendPhoto(chatId, sr.attestationQrImageUrl, {
+            caption: 'TEE Attestation',
+            reply_markup: {
+              inline_keyboard: [[{ text: '🔒 View TEE Attestation', url: sr.attestationUrl }]],
+            },
+          });
+        } catch (e) {
+          console.error(`[${chatId}] Attestation QR failed:`, e.message);
+        }
+      }
+
+      if (sr.receiptQrImageUrl && sr.paymentReceiptUrl) {
         try {
           await bot.sendPhoto(chatId, sr.receiptQrImageUrl, {
-            caption: `Payment receipt: ${sr.paymentReceiptUrl || ''}`,
+            caption: 'Payment Receipt',
+            reply_markup: {
+              inline_keyboard: [[{ text: '🧾 View Payment Receipt', url: sr.paymentReceiptUrl }]],
+            },
           });
         } catch (e) {
           console.error(`[${chatId}] Receipt QR failed:`, e.message);

@@ -77,6 +77,9 @@ export function getTaskOutcome(skill: string, result: unknown): TaskOutcome {
     case 'generate_proof': {
       const r = result as GenerateProofResult;
       let guidance = `Proof generated successfully. ProofId: ${r.proofId}. Verification page: ${r.verifyUrl}`;
+      if (r.attestationUrl) {
+        guidance += ` | TEE Attestation: ${r.attestationUrl}`;
+      }
       if (r.verifierExplorerUrl) {
         guidance += ` | Verifier contract: ${r.verifierExplorerUrl}`;
       }

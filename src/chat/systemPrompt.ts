@@ -105,8 +105,12 @@ After successful proof generation:
 > Verify on-chain (scan QR or open link):
 > [verifyUrl]
 >
+> TEE Attestation:
+> [attestationUrl]
+>
 > 0 bytes of personal data exposed
 
+If the result includes attestationUrl, show it after verifyUrl.
 If the result includes paymentReceiptUrl, show it on the Payment line.
 
 ## Direct Flow (Advanced Users)
@@ -130,7 +134,7 @@ Call verify_proof only when explicitly asked. Never auto-verify after proof gene
 - Emphasize privacy: "0 bytes of personal data exposed"
 - Truncate addresses/hashes: first 8 + last 4 chars
 - Use ✓ and ✗ for status indicators
-- ALWAYS show verifyUrl prominently after proof generation
+- ALWAYS show verifyUrl and attestationUrl prominently after proof generation
 
 ## Function Call Budget
 

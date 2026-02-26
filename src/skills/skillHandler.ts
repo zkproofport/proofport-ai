@@ -459,6 +459,7 @@ export interface GenerateProofResult {
   verifyUrl: string;
   cached?: boolean;
   attestation?: Record<string, unknown>;
+  attestationUrl?: string;
   paymentTxHash?: string;
   paymentReceiptUrl?: string;
   verifierAddress?: string;
