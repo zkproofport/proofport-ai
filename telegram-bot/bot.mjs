@@ -194,7 +194,9 @@ function extractProofportBlock(content) {
  * Returns { cleanedText, buttons } where buttons is [{ text, url }].
  */
 function extractAndReplaceUrls(text) {
-  const urlRegex = /https?:\/\/[^\s)]+\/(?:s|pay|v|a)\/[^\s),.:!?'"]+/g;
+  // Only extract signing (/s/) and payment (/pay/) URLs as buttons.
+  // Verify (/v/) and attestation (/a/) URLs stay as plain text — they get QR photos with buttons instead.
+  const urlRegex = /https?:\/\/[^\s)]+\/(?:s|pay)\/[^\s),.:!?'"]+/g;
   const buttons = [];
   const seenUrls = new Set();
 
@@ -206,13 +208,10 @@ function extractAndReplaceUrls(text) {
     // Telegram Bot API requires HTTPS for inline keyboard buttons — skip http/localhost URLs
     if (!url.startsWith('https://')) continue;
     const isPayment = /\/pay\//.test(url);
-    const isVerify = /\/v\//.test(url);
-    const isAttestation = /\/a\//.test(url);
-    let label = '✍️ Connect Wallet & Sign';
-    if (isPayment) label = '💳 Pay with USDC';
-    else if (isAttestation) label = '🔒 View TEE Attestation';
-    else if (isVerify) label = '✅ Verify Proof On-Chain';
-    buttons.push({ text: label, url });
+    buttons.push({
+      text: isPayment ? '💳 Pay with USDC' : '✍️ Connect Wallet & Sign',
+      url,
+    });
   }
 
   // Remove the extracted URLs from the text (keeping surrounding text intact)
@@ -444,15 +443,11 @@ bot.on('message', async (msg) => {
 
       if (sr.qrImageUrl && sr.verifyUrl) {
         try {
-          const qrButtons = [
-            [{ text: '✅ Verify Proof On-Chain', url: sr.verifyUrl }],
-          ];
-          if (sr.attestationUrl) {
-            qrButtons.push([{ text: '🔒 View TEE Attestation', url: sr.attestationUrl }]);
-          }
           await bot.sendPhoto(chatId, sr.qrImageUrl, {
             caption: 'Proof Verification',
-            reply_markup: { inline_keyboard: qrButtons },
+            reply_markup: {
+              inline_keyboard: [[{ text: '✅ Verify Proof On-Chain', url: sr.verifyUrl }]],
+            },
           });
         } catch (e) {
           console.error(`[${chatId}] QR send failed:`, e.message);
