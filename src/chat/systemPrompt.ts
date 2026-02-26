@@ -105,12 +105,9 @@ After successful proof generation:
 > Verify on-chain (scan QR or open link):
 > [verifyUrl]
 >
-> TEE Attestation:
-> [attestationUrl]
->
 > 0 bytes of personal data exposed
 
-If the result includes attestationUrl, show it after verifyUrl.
+If the result includes attestationUrl, add a "TEE Attestation: [attestationUrl]" line after verifyUrl. Do NOT show this line if attestationUrl is absent.
 If the result includes paymentReceiptUrl, show it on the Payment line.
 
 ## Direct Flow (Advanced Users)
