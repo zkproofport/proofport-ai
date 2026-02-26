@@ -15,6 +15,7 @@ export type AgentCard = SDKAgentCard & {
     mode: string;
     attestationEnabled: boolean;
     attestationFormat: string;
+    attestationEndpoint: string;
   };
 };
 
@@ -140,6 +141,7 @@ export function buildAgentCard(config: Config, tokenId?: bigint | null): AgentCa
         mode: config.teeMode,
         attestationEnabled: config.teeAttestationEnabled,
         attestationFormat: config.teeMode === 'nitro' ? 'aws-nitro-nsm' : 'simulated',
+        attestationEndpoint: `${config.a2aBaseUrl}/api/v1/attestation/{proofId}`,
       },
     }),
   };
@@ -262,6 +264,14 @@ export function buildMcpDiscovery(config: Config) {
       baseUrl: config.a2aBaseUrl,
       documentation: 'https://docs.zkproofport.app',
     },
+    ...(config.teeMode !== 'disabled' && {
+      'x-tee': {
+        mode: config.teeMode,
+        attestationEnabled: config.teeAttestationEnabled,
+        attestationFormat: config.teeMode === 'nitro' ? 'aws-nitro-nsm' : 'simulated',
+        attestationEndpoint: `${config.a2aBaseUrl}/api/v1/attestation/{proofId}`,
+      },
+    }),
   };
 }
 
@@ -327,6 +337,14 @@ export function buildOasfAgent(config: Config, tokenId?: bigint | null) {
     supportedTrust: config.teeMode !== 'disabled'
       ? ['reputation', 'tee-attestation']
       : ['reputation'],
+    ...(config.teeMode !== 'disabled' && {
+      teeMetadata: {
+        mode: config.teeMode,
+        attestationEnabled: config.teeAttestationEnabled,
+        attestationFormat: config.teeMode === 'nitro' ? 'aws-nitro-nsm' : 'simulated',
+        attestationEndpoint: `${config.a2aBaseUrl}/api/v1/attestation/{proofId}`,
+      },
+    }),
   };
 }
 

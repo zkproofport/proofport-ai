@@ -309,6 +309,77 @@ export function createRestRoutes(deps: RestRoutesDeps): Router {
   });
 
   /**
+   * GET /api/v1/attestation/:proofId
+   * Return attestation document and verification result for a stored proof.
+   */
+  router.get('/attestation/:proofId', async (req: Request, res: Response) => {
+    const { proofId } = req.params;
+
+    try {
+      const stored = await getProofResult(redis, proofId);
+
+      if (!stored) {
+        res.status(404).json({ error: 'Proof not found or expired' });
+        return;
+      }
+
+      if (!stored.attestation) {
+        res.status(404).json({ error: 'No attestation available for this proof. The proof was generated without TEE attestation.' });
+        return;
+      }
+
+      // Parse and verify the attestation document
+      let attestationDoc: any = null;
+      let verification: any = null;
+
+      try {
+        const { parseAttestationDocument, verifyAttestationDocument } = await import('../tee/attestation.js');
+        attestationDoc = parseAttestationDocument(stored.attestation.document);
+        verification = await verifyAttestationDocument(attestationDoc);
+      } catch (err) {
+        // Attestation parsing/verification failed — still return the raw data
+        verification = {
+          isValid: false,
+          error: err instanceof Error ? err.message : 'Attestation verification failed',
+        };
+      }
+
+      // Build response with PCR values as hex strings
+      const pcrs: Record<string, string> = {};
+      if (attestationDoc?.pcrs) {
+        for (const [key, value] of attestationDoc.pcrs.entries()) {
+          pcrs[`pcr${key}`] = (value as Buffer).toString('hex');
+        }
+      }
+
+      res.json({
+        proofId,
+        circuitId: stored.circuitId,
+        attestation: {
+          mode: stored.attestation.mode,
+          proofHash: stored.attestation.proofHash,
+          timestamp: stored.attestation.timestamp,
+          document: stored.attestation.document, // base64 raw
+        },
+        parsed: attestationDoc ? {
+          moduleId: attestationDoc.moduleId,
+          digest: attestationDoc.digest,
+          timestamp: attestationDoc.timestamp,
+          pcrs,
+          userData: attestationDoc.userData?.toString('hex') || null,
+          nonce: attestationDoc.nonce?.toString('hex') || null,
+        } : null,
+        verification,
+      });
+    } catch (error) {
+      log.error({ err: error }, 'Attestation retrieval error');
+      res.status(500).json({
+        error: error instanceof Error ? error.message : 'Failed to retrieve attestation',
+      });
+    }
+  });
+
+  /**
    * POST /api/v1/flow
    * Start an orchestrated proof flow. Returns flowId, signingUrl, and initial phase.
    */

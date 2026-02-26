@@ -10,6 +10,12 @@ export interface StoredProofResult {
   circuitId: string;
   nullifier: string;
   signalHash: string;
+  attestation?: {
+    document: string;  // base64-encoded COSE Sign1
+    mode: string;      // 'nitro' | 'local'
+    proofHash: string;
+    timestamp: number;
+  };
 }
 
 interface ProofResultRecord extends StoredProofResult {

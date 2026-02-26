@@ -739,6 +739,14 @@ export async function handleGenerateProof(
     circuitId: resolvedCircuitId,
     nullifier,
     signalHash,
+    ...(attestation && {
+      attestation: {
+        document: (attestation as any).document,
+        mode: (attestation as any).mode,
+        proofHash: (attestation as any).proofHash,
+        timestamp: (attestation as any).timestamp,
+      },
+    }),
   });
 
   const verifyUrl = deps.signPageUrl.replace(/\/$/, '') + '/v/' + proofId;

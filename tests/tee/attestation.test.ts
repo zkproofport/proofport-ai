@@ -3,6 +3,13 @@ import { encode as cborEncode } from 'cbor-x';
 import { readFileSync } from 'fs';
 import { execSync } from 'child_process';
 import type { AttestationDocument } from '../../src/tee/types.js';
+import {
+  REAL_ATTESTATION_DOC_BASE64,
+  REAL_ATTESTATION_DOC_2,
+  REAL_ATTESTATION_DOC_3,
+  REAL_ATTESTATION_DOC_4,
+  ALL_REAL_ATTESTATION_DOCS,
+} from './fixtures/real-attestation.js';
 
 describe('Attestation Verification', () => {
   let verifyAttestationDocument: any;
@@ -284,10 +291,10 @@ describe('Attestation Verification', () => {
         maxAge: 5000, // 5 seconds
       });
       // Timestamp is fresh (within 5 seconds), so error should NOT be about timestamp
-      // It will fail on signature verification instead (dummy signature)
+      // It will fail on Root CA fingerprint check (mock cert != AWS Nitro Root CA)
       if (!result.isValid) {
         expect(result.error).not.toContain('timestamp');
-        expect(result.error).toContain('signature');
+        expect(result.error).toContain('Root CA fingerprint mismatch');
       }
     });
 
@@ -508,8 +515,8 @@ describe('Attestation Verification', () => {
       const result = await verifyAttestationDocument(doc);
 
       expect(result.isValid).toBe(false);
-      expect(result.signatureValid).toBe(false);
-      expect(result.error).toContain('Unsupported COSE algorithm');
+      // Root CA fingerprint check rejects mock certs before reaching algorithm check
+      expect(result.error).toContain('Root CA fingerprint mismatch');
     });
 
     it('should return error details on failure', async () => {
@@ -600,6 +607,106 @@ describe('Attestation Verification', () => {
       expect(result.pcr0Valid).toBe(true);
       expect(result.pcr1Valid).toBe(true);
       expect(result.pcr2Valid).toBe(true);
+    });
+  });
+
+  describe('Real AWS Nitro attestation verification', () => {
+    it('should parse real attestation document', () => {
+      const doc = parseAttestationDocument(REAL_ATTESTATION_DOC_BASE64);
+      expect(doc.moduleId).toBe('i-00c24aade60062e55-enc019c950296d762b3');
+      expect(doc.digest).toBe('SHA384');
+      expect(doc.timestamp).toBe(1772027701218);
+      expect(doc.pcrs.size).toBe(16);
+      expect(doc.cabundle.length).toBe(4);
+      expect(doc.userData).toBeDefined();
+    });
+
+    it('should fully verify real attestation document', async () => {
+      const doc = parseAttestationDocument(REAL_ATTESTATION_DOC_BASE64);
+      const result = await verifyAttestationDocument(doc);
+
+      expect(result.isValid).toBe(true);
+      expect(result.rootCaValid).toBe(true);
+      expect(result.chainValid).toBe(true);
+      expect(result.certificateValid).toBe(true);
+      expect(result.signatureValid).toBe(true);
+      expect(result.error).toBeUndefined();
+    });
+
+    it('should verify real attestation with correct PCR0', async () => {
+      const doc = parseAttestationDocument(REAL_ATTESTATION_DOC_BASE64);
+      const pcr0 = doc.pcrs.get(0)!;
+
+      const result = await verifyAttestationDocument(doc, {
+        expectedPcr0: pcr0,
+      });
+      expect(result.isValid).toBe(true);
+      expect(result.pcr0Valid).toBe(true);
+    });
+
+    it('should reject real attestation with wrong PCR0', async () => {
+      const doc = parseAttestationDocument(REAL_ATTESTATION_DOC_BASE64);
+
+      const result = await verifyAttestationDocument(doc, {
+        expectedPcr0: Buffer.alloc(48, 0xff),
+      });
+      expect(result.isValid).toBe(false);
+      expect(result.pcr0Valid).toBe(false);
+      expect(result.error).toContain('PCR0');
+    });
+  });
+
+  describe('Multiple real attestation documents', () => {
+    it('should fully verify all 5 real attestation documents', async () => {
+      for (const docBase64 of ALL_REAL_ATTESTATION_DOCS) {
+        const doc = parseAttestationDocument(docBase64);
+        const result = await verifyAttestationDocument(doc);
+
+        expect(result.isValid).toBe(true);
+        expect(result.rootCaValid).toBe(true);
+        expect(result.chainValid).toBe(true);
+        expect(result.certificateValid).toBe(true);
+        expect(result.signatureValid).toBe(true);
+        expect(result.error).toBeUndefined();
+      }
+    });
+
+    it('should have the same PCR0 across all 5 documents (same enclave image)', () => {
+      const pcr0Values = ALL_REAL_ATTESTATION_DOCS.map((docBase64) => {
+        const doc = parseAttestationDocument(docBase64);
+        const pcr0 = doc.pcrs.get(0);
+        expect(pcr0).toBeDefined();
+        return pcr0!.toString('hex');
+      });
+
+      // All docs from the same enclave instance must have identical PCR0
+      const firstPcr0 = pcr0Values[0];
+      for (const pcr0 of pcr0Values) {
+        expect(pcr0).toBe(firstPcr0);
+      }
+    });
+
+    it('should have different timestamps across all 5 documents', () => {
+      const timestamps = ALL_REAL_ATTESTATION_DOCS.map((docBase64) => {
+        const doc = parseAttestationDocument(docBase64);
+        return doc.timestamp;
+      });
+
+      // All timestamps must be unique
+      const uniqueTimestamps = new Set(timestamps);
+      expect(uniqueTimestamps.size).toBe(ALL_REAL_ATTESTATION_DOCS.length);
+    });
+
+    it('should have different user_data across all 5 documents (different proof hashes)', () => {
+      const userDataValues = ALL_REAL_ATTESTATION_DOCS.map((docBase64) => {
+        const doc = parseAttestationDocument(docBase64);
+        expect(doc.userData).toBeDefined();
+        return doc.userData!.toString('hex');
+      });
+
+      // All user_data must be unique (each proof generates a different hash)
+      const uniqueUserData = new Set(userDataValues);
+      expect(uniqueUserData.size).toBe(ALL_REAL_ATTESTATION_DOCS.length);
     });
   });
 
