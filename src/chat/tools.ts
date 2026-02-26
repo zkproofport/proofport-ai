@@ -59,7 +59,7 @@ export const CHAT_TOOLS: LLMTool[] = [
   },
   {
     name: 'generate_proof',
-    description: '[STEP 4/5] Generate a zero-knowledge proof (30-90 seconds). When following a session flow (request_signing → check_status → request_payment → check_status), just call with no parameters — requestId, circuitId, and scope are auto-resolved from the session. For direct flow, provide address+signature+circuitId+scope. Returns: proofId, verifyUrl (verification page), verifierAddress, verifierExplorerUrl (Basescan link to contract), nullifier, signalHash, paymentTxHash, paymentReceiptUrl (Basescan link to payment tx), proof (raw hex), publicInputs (raw hex), cached (boolean), attestation (TEE).',
+    description: '[STEP 4/5] Generate a zero-knowledge proof (30-90 seconds). When following a session flow (request_signing → check_status → request_payment → check_status), just call with no parameters — requestId, circuitId, and scope are auto-resolved from the session. For direct flow, provide address+signature+circuitId+scope. Returns: proofId, verifyUrl (verification page), attestationUrl (TEE attestation page), verifierAddress, verifierExplorerUrl (Basescan link to contract), nullifier, signalHash, paymentTxHash, paymentReceiptUrl (Basescan link to payment tx), proof (raw hex), publicInputs (raw hex), cached (boolean), attestation (TEE).',
     parameters: {
       type: 'object',
       properties: {

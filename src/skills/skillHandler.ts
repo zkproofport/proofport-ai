@@ -603,13 +603,14 @@ export async function handleGenerateProof(
       const defaultChainId = '84532';
       const cachedVerifierAddress = VERIFIER_ADDRESSES[defaultChainId]?.[resolvedCircuitId];
 
+      const baseUrl = deps.signPageUrl.replace(/\/$/, '');
       return {
         proof: cached.proof,
         publicInputs: cached.publicInputs,
         nullifier: cached.nullifier,
         signalHash: cached.signalHash,
         proofId,
-        verifyUrl: deps.signPageUrl.replace(/\/$/, '') + '/v/' + proofId,
+        verifyUrl: baseUrl + '/v/' + proofId,
         cached: true,
         ...(paymentTxHash && { paymentTxHash, paymentReceiptUrl: getBasescanTxUrl(deps.paymentMode, paymentTxHash) }),
         ...(cachedVerifierAddress && { verifierAddress: cachedVerifierAddress, verifierExplorerUrl: getBasescanAddressUrl(defaultChainId, cachedVerifierAddress) }),
@@ -749,7 +750,8 @@ export async function handleGenerateProof(
     }),
   });
 
-  const verifyUrl = deps.signPageUrl.replace(/\/$/, '') + '/v/' + proofId;
+  const baseUrl = deps.signPageUrl.replace(/\/$/, '');
+  const verifyUrl = baseUrl + '/v/' + proofId;
 
   log.info({ proofId, circuitId: resolvedCircuitId, nullifier, signalHash, hasAttestation: !!attestation }, 'Proof generated');
 
@@ -763,7 +765,7 @@ export async function handleGenerateProof(
     signalHash,
     proofId,
     verifyUrl,
-    ...(attestation && { attestation }),
+    ...(attestation && { attestation, attestationUrl: baseUrl + '/a/' + proofId }),
     ...(paymentTxHash && { paymentTxHash, paymentReceiptUrl: getBasescanTxUrl(deps.paymentMode, paymentTxHash) }),
     ...(resolvedVerifierAddress && { verifierAddress: resolvedVerifierAddress, verifierExplorerUrl: getBasescanAddressUrl(defaultChainId, resolvedVerifierAddress) }),
   };

@@ -195,7 +195,8 @@ Response fields:
 - proof (string): Raw proof bytes (0x-prefixed hex)
 - publicInputs (string): Raw public inputs (0x-prefixed hex)
 - cached (boolean?): True if served from proof cache
-- attestation (object?): TEE attestation (when running in trusted execution environment)`,
+- attestation (object?): TEE attestation (when running in trusted execution environment)
+- attestationUrl (string?): Web page URL for TEE attestation verification (when attestation is available)`,
     {
       address: z.string().optional().describe('KYC wallet address (0x-prefixed, 20 bytes). Required when providing signature directly. Omit for web signing flow.'),
       signature: z.string().optional().describe('User signature over the signal hash (0x-prefixed, 65 bytes). If omitted, a web signing request is created.'),

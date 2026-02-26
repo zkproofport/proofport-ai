@@ -254,6 +254,26 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
     next();
   });
 
+  // CORS for attestation routes (sign-page on port 3200 → AI server on port 4002)
+  app.use('/api/v1/attestation', (req, res, next) => {
+    const origin = req.headers.origin;
+    const allowedOrigins = [
+      'http://127.0.0.1:3200',
+      'http://localhost:3200',
+      config.signPageUrl,
+    ].filter(Boolean);
+    if (origin && allowedOrigins.includes(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    }
+    if (req.method === 'OPTIONS') {
+      res.sendStatus(204);
+      return;
+    }
+    next();
+  });
+
   // CORS for payment routes (sign-page on port 3200 → AI server on port 4002)
   app.use('/api/payment', (req, res, next) => {
     const origin = req.headers.origin;
@@ -474,7 +494,8 @@ el.innerHTML=
 '<div class="field"><div class="label">Nullifier</div><div class="value">'+d.nullifier+'</div></div>'+
 '<div class="field"><div class="label">Verifier Contract</div><div class="value">'+d.verifierAddress+'</div></div>'+
 '<div class="field"><div class="label">Chain</div><div class="value">Base Sepolia ('+d.chainId+')</div></div>'+
-'<div class="privacy">0 bytes of personal data exposed</div>';
+'<div class="privacy">0 bytes of personal data exposed</div>'+
+'<div style="text-align:center;margin-top:.75rem"><a href="/a/${proofId}" style="color:#93c5fd;font-size:.8rem;text-decoration:underline">View TEE Attestation →</a></div>';
 }catch(e){el.innerHTML='<div class="status error">Failed to verify: '+e.message+'</div>'}
 })();
 </script>
@@ -672,6 +693,7 @@ el.innerHTML=
   // Proxy sign-page requests to internal Next.js server
   app.use('/s', createSignPageProxy());
   app.use('/pay', createSignPageProxy());
+  app.use('/a', createSignPageProxy());
   app.use('/_next', createSignPageProxy());
 
   return { app, paymentFacilitator, teeProvider, settlementWorker, cleanupWorker };
