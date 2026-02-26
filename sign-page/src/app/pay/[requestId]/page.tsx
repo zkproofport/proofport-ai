@@ -2,7 +2,7 @@
 
 import { useParams } from 'next/navigation';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { useAccount, useSwitchChain, useSignTypedData, useChainId, useDisconnect } from 'wagmi';
+import { useAccount, useDisconnect } from 'wagmi';
 import { useState, useEffect, useCallback } from 'react';
 import { toHex } from 'viem';
 
@@ -39,11 +39,8 @@ function formatPrice(priceDisplay: string): string {
 export default function PaymentPage() {
   const params = useParams();
   const requestId = params.requestId as string;
-  const { address, isConnected } = useAccount();
+  const { address, isConnected, connector, chainId: connectedChainId } = useAccount();
   const { disconnect } = useDisconnect();
-  const connectedChainId = useChainId();
-  const { switchChainAsync } = useSwitchChain();
-  const { signTypedDataAsync } = useSignTypedData();
 
   const [payInfo, setPayInfo] = useState<PaymentInfo | null>(null);
   const [status, setStatus] = useState<
@@ -99,13 +96,18 @@ export default function PaymentPage() {
     try {
       setStatus('switching-chain');
       setErrorMessage('');
-      await switchChainAsync({ chainId: payInfo.chainId });
+      const provider = await connector?.getProvider();
+      if (!provider) throw new Error('No wallet provider available');
+      await (provider as any).request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: toHex(payInfo.chainId) }],
+      });
       setStatus('ready');
     } catch (err: any) {
       setErrorMessage(err.message || 'Failed to switch network');
       setStatus('wrong-chain');
     }
-  }, [payInfo, switchChainAsync]);
+  }, [payInfo, connector]);
 
   const handlePay = useCallback(async () => {
     if (!address || !payInfo) return;
@@ -129,7 +131,7 @@ export default function PaymentPage() {
         nonce,
       };
 
-      const signature = await signTypedDataAsync({
+      const typedData = {
         domain: {
           name: payInfo.usdcName,
           version: payInfo.usdcVersion,
@@ -147,7 +149,23 @@ export default function PaymentPage() {
           ],
         },
         primaryType: 'TransferWithAuthorization',
-        message: authorization,
+        message: {
+          from: authorization.from,
+          to: authorization.to,
+          value: authorization.value.toString(),
+          validAfter: authorization.validAfter.toString(),
+          validBefore: authorization.validBefore.toString(),
+          nonce: authorization.nonce,
+        },
+      };
+
+      // Use raw EIP-1193 provider to bypass wagmi's request queue.
+      // Avoids "eth_signTypedData_v4 already pending" errors on mobile WalletConnect.
+      const provider = await connector?.getProvider();
+      if (!provider) throw new Error('No wallet provider available');
+      const signature = await (provider as any).request({
+        method: 'eth_signTypedData_v4',
+        params: [address, JSON.stringify(typedData)],
       });
 
       setStatus('submitting');
@@ -180,7 +198,7 @@ export default function PaymentPage() {
       setErrorMessage(err.message || 'Payment failed');
       setStatus('error');
     }
-  }, [address, payInfo, requestId, signTypedDataAsync]);
+  }, [address, payInfo, requestId, connector]);
 
   if (status === 'loading') {
     return (

@@ -2,9 +2,8 @@
 
 import { useParams } from 'next/navigation';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { useAccount, useSignMessage, useDisconnect } from 'wagmi';
+import { useAccount, useDisconnect } from 'wagmi';
 import { useState, useEffect, useCallback } from 'react';
-import { toBytes } from 'viem';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
 if (!API_BASE_URL) {
@@ -14,8 +13,7 @@ if (!API_BASE_URL) {
 export default function SigningPage() {
   const params = useParams();
   const requestId = params.requestId as string;
-  const { address, isConnected } = useAccount();
-  const { signMessageAsync } = useSignMessage();
+  const { address, isConnected, connector } = useAccount();
   const { disconnect } = useDisconnect();
 
   const [signalHash, setSignalHash] = useState<string | null>(null);
@@ -107,10 +105,13 @@ export default function SigningPage() {
       setStatus('signing');
       setErrorMessage('');
 
-      // Sign the raw signalHash bytes using personal_sign
-      // This matches the mobile app's signing behavior
-      const signature = await signMessageAsync({
-        message: { raw: toBytes(signalHash as `0x${string}`) },
+      // Sign the raw signalHash bytes using personal_sign via raw EIP-1193 provider.
+      // Bypasses wagmi's request queue to avoid "personal_sign already pending" on mobile WalletConnect.
+      const provider = await connector?.getProvider();
+      if (!provider) throw new Error('No wallet provider available');
+      const signature = await (provider as any).request({
+        method: 'personal_sign',
+        params: [signalHash, address],
       });
 
       setStatus('submitting');
