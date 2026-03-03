@@ -4,6 +4,11 @@ import type { AgentCard as SDKAgentCard } from '@a2a-js/sdk';
 import { ERC8004_ADDRESSES } from '../config/contracts.js';
 
 export type AgentCard = SDKAgentCard & {
+  guides?: {
+    description: string;
+    coinbase_kyc: string;
+    coinbase_country: string;
+  };
   identity?: {
     erc8004: {
       contractAddress: string;
@@ -38,7 +43,7 @@ export function buildAgentCard(config: Config, tokenId?: bigint | null): AgentCa
 
   return {
     name: 'proveragent.base.eth',
-    description: 'Autonomous ZK proof generation. ERC-8004 identity. x402 payments. Powered by ZKProofport',
+    description: 'ZK proof generation agent for Coinbase KYC and country-of-residence verification. Generates zero-knowledge proofs from Coinbase Verified Account attestations on Base chain using Noir circuits in AWS Nitro TEE. Supports: (1) coinbase_kyc — prove KYC verification without revealing identity, (2) coinbase_country — prove country of residence with inclusion/exclusion lists. Payment via USDC on Base. ERC-8004 registered identity. x402 payment protocol compatible.',
     url: `${config.a2aBaseUrl}/a2a`,
     version: config.agentVersion,
     protocolVersion: '0.3.0',
@@ -54,62 +59,70 @@ export function buildAgentCard(config: Config, tokenId?: bigint | null): AgentCa
     },
     skills: [
       {
-        id: 'request_signing',
-        name: 'Request Wallet Signing',
-        description: '[STEP 1/5] Start a proof generation session. Returns a URL where the user connects their wallet and signs. Use the same contextId for all subsequent calls (check_status, request_payment, generate_proof) to auto-link the session.',
-        tags: ['signing', 'wallet', 'session'],
-        examples: [
-          'I want to generate a KYC proof',
-          'Start a proof for my Coinbase attestation',
-        ],
-        inputModes: ['application/json'],
-        outputModes: ['application/json'],
-      },
-      {
-        id: 'check_status',
-        name: 'Check Request Status',
-        description: '[STEP 2/5] Check signing and payment status. Returns phase: signing | payment | ready | expired. If using the same contextId as request_signing, the requestId is auto-resolved. When phase is "payment", call request_payment. When "ready", call generate_proof.',
-        tags: ['status', 'polling'],
-        examples: [
-          'Check if signing is complete',
-          'What is the status of my request?',
-        ],
-        inputModes: ['application/json'],
-        outputModes: ['application/json'],
-      },
-      {
-        id: 'request_payment',
-        name: 'Request Payment',
-        description: '[STEP 3/5] Initiate USDC payment for proof generation. Returns a payment URL. Only call when check_status shows phase "payment". Signing must be completed first.',
-        tags: ['payment', 'usdc', 'x402'],
-        examples: [
-          'I need to pay for the proof',
-          'Get the payment link',
-        ],
-        inputModes: ['application/json'],
-        outputModes: ['application/json'],
-      },
-      {
-        id: 'generate_proof',
-        name: 'Generate ZK Proof',
-        description: '[STEP 4/5] Generate a zero-knowledge proof. Call when check_status shows phase "ready". If using the same contextId, the requestId is auto-resolved. Proof generation takes 30-90 seconds.',
-        tags: ['zk-proof', 'privacy', 'coinbase', 'attestation', 'noir'],
+        id: 'proof_request',
+        name: 'Create Proof Session',
+        description: `[STEP 1/2] Create a proof generation session for Coinbase KYC or country-of-residence verification. Returns session_id, guide_url (comprehensive step-by-step instructions for preparing all proof inputs), and USDC payment instructions (amount, recipient, nonce to embed in transfer data field).
+
+SUPPORTED CIRCUITS:
+- coinbase_kyc: Prove Coinbase KYC verification without revealing identity. Requires a Coinbase Verified Account attestation on Base chain (EAS schema 0xf8b05c79f090979bf4a80270aba232dff11a10d9ca55c4f88de95317970f0de9).
+- coinbase_country: Prove country of residence from Coinbase attestation with inclusion/exclusion list. EAS schema 0x1801901fabd0e6189356b4fb52bb0ab855276d84f7ec140839fbd1f6801ca065.
+
+FLOW OVERVIEW:
+1. Call proof_request with circuit type → get session_id + guide_url + payment info
+2. Follow guide_url to prepare all required proof inputs (signal_hash, nullifier, scope_bytes, merkle_root, user_address, signature, public keys, raw transaction, Merkle proof)
+3. Pay via x402: Sign EIP-3009 TransferWithAuthorization with session nonce, settle via x402 facilitator
+4. Call prove with session_id, payment_tx_hash, and all circuit inputs → receive ZK proof
+
+PAYMENT:
+- Amount: 0.1 USDC (100000 base units, 6 decimals)
+- Network: Base Sepolia (testnet) or Base (mainnet)
+- Method: x402 protocol (EIP-3009 TransferWithAuthorization + x402 facilitator settle)
+- Sign EIP-712 authorization with session nonce, submit to https://www.x402.org/facilitator/settle
+- The facilitator settles on-chain (pays gas). Use returned tx hash in prove step`,
+        tags: ['zk-proof', 'coinbase', 'kyc', 'identity', 'privacy', 'attestation', 'session', 'payment', 'usdc', 'base-chain', 'noir', 'tee', 'country-verification', 'eas'],
         examples: [
           'Generate a KYC proof for my Coinbase account',
-          'Create a country attestation proof for US residency',
-          'Prove Coinbase verification without revealing identity',
+          'Prove my Coinbase verification without revealing identity',
+          'Create a country attestation proof',
+          'Start a zero-knowledge proof session for Coinbase KYC',
+          'Verify my Coinbase identity privately using ZK proof',
         ],
         inputModes: ['application/json'],
         outputModes: ['application/json'],
       },
       {
-        id: 'verify_proof',
-        name: 'Verify ZK Proof',
-        description: '[STEP 5/5 — OPTIONAL] Verify a zero-knowledge proof on-chain against the deployed verifier contract. Not part of the standard generation flow.',
-        tags: ['verification', 'on-chain', 'smart-contract'],
+        id: 'prove',
+        name: 'Generate ZK Proof',
+        description: `[STEP 2/2] Submit payment proof and circuit inputs to generate a zero-knowledge proof. Atomically verifies USDC payment on-chain and generates the ZK proof in TEE. Takes 30-90 seconds.
+
+REQUIRED INPUTS (all prepared client-side — see guide_url from proof_request for detailed instructions):
+- session_id: From proof_request response
+- payment_tx_hash: USDC transfer TX hash on Base chain
+- signal_hash: 0x-prefixed 32-byte signal hash (keccak256 of scope + address)
+- nullifier: 0x-prefixed 32-byte nullifier (derived from attestation UID + scope)
+- scope_bytes: 0x-prefixed 32-byte keccak256 of scope string
+- merkle_root: 0x-prefixed 32-byte Merkle root of authorized signers tree
+- user_address: 0x-prefixed 20-byte wallet address with Coinbase attestation
+- signature: eth_sign(signal_hash) from the KYC wallet, 65 bytes (r+s+v)
+- user_pubkey_x, user_pubkey_y: secp256k1 public key coordinates (recover via ecrecover from signature)
+- raw_transaction: RLP-encoded EAS attestation transaction (zero-padded to 300 bytes)
+- tx_length: Actual byte length before padding
+- coinbase_attester_pubkey_x/y: Attester public key (recover via ecrecover from attestation TX)
+- merkle_proof: Merkle proof for attester in authorized signers list (max depth 8)
+- leaf_index, depth: Position in Merkle tree
+
+HOW TO PREPARE INPUTS:
+Follow the guide_url returned by proof_request for complete step-by-step instructions including code examples, constants, formulas, and EAS query templates.
+
+RETURNS: proof (hex), publicInputs (hex), proofWithInputs (hex for on-chain verification), TEE attestation document
+
+ON-CHAIN VERIFICATION:
+- Verifier contracts on Base Sepolia: coinbase_attestation=0x0036B61dBFaB8f3CfEEF77dD5D45F7EFBFE2035c, coinbase_country_attestation=0xdEe363585926c3c28327Efd1eDd01cf4559738cf
+- Call verifier.verify(proofWithInputs) to verify on-chain`,
+        tags: ['zk-proof', 'generate', 'tee', 'noir', 'privacy', 'coinbase', 'attestation', 'on-chain-verification'],
         examples: [
-          'Verify this proof on Base Sepolia',
-          'Check if a KYC proof is valid on-chain',
+          'Submit my proof inputs and generate the ZK proof',
+          'Verify payment and create the proof',
         ],
         inputModes: ['application/json'],
         outputModes: ['application/json'],
@@ -117,11 +130,12 @@ export function buildAgentCard(config: Config, tokenId?: bigint | null): AgentCa
       {
         id: 'get_supported_circuits',
         name: 'Get Supported Circuits',
-        description: '[DISCOVERY] List all supported ZK circuits with metadata. Call this first to discover available circuits before starting a proof generation flow.',
-        tags: ['circuits', 'metadata', 'discovery'],
+        description: '[DISCOVERY] List all supported ZK circuits with metadata, verifier addresses, EAS schema IDs, and chain information. Call this first to discover available proof types before starting a session.',
+        tags: ['circuits', 'metadata', 'discovery', 'coinbase', 'kyc', 'country', 'eas'],
         examples: [
           'What circuits do you support?',
           'List available proof types',
+          'Show me Coinbase verification options',
         ],
         inputModes: ['application/json'],
         outputModes: ['application/json'],
@@ -129,6 +143,11 @@ export function buildAgentCard(config: Config, tokenId?: bigint | null): AgentCa
     ],
     defaultInputModes: ['application/json'],
     defaultOutputModes: ['application/json'],
+    guides: {
+      description: 'Step-by-step guides for preparing proof inputs. Read the guide BEFORE calling prove.',
+      coinbase_kyc: `${config.a2aBaseUrl}/api/v1/guide/coinbase_kyc`,
+      coinbase_country: `${config.a2aBaseUrl}/api/v1/guide/coinbase_country`,
+    },
     identity: {
       erc8004: {
         contractAddress: erc8004Identity,
@@ -159,99 +178,61 @@ export function buildMcpDiscovery(config: Config) {
     serverInfo: {
       name: 'proveragent.base.eth',
       version: config.agentVersion,
-      description: 'proveragent.base.eth — Autonomous ZK proof generation. ERC-8004 identity. x402 payments. Powered by ZKProofport',
+      description: 'proveragent.base.eth — ZK proof generation agent for Coinbase KYC and country-of-residence verification. Generates zero-knowledge proofs from Coinbase Verified Account attestations on Base chain using Noir circuits in AWS Nitro TEE. Supports: (1) coinbase_kyc — prove KYC verification without revealing identity, (2) coinbase_country — prove country of residence with inclusion/exclusion lists. Payment via USDC on Base. ERC-8004 registered identity. x402 payment protocol compatible.',
     },
     capabilities: {
       tools: {},
     },
     tools: [
       {
-        name: 'request_signing',
-        description: '[STEP 1/5] Start a proof generation session. Returns a signing URL and requestId. After user signs, call check_status with the requestId.',
+        name: 'proof_request',
+        description: '[STEP 1/2] Create a proof generation session for Coinbase KYC or country-of-residence verification. Returns session_id, guide_url (step-by-step instructions for preparing proof inputs), and USDC payment instructions (amount, recipient, nonce to embed in transfer data field). Supported circuits: coinbase_kyc (EAS schema 0xf8b05c79f090979bf4a80270aba232dff11a10d9ca55c4f88de95317970f0de9) and coinbase_country (EAS schema 0x1801901fabd0e6189356b4fb52bb0ab855276d84f7ec140839fbd1f6801ca065). Payment: 0.1 USDC on Base, x402 protocol (EIP-3009 TransferWithAuthorization + facilitator settle).',
         inputSchema: {
           type: 'object',
           properties: {
-            circuitId: { type: 'string', description: 'Circuit identifier: coinbase_attestation or coinbase_country_attestation' },
-            scope: { type: 'string', description: 'Privacy scope string' },
-            countryList: { type: 'array', items: { type: 'string' }, description: 'Country codes for country attestation' },
-            isIncluded: { type: 'boolean', description: 'Prove inclusion or exclusion from country list' },
+            circuit: { type: 'string', enum: ['coinbase_kyc', 'coinbase_country'], description: 'Circuit to use' },
           },
-          required: ['circuitId', 'scope'],
+          required: ['circuit'],
         },
       },
       {
-        name: 'check_status',
-        description: '[STEP 2/5] Check signing and payment status of a proof request. Returns phase: signing | payment | ready | expired. When "payment", call request_payment. When "ready", call generate_proof.',
+        name: 'prove',
+        description: '[STEP 2/2] Submit payment proof and circuit inputs to generate a zero-knowledge proof. Atomically verifies USDC payment on-chain and generates the ZK proof in AWS Nitro TEE. Takes 30-90 seconds. Requires: session_id (from proof_request), payment_tx_hash (USDC transfer on Base), signature (eth_sign of signal_hash, 65 bytes), user public key coordinates, RLP-encoded EAS attestation transaction (zero-padded to 300 bytes), attester public key coordinates, and Merkle proof for attester in authorized signers list. Authorized signers: [0x952f32128AF084422539C4Ff96df5C525322E564, 0x8844591D47F17bcA6F5dF8f6B64F4a739F1C0080, 0x88fe64ea2e121f49bb77abea6c0a45e93638c3c5, 0x44ace9abb148e8412ac4492e9a1ae6bd88226803]. Returns proof (hex), publicInputs, proofWithInputs (for on-chain verification), and TEE attestation. Verifier contracts on Base Sepolia: coinbase_attestation=0x0036B61dBFaB8f3CfEEF77dD5D45F7EFBFE2035c, coinbase_country_attestation=0xdEe363585926c3c28327Efd1eDd01cf4559738cf.',
         inputSchema: {
           type: 'object',
           properties: {
-            requestId: { type: 'string', description: 'Request ID from request_signing' },
+            session_id: { type: 'string' },
+            payment_tx_hash: { type: 'string' },
+            inputs: {
+              type: 'object',
+              properties: {
+                signal_hash: { type: 'string', description: '0x-prefixed 32-byte signal hash' },
+                nullifier: { type: 'string', description: '0x-prefixed 32-byte nullifier' },
+                scope_bytes: { type: 'string', description: '0x-prefixed 32-byte keccak256 of scope string' },
+                merkle_root: { type: 'string', description: '0x-prefixed 32-byte Merkle root' },
+                user_address: { type: 'string', description: '0x-prefixed 20-byte wallet address' },
+                signature: { type: 'string', description: 'eth_sign(signal_hash), 65 bytes hex' },
+                user_pubkey_x: { type: 'string' },
+                user_pubkey_y: { type: 'string' },
+                raw_transaction: { type: 'string' },
+                tx_length: { type: 'number' },
+                coinbase_attester_pubkey_x: { type: 'string' },
+                coinbase_attester_pubkey_y: { type: 'string' },
+                merkle_proof: { type: 'array', items: { type: 'string' } },
+                leaf_index: { type: 'number' },
+                depth: { type: 'number' },
+                country_list: { type: 'array', items: { type: 'string' } },
+                is_included: { type: 'boolean' },
+              },
+              required: ['signal_hash', 'nullifier', 'scope_bytes', 'merkle_root', 'user_address', 'signature', 'user_pubkey_x', 'user_pubkey_y', 'raw_transaction', 'tx_length', 'coinbase_attester_pubkey_x', 'coinbase_attester_pubkey_y', 'merkle_proof', 'leaf_index', 'depth'],
+            },
           },
-          required: ['requestId'],
-        },
-      },
-      {
-        name: 'request_payment',
-        description: '[STEP 3/5] Initiate USDC payment for proof generation. Returns a payment URL. Only call when check_status shows phase "payment".',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            requestId: { type: 'string', description: 'Request ID from request_signing' },
-          },
-          required: ['requestId'],
-        },
-      },
-      {
-        name: 'generate_proof',
-        description: '[STEP 4/5] Generate a zero-knowledge proof. Call with requestId when check_status shows phase "ready". Takes 30-90 seconds.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            scope: { type: 'string', description: 'Privacy scope string for nullifier computation' },
-            circuitId: {
-              type: 'string',
-              description: 'Circuit identifier: coinbase_attestation or coinbase_country_attestation',
-            },
-            address: {
-              type: 'string',
-              description: 'KYC wallet address (0x-prefixed). Optional for web signing flow.',
-            },
-            signature: {
-              type: 'string',
-              description: 'User signature (0x-prefixed, 65 bytes). Optional — omit for web signing.',
-            },
-            requestId: { type: 'string', description: 'Signing request ID from Step 1 web signing flow.' },
-            countryList: {
-              type: 'array',
-              items: { type: 'string' },
-              description: 'Country codes for country attestation',
-            },
-            isIncluded: { type: 'boolean', description: 'Prove inclusion or exclusion from country list' },
-          },
-          required: ['scope', 'circuitId'],
-        },
-      },
-      {
-        name: 'verify_proof',
-        description: '[STEP 5/5 — OPTIONAL] Verify a zero-knowledge proof on-chain via deployed verifier contract. Not part of the standard generation flow.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            proof: { type: 'string', description: 'Proof bytes (0x-prefixed hex)' },
-            publicInputs: {
-              type: 'array',
-              items: { type: 'string' },
-              description: 'Public inputs as bytes32 hex strings',
-            },
-            circuitId: { type: 'string', description: 'Circuit identifier' },
-            chainId: { type: 'string', description: 'Chain ID (default: 84532)' },
-          },
-          required: ['proof', 'publicInputs', 'circuitId'],
+          required: ['session_id', 'payment_tx_hash', 'inputs'],
         },
       },
       {
         name: 'get_supported_circuits',
-        description: '[DISCOVERY] List all supported ZK circuits with metadata. Call first before starting a proof generation flow.',
+        description: '[DISCOVERY] List all supported ZK circuits with metadata, verifier addresses, EAS schema IDs, and chain information. Call this first to discover available proof types (coinbase_kyc, coinbase_country) before starting a session.',
         inputSchema: {
           type: 'object',
           properties: {},
@@ -259,6 +240,11 @@ export function buildMcpDiscovery(config: Config) {
         },
       },
     ],
+    'x-guides': {
+      description: 'Step-by-step guides for preparing proof inputs. Read the guide BEFORE calling prove.',
+      coinbase_kyc: `${config.a2aBaseUrl}/api/v1/guide/coinbase_kyc`,
+      coinbase_country: `${config.a2aBaseUrl}/api/v1/guide/coinbase_country`,
+    },
     'x-x402': {
       paymentRequired: config.paymentMode !== 'disabled',
       baseUrl: config.a2aBaseUrl,
@@ -292,10 +278,10 @@ export function buildOasfAgent(config: Config, tokenId?: bigint | null) {
     type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
     name: 'proveragent.base.eth',
     description:
-      'Autonomous ZK proof generation. ERC-8004 identity. x402 payments. Powered by ZKProofport',
+      'ZK proof generation agent for Coinbase KYC and country-of-residence verification. Generates zero-knowledge proofs from Coinbase Verified Account attestations on Base chain using Noir circuits in AWS Nitro TEE. Supports: (1) coinbase_kyc — prove KYC verification without revealing identity, (2) coinbase_country — prove country of residence with inclusion/exclusion lists. Payment via USDC on Base. ERC-8004 registered identity. x402 payment protocol compatible.',
     image: `${config.a2aBaseUrl}/icon.png`,
     agentType: 'service',
-    tags: ['ZK', 'Privacy', 'Proof', 'Coinbase', 'KYC', 'Attestation', 'x402'],
+    tags: ['ZK', 'Privacy', 'Proof', 'Coinbase', 'KYC', 'Attestation', 'x402', 'Identity', 'Country', 'Verification', 'Base', 'USDC', 'TEE', 'Noir', 'EAS', 'Zero-Knowledge'],
     services: [
       {
         name: 'web',
@@ -306,22 +292,27 @@ export function buildOasfAgent(config: Config, tokenId?: bigint | null) {
         name: 'OASF',
         endpoint: `${config.a2aBaseUrl}/.well-known/oasf.json`,
         version: 'v0.8.0',
-        skills: ['Proof Session Management', 'Proof Generation', 'Proof Verification', 'Circuit Management'],
+        skills: ['Create Proof Session', 'Generate ZK Proof', 'Get Supported Circuits'],
         domains: ['Privacy', 'Identity'],
       },
       {
         name: 'A2A',
         endpoint: `${config.a2aBaseUrl}/.well-known/agent-card.json`,
         version: '0.3.0',
-        a2aSkills: ['request_signing', 'check_status', 'request_payment', 'generate_proof', 'verify_proof', 'get_supported_circuits'],
+        a2aSkills: ['proof_request', 'prove', 'get_supported_circuits'],
       },
       {
         name: 'MCP',
         endpoint: `${config.a2aBaseUrl}/.well-known/mcp.json`,
         version: '2024-11-05',
-        mcpTools: ['request_signing', 'check_status', 'request_payment', 'generate_proof', 'verify_proof', 'get_supported_circuits'],
+        mcpTools: ['proof_request', 'prove', 'get_supported_circuits'],
       },
     ],
+    guides: {
+      description: 'Step-by-step guides for preparing proof inputs. Read the guide BEFORE calling prove.',
+      coinbase_kyc: `${config.a2aBaseUrl}/api/v1/guide/coinbase_kyc`,
+      coinbase_country: `${config.a2aBaseUrl}/api/v1/guide/coinbase_country`,
+    },
     x402Support: config.paymentMode !== 'disabled',
     active: true,
     registrations: [

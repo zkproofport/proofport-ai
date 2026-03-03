@@ -14,49 +14,80 @@ import type {
 } from '@a2a-js/sdk';
 import { trace, SpanStatusCode } from '@opentelemetry/api';
 import { ethers } from 'ethers';
-import {
-  handleRequestSigning,
-  handleCheckStatus,
-  handleRequestPayment,
-  handleGenerateProof,
-  handleVerifyProof,
-  handleGetSupportedCircuits,
-  type SkillDeps,
-} from '../skills/skillHandler.js';
+// import {
+//   handleRequestSigning,
+//   handleCheckStatus,
+//   handleRequestPayment,
+//   handleGenerateProof,
+//   handleVerifyProof,
+//   handleGetSupportedCircuits,
+//   type SkillDeps,
+// } from '../skills/skillHandler.js';
+import { handleGetSupportedCircuits, type SkillDeps } from '../skills/skillHandler.js';
+import { ProofSessionManager } from '../proof/sessionManager.js';
+import type { ProofSessionRequest } from '../proof/types.js';
 import { handleProofCompleted } from '../identity/reputation.js';
 import { getTaskOutcome } from '../skills/flowGuidance.js';
 import type { LLMProvider } from '../chat/llmProvider.js';
-import { CHAT_TOOLS } from '../chat/tools.js';
+import type { LLMTool } from '../chat/llmProvider.js';
 import type { Config } from '../config/index.js';
+
+/** Tool definitions for LLM-based skill routing in A2A text inference. */
+const A2A_TOOLS: LLMTool[] = [
+  {
+    name: 'proof_request',
+    description: 'Create a new proof session. Returns session_id, payment instructions, and a guide_url.',
+    parameters: {
+      type: 'object',
+      properties: {
+        circuit: { type: 'string', description: 'Circuit alias: "coinbase_kyc" or "coinbase_country"' },
+      },
+      required: ['circuit'],
+    },
+  },
+  {
+    name: 'prove',
+    description: 'Submit proof inputs and payment to generate a ZK proof. Use POST /api/v1/prove REST endpoint for actual execution.',
+    parameters: {
+      type: 'object',
+      properties: {
+        session_id: { type: 'string', description: 'Session ID from proof_request' },
+        payment_tx_hash: { type: 'string', description: 'USDC payment transaction hash' },
+      },
+      required: ['session_id', 'payment_tx_hash'],
+    },
+  },
+  {
+    name: 'get_supported_circuits',
+    description: 'List all supported ZK circuits with metadata and verifier addresses.',
+    parameters: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+  },
+];
 import type { TeeProvider } from '../tee/types.js';
 import type { RedisTaskStore } from './redisTaskStore.js';
 
 const tracer = trace.getTracer('a2a-executor');
 
-const VALID_SKILLS = ['request_signing', 'check_status', 'request_payment', 'generate_proof', 'verify_proof', 'get_supported_circuits'];
+const VALID_SKILLS = ['proof_request', 'prove', 'get_supported_circuits'];
 
-export const A2A_INFERENCE_PROMPT = `You are a skill router for proveragent.base.eth. Given user text, determine which tool to call and extract parameters. ALWAYS respond with a tool call — never with plain text.
+export const A2A_INFERENCE_PROMPT = `You are a skill router for proveragent.base.eth — a ZK proof generation agent for Coinbase KYC and country-of-residence verification. Given user text, determine which tool to call and extract parameters. ALWAYS respond with a tool call — never with plain text.
 
-CRITICAL — requestId handling:
-- The server automatically resolves requestId from the session context. You do NOT need to provide it.
-- NEVER guess, fabricate, or use placeholder values like "YOUR_REQUEST_ID", "<request_id>", or "unknown".
-- Only include requestId if the user explicitly provides a specific UUID value (e.g., "check status of abc-123").
-- For follow-up messages like "done", "check status", "pay", "결제해줘" — call the tool WITHOUT requestId. The server fills it in.
+Available tools:
+- proof_request: User wants to START a new proof generation session. Keywords: start, begin, create, generate proof, KYC proof, coinbase proof, verify identity, prove, country proof, attestation, 증명 생성, 시작, KYC 검증, 나라 증명. Always requires: circuit type (coinbase_kyc or coinbase_country).
+- prove: User wants to SUBMIT circuit inputs and complete proof generation. Keywords: submit, complete, finalize, generate, prove now, inputs ready, 제출, 완료, 증명 생성해. Requires: session_id, payment_tx_hash, inputs object.
+- get_supported_circuits: User asks about available circuits or capabilities. Keywords: what circuits, list, supported, available, what can you do, 뭐 할 수 있어, 어떤 증명, 목록.
 
-Tool selection rules:
-- verify_proof: User wants to VERIFY or VALIDATE an existing proof. Keywords: verify, validate, check proof, 검증, 확인, 검사. Often includes a hex proof value (0x...) or proofId. When the user provides a hex string and asks to verify/check it, ALWAYS use verify_proof.
-- generate_proof: User wants to CREATE or GENERATE a new proof. Keywords: generate, create, make, prove, 생성, 만들어, 증명해.
-- request_signing: User wants to initiate a signing request for proof generation (alternative entry point to generate_proof flow).
-- get_supported_circuits: User asks about available circuits. Keywords: list, show, what circuits, which circuits, 목록, 지원, 뭐 있어, 어떤.
-- check_status: User wants to check the status of an existing request. Keywords: status, progress, done yet, done, 상태, 완료됐어, 됐어, 확인.
-- request_payment: User wants to pay for a proof request. Keywords: pay, payment, 결제, 지불.
-
-Critical distinction — 검증 vs 생성: "검증해줘" = verify_proof. "생성해줘" = generate_proof. If the user provides a hex value (0x...) and uses words like 검증/확인/verify/validate, always route to verify_proof.
-
-CRITICAL — generate_proof vs request_signing:
-- generate_proof: Use when the user says "generate proof", "증명 생성", "make proof", "prove" as a FOLLOW-UP after signing/payment. If the user does NOT provide circuitId, scope, or address, they are asking to continue an existing session → use generate_proof. The server auto-resolves requestId, circuitId, and scope from the session.
-- request_signing: Use ONLY when the user provides specific parameters (wallet address, circuitId, scope) to START a NEW proof session. If the user gives a wallet address and circuit type, use request_signing.
-- When in doubt (no address, no circuitId given, just "증명 생성해줘" or "generate proof"), prefer generate_proof.`;
+CRITICAL RULES:
+- NEVER guess or fabricate session_id, payment_tx_hash, or wallet addresses
+- If the user doesn't provide required parameters, ask them — do NOT make up values
+- For follow-up messages about an existing session, use prove (the user likely wants to submit inputs)
+- When in doubt between proof_request and prove: if the user mentions a session_id → prove. If not → proof_request.
+- "Coinbase KYC" or just "KYC" → circuit = "coinbase_kyc"
+- "country" or "residency" → circuit = "coinbase_country"`;
 
 export interface ExecutorDeps {
   taskStore: RedisTaskStore;
@@ -84,7 +115,7 @@ async function inferSkillFromText(text: string, llmProvider: LLMProvider, logCon
     llmProvider.chat(
       [{ role: 'user', content: text }],
       A2A_INFERENCE_PROMPT,
-      CHAT_TOOLS,
+      A2A_TOOLS,
       { toolChoice: 'required', logContext },
     ),
     new Promise<never>((_, reject) =>
@@ -168,10 +199,10 @@ export class ProofportExecutor implements AgentExecutor {
       if (ctx.contextId) {
         try {
           const storedRequestId = await this.deps.taskStore.getContextFlow(ctx.contextId);
-          if (storedRequestId && ['check_status', 'request_payment', 'generate_proof'].includes(skill)) {
-            if (source === 'text' || !skillParams.requestId) {
-              log.info({ action: 'a2a.context.resolved', requestId: storedRequestId, source, overridden: !!skillParams.requestId, contextId: ctx.contextId }, 'Auto-resolved requestId from context flow');
-              skillParams.requestId = storedRequestId;
+          if (storedRequestId && ['prove'].includes(skill)) {
+            if (source === 'text' || !skillParams.session_id) {
+              log.info({ action: 'a2a.context.resolved', sessionId: storedRequestId, source, overridden: !!skillParams.session_id, contextId: ctx.contextId }, 'Auto-resolved session_id from context flow');
+              skillParams.session_id = storedRequestId;
             }
           }
         } catch (e) {
@@ -193,39 +224,109 @@ export class ProofportExecutor implements AgentExecutor {
       let result: unknown;
 
       switch (skill) {
-        case 'request_signing':
-          result = await handleRequestSigning(skillParams as any, skillDeps);
+        case 'proof_request': {
+          const sessionManager = new ProofSessionManager(this.deps.taskStore.redis);
+          const circuitMap: Record<string, string> = {
+            'coinbase_kyc': 'coinbase_attestation',
+            'coinbase_country': 'coinbase_country_attestation',
+            'coinbase_attestation': 'coinbase_attestation',
+            'coinbase_country_attestation': 'coinbase_country_attestation',
+          };
+          const circuitId = circuitMap[(skillParams as any).circuit] || (skillParams as any).circuit;
+          const session = await sessionManager.createSession({
+            circuit: circuitId as any,
+          });
+
+          const isTestnet = this.deps.config.paymentMode === 'testnet';
+          const network = isTestnet ? 'base-sepolia' : 'base';
+          const usdcAddress = isTestnet
+            ? '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+            : '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+          const priceStr = (this.deps.config.paymentProofPrice || '$0.10').replace('$', '');
+          const paymentAmount = Math.round(parseFloat(priceStr) * 1_000_000);
+
+          const circuitAliasMap: Record<string, string> = {
+            'coinbase_attestation': 'coinbase_kyc',
+            'coinbase_country_attestation': 'coinbase_country',
+          };
+          const circuitAlias = circuitAliasMap[circuitId] || circuitId;
+
+          result = {
+            session_id: session.session_id,
+            guide_url: `${this.deps.config.a2aBaseUrl}/api/v1/guide/${circuitAlias}`,
+            payment: {
+              nonce: session.payment_nonce,
+              recipient: this.deps.config.paymentPayTo,
+              amount: paymentAmount,
+              asset: usdcAddress,
+              network,
+              instruction: `Sign EIP-3009 TransferWithAuthorization for ${priceStr} USDC to ${this.deps.config.paymentPayTo} using nonce ${session.payment_nonce}. Settle via x402 facilitator (https://www.x402.org/facilitator/settle). Submit the resulting tx hash to POST /api/v1/prove.`,
+            },
+            tee_endpoint: `${this.deps.config.a2aBaseUrl}/api/v1/prove`,
+            expires_at: session.expires_at,
+          };
           break;
-        case 'check_status':
-          result = await handleCheckStatus(skillParams as any, skillDeps);
+        }
+        case 'prove': {
+          // For prove, redirect to REST endpoint since A2A has timeout limitations
+          result = {
+            message: 'Proof generation requires the REST API endpoint due to 30-90 second processing time. Read the guide_url from proof_request response to learn how to prepare all inputs.',
+            endpoint: `${this.deps.config.a2aBaseUrl}/api/v1/prove`,
+            method: 'POST',
+            body_format: {
+              session_id: 'string (from proof_request)',
+              payment_tx_hash: 'string (USDC transfer TX hash)',
+              inputs: {
+                signal_hash: 'string (0x-prefixed 32-byte signal hash)',
+                nullifier: 'string (0x-prefixed 32-byte nullifier)',
+                scope_bytes: 'string (0x-prefixed 32-byte keccak256 of scope string)',
+                merkle_root: 'string (0x-prefixed 32-byte Merkle root)',
+                user_address: 'string (0x-prefixed 20-byte wallet address)',
+                signature: 'string (eth_sign(signal_hash), 65 bytes hex)',
+                user_pubkey_x: 'string (32 bytes hex)',
+                user_pubkey_y: 'string (32 bytes hex)',
+                raw_transaction: 'string (RLP-encoded, zero-padded to 300 bytes)',
+                tx_length: 'number (actual byte length)',
+                coinbase_attester_pubkey_x: 'string (32 bytes hex)',
+                coinbase_attester_pubkey_y: 'string (32 bytes hex)',
+                merkle_proof: 'string[] (each 32 bytes hex, max depth 8)',
+                leaf_index: 'number',
+                depth: 'number',
+              },
+            },
+          };
           break;
-        case 'request_payment':
-          result = await handleRequestPayment(skillParams as any, skillDeps);
+        }
+        case 'get_supported_circuits': {
+          const circuitsResult = handleGetSupportedCircuits(skillParams as any);
+          const aliasMap: Record<string, string> = {
+            coinbase_attestation: 'coinbase_kyc',
+            coinbase_country_attestation: 'coinbase_country',
+          };
+          result = {
+            ...circuitsResult,
+            circuits: circuitsResult.circuits.map(circuit => ({
+              ...circuit,
+              guide_url: `${this.deps.config.a2aBaseUrl}/api/v1/guide/${aliasMap[circuit.id] ?? circuit.id}`,
+            })),
+          };
           break;
-        case 'generate_proof':
-          result = await handleGenerateProof(skillParams as any, skillDeps);
-          break;
-        case 'verify_proof':
-          result = await handleVerifyProof(skillParams as any, skillDeps);
-          break;
-        case 'get_supported_circuits':
-          result = handleGetSupportedCircuits(skillParams as any);
-          break;
+        }
         default:
           throw new Error(`Unknown skill: ${skill}`);
       }
 
-      // Link contextId -> requestId for session-based auto-resolution
-      if (skill === 'request_signing' && ctx.contextId) {
+      // Link contextId -> session_id for session-based auto-resolution
+      if (skill === 'proof_request' && ctx.contextId) {
         try {
-          const requestId = (result as any)?.requestId;
-          if (requestId) {
+          const sessionId = (result as any)?.session_id;
+          if (sessionId) {
             // Only set context flow if no existing mapping (prevent accidental overwrite)
-            const existingRequestId = await this.deps.taskStore.getContextFlow(ctx.contextId);
-            if (!existingRequestId) {
-              await this.deps.taskStore.setContextFlow(ctx.contextId, requestId);
+            const existingId = await this.deps.taskStore.getContextFlow(ctx.contextId);
+            if (!existingId) {
+              await this.deps.taskStore.setContextFlow(ctx.contextId, sessionId);
             } else {
-              log.info({ action: 'a2a.context.exists', existingRequestId, newRequestId: requestId, contextId: ctx.contextId }, 'Context flow already exists, not overwriting');
+              log.info({ action: 'a2a.context.exists', existingId, newSessionId: sessionId, contextId: ctx.contextId }, 'Context flow already exists, not overwriting');
             }
           }
         } catch (e) {
@@ -234,7 +335,12 @@ export class ProofportExecutor implements AgentExecutor {
       }
 
       // Determine task state and guidance text
-      const outcome = getTaskOutcome(skill, result);
+      let outcome;
+      try {
+        outcome = getTaskOutcome(skill, result);
+      } catch {
+        outcome = { guidance: JSON.stringify(result, null, 2), state: 'completed' as const };
+      }
 
       // Build artifact with context-specific guidance
       const artifact: Artifact = {
@@ -265,7 +371,7 @@ export class ProofportExecutor implements AgentExecutor {
       eventBus.finished();
 
       // ERC-8004 reputation (non-blocking)
-      if (skill === 'generate_proof' && this.deps.config.erc8004ReputationAddress) {
+      if (skill === 'prove' && this.deps.config.erc8004ReputationAddress) {
         const provider = new ethers.JsonRpcProvider(this.deps.config.chainRpcUrl);
         const signer = new ethers.Wallet(this.deps.config.proverPrivateKey, provider);
         handleProofCompleted(
@@ -331,8 +437,6 @@ export class ProofportExecutor implements AgentExecutor {
     const redis = this.deps.taskStore.redis;
     return {
       redis,
-      signPageUrl: this.deps.config.signPageUrl || this.deps.config.a2aBaseUrl,
-      signingTtlSeconds: this.deps.config.signingTtlSeconds || 300,
       paymentMode: this.deps.config.paymentMode,
       paymentProofPrice: this.deps.config.paymentProofPrice || '$0.10',
       easGraphqlEndpoint: this.deps.config.easGraphqlEndpoint,
