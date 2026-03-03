@@ -35,7 +35,6 @@ const logger = pino({
     paths: [
       'privateKey',
       'proverPrivateKey',
-      'settlementPrivateKey',
       'signature',
       'authorization.signature',
       'sessionSecret',

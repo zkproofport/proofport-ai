@@ -3,7 +3,6 @@ import express from 'express';
 import { createLogger } from './logger.js';
 
 const log = createLogger('Server');
-import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import swaggerUi from 'swagger-ui-express';
@@ -24,48 +23,14 @@ import { jsonRpcHandler, UserBuilder } from '@a2a-js/sdk/server/express';
 import { buildAgentCard } from './a2a/agentCard.js';
 import { RedisTaskStore } from './a2a/redisTaskStore.js';
 import { ProofportExecutor } from './a2a/proofportExecutor.js';
-import { PAYMENT_NETWORKS } from './payment/x402Middleware.js';
-import { HTTPFacilitatorClient } from '@x402/core/server';
-import { PaymentFacilitator } from './payment/facilitator.js';
-import { SettlementWorker } from './payment/settlementWorker.js';
 import { validatePaymentConfig, getPaymentModeConfig } from './payment/freeTier.js';
-import { createSigningCallbackHandler } from './signing/webSigning.js';
-import { createBatchSigningHandler } from './signing/eip7702Signing.js';
 import { getTeeConfig, createTeeProvider, resolveTeeMode } from './tee/index.js';
 import { ensureAgentRegistered } from './identity/autoRegister.js';
-import { computeSignalHash } from './input/inputBuilder.js';
-import { ethers } from 'ethers';
-import type { SigningRequestRecord } from './signing/types.js';
-import { createRestRoutes } from './api/restRoutes.js';
-import { createOpenAIRoutes } from './chat/openaiHandler.js';
+import { createProofRoutes } from './proof/proofRoutes.js';
 import type { LLMProvider } from './chat/llmProvider.js';
 import { OpenAIProvider } from './chat/openaiClient.js';
 import { GeminiProvider } from './chat/geminiClient.js';
 import { MultiLLMProvider } from './chat/multiProvider.js';
-
-/**
- * Create a reverse proxy middleware to forward requests to the internal Next.js sign-page.
- * The sign-page runs on port 3200 inside the same container.
- */
-function createSignPageProxy() {
-  const target = 'http://127.0.0.1:3200';
-  return (req: any, res: any) => {
-    const proxyReq = http.request(
-      `${target}${req.originalUrl}`,
-      { method: req.method, headers: req.headers },
-      (proxyRes) => {
-        res.writeHead(proxyRes.statusCode || 200, proxyRes.headers);
-        proxyRes.pipe(res);
-      }
-    );
-    proxyReq.on('error', () => {
-      if (!res.headersSent) {
-        res.status(502).json({ error: 'Sign page not available' });
-      }
-    });
-    req.pipe(proxyReq);
-  };
-}
 
 function createApp(config: Config, agentTokenId?: bigint | null) {
   // Validate payment config at startup
@@ -91,8 +56,6 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   // Cleanup worker setup
   const cleanupWorker = new CleanupWorker(redis);
 
-  // Payment setup
-  const paymentFacilitator = new PaymentFacilitator(redis, { ttlSeconds: 86400 });
   const paymentModeConfig = getPaymentModeConfig(config.paymentMode);
 
   // TEE setup
@@ -100,26 +63,6 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   const resolvedMode = resolveTeeMode(teeConfig.mode);
   log.info({ action: 'server.tee.resolved', teeMode: teeConfig.mode, resolvedMode }, 'TEE mode resolved');
   const teeProvider = createTeeProvider({ ...teeConfig, mode: resolvedMode });
-
-  // Settlement worker setup (only if payment mode is not disabled)
-  let settlementWorker: SettlementWorker | null = null;
-  if (paymentModeConfig.mode !== 'disabled') {
-    // Only create if settlement config is provided
-    if (
-      config.settlementChainRpcUrl &&
-      config.settlementPrivateKey &&
-      config.settlementOperatorAddress &&
-      config.settlementUsdcAddress
-    ) {
-      settlementWorker = new SettlementWorker(paymentFacilitator, {
-        chainRpcUrl: config.settlementChainRpcUrl,
-        privateKey: config.settlementPrivateKey,
-        operatorAddress: config.settlementOperatorAddress,
-        usdcContractAddress: config.settlementUsdcAddress,
-        pollIntervalMs: 30000,
-      });
-    }
-  }
 
   // Static files (icon.png for 8004scan agent image)
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -140,47 +83,6 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
       tee: {
         mode: resolvedMode,
         attestationEnabled: teeConfig.attestationEnabled,
-      },
-    });
-  });
-
-  // Payment status endpoint
-  app.get('/payment/status', (_req, res) => {
-    res.json({
-      mode: paymentModeConfig.mode,
-      network: paymentModeConfig.network,
-      requiresPayment: paymentModeConfig.requiresPayment,
-      description: paymentModeConfig.description,
-    });
-  });
-
-  // Signing status endpoint
-  app.get('/signing/status', (_req, res) => {
-    res.json({
-      providers: {
-        privy: { enabled: !!config.privyAppId && !!config.privyApiSecret },
-        web: { enabled: !!config.signPageUrl },
-        eip7702: { enabled: true },
-      },
-    });
-  });
-
-  // TEE status endpoint
-  app.get('/tee/status', (_req, res) => {
-    res.json({
-      mode: teeConfig.mode,
-      attestationEnabled: teeConfig.attestationEnabled,
-      available: teeConfig.mode !== 'disabled',
-    });
-  });
-
-  // Identity status endpoint
-  app.get('/identity/status', (_req, res) => {
-    res.json({
-      erc8004: {
-        identityContract: config.erc8004IdentityAddress || null,
-        reputationContract: config.erc8004ReputationAddress || null,
-        configured: !!config.erc8004IdentityAddress && !!config.erc8004ReputationAddress,
       },
     });
   });
@@ -233,139 +135,7 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   app.use('/a2a', jsonRpcHandler({ requestHandler, userBuilder: UserBuilder.noAuthentication }));
 
   // REST API routes — payment is handled inside skillHandler via request_payment flow
-  app.use('/api/v1', createRestRoutes({ taskStore, redis, config, rateLimiter, proofCache, teeProvider }));
-
-  // CORS for signing routes (sign-page on port 3200 → AI server on port 4002)
-  app.use('/api/signing', (req, res, next) => {
-    const origin = req.headers.origin;
-    const allowedOrigins = [
-      'http://127.0.0.1:3200',
-      'http://localhost:3200',
-      config.signPageUrl,
-    ].filter(Boolean);
-    if (origin && allowedOrigins.includes(origin)) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    }
-    if (req.method === 'OPTIONS') {
-      res.sendStatus(204);
-      return;
-    }
-    next();
-  });
-
-  // CORS for attestation routes (sign-page on port 3200 → AI server on port 4002)
-  app.use('/api/v1/attestation', (req, res, next) => {
-    const origin = req.headers.origin;
-    const allowedOrigins = [
-      'http://127.0.0.1:3200',
-      'http://localhost:3200',
-      config.signPageUrl,
-    ].filter(Boolean);
-    if (origin && allowedOrigins.includes(origin)) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    }
-    if (req.method === 'OPTIONS') {
-      res.sendStatus(204);
-      return;
-    }
-    next();
-  });
-
-  // CORS for payment routes (sign-page on port 3200 → AI server on port 4002)
-  app.use('/api/payment', (req, res, next) => {
-    const origin = req.headers.origin;
-    const allowedOrigins = [
-      'http://127.0.0.1:3200',
-      'http://localhost:3200',
-      config.signPageUrl,
-    ].filter(Boolean);
-    if (origin && allowedOrigins.includes(origin)) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    }
-    if (req.method === 'OPTIONS') {
-      res.sendStatus(204);
-      return;
-    }
-    next();
-  });
-
-  // Signing request details (sign-page fetches request info from here)
-  app.get('/api/signing/:requestId', async (req, res) => {
-    const { requestId } = req.params;
-    const key = `signing:${requestId}`;
-    const data = await redis.get(key);
-
-    if (!data) {
-      log.warn({ action: 'signing.request.not_found', requestId }, 'Signing request not found or expired');
-      res.status(404).json({ error: 'Request not found or expired' });
-      return;
-    }
-
-    const record: SigningRequestRecord = JSON.parse(data);
-
-    res.json({
-      address: record.address || null,
-      signalHash: record.signalHash || null,
-      scope: record.scope,
-      circuitId: record.circuitId,
-      status: record.status,
-      expiresAt: record.expiresAt,
-    });
-  });
-
-  // Prepare signing request — sign-page calls this after user connects wallet
-  // Computes signalHash from the connected address + stored scope/circuitId
-  app.post('/api/signing/:requestId/prepare', async (req, res) => {
-    const { requestId } = req.params;
-    const { address } = req.body;
-
-    if (!address) {
-      res.status(400).json({ error: 'Missing address' });
-      return;
-    }
-
-    const key = `signing:${requestId}`;
-    const data = await redis.get(key);
-
-    if (!data) {
-      log.warn({ action: 'signing.prepare.not_found', requestId }, 'Signing request not found or expired');
-      res.status(404).json({ error: 'Request not found or expired' });
-      return;
-    }
-
-    const record: SigningRequestRecord = JSON.parse(data);
-
-    if (record.status !== 'pending') {
-      res.status(400).json({ error: `Request is already ${record.status}` });
-      return;
-    }
-
-    // Compute signalHash from connected wallet address
-    const signalHash = computeSignalHash(address, record.scope, record.circuitId);
-    const signalHashHex = ethers.hexlify(signalHash);
-
-    // Update record with address + signalHash
-    const updatedRecord: SigningRequestRecord = {
-      ...record,
-      address,
-      signalHash: signalHashHex,
-    };
-
-    const ttl = await redis.ttl(key);
-    await redis.set(key, JSON.stringify(updatedRecord), 'EX', ttl > 0 ? ttl : 300);
-
-    res.json({ signalHash: signalHashHex });
-  });
-
-  // Signing callback routes (no payment gate — these receive signatures from users)
-  app.post('/api/signing/callback/:requestId', createSigningCallbackHandler(redis));
-  app.post('/api/signing/batch', createBatchSigningHandler(redis));
+  app.use('/api/v1', createProofRoutes({ redis, config, teeProvider }));
 
   // MCP StreamableHTTP endpoint (stateless mode)
   // Payment is handled inside skillHandler via request_payment flow (no HTTP-level x402 gate)
@@ -402,312 +172,7 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
     res.status(405).json({ error: 'Session management not supported in stateless mode.' });
   });
 
-  // Chat endpoint (LLM-based natural language interface)
-  // Payment is handled inside skillHandler via request_payment flow (no HTTP-level x402 gate)
-  if (llmProvider) {
-    const chatDeps = {
-      redis, taskStore, a2aBaseUrl: config.a2aBaseUrl, llmProvider,
-      signPageUrl: config.signPageUrl,
-      signingTtlSeconds: config.signingTtlSeconds,
-      paymentMode: config.paymentMode,
-      paymentProofPrice: config.paymentProofPrice,
-      easGraphqlEndpoint: config.easGraphqlEndpoint,
-      rpcUrls: [config.baseRpcUrl],
-      bbPath: config.bbPath,
-      nargoPath: config.nargoPath,
-      circuitsDir: config.circuitsDir,
-      chainRpcUrl: config.chainRpcUrl,
-      rateLimiter,
-      proofCache,
-      teeProvider,
-      teeMode: resolvedMode,
-    };
-
-    app.use('/v1', createOpenAIRoutes(chatDeps));
-    log.info({ action: 'server.llm.enabled', providers: llmProviders.map(p => p.name) }, 'LLM chat endpoint enabled');
-    log.info({ action: 'server.openai.enabled' }, 'OpenAI-compatible endpoint enabled at /v1/chat/completions');
-  } else {
-    app.post('/v1/chat/completions', (_req, res) => {
-      res.status(503).json({ error: { message: 'Chat not configured. Set OPENAI_API_KEY or GEMINI_API_KEY.', type: 'server_error', code: 'not_configured' } });
-    });
-  }
-
-  // Deprecated endpoint — redirect clients to the unified OpenAI-compatible endpoint
-  app.post('/api/v1/chat', (_req, res) => {
-    res.status(410).json({
-      error: {
-        message: 'This endpoint has been removed. Use POST /v1/chat/completions (OpenAI-compatible format) instead.',
-        type: 'gone',
-        code: 'endpoint_removed',
-      },
-    });
-  });
-
-  // Verification page for QR code scanning
-  app.get('/v/:proofId', (req, res) => {
-    const { proofId } = req.params;
-    const apiUrl = `${config.a2aBaseUrl}/api/v1/verify/${proofId}`;
-    res.setHeader('Content-Type', 'text/html');
-    res.send(`<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>proveragent.base.eth — Proof Verification</title>
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:#0a0a0a;color:#f0f0f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1rem}
-.card{background:#1a1a1a;border:1px solid #333;border-radius:12px;padding:2rem;max-width:480px;width:100%}
-h1{font-size:1.25rem;font-weight:600;margin-bottom:.5rem;text-align:center}
-.subtitle{color:#999;font-size:.875rem;text-align:center;margin-bottom:1.5rem}
-.status{padding:1rem;border-radius:8px;margin-bottom:1rem;font-size:.875rem}
-.loading{background:#1a2a3a;border:1px solid #2a4a5a;color:#93c5fd}
-.valid{background:#1a3a2a;border:1px solid #2a5a3a;color:#4ade80}
-.invalid{background:#3a1a1a;border:1px solid #5a2a2a;color:#f87171}
-.error{background:#3a1a1a;border:1px solid #5a2a2a;color:#f87171}
-.field{margin-bottom:.75rem}
-.label{color:#999;font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.25rem}
-.value{font-family:'Courier New',monospace;font-size:.8rem;color:#93c5fd;word-break:break-all}
-.badge{display:inline-block;padding:.25rem .75rem;border-radius:20px;font-weight:600;font-size:1rem}
-.badge-valid{background:#166534;color:#4ade80}
-.badge-invalid{background:#7f1d1d;color:#f87171}
-.privacy{text-align:center;color:#4ade80;font-size:.875rem;margin-top:1rem}
-</style>
-</head>
-<body>
-<div class="card">
-<h1>proveragent.base.eth</h1>
-<p class="subtitle">On-chain ZK Proof Verification</p>
-<div id="result"><div class="status loading">Verifying proof on-chain...</div></div>
-</div>
-<script>
-(async()=>{
-const el=document.getElementById('result');
-try{
-const r=await fetch('${apiUrl}');
-const d=await r.json();
-if(!r.ok){
-if(r.status===404){
-el.innerHTML='<div class="status error">🕐 This proof data has expired or was not found.<br><br>Proof verification results are available for 24 hours after generation. To keep your results permanently, download the JSON data before expiration.</div>';
-}else{
-el.innerHTML='<div class="status error">'+d.error+'</div>';
-}
-return;
-}
-el.innerHTML=
-'<div class="status '+(d.isValid?'valid':'invalid')+'">'+
-'<span class="badge '+(d.isValid?'badge-valid':'badge-invalid')+'">'+(d.isValid?'\\u2713 VALID':'\\u2717 INVALID')+'</span>'+
-'</div>'+
-'<div class="field"><div class="label">Circuit</div><div class="value">'+d.circuitId+'</div></div>'+
-'<div class="field"><div class="label">Nullifier</div><div class="value">'+d.nullifier+'</div></div>'+
-'<div class="field"><div class="label">Verifier Contract</div><div class="value">'+d.verifierAddress+'</div></div>'+
-'<div class="field"><div class="label">Chain</div><div class="value">Base Sepolia ('+d.chainId+')</div></div>'+
-'<div style="color:#666;font-size:.75rem;margin-top:.25rem;margin-bottom:.75rem">Data available until: '+new Date(d.expiresAt).toUTCString()+'</div>'+
-'<div class="privacy">0 bytes of personal data exposed</div>'+
-'<div style="text-align:center;margin-top:.75rem"><a href="/a/${proofId}" style="color:#93c5fd;font-size:.8rem;text-decoration:underline">View TEE Attestation →</a></div>'+
-'<button id="dl-btn" style="background:#1e3a5f;border:1px solid #2563eb;color:#93c5fd;padding:.5rem 1rem;border-radius:6px;cursor:pointer;font-size:.8rem;width:100%;margin-top:.75rem">Download Complete Proof Data (JSON)</button>';
-document.getElementById('dl-btn').onclick=function(){fetch('${config.a2aBaseUrl}/api/v1/proof/${proofId}').then(function(r){return r.json()}).then(function(full){var blob=new Blob([JSON.stringify(full,null,2)],{type:'application/json'});var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='proof-'+full.proofId+'.json';a.click();});};
-}catch(e){el.innerHTML='<div class="status error">Failed to verify: '+e.message+'</div>'}
-})();
-</script>
-</body>
-</html>`);
-  });
-
-  // Payment info endpoint (payment page fetches details)
-  app.get('/api/payment/:requestId', async (req, res) => {
-    const { requestId } = req.params;
-    const key = `signing:${requestId}`;
-    const data = await redis.get(key);
-
-    if (!data) {
-      log.warn({ action: 'payment.request.not_found', requestId }, 'Payment request not found or expired');
-      res.status(404).json({ error: 'Request not found or expired' });
-      return;
-    }
-
-    const record: SigningRequestRecord = JSON.parse(data);
-    const isTestnet = config.paymentMode === 'testnet';
-    const chainId = isTestnet ? 84532 : 8453;
-    const usdcAddress = isTestnet
-      ? '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
-      : '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
-    const priceStr = (config.paymentProofPrice || '$0.10').replace('$', '');
-    const amount = String(Math.round(parseFloat(priceStr) * 1_000_000));
-
-    res.json({
-      requestId,
-      circuitId: record.circuitId,
-      scope: record.scope,
-      paymentStatus: record.paymentStatus || null,
-      paymentTxHash: record.paymentTxHash || null,
-      payTo: config.paymentPayTo,
-      amount,
-      priceDisplay: config.paymentProofPrice || '$0.10',
-      usdcAddress,
-      chainId,
-      chainName: isTestnet ? 'Base Sepolia' : 'Base',
-      usdcName: 'USDC',
-      usdcVersion: '2',
-    });
-  });
-
-  // Payment confirmation (called by payment page after tx)
-  app.post('/api/payment/confirm/:requestId', async (req, res) => {
-    const { requestId } = req.params;
-    const { txHash } = req.body;
-
-    if (!txHash || typeof txHash !== 'string') {
-      res.status(400).json({ error: 'Missing txHash' });
-      return;
-    }
-
-    const key = `signing:${requestId}`;
-    const data = await redis.get(key);
-
-    if (!data) {
-      log.warn({ action: 'payment.confirm.not_found', requestId }, 'Payment request not found or expired');
-      res.status(404).json({ error: 'Request not found or expired' });
-      return;
-    }
-
-    const record: SigningRequestRecord = JSON.parse(data);
-
-    if (record.paymentStatus === 'completed') {
-      res.json({ status: 'already_completed' });
-      return;
-    }
-
-    record.paymentStatus = 'completed';
-    record.paymentTxHash = txHash;
-
-    const ttl = await redis.ttl(key);
-    await redis.set(key, JSON.stringify(record), 'EX', ttl > 0 ? ttl : 300);
-
-    // Publish flow event if this requestId is linked to a flow
-    try {
-      const { getFlowByRequestId, publishFlowEvent } = await import('./skills/flowManager.js');
-      const flow = await getFlowByRequestId(requestId, redis);
-      if (flow) {
-        await publishFlowEvent(redis, flow.flowId, { ...flow, updatedAt: new Date().toISOString() });
-      }
-    } catch (e) {
-      log.error({ action: 'payment.flow_event.failed', err: e, requestId }, 'Failed to publish flow event');
-    }
-
-    log.info({ action: 'payment.confirmed', requestId, txHash }, 'Payment confirmed');
-    res.json({ status: 'confirmed' });
-  });
-
-  // Payment via EIP-3009 signed authorization (facilitator settles on-chain)
-  app.post('/api/payment/sign/:requestId', async (req, res) => {
-    const { requestId } = req.params;
-    const { authorization, signature } = req.body;
-
-    if (!authorization || !signature) {
-      res.status(400).json({ error: 'Missing authorization or signature' });
-      return;
-    }
-
-    const key = `signing:${requestId}`;
-    const data = await redis.get(key);
-
-    if (!data) {
-      log.warn({ action: 'payment.sign.not_found', requestId }, 'Payment request not found or expired');
-      res.status(404).json({ error: 'Request not found or expired' });
-      return;
-    }
-
-    const record: SigningRequestRecord = JSON.parse(data);
-
-    if (record.paymentStatus === 'completed') {
-      res.json({ success: true, message: 'Payment already completed', txHash: record.paymentTxHash });
-      return;
-    }
-
-    // Build x402 payment payload and requirements for facilitator settlement
-    const network = config.paymentMode === 'testnet'
-      ? PAYMENT_NETWORKS.testnet
-      : PAYMENT_NETWORKS.mainnet;
-    const usdcAddress = network === PAYMENT_NETWORKS.testnet
-      ? '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
-      : '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
-    const priceStr = (config.paymentProofPrice || '$0.10').replace('$', '');
-    const amount = String(Math.round(parseFloat(priceStr) * 1_000_000));
-
-    const paymentRequirements = {
-      scheme: 'exact' as const,
-      network,
-      amount,
-      asset: usdcAddress,
-      payTo: config.paymentPayTo,
-      maxTimeoutSeconds: 300,
-      extra: { name: 'USDC', version: '2' } as Record<string, unknown>,
-    };
-
-    const resourceUrl = `${config.a2aBaseUrl}/v1/chat/completions`;
-    const paymentPayload = {
-      x402Version: 2,
-      resource: { url: resourceUrl, description: 'ZK proof generation payment', mimeType: '' },
-      accepted: paymentRequirements,
-      payload: { authorization, signature } as Record<string, unknown>,
-    };
-
-    try {
-      log.debug({ action: 'payment.settle.payload', requestId, paymentPayload, paymentRequirements }, 'Payment settle payload');
-
-      const facilitatorClient = new HTTPFacilitatorClient({
-        url: config.paymentFacilitatorUrl,
-      });
-
-      const settleResult = await facilitatorClient.settle(paymentPayload, paymentRequirements);
-
-      if (settleResult.success) {
-        record.paymentStatus = 'completed';
-        record.paymentTxHash = settleResult.transaction;
-        const ttl = await redis.ttl(key);
-        await redis.set(key, JSON.stringify(record), 'EX', ttl > 0 ? ttl : 300);
-
-        // Publish flow event if this requestId is linked to a flow
-        try {
-          const { getFlowByRequestId, publishFlowEvent } = await import('./skills/flowManager.js');
-          const flow = await getFlowByRequestId(requestId, redis);
-          if (flow) {
-            await publishFlowEvent(redis, flow.flowId, { ...flow, updatedAt: new Date().toISOString() });
-          }
-        } catch (e) {
-          log.error({ action: 'payment.flow_event.failed', err: e, requestId }, 'Failed to publish flow event');
-        }
-
-        log.info({ action: 'payment.settle.succeeded', requestId, txHash: settleResult.transaction }, 'Facilitator settled payment');
-        res.json({
-          success: true,
-          txHash: settleResult.transaction,
-          network: settleResult.network,
-        });
-      } else {
-        log.error({ action: 'payment.settle.failed', requestId, settleResult }, 'Facilitator settlement failed');
-        res.status(400).json({
-          error: settleResult.errorMessage || settleResult.errorReason || 'Payment settlement failed',
-        });
-      }
-    } catch (error: any) {
-      log.error({ action: 'payment.settle.error', err: error, requestId }, 'Facilitator settle error');
-      res.status(500).json({
-        error: error.message || 'Payment processing failed',
-      });
-    }
-  });
-
-  // Payment page is now served by the sign-page Next.js app (proxied via /pay below)
-
-  // Proxy sign-page requests to internal Next.js server
-  app.use('/s', createSignPageProxy());
-  app.use('/pay', createSignPageProxy());
-  app.use('/a', createSignPageProxy());
-  app.use('/_next', createSignPageProxy());
-
-  return { app, paymentFacilitator, teeProvider, settlementWorker, cleanupWorker };
+  return { app, teeProvider, cleanupWorker };
 }
 
 async function startServer() {
@@ -728,10 +193,7 @@ async function startServer() {
     const agentTokenId = await ensureAgentRegistered(config, earlyTeeProvider);
 
     // Create app with tokenId
-    const { app, paymentFacilitator, teeProvider, settlementWorker, cleanupWorker } = createApp(
-      config,
-      agentTokenId
-    );
+    const { app, teeProvider, cleanupWorker } = createApp(config, agentTokenId);
 
     app.listen(config.port, () => {
       log.info({ action: 'server.started', port: config.port }, 'proofport-ai server listening');
@@ -743,13 +205,6 @@ async function startServer() {
 
       cleanupWorker.start();
       log.info({ action: 'server.cleanup.started' }, 'CleanupWorker started');
-
-      if (settlementWorker) {
-        settlementWorker.start();
-        log.info({ action: 'server.settlement.started' }, 'SettlementWorker started');
-      } else if (paymentModeConfig.mode !== 'disabled') {
-        log.warn({ action: 'server.settlement.not_configured' }, 'SettlementWorker not configured (missing settlement env vars)');
-      }
     });
   } catch (error) {
     log.error({ action: 'server.start.failed', err: error }, 'Failed to start server');

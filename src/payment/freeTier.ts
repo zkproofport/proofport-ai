@@ -1,5 +1,3 @@
-import type { Request, Response, NextFunction } from 'express';
-
 export interface PaymentModeConfig {
   mode: 'disabled' | 'testnet' | 'mainnet';
   network: string | null;
@@ -36,30 +34,6 @@ export function getPaymentModeConfig(mode: 'disabled' | 'testnet' | 'mainnet'): 
         description: 'Mainnet USDC on Base',
       };
   }
-}
-
-export function createPaymentGate(config: {
-  paymentMode: 'disabled' | 'testnet' | 'mainnet';
-}): (req: Request, res: Response, next: NextFunction) => void {
-  const modeConfig = getPaymentModeConfig(config.paymentMode);
-
-  return (req: Request, res: Response, next: NextFunction) => {
-    if (!modeConfig.requiresPayment) {
-      (req as any).paymentSkipped = true;
-      return next();
-    }
-
-    const paymentHeader = req.headers['x-payment'];
-    if (!paymentHeader) {
-      return res.status(402).json({
-        error: 'Payment Required',
-        paymentMode: modeConfig.mode,
-        network: modeConfig.network,
-      });
-    }
-
-    next();
-  };
 }
 
 export function validatePaymentConfig(config: {

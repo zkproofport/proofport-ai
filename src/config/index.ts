@@ -44,17 +44,9 @@ export function loadConfig() {
     websiteUrl: process.env.WEBSITE_URL || 'https://zkproofport.com',
     agentVersion: process.env.AGENT_VERSION || '1.0.0',
 
-    // x402 Payment (required when paymentMode !== 'disabled')
+    // Payment (required when paymentMode !== 'disabled')
     paymentPayTo: process.env.PAYMENT_PAY_TO || '',
-    paymentFacilitatorUrl: process.env.PAYMENT_FACILITATOR_URL || 'https://www.x402.org/facilitator',
     paymentProofPrice: process.env.PAYMENT_PROOF_PRICE || '$0.10',
-
-    // Signing providers (optional, enable per method)
-    privyAppId: process.env.PRIVY_APP_ID || '',
-    privyApiSecret: process.env.PRIVY_API_SECRET || '',
-    privyApiUrl: process.env.PRIVY_API_URL || 'https://auth.privy.io',
-    signPageUrl: process.env.SIGN_PAGE_URL || '',
-    signingTtlSeconds: parseInt(process.env.SIGNING_TTL_SECONDS || '300', 10),
 
     // TEE (optional)
     teeMode: validateTeeMode(process.env.TEE_MODE || 'disabled'),
@@ -66,12 +58,6 @@ export function loadConfig() {
     erc8004IdentityAddress: process.env.ERC8004_IDENTITY_ADDRESS || '',
     erc8004ReputationAddress: process.env.ERC8004_REPUTATION_ADDRESS || '',
     erc8004ValidationAddress: process.env.ERC8004_VALIDATION_ADDRESS || '',
-
-    // Settlement worker (optional - only needed when paymentMode !== 'disabled' and auto-settlement desired)
-    settlementChainRpcUrl: process.env.SETTLEMENT_CHAIN_RPC_URL || '',
-    settlementPrivateKey: process.env.SETTLEMENT_PRIVATE_KEY || '',
-    settlementOperatorAddress: process.env.SETTLEMENT_OPERATOR_ADDRESS || '',
-    settlementUsdcAddress: process.env.SETTLEMENT_USDC_ADDRESS || '',
 
     // Chat / LLM (optional)
     openaiApiKey: process.env.OPENAI_API_KEY || '',
