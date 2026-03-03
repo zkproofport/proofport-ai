@@ -23,7 +23,7 @@ export function getTaskOutcome(skill: string, result: unknown): TaskOutcome {
       const r = result as GetSupportedCircuitsResult;
       return {
         state: 'completed',
-        guidance: `Found ${r.circuits.length} supported circuit(s). To start proof generation, call proof_request with a circuit type. Read the guide_url for step-by-step input preparation.`,
+        guidance: `Found ${r.circuits.length} supported circuit(s). NEXT STEP: Call the MCP tool named exactly "proof_request" with a circuit parameter (e.g. circuit: "coinbase_kyc"). Available MCP tools are ONLY: get_supported_circuits, proof_request, prove. Do NOT call any other tool name.`,
       };
     }
 

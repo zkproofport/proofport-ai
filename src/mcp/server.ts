@@ -306,7 +306,15 @@ VERIFIER ADDRESSES (Base Sepolia, chain ID 84532):
   // ─── get_supported_circuits ─────────────────────────────────────────
   server.tool(
     'get_supported_circuits',
-    `List all ZK circuits supported by ZKProofport. Call this to discover available circuits, their EAS schema IDs, deployed verifier contract addresses, and required inputs before starting a proof generation session.
+    `List all ZK circuits supported by ZKProofport. Call this first to discover available circuits before starting proof generation.
+
+AVAILABLE MCP TOOLS (use EXACT names — no other tool names exist):
+  1. get_supported_circuits — this tool (discovery)
+  2. proof_request — create a proof session (call this NEXT with circuit parameter)
+  3. prove — submit proof inputs (redirects to REST endpoint for long-running proof generation)
+
+IMPORTANT: Do NOT call "generate_proof" or any other tool name. The correct flow is:
+  get_supported_circuits → proof_request → (follow guide) → prove
 
 CIRCUITS:
   1. coinbase_attestation ("coinbase_kyc")
