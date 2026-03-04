@@ -1,0 +1,172 @@
+// ─── Circuit name mappings ──────────────────────────────────────────────
+
+/** Client-friendly circuit aliases. */
+export type CircuitName = 'coinbase_kyc' | 'coinbase_country';
+
+/** Canonical circuit IDs matching Nargo.toml names. */
+export type CircuitId = 'coinbase_attestation' | 'coinbase_country_attestation';
+
+/** Map client-friendly names to canonical circuit IDs. */
+export const CIRCUIT_NAME_MAP: Record<CircuitName, CircuitId> = {
+  coinbase_kyc: 'coinbase_attestation',
+  coinbase_country: 'coinbase_country_attestation',
+};
+
+/** Map canonical circuit IDs back to client-friendly names. */
+export const CIRCUIT_ID_MAP: Record<CircuitId, CircuitName> = {
+  coinbase_attestation: 'coinbase_kyc',
+  coinbase_country_attestation: 'coinbase_country',
+};
+
+// ─── Configuration ──────────────────────────────────────────────────────
+
+export interface ClientConfig {
+  /** proofport-ai server URL (e.g. https://stg-ai.zkproofport.app) */
+  baseUrl: string;
+  /** Base Mainnet RPC for EAS attestation fetching */
+  easRpcUrl?: string;
+  /** Base Sepolia/Mainnet RPC for payment transactions */
+  paymentRpcUrl?: string;
+  /** EAS GraphQL endpoint */
+  easGraphqlUrl?: string;
+}
+
+export interface WalletConfig {
+  /** Private key of the wallet holding an EAS attestation */
+  attestationPrivateKey: string;
+  /** Private key of the wallet holding USDC for payment (defaults to attestationPrivateKey) */
+  paymentPrivateKey?: string;
+}
+
+// ─── Payment ────────────────────────────────────────────────────────────
+
+export interface PaymentInfo {
+  nonce: string;
+  recipient: string;
+  amount: number;
+  asset: string;
+  network: string;
+  instruction: string;
+}
+
+// ─── x402 Challenge (402 response from POST /prove) ─────────────────────
+
+export interface PaymentRequirements {
+  scheme: string;
+  network: string;
+  maxAmountRequired: string;
+  resource: string;
+  description: string;
+  mimeType: string;
+  payTo: string;
+  extra: { name: string; version: string; nonce: string };
+}
+
+export interface ChallengeResponse {
+  error: string;
+  message: string;
+  nonce: string;
+  payment: PaymentRequirements;
+}
+
+// ─── Prove (POST /prove) ────────────────────────────────────────────────
+
+export interface ProveInputs {
+  signal_hash: string;
+  nullifier: string;
+  scope_bytes: string;
+  merkle_root: string;
+  user_address: string;
+  signature: string;
+  user_pubkey_x: string;
+  user_pubkey_y: string;
+  raw_transaction: string;
+  tx_length: number;
+  coinbase_attester_pubkey_x: string;
+  coinbase_attester_pubkey_y: string;
+  merkle_proof: string[];
+  leaf_index: number;
+  depth: number;
+  country_list?: string[];
+  is_included?: boolean;
+}
+
+export interface ProveRequest {
+  circuit: CircuitName;
+  inputs: ProveInputs;
+}
+
+export interface ProveResponse {
+  proof: string;
+  publicInputs: string;
+  proofWithInputs: string;
+  attestation: {
+    document: string;
+    proof_hash: string;
+    verification: {
+      rootCaValid: boolean;
+      chainValid: boolean;
+      signatureValid: boolean;
+      pcrs: Record<number, string>;
+    };
+  } | null;
+  timing: {
+    totalMs: number;
+    paymentVerifyMs?: number;
+    inputBuildMs?: number;
+    proveMs?: number;
+  };
+}
+
+export interface VerifyResult {
+  valid: boolean;
+  transactionHash?: string;
+  error?: string;
+}
+
+// ─── EAS attestation data ───────────────────────────────────────────────
+
+export interface EASAttestation {
+  id: string;
+  txid: string;
+  recipient: string;
+  attester: string;
+  time: number;
+  expirationTime: number;
+  schemaId: string;
+}
+
+export interface AttestationData {
+  attestation: EASAttestation;
+  rawTransaction: string;
+}
+
+// ─── Proof generation params ────────────────────────────────────────────
+
+export interface ProofParams {
+  circuit: CircuitName;
+  /** Scope string for the proof (defaults to "proofport") */
+  scope?: string;
+  /** Country codes for the country circuit (e.g. ["US", "KR"]) */
+  countryList?: string[];
+  /** Whether the country list is an inclusion or exclusion list */
+  isIncluded?: boolean;
+}
+
+export interface ProofResult {
+  proof: string;
+  publicInputs: string;
+  proofWithInputs: string;
+  paymentTxHash: string;
+  attestation: ProveResponse['attestation'];
+  timing: ProveResponse['timing'];
+}
+
+// ─── Step results for step-by-step execution ────────────────────────────
+
+export interface StepResult<T = unknown> {
+  step: number;
+  name: string;
+  data: T;
+  durationMs: number;
+}
