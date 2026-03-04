@@ -115,6 +115,7 @@ vi.mock('ethers', () => ({
   ethers: {
     JsonRpcProvider: vi.fn().mockImplementation(() => ({
       getNetwork: vi.fn().mockResolvedValue({ chainId: 84532n }),
+      getLogs: vi.fn().mockResolvedValue([]),
     })),
     Wallet: vi.fn().mockImplementation((_pk: string, prov: any) => ({
       address: '0x1234567890123456789012345678901234567890',
@@ -128,6 +129,13 @@ vi.mock('ethers', () => ({
     })),
     hexlify: vi.fn((bytes: Uint8Array) => '0x' + Buffer.from(bytes).toString('hex')),
     encodeBytes32String: vi.fn((str: string) => '0x' + Buffer.from(str).toString('hex').padEnd(64, '0')),
+    id: vi.fn((str: string) => '0x' + Buffer.from(str).toString('hex').padEnd(64, '0')),
+    getAddress: vi.fn((addr: string) => addr),
+    getBytes: vi.fn((hex: string) => new Uint8Array(Buffer.from(hex.replace('0x', ''), 'hex'))),
+    keccak256: vi.fn(() => '0x' + '11'.repeat(32)),
+    randomBytes: vi.fn((n: number) => new Uint8Array(n).fill(0xab)),
+    toUtf8Bytes: vi.fn((str: string) => Buffer.from(str, 'utf8')),
+    verifyMessage: vi.fn(() => '0x1234567890123456789012345678901234567890'),
   },
 }));
 
@@ -186,27 +194,17 @@ function makeTestConfig(overrides?: Partial<Config>): Config {
     a2aBaseUrl: 'http://localhost:0', // will be overridden
     agentVersion: '1.0.0',
     paymentPayTo: '',
-    paymentFacilitatorUrl: '',
     paymentProofPrice: '$0.10',
-    privyAppId: '',
-    privyApiSecret: '',
-    privyApiUrl: '',
-    signPageUrl: 'https://sign.zkproofport.app',
-    signingTtlSeconds: 300,
     teeMode: 'disabled' as const,
     enclaveCid: undefined,
     enclavePort: 5000,
     teeAttestationEnabled: false,
     erc8004IdentityAddress: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
     erc8004ReputationAddress: '0x8004B663056A597Dffe9eCcC1965A193B7388713',
-    settlementChainRpcUrl: '',
-    settlementPrivateKey: '',
-    settlementOperatorAddress: '',
-    settlementUsdcAddress: '',
+    erc8004ValidationAddress: '',
     openaiApiKey: '',
     geminiApiKey: '',
     phoenixCollectorEndpoint: '',
-    erc8004ValidationAddress: '',
     ...overrides,
   };
 }
@@ -320,12 +318,8 @@ describe('A2A SDK Client Integration', () => {
       expect(Array.isArray(agentCard.skills)).toBe(true);
 
       const skillIds = agentCard.skills.map((s) => s.id);
-      expect(skillIds).toContain('generate_proof');
-      expect(skillIds).toContain('verify_proof');
+      expect(skillIds).toContain('prove');
       expect(skillIds).toContain('get_supported_circuits');
-      expect(skillIds).toContain('request_signing');
-      expect(skillIds).toContain('check_status');
-      expect(skillIds).toContain('request_payment');
     });
 
     it('agent card contains capabilities', async () => {
@@ -381,14 +375,11 @@ describe('A2A SDK Client Integration', () => {
       expect(textPart!.text.length).toBeGreaterThan(0);
     });
 
-    it('verify_proof returns Task with verification result', async () => {
+    it('prove returns Task with REST endpoint redirect info', async () => {
       const result = await client.sendMessage(
         makeDataPartMessage({
-          skill: 'verify_proof',
-          circuitId: 'coinbase_attestation',
-          proof: '0xaabb',
-          publicInputs: ['0x' + 'cc'.repeat(32)],
-          chainId: '84532',
+          skill: 'prove',
+          circuit: 'coinbase_kyc',
         }),
       );
 
@@ -398,11 +389,12 @@ describe('A2A SDK Client Integration', () => {
 
       const dataPart = findDataPart(task.artifacts);
       expect(dataPart).toBeDefined();
-      expect(dataPart!.data.valid).toBe(true);
-      expect(dataPart!.data.circuitId).toBe('coinbase_attestation');
+      // prove skill returns REST redirect message
+      expect(dataPart!.data.endpoint).toBeDefined();
     });
 
-    it('generate_proof with direct signature returns completed Task with proof', async () => {
+    it('invalid skill (generate_proof) returns failed Task', async () => {
+      // generate_proof is not a valid skill; valid skills are prove and get_supported_circuits
       const result = await client.sendMessage(
         makeDataPartMessage({
           skill: 'generate_proof',
@@ -415,71 +407,23 @@ describe('A2A SDK Client Integration', () => {
 
       expect(isTask(result)).toBe(true);
       const task = result as Task;
-      expect(task.status.state).toBe('completed');
-
-      const dataPart = findDataPart(task.artifacts);
-      expect(dataPart).toBeDefined();
-      expect(dataPart!.data.proof).toBeDefined();
-      expect(dataPart!.data.publicInputs).toBeDefined();
-    });
-
-    it('request_signing returns Task with signingUrl and requestId', async () => {
-      const result = await client.sendMessage(
-        makeDataPartMessage({
-          skill: 'request_signing',
-          circuitId: 'coinbase_attestation',
-          scope: 'test.com',
-        }),
-      );
-
-      expect(isTask(result)).toBe(true);
-      const task = result as Task;
-      expect(task.status.state).toBe('input-required');
-
-      const dataPart = findDataPart(task.artifacts);
-      expect(dataPart).toBeDefined();
-      expect(dataPart!.data.requestId).toBeDefined();
-      expect(typeof dataPart!.data.requestId).toBe('string');
-      expect(dataPart!.data.signingUrl).toBeDefined();
-    });
-
-    it('check_status with unknown requestId returns failed Task', async () => {
-      const result = await client.sendMessage(
-        makeDataPartMessage({
-          skill: 'check_status',
-          requestId: 'non-existent-request-id',
-        }),
-      );
-
-      expect(isTask(result)).toBe(true);
-      const task = result as Task;
       expect(task.status.state).toBe('failed');
     });
 
-    it('request_payment with disabled payment mode returns failed Task', async () => {
-      // First create a signing request to get a valid requestId
-      const signingResult = await client.sendMessage(
-        makeDataPartMessage({
-          skill: 'request_signing',
-          circuitId: 'coinbase_attestation',
-          scope: 'test.com',
-        }),
-      );
-      const signingTask = signingResult as Task;
-      const requestId = findDataPart(signingTask.artifacts)?.data.requestId as string;
-      expect(requestId).toBeDefined();
-
-      // Attempt payment request (disabled mode)
+    it('invalid skill (verify_proof) returns failed Task', async () => {
+      // verify_proof is not a valid A2A skill; it's only in the local MCP server
       const result = await client.sendMessage(
         makeDataPartMessage({
-          skill: 'request_payment',
-          requestId,
+          skill: 'verify_proof',
+          circuitId: 'coinbase_attestation',
+          proof: '0xaabb',
+          publicInputs: ['0x' + 'cc'.repeat(32)],
+          chainId: '84532',
         }),
       );
 
       expect(isTask(result)).toBe(true);
       const task = result as Task;
-      // Should fail because payment is disabled
       expect(task.status.state).toBe('failed');
     });
   });
@@ -559,7 +503,7 @@ describe('A2A SDK Client Integration', () => {
       // Error artifact should contain text mentioning invalid skill
       const textPart = findTextPart(task.artifacts);
       expect(textPart).toBeDefined();
-      expect(textPart!.text.toLowerCase()).toContain('invalid skill');
+      expect(textPart!.text.toLowerCase()).toMatch(/invalid skill|valid skills/i);
     });
 
     it('failed Task for missing required params', async () => {
@@ -706,7 +650,8 @@ describe('A2A SDK Client Integration', () => {
       }
     }, 15000);
 
-    it('sendMessageStream for verify_proof yields artifact with verification result', async () => {
+    it('sendMessageStream for invalid skill (verify_proof) yields failed status', async () => {
+      // verify_proof is not a valid A2A skill — valid skills are prove and get_supported_circuits
       const events: any[] = [];
 
       const stream = client.sendMessageStream(
@@ -725,17 +670,13 @@ describe('A2A SDK Client Integration', () => {
 
       expect(events.length).toBeGreaterThan(0);
 
-      // Should find an artifact-update or task with valid: true
-      const artifactEvent = events.find(
+      // verify_proof is not a valid skill — should get a failed status
+      const failedEvent = events.find(
         (e) =>
-          (e.kind === 'artifact-update' &&
-            e.artifact?.parts?.some((p: any) => p.kind === 'data' && p.data?.valid === true)) ||
-          (e.kind === 'task' &&
-            e.artifacts?.some((a: any) =>
-              a.parts?.some((p: any) => p.kind === 'data' && p.data?.valid === true),
-            )),
+          (e.kind === 'status-update' && e.status?.state === 'failed') ||
+          (e.kind === 'task' && e.status?.state === 'failed'),
       );
-      expect(artifactEvent).toBeDefined();
+      expect(failedEvent).toBeDefined();
     }, 15000);
 
     it('sendMessageStream for invalid skill yields failed status', async () => {
@@ -764,29 +705,6 @@ describe('A2A SDK Client Integration', () => {
   // ── 8. contextId Flow (Multi-turn) ─────────────────────────────────────
 
   describe('contextId Flow (Multi-turn)', () => {
-    it('request_signing stores contextId mapping for subsequent calls', async () => {
-      const contextId = randomUUID();
-
-      // Step 1: request_signing with contextId
-      const signingResult = await client.sendMessage(
-        makeDataPartMessage(
-          {
-            skill: 'request_signing',
-            circuitId: 'coinbase_attestation',
-            scope: 'test.com',
-          },
-          contextId,
-        ),
-      );
-
-      expect(isTask(signingResult)).toBe(true);
-      const signingTask = signingResult as Task;
-      expect(signingTask.status.state).toBe('input-required');
-
-      const requestId = findDataPart(signingTask.artifacts)?.data.requestId;
-      expect(requestId).toBeDefined();
-    });
-
     it('contextId is preserved in task response', async () => {
       const contextId = randomUUID();
 
@@ -803,11 +721,11 @@ describe('A2A SDK Client Integration', () => {
       expect(typeof task.contextId).toBe('string');
     });
 
-    it('check_status with same contextId auto-resolves requestId', async () => {
+    it('invalid skill (request_signing) with contextId returns failed Task', async () => {
+      // request_signing is not a valid skill in current code
       const contextId = randomUUID();
 
-      // Step 1: request_signing with contextId
-      const signingResult = await client.sendMessage(
+      const result = await client.sendMessage(
         makeDataPartMessage(
           {
             skill: 'request_signing',
@@ -817,31 +735,46 @@ describe('A2A SDK Client Integration', () => {
           contextId,
         ),
       );
-      const signingTask = signingResult as Task;
-      expect(signingTask.status.state).toBe('input-required');
-      const requestId = findDataPart(signingTask.artifacts)?.data.requestId;
-      expect(requestId).toBeDefined();
 
-      // Step 2: check_status with same contextId (no requestId param)
-      // The server should auto-resolve the requestId from the contextId mapping
-      const statusResult = await client.sendMessage(
+      expect(isTask(result)).toBe(true);
+      const task = result as Task;
+      expect(task.status.state).toBe('failed');
+    });
+
+    it('invalid skill (check_status) with contextId returns failed Task', async () => {
+      // check_status is not a valid skill in current code
+      const contextId = randomUUID();
+
+      const result = await client.sendMessage(
         makeDataPartMessage(
           {
             skill: 'check_status',
-            // requestId intentionally omitted — should auto-resolve from contextId
+            requestId: 'some-request-id',
           },
           contextId,
         ),
       );
 
-      expect(isTask(statusResult)).toBe(true);
-      const statusTask = statusResult as Task;
-      // Should succeed (not fail with "requestId is required") because auto-resolution
-      expect(statusTask.status.state).toBe('input-required');
+      expect(isTask(result)).toBe(true);
+      const task = result as Task;
+      expect(task.status.state).toBe('failed');
+    });
 
-      const statusData = findDataPart(statusTask.artifacts);
-      expect(statusData).toBeDefined();
-      expect(statusData!.data.phase).toBeDefined();
+    it('two sequential get_supported_circuits calls each return unique task IDs', async () => {
+      const contextId = randomUUID();
+
+      const result1 = await client.sendMessage(
+        makeDataPartMessage({ skill: 'get_supported_circuits' }, contextId),
+      );
+      const result2 = await client.sendMessage(
+        makeDataPartMessage({ skill: 'get_supported_circuits' }, contextId),
+      );
+
+      const task1 = result1 as Task;
+      const task2 = result2 as Task;
+      expect(task1.id).not.toBe(task2.id);
+      expect(task1.status.state).toBe('completed');
+      expect(task2.status.state).toBe('completed');
     });
   });
 
@@ -857,73 +790,8 @@ describe('A2A SDK Client Integration', () => {
       expect(task.status.state).toBe('failed');
     });
 
-    it('generate_proof without circuitId returns failed Task', async () => {
-      const result = await client.sendMessage(
-        makeDataPartMessage({
-          skill: 'generate_proof',
-          scope: 'test.com',
-          // Missing circuitId
-          address: '0x' + 'dd'.repeat(20),
-          signature: '0x' + 'ee'.repeat(65),
-        }),
-      );
-
-      const task = result as Task;
-      expect(task.status.state).toBe('failed');
-    });
-
-    it('verify_proof without proof returns failed Task', async () => {
-      const result = await client.sendMessage(
-        makeDataPartMessage({
-          skill: 'verify_proof',
-          circuitId: 'coinbase_attestation',
-          // Missing proof and publicInputs
-        }),
-      );
-
-      const task = result as Task;
-      expect(task.status.state).toBe('failed');
-    });
-
-    it('request_signing without circuitId returns failed Task', async () => {
-      const result = await client.sendMessage(
-        makeDataPartMessage({
-          skill: 'request_signing',
-          scope: 'test.com',
-          // Missing circuitId
-        }),
-      );
-
-      const task = result as Task;
-      expect(task.status.state).toBe('failed');
-    });
-
-    it('request_signing without scope returns failed Task', async () => {
-      const result = await client.sendMessage(
-        makeDataPartMessage({
-          skill: 'request_signing',
-          circuitId: 'coinbase_attestation',
-          // Missing scope
-        }),
-      );
-
-      const task = result as Task;
-      expect(task.status.state).toBe('failed');
-    });
-
-    it('check_status without requestId (and no contextId) returns failed Task', async () => {
-      const result = await client.sendMessage(
-        makeDataPartMessage({
-          skill: 'check_status',
-          // No requestId, no contextId auto-resolution
-        }),
-      );
-
-      const task = result as Task;
-      expect(task.status.state).toBe('failed');
-    });
-
-    it('DataPart without skill field returns failed Task', async () => {
+    it('DataPart without skill field returns failed Task (no LLM for text routing)', async () => {
+      // No skill field → falls through to text path → fails because no LLM configured
       const result = await client.sendMessage(
         makeDataPartMessage({ address: '0xabc' }),
       );
@@ -932,14 +800,27 @@ describe('A2A SDK Client Integration', () => {
       expect(task.status.state).toBe('failed');
     });
 
-    it('generate_proof with invalid circuitId returns failed Task', async () => {
+    it('prove with invalid circuit alias returns completed Task (prove only validates at REST level)', async () => {
+      // The A2A prove skill just returns a REST redirect — it does not validate circuit at A2A level
+      const result = await client.sendMessage(
+        makeDataPartMessage({
+          skill: 'prove',
+          circuit: 'invalid_circuit_name',
+        }),
+      );
+
+      const task = result as Task;
+      // prove skill redirects to REST — it completes even with invalid circuit (REST will reject)
+      expect(task.status.state).toBe('completed');
+    });
+
+    it('generate_proof (invalid skill) returns failed Task', async () => {
+      // generate_proof is not a valid A2A skill
       const result = await client.sendMessage(
         makeDataPartMessage({
           skill: 'generate_proof',
           scope: 'test.com',
-          circuitId: 'invalid_circuit_name',
-          address: '0x' + 'dd'.repeat(20),
-          signature: '0x' + 'ee'.repeat(65),
+          circuitId: 'coinbase_attestation',
         }),
       );
 
@@ -951,42 +832,38 @@ describe('A2A SDK Client Integration', () => {
   // ── 10. Multiple Skills in Sequence ────────────────────────────────────
 
   describe('Multiple Skills in Sequence', () => {
-    it('can invoke different skills sequentially', async () => {
+    it('can invoke valid skills sequentially', async () => {
       // First: get_supported_circuits
       const circuitsResult = await client.sendMessage(
         makeDataPartMessage({ skill: 'get_supported_circuits' }),
       );
       expect((circuitsResult as Task).status.state).toBe('completed');
 
-      // Second: verify_proof
-      const verifyResult = await client.sendMessage(
+      // Second: prove (returns REST redirect info)
+      const proveResult = await client.sendMessage(
+        makeDataPartMessage({
+          skill: 'prove',
+          circuit: 'coinbase_kyc',
+        }),
+      );
+      expect((proveResult as Task).status.state).toBe('completed');
+
+      // Third: invalid skill (verify_proof) returns failed
+      const invalidResult = await client.sendMessage(
         makeDataPartMessage({
           skill: 'verify_proof',
           circuitId: 'coinbase_attestation',
           proof: '0xaabb',
           publicInputs: ['0x' + 'cc'.repeat(32)],
-          chainId: '84532',
         }),
       );
-      expect((verifyResult as Task).status.state).toBe('completed');
-
-      // Third: generate_proof
-      const proofResult = await client.sendMessage(
-        makeDataPartMessage({
-          skill: 'generate_proof',
-          scope: 'test.com',
-          circuitId: 'coinbase_attestation',
-          address: '0x' + 'dd'.repeat(20),
-          signature: '0x' + 'ee'.repeat(65),
-        }),
-      );
-      expect((proofResult as Task).status.state).toBe('completed');
+      expect((invalidResult as Task).status.state).toBe('failed');
 
       // Each task should have a unique ID
       const ids = [
         (circuitsResult as Task).id,
-        (verifyResult as Task).id,
-        (proofResult as Task).id,
+        (proveResult as Task).id,
+        (invalidResult as Task).id,
       ];
       const uniqueIds = new Set(ids);
       expect(uniqueIds.size).toBe(3);
@@ -998,10 +875,8 @@ describe('A2A SDK Client Integration', () => {
       );
       const result2 = await client.sendMessage(
         makeDataPartMessage({
-          skill: 'verify_proof',
-          circuitId: 'coinbase_attestation',
-          proof: '0xaabb',
-          publicInputs: ['0x' + 'cc'.repeat(32)],
+          skill: 'prove',
+          circuit: 'coinbase_kyc',
         }),
       );
 
@@ -1014,40 +889,45 @@ describe('A2A SDK Client Integration', () => {
     });
   });
 
-  // ── 11. Full Flow: request_signing -> check_status ─────────────────────
+  // ── 11. Full Valid Skill Flow ───────────────────────────────────────────
 
   describe('Full Session Flow', () => {
-    it('request_signing -> check_status with explicit requestId', async () => {
-      // Step 1: Request signing
-      const signingResult = await client.sendMessage(
+    it('get_supported_circuits -> prove -> getTask for both tasks', async () => {
+      // Step 1: Discover circuits
+      const circuitsResult = await client.sendMessage(
+        makeDataPartMessage({ skill: 'get_supported_circuits' }),
+      );
+
+      const circuitsTask = circuitsResult as Task;
+      expect(circuitsTask.status.state).toBe('completed');
+
+      const dataPart = findDataPart(circuitsTask.artifacts);
+      expect(dataPart).toBeDefined();
+      expect(Array.isArray(dataPart!.data.circuits)).toBe(true);
+
+      // Step 2: prove (redirects to REST endpoint)
+      const proveResult = await client.sendMessage(
         makeDataPartMessage({
-          skill: 'request_signing',
-          circuitId: 'coinbase_attestation',
-          scope: 'test.com',
+          skill: 'prove',
+          circuit: 'coinbase_kyc',
         }),
       );
 
-      const signingTask = signingResult as Task;
-      expect(signingTask.status.state).toBe('input-required');
+      const proveTask = proveResult as Task;
+      expect(proveTask.status.state).toBe('completed');
 
-      const requestId = findDataPart(signingTask.artifacts)?.data.requestId as string;
-      expect(requestId).toBeDefined();
+      const proveData = findDataPart(proveTask.artifacts);
+      expect(proveData).toBeDefined();
+      expect(proveData!.data.endpoint).toBeDefined();
 
-      // Step 2: Check status with explicit requestId
-      const statusResult = await client.sendMessage(
-        makeDataPartMessage({
-          skill: 'check_status',
-          requestId,
-        }),
-      );
+      // Step 3: getTask retrieves both tasks by ID
+      const fetchedCircuits = await client.getTask({ id: circuitsTask.id });
+      const fetchedProve = await client.getTask({ id: proveTask.id });
 
-      const statusTask = statusResult as Task;
-      expect(statusTask.status.state).toBe('input-required');
-
-      const statusData = findDataPart(statusTask.artifacts);
-      expect(statusData).toBeDefined();
-      // Should show signing phase since we haven't actually signed
-      expect(statusData!.data.phase).toBe('signing');
+      expect(fetchedCircuits.id).toBe(circuitsTask.id);
+      expect(fetchedProve.id).toBe(proveTask.id);
+      expect(fetchedCircuits.status.state).toBe('completed');
+      expect(fetchedProve.status.state).toBe('completed');
     });
   });
 });

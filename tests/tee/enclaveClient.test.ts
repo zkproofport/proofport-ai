@@ -78,7 +78,9 @@ describe('EnclaveClient', () => {
       const client = new EnclaveClient(config);
 
       // Mock successful connection and response
-      mockSocket.on.mockImplementation((event, handler) => {
+      const handlers: Record<string, Function> = {};
+      mockSocket.on.mockImplementation((event: string, handler: Function) => {
+        handlers[event] = handler;
         if (event === 'connect') {
           setTimeout(() => handler(), 0);
         } else if (event === 'data') {
@@ -90,6 +92,8 @@ describe('EnclaveClient', () => {
               publicInputs: ['0x01'],
             };
             handler(Buffer.from(JSON.stringify(response)));
+            // Fire 'end' event after data
+            if (handlers['end']) setTimeout(() => handlers['end'](), 5);
           }, 10);
         }
         return mockSocket;
@@ -110,7 +114,9 @@ describe('EnclaveClient', () => {
       };
       const client = new EnclaveClient(config);
 
-      mockSocket.on.mockImplementation((event, handler) => {
+      const handlers2: Record<string, Function> = {};
+      mockSocket.on.mockImplementation((event: string, handler: Function) => {
+        handlers2[event] = handler;
         if (event === 'connect') {
           setTimeout(() => handler(), 0);
         } else if (event === 'data') {
@@ -122,6 +128,7 @@ describe('EnclaveClient', () => {
               publicInputs: [],
             };
             handler(Buffer.from(JSON.stringify(response)));
+            if (handlers2['end']) setTimeout(() => handlers2['end'](), 5);
           }, 10);
         }
         return mockSocket;
@@ -145,7 +152,9 @@ describe('EnclaveClient', () => {
       };
       const client = new EnclaveClient(config);
 
-      mockSocket.on.mockImplementation((event, handler) => {
+      const handlers3: Record<string, Function> = {};
+      mockSocket.on.mockImplementation((event: string, handler: Function) => {
+        handlers3[event] = handler;
         if (event === 'connect') {
           setTimeout(() => handler(), 0);
         } else if (event === 'data') {
@@ -156,6 +165,7 @@ describe('EnclaveClient', () => {
               error: 'Circuit not found',
             };
             handler(Buffer.from(JSON.stringify(response)));
+            if (handlers3['end']) setTimeout(() => handlers3['end'](), 5);
           }, 10);
         }
         return mockSocket;
@@ -215,7 +225,9 @@ describe('EnclaveClient', () => {
       };
       const client = new EnclaveClient(config);
 
-      mockSocket.on.mockImplementation((event, handler) => {
+      const handlers4: Record<string, Function> = {};
+      mockSocket.on.mockImplementation((event: string, handler: Function) => {
+        handlers4[event] = handler;
         if (event === 'connect') {
           setTimeout(() => handler(), 0);
         } else if (event === 'data') {
@@ -225,6 +237,7 @@ describe('EnclaveClient', () => {
               requestId: 'health-123',
             };
             handler(Buffer.from(JSON.stringify(response)));
+            if (handlers4['end']) setTimeout(() => handlers4['end'](), 5);
           }, 10);
         }
         return mockSocket;
@@ -304,7 +317,9 @@ describe('EnclaveClient', () => {
 
       const mockCoseDoc = Buffer.from(cborEncode(coseSign1)).toString('base64');
 
-      mockSocket.on.mockImplementation((event, handler) => {
+      const handlers5: Record<string, Function> = {};
+      mockSocket.on.mockImplementation((event: string, handler: Function) => {
+        handlers5[event] = handler;
         if (event === 'connect') {
           setTimeout(() => handler(), 0);
         } else if (event === 'data') {
@@ -317,6 +332,7 @@ describe('EnclaveClient', () => {
               attestationDocument: mockCoseDoc,
             };
             handler(Buffer.from(JSON.stringify(response)));
+            if (handlers5['end']) setTimeout(() => handlers5['end'](), 5);
           }, 10);
         }
         return mockSocket;

@@ -116,7 +116,7 @@ describe('A2A Integration Tests', () => {
         },
         skills: expect.arrayContaining([
           expect.objectContaining({
-            id: 'generate_proof',
+            id: 'prove',
             name: 'Generate ZK Proof',
             tags: expect.any(Array),
             examples: expect.any(Array),

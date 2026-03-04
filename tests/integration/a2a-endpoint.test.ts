@@ -97,6 +97,7 @@ vi.mock('ethers', () => ({
   ethers: {
     JsonRpcProvider: vi.fn().mockImplementation(() => ({
       getNetwork: vi.fn().mockResolvedValue({ chainId: 84532n }),
+      getLogs: vi.fn().mockResolvedValue([]),
     })),
     Wallet: vi.fn().mockImplementation((_pk: string, prov: any) => ({
       address: '0x1234567890123456789012345678901234567890',
@@ -110,6 +111,13 @@ vi.mock('ethers', () => ({
     })),
     hexlify: vi.fn((bytes: Uint8Array) => '0x' + Buffer.from(bytes).toString('hex')),
     encodeBytes32String: vi.fn((str: string) => '0x' + Buffer.from(str).toString('hex').padEnd(64, '0')),
+    id: vi.fn((str: string) => '0x' + Buffer.from(str).toString('hex').padEnd(64, '0')),
+    getAddress: vi.fn((addr: string) => addr),
+    getBytes: vi.fn((hex: string) => new Uint8Array(Buffer.from(hex.replace('0x', ''), 'hex'))),
+    keccak256: vi.fn(() => '0x' + '11'.repeat(32)),
+    randomBytes: vi.fn((n: number) => new Uint8Array(n).fill(0xab)),
+    toUtf8Bytes: vi.fn((str: string) => Buffer.from(str, 'utf8')),
+    verifyMessage: vi.fn(() => '0x1234567890123456789012345678901234567890'),
   },
 }));
 
@@ -179,23 +187,17 @@ describe('A2A Endpoint E2E', () => {
       a2aBaseUrl: 'https://a2a.example.com',
       agentVersion: '1.0.0',
       paymentPayTo: '',
-      paymentFacilitatorUrl: '',
       paymentProofPrice: '$0.10',
-      privyAppId: '',
-      privyApiSecret: '',
-      privyApiUrl: '',
-      signPageUrl: '',
-      signingTtlSeconds: 300,
       teeMode: 'disabled' as const,
       enclaveCid: undefined,
       enclavePort: 5000,
       teeAttestationEnabled: false,
       erc8004IdentityAddress: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
       erc8004ReputationAddress: '0x8004B663056A597Dffe9eCcC1965A193B7388713',
-      settlementChainRpcUrl: '',
-      settlementPrivateKey: '',
-      settlementOperatorAddress: '',
-      settlementUsdcAddress: '',
+      erc8004ValidationAddress: '',
+      openaiApiKey: '',
+      geminiApiKey: '',
+      phoenixCollectorEndpoint: '',
     };
 
     const appBundle = createApp(testConfig, 123456n);
@@ -203,17 +205,17 @@ describe('A2A Endpoint E2E', () => {
   });
 
   describe('GET /.well-known/agent.json (A2A Agent Card)', () => {
-    it('should return A2A v0.3 agent card', async () => {
+    it('should return OASF agent descriptor at /.well-known/agent.json', async () => {
       const response = await request(app).get('/.well-known/agent.json');
 
       expect(response.status).toBe(200);
       expect(response.headers['content-type']).toMatch(/application\/json/);
+      // /.well-known/agent.json is the OASF endpoint, not A2A agent card
       expect(response.body).toMatchObject({
         name: 'proveragent.base.eth',
-        protocolVersion: '0.3.0',
-        preferredTransport: 'JSONRPC',
-        skills: expect.any(Array),
-        capabilities: expect.any(Object),
+        type: expect.any(String),
+        agentType: expect.any(String),
+        active: true,
       });
     });
 
@@ -248,14 +250,8 @@ describe('A2A Endpoint E2E', () => {
       expect(response.body.skills).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
-            id: 'generate_proof',
+            id: 'prove',
             name: 'Generate ZK Proof',
-            tags: expect.any(Array),
-            examples: expect.any(Array),
-          }),
-          expect.objectContaining({
-            id: 'verify_proof',
-            name: 'Verify ZK Proof',
             tags: expect.any(Array),
             examples: expect.any(Array),
           }),
@@ -425,72 +421,20 @@ describe('A2A Endpoint E2E', () => {
       });
     });
 
-    it('GET /payment/status should return payment config', async () => {
-      const response = await request(app).get('/payment/status');
-
+    it('GET /health returns JSON content-type', async () => {
+      const response = await request(app).get('/health');
       expect(response.status).toBe(200);
-      expect(response.body).toMatchObject({
-        mode: 'disabled',
-        requiresPayment: false,
-        description: expect.any(String),
-      });
-    });
-
-    it('GET /signing/status should return signing providers', async () => {
-      const response = await request(app).get('/signing/status');
-
-      expect(response.status).toBe(200);
-      expect(response.body).toMatchObject({
-        providers: {
-          privy: { enabled: false },
-          web: { enabled: false },
-          eip7702: { enabled: true },
-        },
-      });
-    });
-
-    it('GET /tee/status should return TEE config', async () => {
-      const response = await request(app).get('/tee/status');
-
-      expect(response.status).toBe(200);
-      expect(response.body).toMatchObject({
-        mode: 'disabled',
-        attestationEnabled: false,
-        available: false,
-      });
-    });
-
-    it('GET /identity/status should return ERC-8004 config', async () => {
-      const response = await request(app).get('/identity/status');
-
-      expect(response.status).toBe(200);
-      expect(response.body).toMatchObject({
-        erc8004: {
-          identityContract: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
-          reputationContract: '0x8004B663056A597Dffe9eCcC1965A193B7388713',
-          configured: true,
-        },
-      });
-    });
-
-    it('should return JSON content-type for all status endpoints', async () => {
-      const endpoints = ['/health', '/payment/status', '/signing/status', '/tee/status', '/identity/status'];
-
-      for (const endpoint of endpoints) {
-        const response = await request(app).get(endpoint);
-        expect(response.status).toBe(200);
-        expect(response.headers['content-type']).toMatch(/json/);
-      }
+      expect(response.headers['content-type']).toMatch(/json/);
     });
   });
 
   describe('Route Coexistence', () => {
     it('A2A and MCP routes both respond correctly', async () => {
-      // Test A2A Agent Card at standard URL
+      // Test OASF agent descriptor at standard URL
       const oasfResponse = await request(app).get('/.well-known/agent.json');
       expect(oasfResponse.status).toBe(200);
       expect(oasfResponse.body.name).toBe('proveragent.base.eth');
-      expect(oasfResponse.body.protocolVersion).toBe('0.3.0');
+      expect(oasfResponse.body.active).toBe(true);
 
       // Test A2A Agent Card at alias URL
       const agentCardResponse = await request(app).get('/.well-known/agent-card.json');
@@ -574,7 +518,7 @@ describe('A2A Endpoint E2E', () => {
       expect(circuitIds).toContain('coinbase_attestation');
     });
 
-    it('message/send with DataPart verify_proof', async () => {
+    it('message/send with DataPart prove skill returns redirect to REST endpoint', async () => {
       const response = await request(app)
         .post('/a2a')
         .send({
@@ -584,17 +528,14 @@ describe('A2A Endpoint E2E', () => {
           params: {
             message: {
               kind: 'message',
-              messageId: 'msg-verify-1',
+              messageId: 'msg-prove-1',
               role: 'user',
               parts: [
                 {
                   kind: 'data',
                   data: {
-                    skill: 'verify_proof',
-                    circuitId: 'coinbase_attestation',
-                    proof: '0xaabb',
-                    publicInputs: ['0x' + 'cc'.repeat(32)],
-                    chainId: '84532',
+                    skill: 'prove',
+                    circuit: 'coinbase_kyc',
                   },
                 },
               ],
@@ -610,63 +551,14 @@ describe('A2A Endpoint E2E', () => {
       expect(task.artifacts).toBeDefined();
       expect(task.artifacts.length).toBeGreaterThan(0);
 
-      // Find artifact with DataPart containing valid: true
-      const artifact = task.artifacts.find((a: any) =>
-        a.parts.some((p: any) => p.kind === 'data' && p.data && typeof p.data.valid === 'boolean')
-      );
-      expect(artifact).toBeDefined();
+      // Artifact should contain redirect message with endpoint info
+      const artifact = task.artifacts[0];
       const dataPart = artifact.parts.find((p: any) => p.kind === 'data');
-      expect(dataPart.data.valid).toBe(true);
-      expect(dataPart.data.circuitId).toBe('coinbase_attestation');
+      expect(dataPart).toBeDefined();
+      expect(dataPart.data.endpoint).toBeDefined();
     });
 
-    it('message/send with DataPart generate_proof (direct signature)', async () => {
-      const response = await request(app)
-        .post('/a2a')
-        .send({
-          jsonrpc: '2.0',
-          id: 13,
-          method: 'message/send',
-          params: {
-            message: {
-              kind: 'message',
-              messageId: 'msg-genproof-1',
-              role: 'user',
-              parts: [
-                {
-                  kind: 'data',
-                  data: {
-                    skill: 'generate_proof',
-                    scope: 'test.com',
-                    circuitId: 'coinbase_attestation',
-                    address: '0x' + 'dd'.repeat(20),
-                    signature: '0x' + 'ee'.repeat(65),
-                  },
-                },
-              ],
-            },
-          },
-        });
-
-      expect(response.status).toBe(200);
-      expect(response.body.error).toBeUndefined();
-
-      const task = response.body.result;
-      expect(task.status.state).toBe('completed');
-      expect(task.artifacts).toBeDefined();
-      expect(task.artifacts.length).toBeGreaterThan(0);
-
-      // Artifact must contain proof data
-      const artifact = task.artifacts.find((a: any) =>
-        a.parts.some((p: any) => p.kind === 'data' && p.data && 'proof' in p.data)
-      );
-      expect(artifact).toBeDefined();
-      const dataPart = artifact.parts.find((p: any) => p.kind === 'data');
-      expect(dataPart.data.proof).toBeDefined();
-      expect(dataPart.data.publicInputs).toBeDefined();
-    });
-
-    it('message/send with generate_proof missing params', async () => {
+    it('message/send with invalid skill returns failed task', async () => {
       const response = await request(app)
         .post('/a2a')
         .send({
@@ -676,14 +568,14 @@ describe('A2A Endpoint E2E', () => {
           params: {
             message: {
               kind: 'message',
-              messageId: 'msg-genproof-missing',
+              messageId: 'msg-invalid-skill',
               role: 'user',
               parts: [
                 {
                   kind: 'data',
                   data: {
                     skill: 'generate_proof',
-                    // no scope, no circuitId
+                    // generate_proof is not a valid skill (valid: prove, get_supported_circuits)
                   },
                 },
               ],
@@ -692,41 +584,6 @@ describe('A2A Endpoint E2E', () => {
         });
 
       expect(response.status).toBe(200);
-      // SDK returns task with failed state when executor catches error
-      const task = response.body.result;
-      expect(task).toBeDefined();
-      expect(task.status.state).toBe('failed');
-      expect(task.artifacts).toBeDefined();
-      expect(task.artifacts.length).toBeGreaterThan(0);
-    });
-
-    it('message/send with verify_proof missing params', async () => {
-      const response = await request(app)
-        .post('/a2a')
-        .send({
-          jsonrpc: '2.0',
-          id: 15,
-          method: 'message/send',
-          params: {
-            message: {
-              kind: 'message',
-              messageId: 'msg-verify-missing',
-              role: 'user',
-              parts: [
-                {
-                  kind: 'data',
-                  data: {
-                    skill: 'verify_proof',
-                    // no circuitId, no proof, no publicInputs
-                  },
-                },
-              ],
-            },
-          },
-        });
-
-      expect(response.status).toBe(200);
-      // SDK returns task with failed state when executor catches error
       const task = response.body.result;
       expect(task).toBeDefined();
       expect(task.status.state).toBe('failed');
@@ -926,19 +783,6 @@ describe('A2A Endpoint E2E', () => {
       const reg = oasf.registrations[0];
       expect(reg).toHaveProperty('agentRegistry');
       expect(reg).toHaveProperty('agentId');
-    });
-
-    it('Identity status endpoint returns ERC-8004 contracts', async () => {
-      const response = await request(app).get('/identity/status');
-
-      expect(response.status).toBe(200);
-      expect(response.body).toMatchObject({
-        erc8004: {
-          identityContract: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
-          reputationContract: '0x8004B663056A597Dffe9eCcC1965A193B7388713',
-          configured: true,
-        },
-      });
     });
 
     it('Agent card supportedTrust includes reputation (and tee-attestation when TEE enabled)', async () => {

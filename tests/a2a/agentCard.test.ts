@@ -114,31 +114,27 @@ describe('A2A Agent Card', () => {
       expect(card2.version).toBe('2.0.0');
     });
 
-    it('should have skills array with generate_proof skill', async () => {
+    it('should have skills array with prove skill', async () => {
       const { buildAgentCard } = await import('../../src/a2a/agentCard');
       const card = buildAgentCard(mockConfig);
 
       expect(Array.isArray(card.skills)).toBe(true);
       expect(card.skills.length).toBeGreaterThanOrEqual(1);
 
-      const generateProofSkill = card.skills.find(s => s.id === 'generate_proof');
-      expect(generateProofSkill).toBeDefined();
-      expect(generateProofSkill?.name).toBe('Generate ZK Proof');
-      expect(generateProofSkill?.description).toContain('zero-knowledge proof');
-      expect(generateProofSkill?.inputModes).toContain('application/json');
-      expect(generateProofSkill?.outputModes).toContain('application/json');
+      const proveSkill = card.skills.find(s => s.id === 'prove');
+      expect(proveSkill).toBeDefined();
+      expect(proveSkill?.name).toBe('Generate ZK Proof');
+      expect(proveSkill?.description).toContain('zero-knowledge proof');
+      expect(proveSkill?.inputModes).toContain('application/json');
+      expect(proveSkill?.outputModes).toContain('application/json');
     });
 
-    it('should have skills array with verify_proof skill', async () => {
+    it('should NOT have verify_proof skill (removed in current implementation)', async () => {
       const { buildAgentCard } = await import('../../src/a2a/agentCard');
       const card = buildAgentCard(mockConfig);
 
       const verifyProofSkill = card.skills.find(s => s.id === 'verify_proof');
-      expect(verifyProofSkill).toBeDefined();
-      expect(verifyProofSkill?.name).toBe('Verify ZK Proof');
-      expect(verifyProofSkill?.description.toLowerCase()).toContain('verify');
-      expect(verifyProofSkill?.inputModes).toContain('application/json');
-      expect(verifyProofSkill?.outputModes).toContain('application/json');
+      expect(verifyProofSkill).toBeUndefined();
     });
 
     it('should have skills array with get_supported_circuits skill', async () => {
@@ -227,14 +223,14 @@ describe('A2A Agent Card', () => {
       expect(card.identity.erc8004.tokenId).toBe(null);
     });
 
-    it('should have proper description mentioning ZK proof and ZKProofport', async () => {
+    it('should have proper description mentioning ZK proof and Coinbase', async () => {
       const { buildAgentCard } = await import('../../src/a2a/agentCard');
       const card = buildAgentCard(mockConfig);
 
       expect(card.description).toBeDefined();
       expect(typeof card.description).toBe('string');
       expect(card.description.toLowerCase()).toContain('zk proof');
-      expect(card.description.toLowerCase()).toContain('zkproofport');
+      expect(card.description.toLowerCase()).toContain('coinbase');
     });
   });
 

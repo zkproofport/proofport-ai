@@ -10,6 +10,9 @@
  *
  * All mocks are for EXTERNAL dependencies only (Redis, bb, ethers) -- never
  * for the MCP protocol layer itself.
+ *
+ * MCP server exposes exactly 2 tools: prove, get_supported_circuits
+ * and 1 prompt: proof_generation_flow
  */
 
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
@@ -103,6 +106,7 @@ vi.mock('ethers', () => ({
   ethers: {
     JsonRpcProvider: vi.fn().mockImplementation(() => ({
       getNetwork: vi.fn().mockResolvedValue({ chainId: 84532n }),
+      getLogs: vi.fn().mockResolvedValue([]),
     })),
     Wallet: vi.fn().mockImplementation((_pk: string, prov: any) => ({
       address: '0x1234567890123456789012345678901234567890',
@@ -116,6 +120,13 @@ vi.mock('ethers', () => ({
     })),
     hexlify: vi.fn((bytes: Uint8Array) => '0x' + Buffer.from(bytes).toString('hex')),
     encodeBytes32String: vi.fn((str: string) => '0x' + Buffer.from(str).toString('hex').padEnd(64, '0')),
+    id: vi.fn((str: string) => '0x' + Buffer.from(str).toString('hex').padEnd(64, '0')),
+    getAddress: vi.fn((addr: string) => addr),
+    getBytes: vi.fn((hex: string) => new Uint8Array(Buffer.from(hex.replace('0x', ''), 'hex'))),
+    keccak256: vi.fn(() => '0x' + '11'.repeat(32)),
+    randomBytes: vi.fn((n: number) => new Uint8Array(n).fill(0xab)),
+    toUtf8Bytes: vi.fn((str: string) => Buffer.from(str, 'utf8')),
+    verifyMessage: vi.fn(() => '0x1234567890123456789012345678901234567890'),
   },
 }));
 
@@ -174,27 +185,17 @@ function makeTestConfig(overrides?: Partial<Config>): Config {
     a2aBaseUrl: 'http://localhost:0',
     agentVersion: '1.0.0',
     paymentPayTo: '',
-    paymentFacilitatorUrl: '',
     paymentProofPrice: '$0.10',
-    privyAppId: '',
-    privyApiSecret: '',
-    privyApiUrl: '',
-    signPageUrl: 'https://sign.zkproofport.app',
-    signingTtlSeconds: 300,
     teeMode: 'disabled' as const,
     enclaveCid: undefined,
     enclavePort: 5000,
     teeAttestationEnabled: false,
     erc8004IdentityAddress: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
     erc8004ReputationAddress: '0x8004B663056A597Dffe9eCcC1965A193B7388713',
-    settlementChainRpcUrl: '',
-    settlementPrivateKey: '',
-    settlementOperatorAddress: '',
-    settlementUsdcAddress: '',
+    erc8004ValidationAddress: '',
     openaiApiKey: '',
     geminiApiKey: '',
     phoenixCollectorEndpoint: '',
-    erc8004ValidationAddress: '',
     ...overrides,
   };
 }
@@ -217,11 +218,16 @@ async function createMcpClient(port: number): Promise<{ client: Client; transpor
 
 /**
  * Parse the text content from a callTool result into JSON.
+ * Returns the last text content item parsed as JSON, or the raw text if not JSON.
  */
 function parseToolResult(result: any): any {
   const textContents = result.content?.filter((c: any) => c.type === 'text');
   if (!textContents || textContents.length === 0) return null;
-  return JSON.parse(textContents[textContents.length - 1].text);
+  try {
+    return JSON.parse(textContents[textContents.length - 1].text);
+  } catch {
+    return { rawText: textContents[textContents.length - 1].text };
+  }
 }
 
 // ─── Test suite ───────────────────────────────────────────────────────────
@@ -267,7 +273,6 @@ describe('MCP SDK Client Integration', () => {
     it('client.connect() should succeed (MCP handshake)', async () => {
       const { client, transport } = await createMcpClient(port);
       try {
-        // If connect() succeeds without throwing, handshake is complete
         expect(client).toBeDefined();
         const serverVersion = client.getServerVersion();
         expect(serverVersion).toBeDefined();
@@ -277,22 +282,15 @@ describe('MCP SDK Client Integration', () => {
       }
     });
 
-    it('client.listTools() should return all 6 tools', async () => {
+    it('client.listTools() should return exactly 2 tools: prove and get_supported_circuits', async () => {
       const { client, transport } = await createMcpClient(port);
       try {
         const result = await client.listTools();
         expect(result.tools).toBeDefined();
-        expect(result.tools).toHaveLength(6);
+        expect(result.tools).toHaveLength(2);
 
         const toolNames = result.tools.map((t) => t.name).sort();
-        expect(toolNames).toEqual([
-          'check_status',
-          'generate_proof',
-          'get_supported_circuits',
-          'request_payment',
-          'request_signing',
-          'verify_proof',
-        ]);
+        expect(toolNames).toEqual(['get_supported_circuits', 'prove']);
       } finally {
         await transport.close();
       }
@@ -312,6 +310,33 @@ describe('MCP SDK Client Integration', () => {
         await transport.close();
       }
     });
+
+    it('prove tool has required fields: circuit and inputs', async () => {
+      const { client, transport } = await createMcpClient(port);
+      try {
+        const result = await client.listTools();
+        const tool = result.tools.find((t) => t.name === 'prove');
+        expect(tool).toBeDefined();
+        expect(tool!.inputSchema.required).toBeDefined();
+        expect(tool!.inputSchema.required).toContain('circuit');
+        expect(tool!.inputSchema.required).toContain('inputs');
+      } finally {
+        await transport.close();
+      }
+    });
+
+    it('get_supported_circuits tool has no required fields', async () => {
+      const { client, transport } = await createMcpClient(port);
+      try {
+        const result = await client.listTools();
+        const tool = result.tools.find((t) => t.name === 'get_supported_circuits');
+        expect(tool).toBeDefined();
+        const required = tool!.inputSchema.required || [];
+        expect(required).toHaveLength(0);
+      } finally {
+        await transport.close();
+      }
+    });
   });
 
   // ── 2. callTool — get_supported_circuits ────────────────────────────────
@@ -323,6 +348,12 @@ describe('MCP SDK Client Integration', () => {
         const result = await client.callTool({ name: 'get_supported_circuits', arguments: {} });
         expect(result.isError).toBeFalsy();
 
+        // get_supported_circuits returns two text content items: guidance + JSON
+        const textContents = result.content?.filter((c: any) => c.type === 'text');
+        expect(textContents).toBeDefined();
+        expect(textContents!.length).toBeGreaterThanOrEqual(1);
+
+        // Parse the last text as JSON (the circuits data)
         const parsed = parseToolResult(result);
         expect(parsed).toBeDefined();
         expect(parsed.circuits).toBeDefined();
@@ -345,7 +376,7 @@ describe('MCP SDK Client Integration', () => {
       }
     });
 
-    it('each circuit has circuitId, displayName, and description', async () => {
+    it('each circuit has id, displayName, and description', async () => {
       const { client, transport } = await createMcpClient(port);
       try {
         const result = await client.callTool({ name: 'get_supported_circuits', arguments: {} });
@@ -359,347 +390,120 @@ describe('MCP SDK Client Integration', () => {
         await transport.close();
       }
     });
-  });
 
-  // ── 3. callTool — request_signing ───────────────────────────────────────
-
-  describe('callTool — request_signing', () => {
-    it('with valid circuitId and scope returns requestId, signingUrl, expiresAt', async () => {
+    it('returns guidance text as first content item', async () => {
       const { client, transport } = await createMcpClient(port);
       try {
-        const result = await client.callTool({
-          name: 'request_signing',
-          arguments: { circuitId: 'coinbase_attestation', scope: 'test.com' },
-        });
-
-        expect(result.isError).toBeFalsy();
-        const parsed = parseToolResult(result);
-        expect(parsed).toHaveProperty('requestId');
-        expect(typeof parsed.requestId).toBe('string');
-        expect(parsed).toHaveProperty('signingUrl');
-        expect(parsed.signingUrl).toContain('/s/');
-        expect(parsed).toHaveProperty('expiresAt');
-      } finally {
-        await transport.close();
-      }
-    });
-
-    it('with missing circuitId returns isError: true', async () => {
-      const { client, transport } = await createMcpClient(port);
-      try {
-        // Zod validation will reject missing required field
-        let gotError = false;
-        try {
-          const result = await client.callTool({
-            name: 'request_signing',
-            arguments: { scope: 'test.com' },
-          });
-          // If it doesn't throw, check isError
-          gotError = !!result.isError;
-        } catch {
-          // MCP SDK may throw for validation errors
-          gotError = true;
-        }
-        expect(gotError).toBe(true);
-      } finally {
-        await transport.close();
-      }
-    });
-
-    it('with missing scope returns isError: true', async () => {
-      const { client, transport } = await createMcpClient(port);
-      try {
-        let gotError = false;
-        try {
-          const result = await client.callTool({
-            name: 'request_signing',
-            arguments: { circuitId: 'coinbase_attestation' },
-          });
-          gotError = !!result.isError;
-        } catch {
-          gotError = true;
-        }
-        expect(gotError).toBe(true);
-      } finally {
-        await transport.close();
-      }
-    });
-
-    it('with invalid circuitId returns isError: true with "Unknown circuit"', async () => {
-      const { client, transport } = await createMcpClient(port);
-      try {
-        const result = await client.callTool({
-          name: 'request_signing',
-          arguments: { circuitId: 'nonexistent_circuit', scope: 'test.com' },
-        });
-
-        expect(result.isError).toBe(true);
-        const parsed = parseToolResult(result);
-        expect(parsed.error).toContain('Unknown circuit');
+        const result = await client.callTool({ name: 'get_supported_circuits', arguments: {} });
+        const textContents = result.content?.filter((c: any) => c.type === 'text');
+        expect(textContents!.length).toBeGreaterThanOrEqual(2);
+        // First content item should be guidance text
+        expect(typeof (textContents![0] as any).text).toBe('string');
+        expect((textContents![0] as any).text.length).toBeGreaterThan(0);
       } finally {
         await transport.close();
       }
     });
   });
 
-  // ── 4. callTool — check_status ──────────────────────────────────────────
+  // ── 3. callTool — prove ──────────────────────────────────────────────────
 
-  describe('callTool — check_status', () => {
-    it('with valid requestId (after request_signing) returns status info with phase', async () => {
-      const { client, transport } = await createMcpClient(port);
-      try {
-        // First create a signing request
-        const signingResult = await client.callTool({
-          name: 'request_signing',
-          arguments: { circuitId: 'coinbase_attestation', scope: 'test.com' },
-        });
-        const signingData = parseToolResult(signingResult);
-        const requestId = signingData.requestId;
-        expect(requestId).toBeDefined();
-
-        // Now check status with a new client (stateless server)
-        const { client: client2, transport: transport2 } = await createMcpClient(port);
-        try {
-          const statusResult = await client2.callTool({
-            name: 'check_status',
-            arguments: { requestId },
-          });
-
-          expect(statusResult.isError).toBeFalsy();
-          const statusData = parseToolResult(statusResult);
-          expect(statusData).toHaveProperty('phase');
-          expect(statusData.phase).toBe('signing');
-        } finally {
-          await transport2.close();
-        }
-      } finally {
-        await transport.close();
-      }
-    });
-
-    it('with unknown requestId returns isError: true', async () => {
+  describe('callTool — prove', () => {
+    it('returns redirect message with REST endpoint info', async () => {
       const { client, transport } = await createMcpClient(port);
       try {
         const result = await client.callTool({
-          name: 'check_status',
-          arguments: { requestId: 'non-existent-request-id-xyz' },
-        });
-
-        expect(result.isError).toBe(true);
-        const parsed = parseToolResult(result);
-        expect(parsed.error).toBeDefined();
-      } finally {
-        await transport.close();
-      }
-    });
-  });
-
-  // ── 5. callTool — request_payment ───────────────────────────────────────
-
-  describe('callTool — request_payment', () => {
-    it('with unknown requestId returns isError: true', async () => {
-      const { client, transport } = await createMcpClient(port);
-      try {
-        const result = await client.callTool({
-          name: 'request_payment',
-          arguments: { requestId: 'unknown-payment-request-id' },
-        });
-
-        expect(result.isError).toBe(true);
-      } finally {
-        await transport.close();
-      }
-    });
-
-    it('with disabled payment mode returns error about payment', async () => {
-      const { client, transport } = await createMcpClient(port);
-      try {
-        // First create a signing request to get a valid requestId
-        const signingResult = await client.callTool({
-          name: 'request_signing',
-          arguments: { circuitId: 'coinbase_attestation', scope: 'test.com' },
-        });
-        const requestId = parseToolResult(signingResult).requestId;
-
-        // Now request payment (payment is disabled in test config)
-        const { client: client2, transport: transport2 } = await createMcpClient(port);
-        try {
-          const result = await client2.callTool({
-            name: 'request_payment',
-            arguments: { requestId },
-          });
-
-          expect(result.isError).toBe(true);
-          const parsed = parseToolResult(result);
-          expect(parsed.error).toBeDefined();
-        } finally {
-          await transport2.close();
-        }
-      } finally {
-        await transport.close();
-      }
-    });
-  });
-
-  // ── 6. callTool — generate_proof ────────────────────────────────────────
-
-  describe('callTool — generate_proof', () => {
-    it('with direct signature returns proof, publicInputs, proofId, nullifier', async () => {
-      const { client, transport } = await createMcpClient(port);
-      try {
-        const result = await client.callTool({
-          name: 'generate_proof',
+          name: 'prove',
           arguments: {
-            circuitId: 'coinbase_attestation',
-            scope: 'test.com',
-            address: '0x' + 'dd'.repeat(20),
-            signature: '0x' + 'ee'.repeat(65),
-          },
-        });
-
-        expect(result.isError).toBeFalsy();
-        const parsed = parseToolResult(result);
-        expect(parsed).toHaveProperty('proof');
-        expect(parsed).toHaveProperty('publicInputs');
-        expect(parsed).toHaveProperty('proofId');
-        expect(parsed).toHaveProperty('nullifier');
-      } finally {
-        await transport.close();
-      }
-    });
-
-    it('with missing circuitId returns isError: true', async () => {
-      const { client, transport } = await createMcpClient(port);
-      try {
-        let gotError = false;
-        try {
-          const result = await client.callTool({
-            name: 'generate_proof',
-            arguments: {
-              scope: 'test.com',
-              address: '0x' + 'dd'.repeat(20),
-              signature: '0x' + 'ee'.repeat(65),
+            circuit: 'coinbase_kyc',
+            inputs: {
+              signal_hash: '0x' + '11'.repeat(32),
+              nullifier: '0x' + '22'.repeat(32),
+              scope_bytes: '0x' + '33'.repeat(32),
+              merkle_root: '0x' + '44'.repeat(32),
+              user_address: '0x' + '55'.repeat(20),
+              signature: '0x' + '66'.repeat(65),
+              user_pubkey_x: '0x' + '77'.repeat(32),
+              user_pubkey_y: '0x' + '88'.repeat(32),
+              raw_transaction: '0x' + '99'.repeat(100),
+              tx_length: 100,
+              coinbase_attester_pubkey_x: '0x' + 'aa'.repeat(32),
+              coinbase_attester_pubkey_y: '0x' + 'bb'.repeat(32),
+              merkle_proof: ['0x' + 'cc'.repeat(32)],
+              leaf_index: 0,
+              depth: 1,
             },
-          });
-          gotError = !!result.isError;
-        } catch {
-          gotError = true;
-        }
-        expect(gotError).toBe(true);
-      } finally {
-        await transport.close();
-      }
-    });
-
-    it('with coinbase_country_attestation and countryList returns proof', async () => {
-      const { client, transport } = await createMcpClient(port);
-      try {
-        const result = await client.callTool({
-          name: 'generate_proof',
-          arguments: {
-            circuitId: 'coinbase_country_attestation',
-            scope: 'test.com',
-            address: '0x' + 'dd'.repeat(20),
-            signature: '0x' + 'ee'.repeat(65),
-            countryList: ['US', 'KR'],
-            isIncluded: true,
           },
         });
 
         expect(result.isError).toBeFalsy();
         const parsed = parseToolResult(result);
-        expect(parsed).toHaveProperty('proof');
+        expect(parsed).toBeDefined();
+        // prove returns a redirect message to the REST endpoint
+        expect(parsed.rest_endpoint || parsed.message).toBeDefined();
+      } finally {
+        await transport.close();
+      }
+    });
+
+    it('prove with coinbase_country circuit also succeeds', async () => {
+      const { client, transport } = await createMcpClient(port);
+      try {
+        const result = await client.callTool({
+          name: 'prove',
+          arguments: {
+            circuit: 'coinbase_country',
+            inputs: {
+              signal_hash: '0x' + '11'.repeat(32),
+              nullifier: '0x' + '22'.repeat(32),
+              scope_bytes: '0x' + '33'.repeat(32),
+              merkle_root: '0x' + '44'.repeat(32),
+              user_address: '0x' + '55'.repeat(20),
+              signature: '0x' + '66'.repeat(65),
+              user_pubkey_x: '0x' + '77'.repeat(32),
+              user_pubkey_y: '0x' + '88'.repeat(32),
+              raw_transaction: '0x' + '99'.repeat(100),
+              tx_length: 100,
+              coinbase_attester_pubkey_x: '0x' + 'aa'.repeat(32),
+              coinbase_attester_pubkey_y: '0x' + 'bb'.repeat(32),
+              merkle_proof: ['0x' + 'cc'.repeat(32)],
+              leaf_index: 0,
+              depth: 1,
+              country_list: ['US', 'KR'],
+              is_included: true,
+            },
+          },
+        });
+
+        expect(result.isError).toBeFalsy();
       } finally {
         await transport.close();
       }
     });
   });
 
-  // ── 7. callTool — verify_proof ──────────────────────────────────────────
-
-  describe('callTool — verify_proof', () => {
-    it('with proof data (circuitId, proof, publicInputs) returns verification result', async () => {
-      const { client, transport } = await createMcpClient(port);
-      try {
-        const result = await client.callTool({
-          name: 'verify_proof',
-          arguments: {
-            circuitId: 'coinbase_attestation',
-            proof: '0xaabb',
-            publicInputs: ['0x' + 'cc'.repeat(32)],
-            chainId: '84532',
-          },
-        });
-
-        expect(result.isError).toBeFalsy();
-        const parsed = parseToolResult(result);
-        expect(parsed).toHaveProperty('chainId', '84532');
-      } finally {
-        await transport.close();
-      }
-    });
-
-    it('with proofId from previous generate_proof returns verification result', async () => {
-      // Step 1: Generate a proof to get a proofId
-      const { client: genClient, transport: genTransport } = await createMcpClient(port);
-      let proofId: string;
-      try {
-        const genResult = await genClient.callTool({
-          name: 'generate_proof',
-          arguments: {
-            circuitId: 'coinbase_attestation',
-            scope: 'test.com',
-            address: '0x' + 'dd'.repeat(20),
-            signature: '0x' + 'ee'.repeat(65),
-          },
-        });
-        expect(genResult.isError).toBeFalsy();
-        const genParsed = parseToolResult(genResult);
-        proofId = genParsed.proofId;
-        expect(proofId).toBeDefined();
-      } finally {
-        await genTransport.close();
-      }
-
-      // Step 2: Verify using proofId
-      const { client: verifyClient, transport: verifyTransport } = await createMcpClient(port);
-      try {
-        const verifyResult = await verifyClient.callTool({
-          name: 'verify_proof',
-          arguments: { proofId },
-        });
-
-        expect(verifyResult.isError).toBeFalsy();
-        const verifyParsed = parseToolResult(verifyResult);
-        // Result should contain verification info
-        expect(verifyParsed).toBeDefined();
-      } finally {
-        await verifyTransport.close();
-      }
-    });
-  });
-
-  // ── 8. Prompts ──────────────────────────────────────────────────────────
+  // ── 4. Prompts ──────────────────────────────────────────────────────────
 
   describe('Prompts', () => {
-    it('client.listPrompts() contains proof_flow', async () => {
+    it('client.listPrompts() contains proof_generation_flow', async () => {
       const { client, transport } = await createMcpClient(port);
       try {
         const result = await client.listPrompts();
         expect(result.prompts).toBeDefined();
         expect(Array.isArray(result.prompts)).toBe(true);
+        expect(result.prompts.length).toBeGreaterThan(0);
 
         const promptNames = result.prompts.map((p) => p.name);
-        expect(promptNames).toContain('proof_flow');
+        expect(promptNames).toContain('proof_generation_flow');
       } finally {
         await transport.close();
       }
     });
 
-    it('client.getPrompt({ name: "proof_flow" }) returns messages with instructions', async () => {
+    it('client.getPrompt({ name: "proof_generation_flow" }) returns messages with instructions', async () => {
       const { client, transport } = await createMcpClient(port);
       try {
-        const result = await client.getPrompt({ name: 'proof_flow' });
+        const result = await client.getPrompt({ name: 'proof_generation_flow' });
         expect(result.messages).toBeDefined();
         expect(Array.isArray(result.messages)).toBe(true);
         expect(result.messages.length).toBeGreaterThan(0);
@@ -707,172 +511,76 @@ describe('MCP SDK Client Integration', () => {
         const firstMessage = result.messages[0];
         expect(firstMessage.role).toBe('user');
         expect(firstMessage.content.type).toBe('text');
-        expect((firstMessage.content as any).text).toContain('request_signing');
-        expect((firstMessage.content as any).text).toContain('generate_proof');
+        const text = (firstMessage.content as any).text as string;
+        // The prompt references the x402 flow and REST endpoint
+        expect(text).toContain('get_supported_circuits');
+        expect(text).toContain('prove');
+      } finally {
+        await transport.close();
+      }
+    });
+
+    it('proof_generation_flow prompt content references guide_url', async () => {
+      const { client, transport } = await createMcpClient(port);
+      try {
+        const result = await client.getPrompt({ name: 'proof_generation_flow' });
+        const text = (result.messages[0].content as any).text as string;
+        expect(text).toContain('guide_url');
       } finally {
         await transport.close();
       }
     });
   });
 
-  // ── 9. Tool inputSchema Validation ──────────────────────────────────────
-
-  describe('Tool inputSchema Validation', () => {
-    it('request_signing requires circuitId and scope', async () => {
-      const { client, transport } = await createMcpClient(port);
-      try {
-        const result = await client.listTools();
-        const tool = result.tools.find((t) => t.name === 'request_signing');
-        expect(tool).toBeDefined();
-        expect(tool!.inputSchema.required).toBeDefined();
-        expect(tool!.inputSchema.required).toContain('circuitId');
-        expect(tool!.inputSchema.required).toContain('scope');
-      } finally {
-        await transport.close();
-      }
-    });
-
-    it('generate_proof requires circuitId and scope', async () => {
-      const { client, transport } = await createMcpClient(port);
-      try {
-        const result = await client.listTools();
-        const tool = result.tools.find((t) => t.name === 'generate_proof');
-        expect(tool).toBeDefined();
-        expect(tool!.inputSchema.required).toBeDefined();
-        expect(tool!.inputSchema.required).toContain('circuitId');
-        expect(tool!.inputSchema.required).toContain('scope');
-      } finally {
-        await transport.close();
-      }
-    });
-
-    it('verify_proof has no required fields (proofId or circuitId+proof+publicInputs)', async () => {
-      const { client, transport } = await createMcpClient(port);
-      try {
-        const result = await client.listTools();
-        const tool = result.tools.find((t) => t.name === 'verify_proof');
-        expect(tool).toBeDefined();
-        // All fields are optional (can use proofId instead of the triplet)
-        const required = tool!.inputSchema.required || [];
-        expect(required).toHaveLength(0);
-      } finally {
-        await transport.close();
-      }
-    });
-
-    it('get_supported_circuits has no required fields', async () => {
-      const { client, transport } = await createMcpClient(port);
-      try {
-        const result = await client.listTools();
-        const tool = result.tools.find((t) => t.name === 'get_supported_circuits');
-        expect(tool).toBeDefined();
-        // get_supported_circuits takes no arguments
-        const required = tool!.inputSchema.required || [];
-        expect(required).toHaveLength(0);
-      } finally {
-        await transport.close();
-      }
-    });
-
-    it('check_status requires requestId', async () => {
-      const { client, transport } = await createMcpClient(port);
-      try {
-        const result = await client.listTools();
-        const tool = result.tools.find((t) => t.name === 'check_status');
-        expect(tool).toBeDefined();
-        expect(tool!.inputSchema.required).toContain('requestId');
-      } finally {
-        await transport.close();
-      }
-    });
-
-    it('request_payment requires requestId', async () => {
-      const { client, transport } = await createMcpClient(port);
-      try {
-        const result = await client.listTools();
-        const tool = result.tools.find((t) => t.name === 'request_payment');
-        expect(tool).toBeDefined();
-        expect(tool!.inputSchema.required).toContain('requestId');
-      } finally {
-        await transport.close();
-      }
-    });
-  });
-
-  // ── 10. Full Session Flow ───────────────────────────────────────────────
+  // ── 5. Full Session Flow ─────────────────────────────────────────────────
 
   describe('Full Session Flow', () => {
-    it('request_signing -> check_status -> generate_proof -> verify_proof', async () => {
-      // Step 1: request_signing
+    it('get_supported_circuits -> prove (REST redirect)', async () => {
+      // Step 1: discover circuits
       const { client: c1, transport: t1 } = await createMcpClient(port);
-      let requestId: string;
+      let circuitIds: string[];
       try {
-        const signingResult = await c1.callTool({
-          name: 'request_signing',
-          arguments: { circuitId: 'coinbase_attestation', scope: 'test.com' },
-        });
-        expect(signingResult.isError).toBeFalsy();
-        const signingData = parseToolResult(signingResult);
-        requestId = signingData.requestId;
-        expect(requestId).toBeDefined();
-        expect(signingData.signingUrl).toBeDefined();
+        const circuitsResult = await c1.callTool({ name: 'get_supported_circuits', arguments: {} });
+        expect(circuitsResult.isError).toBeFalsy();
+        const parsed = parseToolResult(circuitsResult);
+        circuitIds = parsed.circuits.map((c: any) => c.id);
+        expect(circuitIds).toContain('coinbase_attestation');
       } finally {
         await t1.close();
       }
 
-      // Step 2: check_status with that requestId — phase should be "signing" or "ready"
+      // Step 2: prove using discovered circuit alias
       const { client: c2, transport: t2 } = await createMcpClient(port);
       try {
-        const statusResult = await c2.callTool({
-          name: 'check_status',
-          arguments: { requestId },
+        const proveResult = await c2.callTool({
+          name: 'prove',
+          arguments: {
+            circuit: 'coinbase_kyc',
+            inputs: {
+              signal_hash: '0x' + '11'.repeat(32),
+              nullifier: '0x' + '22'.repeat(32),
+              scope_bytes: '0x' + '33'.repeat(32),
+              merkle_root: '0x' + '44'.repeat(32),
+              user_address: '0x' + '55'.repeat(20),
+              signature: '0x' + '66'.repeat(65),
+              user_pubkey_x: '0x' + '77'.repeat(32),
+              user_pubkey_y: '0x' + '88'.repeat(32),
+              raw_transaction: '0x' + '99'.repeat(100),
+              tx_length: 100,
+              coinbase_attester_pubkey_x: '0x' + 'aa'.repeat(32),
+              coinbase_attester_pubkey_y: '0x' + 'bb'.repeat(32),
+              merkle_proof: ['0x' + 'cc'.repeat(32)],
+              leaf_index: 0,
+              depth: 1,
+            },
+          },
         });
-        expect(statusResult.isError).toBeFalsy();
-        const statusData = parseToolResult(statusResult);
-        expect(statusData.phase).toBeDefined();
-        expect(['signing', 'ready', 'payment']).toContain(statusData.phase);
+        expect(proveResult.isError).toBeFalsy();
+        const parsed = parseToolResult(proveResult);
+        // prove redirects to REST — should contain endpoint or message
+        expect(parsed.rest_endpoint || parsed.message || parsed.staging_url).toBeDefined();
       } finally {
         await t2.close();
-      }
-
-      // Step 3: generate_proof with address + signature (bypass signing flow)
-      const { client: c3, transport: t3 } = await createMcpClient(port);
-      let proofData: any;
-      try {
-        const proofResult = await c3.callTool({
-          name: 'generate_proof',
-          arguments: {
-            circuitId: 'coinbase_attestation',
-            scope: 'test.com',
-            address: '0x' + 'dd'.repeat(20),
-            signature: '0x' + 'ee'.repeat(65),
-          },
-        });
-        expect(proofResult.isError).toBeFalsy();
-        proofData = parseToolResult(proofResult);
-        expect(proofData.proof).toBeDefined();
-        expect(proofData.publicInputs).toBeDefined();
-        expect(proofData.proofId).toBeDefined();
-      } finally {
-        await t3.close();
-      }
-
-      // Step 4: verify_proof with the proof data
-      const { client: c4, transport: t4 } = await createMcpClient(port);
-      try {
-        const verifyResult = await c4.callTool({
-          name: 'verify_proof',
-          arguments: {
-            circuitId: 'coinbase_attestation',
-            proof: proofData.proof,
-            publicInputs: typeof proofData.publicInputs === 'string'
-              ? [proofData.publicInputs]
-              : proofData.publicInputs,
-          },
-        });
-        expect(verifyResult.isError).toBeFalsy();
-      } finally {
-        await t4.close();
       }
     });
   });

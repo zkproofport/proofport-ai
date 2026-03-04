@@ -1,6 +1,6 @@
 /**
  * TEE Integration Tests - HTTP Endpoints
- * Tests the Express app /tee/status endpoint
+ * Tests the Express app /health endpoint which includes TEE status
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -20,12 +20,13 @@ vi.mock('ioredis', () => {
     incr: vi.fn().mockResolvedValue(1),
     expire: vi.fn().mockResolvedValue(1),
     quit: vi.fn().mockResolvedValue('OK'),
+    getdel: vi.fn().mockResolvedValue(null),
     status: 'ready',
   };
   return { default: vi.fn(() => mockRedis), Redis: vi.fn(() => mockRedis) };
 });
 
-// Mock ethers
+// Mock ethers — include all methods used at module load time
 vi.mock('ethers', () => ({
   ethers: {
     JsonRpcProvider: vi.fn().mockImplementation(() => ({})),
@@ -33,6 +34,10 @@ vi.mock('ethers', () => ({
     Contract: vi.fn().mockImplementation(() => ({})),
     hexlify: vi.fn((b: any) => '0x00'),
     encodeBytes32String: vi.fn((s: string) => '0x00'),
+    id: vi.fn((s: string) => '0x' + '00'.repeat(32)),
+    keccak256: vi.fn(() => '0x' + '00'.repeat(32)),
+    getBytes: vi.fn(() => new Uint8Array(32)),
+    randomBytes: vi.fn(() => new Uint8Array(32)),
   },
 }));
 
@@ -67,25 +72,20 @@ function makeTestConfig(overrides: Partial<Config> = {}): Config {
     proverPrivateKey: '0x5c8eb0e0dcdcdabdc87f1fae3e992132e8a06b83188dfba625ca95036876bb0a',
     paymentMode: 'disabled' as const,
     a2aBaseUrl: 'http://localhost:4002',
+    websiteUrl: 'https://zkproofport.com',
     agentVersion: '1.0.0',
     paymentPayTo: '',
-    paymentFacilitatorUrl: 'https://www.x402.org/facilitator',
     paymentProofPrice: '$0.10',
-    privyAppId: '',
-    privyApiSecret: '',
-    privyApiUrl: 'https://auth.privy.io',
-    signPageUrl: '',
-    signingTtlSeconds: 300,
     teeMode: 'disabled' as const,
     enclaveCid: undefined,
     enclavePort: 5000,
     teeAttestationEnabled: false,
     erc8004IdentityAddress: '',
     erc8004ReputationAddress: '',
-    settlementChainRpcUrl: '',
-    settlementPrivateKey: '',
-    settlementOperatorAddress: '',
-    settlementUsdcAddress: '',
+    erc8004ValidationAddress: '',
+    openaiApiKey: '',
+    geminiApiKey: '',
+    phoenixCollectorEndpoint: '',
     ...overrides,
   };
 }
@@ -109,39 +109,44 @@ describe('TEE HTTP Integration', () => {
     }
   });
 
-  describe('GET /tee/status', () => {
-    it('should return TEE status with disabled mode', async () => {
-      const response = await request(app).get('/tee/status');
+  describe('GET /health', () => {
+    it('should return healthy status with disabled TEE mode', async () => {
+      const response = await request(app).get('/health');
 
       expect(response.status).toBe(200);
-      expect(response.body).toEqual({
-        mode: 'disabled',
-        attestationEnabled: false,
-        available: false,
-      });
+      expect(response.body.status).toBe('healthy');
+      expect(response.body.tee).toBeDefined();
+      expect(response.body.tee.mode).toBe('disabled');
     });
 
-    it('should return available: false when TEE is disabled', async () => {
-      const response = await request(app).get('/tee/status');
+    it('should include tee.attestationEnabled field', async () => {
+      const response = await request(app).get('/health');
 
       expect(response.status).toBe(200);
-      expect(response.body.available).toBe(false);
+      expect(response.body.tee).toHaveProperty('attestationEnabled');
+      expect(typeof response.body.tee.attestationEnabled).toBe('boolean');
     });
 
-    it('should include attestationEnabled field', async () => {
-      const response = await request(app).get('/tee/status');
+    it('should include tee.mode field with valid value', async () => {
+      const response = await request(app).get('/health');
 
       expect(response.status).toBe(200);
-      expect(response.body).toHaveProperty('attestationEnabled');
-      expect(typeof response.body.attestationEnabled).toBe('boolean');
+      expect(response.body.tee).toHaveProperty('mode');
+      expect(['disabled', 'local', 'nitro']).toContain(response.body.tee.mode);
     });
 
-    it('should include mode field', async () => {
-      const response = await request(app).get('/tee/status');
+    it('should include paymentMode field', async () => {
+      const response = await request(app).get('/health');
 
       expect(response.status).toBe(200);
-      expect(response.body).toHaveProperty('mode');
-      expect(['disabled', 'local', 'nitro']).toContain(response.body.mode);
+      expect(response.body).toHaveProperty('paymentMode');
+    });
+
+    it('should return JSON response', async () => {
+      const response = await request(app).get('/health');
+
+      expect(response.status).toBe(200);
+      expect(response.headers['content-type']).toMatch(/json/);
     });
   });
 
@@ -152,11 +157,10 @@ describe('TEE HTTP Integration', () => {
 
       const { app: testApp } = createApp(makeTestConfig({ teeMode: 'local' as const }));
 
-      const response = await request(testApp).get('/tee/status');
+      const response = await request(testApp).get('/health');
 
       expect(response.status).toBe(200);
-      expect(response.body.mode).toBe('local');
-      expect(response.body.available).toBe(true);
+      expect(response.body.tee.mode).toBe('local');
 
       if (originalMode !== undefined) {
         process.env.TEE_MODE = originalMode;
@@ -176,11 +180,10 @@ describe('TEE HTTP Integration', () => {
         enclaveCid: 16,
       }));
 
-      const response = await request(testApp).get('/tee/status');
+      const response = await request(testApp).get('/health');
 
       expect(response.status).toBe(200);
-      expect(response.body.mode).toBe('nitro');
-      expect(response.body.available).toBe(true);
+      expect(response.body.tee.mode).toBe('nitro');
 
       if (originalMode !== undefined) {
         process.env.TEE_MODE = originalMode;
@@ -196,31 +199,22 @@ describe('TEE HTTP Integration', () => {
   });
 
   describe('Response format validation', () => {
-    it('should return JSON response', async () => {
-      const response = await request(app).get('/tee/status');
-
-      expect(response.status).toBe(200);
-      expect(response.headers['content-type']).toMatch(/json/);
-    });
-
     it('should have all required fields', async () => {
-      const response = await request(app).get('/tee/status');
+      const response = await request(app).get('/health');
 
       expect(response.status).toBe(200);
-      expect(response.body).toHaveProperty('mode');
-      expect(response.body).toHaveProperty('attestationEnabled');
-      expect(response.body).toHaveProperty('available');
+      expect(response.body).toHaveProperty('status');
+      expect(response.body).toHaveProperty('service');
+      expect(response.body).toHaveProperty('tee');
+      expect(response.body.tee).toHaveProperty('mode');
+      expect(response.body.tee).toHaveProperty('attestationEnabled');
     });
 
-    it('should not have extra fields', async () => {
-      const response = await request(app).get('/tee/status');
+    it('should report service name correctly', async () => {
+      const response = await request(app).get('/health');
 
       expect(response.status).toBe(200);
-      const keys = Object.keys(response.body);
-      expect(keys).toHaveLength(3);
-      expect(keys).toContain('mode');
-      expect(keys).toContain('attestationEnabled');
-      expect(keys).toContain('available');
+      expect(response.body.service).toBe('proofport-ai');
     });
   });
 });

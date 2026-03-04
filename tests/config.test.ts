@@ -102,7 +102,6 @@ describe('Config', () => {
       expect(config.paymentMode).toBe('disabled');
       expect(config.a2aBaseUrl).toBe('http://localhost:4002');
       expect(config.paymentPayTo).toBe('');
-      expect(config.paymentFacilitatorUrl).toBe('https://www.x402.org/facilitator');
       expect(config.paymentProofPrice).toBe('$0.10');
     });
   });

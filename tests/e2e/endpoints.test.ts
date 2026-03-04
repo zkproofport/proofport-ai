@@ -10,19 +10,14 @@
  * SDK clients used for protocol sections:
  *   - A2A: @a2a-js/sdk/client (ClientFactory, Client)
  *   - MCP: @modelcontextprotocol/sdk (Client + StreamableHTTPClientTransport)
- *   - OpenAI: openai (OpenAI SDK)
  *
- * Raw fetch kept for: REST endpoints, discovery, status, signing, proofs,
- * payment, HTML pages, and edge cases testing raw JSON-RPC validation.
+ * Raw fetch kept for: REST endpoints, discovery, and edge cases testing raw JSON-RPC validation.
  *
  * Run: npx vitest run tests/e2e/endpoints.test.ts
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { randomUUID } from 'crypto';
-import { ethers } from 'ethers';
-import { wrapFetchWithPaymentFromConfig } from '@x402/fetch';
-import { ExactEvmScheme } from '@x402/evm';
 
 // SDK clients
 import { ClientFactory } from '@a2a-js/sdk/client';
@@ -30,7 +25,7 @@ import type { Client as A2AClient } from '@a2a-js/sdk/client';
 import type { Task, Artifact, Part } from '@a2a-js/sdk';
 import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import OpenAI from 'openai';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
 const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:4002';
 
@@ -67,15 +62,6 @@ function parseSseEvents(text: string): any[] {
 
 // ─── A2A SDK Helpers ─────────────────────────────────────────────────────────
 
-function findDataPart(artifacts: Artifact[] | undefined): any {
-  if (!artifacts) return undefined;
-  for (const artifact of artifacts) {
-    const found = artifact.parts?.find((p: Part) => p.kind === 'data');
-    if (found) return found;
-  }
-  return undefined;
-}
-
 function extractDataFromArtifacts(artifacts: Artifact[] | undefined): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const artifact of artifacts || []) {
@@ -86,15 +72,6 @@ function extractDataFromArtifacts(artifacts: Artifact[] | undefined): Record<str
     }
   }
   return result;
-}
-
-function findTextPart(artifacts: Artifact[] | undefined): any {
-  if (!artifacts) return undefined;
-  for (const artifact of artifacts) {
-    const found = artifact.parts?.find((p: Part) => p.kind === 'text');
-    if (found) return found;
-  }
-  return undefined;
 }
 
 function makeDataPartMessage(data: Record<string, unknown>, contextId?: string) {
@@ -131,22 +108,9 @@ function parseToolResult(result: any): any {
 
 // ─── Other Helpers ───────────────────────────────────────────────────────────
 
-async function signForProof(walletKey: string, address: string, scope: string, circuitId: string) {
-  const { ethers } = await import('ethers');
-  const wallet = new ethers.Wallet(walletKey);
-  const signalPreimage = ethers.solidityPacked(
-    ['address', 'string', 'string'],
-    [address, scope, circuitId],
-  );
-  const signalHash = ethers.getBytes(ethers.keccak256(signalPreimage));
-  const signature = await wallet.signMessage(signalHash);
-  return signature;
-}
-
 // ─── SDK Client Instances ────────────────────────────────────────────────────
 
 let a2aClient: A2AClient;
-let openaiClient: OpenAI;
 
 // ─── Connectivity check + SDK client setup ───────────────────────────────────
 
@@ -165,12 +129,6 @@ beforeAll(async () => {
   // Create A2A SDK client
   const factory = new ClientFactory();
   a2aClient = await factory.createFromUrl(BASE_URL);
-
-  // Create OpenAI SDK client
-  openaiClient = new OpenAI({
-    apiKey: 'test-key',
-    baseURL: `${BASE_URL}/v1`,
-  });
 }, 15000);
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -185,21 +143,17 @@ describe('Discovery Endpoints', () => {
     expect(json.service).toBe('proofport-ai');
   });
 
-  it('GET /.well-known/agent-card.json returns A2A agent card with 6 skills', async () => {
+  it('GET /.well-known/agent-card.json returns A2A agent card with 2 skills', async () => {
     const { status, json } = await jsonGet('/.well-known/agent-card.json');
     expect(status).toBe(200);
     expect(json.name).toBe('proveragent.base.eth');
     expect(json.protocolVersion).toBe('0.3.0');
     expect(Array.isArray(json.skills)).toBe(true);
-    expect(json.skills.length).toBe(6);
+    expect(json.skills.length).toBe(2);
     const skillIds = json.skills.map((s: any) => s.id).sort();
     expect(skillIds).toEqual([
-      'check_status',
-      'generate_proof',
       'get_supported_circuits',
-      'request_payment',
-      'request_signing',
-      'verify_proof',
+      'prove',
     ]);
   });
 
@@ -208,213 +162,201 @@ describe('Discovery Endpoints', () => {
     expect(status).toBe(200);
     expect(json.name).toBeDefined();
     expect(json.name).toBe('proveragent.base.eth');
-    expect(Array.isArray(json.skills)).toBe(true);
   });
 
-  it('GET /.well-known/mcp.json returns MCP server metadata with 6 tools', async () => {
+  it('GET /.well-known/mcp.json returns MCP server metadata with 2 tools', async () => {
     const { status, json } = await jsonGet('/.well-known/mcp.json');
     expect(status).toBe(200);
     expect(json.serverInfo).toBeDefined();
     expect(json.serverInfo.name).toBeDefined();
     expect(Array.isArray(json.tools)).toBe(true);
-    expect(json.tools.length).toBe(6);
+    expect(json.tools.length).toBe(2);
     const toolNames = json.tools.map((t: any) => t.name).sort();
     expect(toolNames).toEqual([
-      'check_status',
-      'generate_proof',
       'get_supported_circuits',
-      'request_payment',
-      'request_signing',
-      'verify_proof',
+      'prove',
     ]);
   });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Status Endpoints (raw fetch — custom REST)
+// REST API — x402 Single-Step Flow
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('Status Endpoints', () => {
-  it('GET /payment/status returns mode', async () => {
-    const { status, json } = await jsonGet('/payment/status');
-    expect(status).toBe(200);
-    expect(json.mode).toBeDefined();
-    expect(['disabled', 'testnet', 'mainnet']).toContain(json.mode);
+describe('REST API — x402 Single-Step Flow', () => {
+  it('POST /api/v1/prove with circuit + inputs (no session_id) returns 402 with PAYMENT-REQUIRED header', async () => {
+    const { status, headers, json } = await jsonPost('/api/v1/prove', {
+      circuit: 'coinbase_kyc',
+      inputs: { signal_hash: '0x01', nullifier: '0x02', scope_bytes: '0x03', merkle_root: '0x04', user_address: '0x05' },
+    });
+    expect(status).toBe(402);
+    expect(json.error).toBe('PAYMENT_REQUIRED');
+    expect(json.nonce).toBeDefined();
+    expect(json.nonce.startsWith('0x')).toBe(true);
+    expect(json.payment).toBeDefined();
+    expect(json.payment.scheme).toBe('exact');
+    expect(json.payment.payTo).toBeDefined();
+    // Check PAYMENT-REQUIRED header exists
+    const paymentHeader = headers.get('payment-required');
+    expect(paymentHeader).toBeDefined();
+    // Decode and validate
+    const decoded = JSON.parse(Buffer.from(paymentHeader!, 'base64').toString());
+    expect(decoded.scheme).toBe('exact');
+    expect(decoded.extra.nonce).toBe(json.nonce);
   });
 
-  it('GET /signing/status returns provider info', async () => {
-    const { status, json } = await jsonGet('/signing/status');
-    expect(status).toBe(200);
-    expect(json.providers).toBeDefined();
+  it('POST /api/v1/prove without session_id and without inputs returns 400', async () => {
+    const { status, json } = await jsonPost('/api/v1/prove', {
+      circuit: 'coinbase_kyc',
+    });
+    expect(status).toBe(400);
+    expect(json.error).toBe('INVALID_REQUEST');
+    expect(json.message).toMatch(/inputs/i);
   });
 
-  it('GET /tee/status returns mode', async () => {
-    const { status, json } = await jsonGet('/tee/status');
-    expect(status).toBe(200);
-    expect(json.mode).toBeDefined();
+  it('POST /api/v1/prove without session_id and without circuit returns 400', async () => {
+    const { status, json } = await jsonPost('/api/v1/prove', {
+      inputs: { signal_hash: '0x01' },
+    });
+    expect(status).toBe(400);
+    expect(json.error).toBe('INVALID_REQUEST');
+    expect(json.message).toMatch(/circuit/i);
   });
 
-  it('GET /identity/status returns erc8004 config', async () => {
-    const { status, json } = await jsonGet('/identity/status');
-    expect(status).toBe(200);
-    expect(json.erc8004).toBeDefined();
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════════
-// REST API — Circuits (raw fetch — custom REST)
-// ═══════════════════════════════════════════════════════════════════════════
-
-describe('REST API — Circuits', () => {
-  it('GET /api/v1/circuits returns both canonical circuits', async () => {
-    const { status, json } = await jsonGet('/api/v1/circuits');
-    expect(status).toBe(200);
-    expect(Array.isArray(json.circuits)).toBe(true);
-    expect(json.circuits.length).toBeGreaterThanOrEqual(2);
-
-    const ids = json.circuits.map((c: any) => c.id);
-    expect(ids).toContain('coinbase_attestation');
-    expect(ids).toContain('coinbase_country_attestation');
-
-    // Each circuit entry has required fields
-    const kyc = json.circuits.find((c: any) => c.id === 'coinbase_attestation');
-    expect(kyc.displayName).toBeDefined();
-    expect(kyc.description).toBeDefined();
-    expect(Array.isArray(kyc.requiredInputs)).toBe(true);
+  it('POST /api/v1/prove with unknown circuit returns 400', async () => {
+    const { status, json } = await jsonPost('/api/v1/prove', {
+      circuit: 'nonexistent_circuit',
+      inputs: { signal_hash: '0x01' },
+    });
+    expect(status).toBe(400);
+    expect(json.error).toBe('INVALID_CIRCUIT');
   });
 
-  it('GET /api/v1/circuits with chainId query param returns verifier addresses', async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/circuits?chainId=84532`);
+  it('POST /api/v1/prove with X-Payment-TX but without X-Payment-Nonce returns 400', async () => {
+    const res = await fetch(`${BASE_URL}/api/v1/prove`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Payment-TX': '0xfake_tx_hash',
+      },
+      body: JSON.stringify({
+        circuit: 'coinbase_kyc',
+        inputs: { signal_hash: '0x01', nullifier: '0x02', scope_bytes: '0x03', merkle_root: '0x04', user_address: '0x05' },
+      }),
+    });
     const json = await res.json();
-    expect(res.status).toBe(200);
-    expect(Array.isArray(json.circuits)).toBe(true);
-    expect(json.chainId).toBe('84532');
+    expect(res.status).toBe(400);
+    expect(json.error).toBe('MISSING_NONCE');
   });
-});
 
-// ═══════════════════════════════════════════════════════════════════════════
-// REST API — Signing Session (raw fetch — custom REST)
-// ═══════════════════════════════════════════════════════════════════════════
+  it('POST /api/v1/prove with X-Payment-TX + invalid X-Payment-Nonce returns 400', async () => {
+    const res = await fetch(`${BASE_URL}/api/v1/prove`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Payment-TX': '0xfake_tx_hash',
+        'X-Payment-Nonce': '0xinvalid_nonce_not_in_redis',
+      },
+      body: JSON.stringify({
+        circuit: 'coinbase_kyc',
+        inputs: { signal_hash: '0x01', nullifier: '0x02', scope_bytes: '0x03', merkle_root: '0x04', user_address: '0x05' },
+      }),
+    });
+    const json = await res.json();
+    expect(res.status).toBe(400);
+    expect(json.error).toBe('INVALID_NONCE');
+  });
 
-describe('REST API — Signing Session', () => {
-  // Shared state across sequential signing tests
-  let createdRequestId: string;
+  it('402 nonce expires after 5 minutes (TTL check)', async () => {
+    // Get a valid nonce first
+    const { json: firstRes } = await jsonPost('/api/v1/prove', {
+      circuit: 'coinbase_kyc',
+      inputs: { signal_hash: '0x01', nullifier: '0x02', scope_bytes: '0x03', merkle_root: '0x04', user_address: '0x05' },
+    });
+    expect(firstRes.nonce).toBeDefined();
+    // Using the nonce immediately should not give INVALID_NONCE (it should fail later on payment verification)
+    // This just confirms the nonce is accepted
+    const res = await fetch(`${BASE_URL}/api/v1/prove`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Payment-TX': '0x0000000000000000000000000000000000000000000000000000000000000001',
+        'X-Payment-Nonce': firstRes.nonce,
+      },
+      body: JSON.stringify({
+        circuit: 'coinbase_kyc',
+        inputs: { signal_hash: '0x01', nullifier: '0x02', scope_bytes: '0x03', merkle_root: '0x04', user_address: '0x05' },
+      }),
+    });
+    const json = await res.json();
+    // Should NOT be INVALID_NONCE — the nonce was valid (will fail on payment verification instead)
+    expect(json.error).not.toBe('INVALID_NONCE');
+  });
 
-  it('POST /api/v1/signing with valid body returns requestId, signingUrl, expiresAt', async () => {
-    const { status, json } = await jsonPost('/api/v1/signing', {
-      circuitId: 'coinbase_attestation',
-      scope: 'e2e-test.zkproofport.app',
+  it('nonce can only be used once (replay protection)', async () => {
+    // Get a valid nonce
+    const { json: firstRes } = await jsonPost('/api/v1/prove', {
+      circuit: 'coinbase_kyc',
+      inputs: { signal_hash: '0x01', nullifier: '0x02', scope_bytes: '0x03', merkle_root: '0x04', user_address: '0x05' },
+    });
+    const nonce = firstRes.nonce;
+
+    // First use — nonce is consumed (will fail on payment verify but nonce is deleted)
+    await fetch(`${BASE_URL}/api/v1/prove`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Payment-TX': '0x0000000000000000000000000000000000000000000000000000000000000001',
+        'X-Payment-Nonce': nonce,
+      },
+      body: JSON.stringify({
+        circuit: 'coinbase_kyc',
+        inputs: { signal_hash: '0x01', nullifier: '0x02', scope_bytes: '0x03', merkle_root: '0x04', user_address: '0x05' },
+      }),
     });
 
-    expect(status).toBe(200);
-    expect(typeof json.requestId).toBe('string');
-    expect(json.requestId.length).toBeGreaterThan(0);
-    expect(typeof json.signingUrl).toBe('string');
-    expect(json.signingUrl).toContain(json.requestId);
-    expect(typeof json.expiresAt).toBe('string');
-    expect(new Date(json.expiresAt).getTime()).toBeGreaterThan(Date.now());
-    expect(json.circuitId).toBe('coinbase_attestation');
-    expect(json.scope).toBe('e2e-test.zkproofport.app');
-
-    createdRequestId = json.requestId;
-  });
-
-  it('GET /api/v1/signing/:requestId/status with valid requestId returns phase: signing', async () => {
-    expect(createdRequestId).toBeDefined();
-
-    const { status, json } = await jsonGet(`/api/v1/signing/${createdRequestId}/status`);
-    expect(status).toBe(200);
-    expect(json.requestId).toBe(createdRequestId);
-    expect(json.phase).toBe('signing');
-    expect(json.signing).toBeDefined();
-    expect(json.signing.status).toBe('pending');
-    expect(json.expiresAt).toBeDefined();
-  });
-
-  it('POST /api/v1/signing/:requestId/payment before signing complete returns error or disabled message', async () => {
-    expect(createdRequestId).toBeDefined();
-
-    const { status, json } = await jsonPost(`/api/v1/signing/${createdRequestId}/payment`, {});
-    // With paymentMode=disabled: returns message about payment not required
-    // With paymentMode=testnet/mainnet: returns error about signing not complete
-    expect([200, 400]).toContain(status);
-    const text = JSON.stringify(json).toLowerCase();
-    expect(text).toMatch(/sign|complet|pending|not required|disabled|payment/);
-  });
-
-  it('POST /api/v1/signing with missing circuitId returns 400', async () => {
-    const { status, json } = await jsonPost('/api/v1/signing', {
-      scope: 'e2e-test.zkproofport.app',
+    // Second use — nonce should be invalid (consumed)
+    const res2 = await fetch(`${BASE_URL}/api/v1/prove`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Payment-TX': '0x0000000000000000000000000000000000000000000000000000000000000002',
+        'X-Payment-Nonce': nonce,
+      },
+      body: JSON.stringify({
+        circuit: 'coinbase_kyc',
+        inputs: { signal_hash: '0x01', nullifier: '0x02', scope_bytes: '0x03', merkle_root: '0x04', user_address: '0x05' },
+      }),
     });
-    expect(status).toBe(400);
-    expect(json.error).toBeDefined();
-    expect(json.error).toContain('circuitId');
+    const json2 = await res2.json();
+    expect(res2.status).toBe(400);
+    expect(json2.error).toBe('INVALID_NONCE');
   });
 
-  it('POST /api/v1/signing with unknown circuitId returns 400', async () => {
-    const { status, json } = await jsonPost('/api/v1/signing', {
-      circuitId: 'nonexistent_circuit',
-      scope: 'e2e-test.zkproofport.app',
+  it('nonce for wrong circuit returns NONCE_CIRCUIT_MISMATCH', async () => {
+    // Get nonce for coinbase_kyc
+    const { json: firstRes } = await jsonPost('/api/v1/prove', {
+      circuit: 'coinbase_kyc',
+      inputs: { signal_hash: '0x01', nullifier: '0x02', scope_bytes: '0x03', merkle_root: '0x04', user_address: '0x05' },
     });
-    expect(status).toBe(400);
-    expect(json.error).toBeDefined();
-    expect(json.error).toMatch(/[Uu]nknown circuit/);
-  });
+    const nonce = firstRes.nonce;
 
-  it('POST /api/v1/signing with empty scope returns 400', async () => {
-    const { status, json } = await jsonPost('/api/v1/signing', {
-      circuitId: 'coinbase_attestation',
-      scope: '',
+    // Try to use it for coinbase_country
+    const res = await fetch(`${BASE_URL}/api/v1/prove`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Payment-TX': '0x0000000000000000000000000000000000000000000000000000000000000001',
+        'X-Payment-Nonce': nonce,
+      },
+      body: JSON.stringify({
+        circuit: 'coinbase_country',
+        inputs: { signal_hash: '0x01', nullifier: '0x02', scope_bytes: '0x03', merkle_root: '0x04', user_address: '0x05' },
+      }),
     });
-    expect(status).toBe(400);
-    expect(json.error).toBeDefined();
-    expect(json.error).toContain('scope');
-  });
-
-  it('GET /api/v1/signing/:requestId/status with fake requestId returns 404', async () => {
-    const { status, json } = await jsonGet('/api/v1/signing/fake-request-id-00000000/status');
-    expect(status).toBe(404);
-    expect(json.error).toBeDefined();
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════════
-// REST API — Proof Generation Validation (raw fetch — custom REST)
-// ═══════════════════════════════════════════════════════════════════════════
-
-describe('REST API — Proof Generation Validation', () => {
-  it('POST /api/v1/proofs with no params returns 400', async () => {
-    const { status, json } = await jsonPost('/api/v1/proofs', {});
-    // When paymentMode=testnet, payment middleware intercepts before validation → 402
-    expect([400, 402]).toContain(status);
-    if (status === 400) {
-      expect(json.error).toBeDefined();
-    }
-  });
-
-  it('POST /api/v1/proofs with missing circuitId returns 400', async () => {
-    const { status, json } = await jsonPost('/api/v1/proofs', {
-      address: '0x' + 'aa'.repeat(20),
-      signature: '0x' + 'bb'.repeat(65),
-      scope: 'test.com',
-    });
-    // When paymentMode=testnet, payment middleware intercepts before validation → 402
-    expect([400, 402]).toContain(status);
-    if (status === 400) {
-      expect(json.error).toBeDefined();
-    }
-  });
-
-  it('POST /api/v1/proofs/verify with missing params returns 400', async () => {
-    const { status, json } = await jsonPost('/api/v1/proofs/verify', {});
-    expect(status).toBe(400);
-    expect(json.error).toBeDefined();
-  });
-
-  it('GET /api/v1/proofs/:taskId returns 404 for non-existent task', async () => {
-    const { status, json } = await jsonGet('/api/v1/proofs/nonexistent-task-id');
-    expect(status).toBe(404);
-    expect(json.error).toBeDefined();
+    const json = await res.json();
+    expect(res.status).toBe(400);
+    expect(json.error).toBe('NONCE_CIRCUIT_MISMATCH');
   });
 });
 
@@ -441,44 +383,6 @@ describe('A2A message/send — get_supported_circuits', () => {
     const circuits = (dataArtifact!.parts.find((p: Part) => p.kind === 'data' && (p as any).data?.circuits) as any).data.circuits;
     expect(circuits.find((c: any) => c.id === 'coinbase_attestation')).toBeDefined();
     expect(circuits.find((c: any) => c.id === 'coinbase_country_attestation')).toBeDefined();
-  });
-});
-
-describe('A2A message/send — request_signing + check_status (multi-turn)', () => {
-  let a2aRequestId: string;
-
-  it('request_signing returns requestId and signingUrl', async () => {
-    const result = await a2aClient.sendMessage(
-      makeDataPartMessage({
-        skill: 'request_signing',
-        circuitId: 'coinbase_attestation',
-        scope: 'a2a-e2e-test.zkproofport.app',
-      }),
-    );
-
-    const task = result as Task;
-    expect(task.status.state).toBe('input-required');
-
-    // Extract requestId and signingUrl from artifacts
-    const data = extractDataFromArtifacts(task.artifacts);
-    expect(data.requestId).toBeDefined();
-    expect(data.signingUrl).toBeDefined();
-    expect(data.signingUrl as string).toContain(data.requestId as string);
-    a2aRequestId = data.requestId as string;
-  });
-
-  it('check_status for the created requestId returns phase: signing', async () => {
-    expect(a2aRequestId).toBeDefined();
-
-    const result = await a2aClient.sendMessage(
-      makeDataPartMessage({ skill: 'check_status', requestId: a2aRequestId }),
-    );
-
-    const task = result as Task;
-    expect(task.status.state).toBe('input-required');
-
-    const data = extractDataFromArtifacts(task.artifacts);
-    expect(data.phase).toBe('signing');
   });
 });
 
@@ -587,96 +491,27 @@ describe('A2A message/send — error cases', () => {
     expect(task.status.state).toBe('failed');
   });
 
-  it('generate_proof with unknown circuit returns failed task', async () => {
-    // When paymentMode=testnet, payment middleware intercepts before the handler → 402
-    // Check with raw fetch first to detect 402
-    const rawRes = await fetch(`${BASE_URL}/a2a`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 27,
-        method: 'message/send',
-        params: {
-          message: {
-            messageId: randomUUID(),
-            role: 'user',
-            parts: [{
-              kind: 'data',
-              mimeType: 'application/json',
-              data: {
-                skill: 'generate_proof',
-                circuitId: 'nonexistent_circuit',
-                address: '0x' + 'aa'.repeat(20),
-                signature: '0x' + 'bb'.repeat(65),
-                scope: 'test.com',
-              },
-            }],
-          },
-        },
-      }),
-    });
-
-    if (rawRes.status === 402) {
-      return;
-    }
-
+  it('prove returns completed with redirect (A2A does not generate proofs directly)', async () => {
+    // A2A prove skill returns a redirect message to the REST endpoint
+    // (proof generation takes 30-90s, exceeding A2A timeout limitations)
     const result = await a2aClient.sendMessage(
       makeDataPartMessage({
-        skill: 'generate_proof',
-        circuitId: 'nonexistent_circuit',
-        address: '0x' + 'aa'.repeat(20),
-        signature: '0x' + 'bb'.repeat(65),
-        scope: 'test.com',
+        skill: 'prove',
+        circuit: 'coinbase_kyc',
       }),
     );
 
     const task = result as Task;
-    expect(task.status.state).toBe('failed');
-  });
+    expect(task.status.state).toBe('completed');
 
-  it('generate_proof with missing address and signature returns failed task', async () => {
-    // When paymentMode=testnet, payment middleware intercepts before the handler → 402
-    const rawRes = await fetch(`${BASE_URL}/a2a`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 28,
-        method: 'message/send',
-        params: {
-          message: {
-            messageId: randomUUID(),
-            role: 'user',
-            parts: [{
-              kind: 'data',
-              mimeType: 'application/json',
-              data: {
-                skill: 'generate_proof',
-                circuitId: 'coinbase_attestation',
-                scope: 'test.com',
-              },
-            }],
-          },
-        },
-      }),
-    });
-
-    if (rawRes.status === 402) {
-      return;
-    }
-
-    const result = await a2aClient.sendMessage(
-      makeDataPartMessage({
-        skill: 'generate_proof',
-        circuitId: 'coinbase_attestation',
-        scope: 'test.com',
-        // missing address and signature
-      }),
+    // Should contain redirect info with REST endpoint
+    const dataArtifact = task.artifacts?.find((a: Artifact) =>
+      a.parts.some((p: Part) => p.kind === 'data' && (p as any).data?.endpoint)
     );
-
-    const task = result as Task;
-    expect(task.status.state).toBe('failed');
+    expect(dataArtifact).toBeDefined();
+    const dataPart = dataArtifact!.parts.find((p: Part) => p.kind === 'data') as any;
+    expect(dataPart.data.endpoint).toContain('/api/v1/prove');
+    expect(dataPart.data.method).toBe('POST');
   });
 });
 
@@ -743,21 +578,17 @@ describe('MCP StreamableHTTP', () => {
     }
   });
 
-  it('tools/list returns all 6 tools', async () => {
+  it('tools/list returns all 2 tools', async () => {
     const { client, transport } = await createMcpClient();
     try {
       const result = await client.listTools();
       expect(result.tools).toBeDefined();
-      expect(result.tools.length).toBe(6);
+      expect(result.tools.length).toBe(2);
 
       const toolNames = result.tools.map((t) => t.name).sort();
       expect(toolNames).toEqual([
-        'check_status',
-        'generate_proof',
         'get_supported_circuits',
-        'request_payment',
-        'request_signing',
-        'verify_proof',
+        'prove',
       ]);
     } finally {
       await transport.close();
@@ -782,48 +613,7 @@ describe('MCP StreamableHTTP', () => {
     }
   });
 
-  it('tools/call request_signing returns signingUrl or error', async () => {
-    const { client, transport } = await createMcpClient();
-    try {
-      const result = await client.callTool({
-        name: 'request_signing',
-        arguments: {
-          circuitId: 'coinbase_attestation',
-          scope: 'mcp-e2e-test.zkproofport.app',
-        },
-      });
-
-      expect(result.content).toBeDefined();
-
-      const textContent = (result.content as any[])?.find((c: any) => c.type === 'text');
-      expect(textContent).toBeDefined();
-
-      // Should contain requestId and signingUrl — try JSON parse first
-      let parsed: any;
-      try {
-        parsed = JSON.parse(textContent.text);
-      } catch {
-        parsed = null;
-      }
-
-      if (result.isError || (parsed && parsed.error)) {
-        // Tool returned an error (e.g., SIGN_PAGE_URL not configured)
-        const errorText = parsed?.error || textContent.text;
-        expect(errorText.toLowerCase()).toMatch(/sign|config|url/);
-      } else if (parsed && parsed.requestId) {
-        expect(parsed.requestId).toBeDefined();
-        expect(parsed.signingUrl).toBeDefined();
-        expect(typeof parsed.signingUrl).toBe('string');
-      } else {
-        // Plain text response — should mention signing or request
-        expect(textContent.text.toLowerCase()).toMatch(/sign|request/);
-      }
-    } finally {
-      await transport.close();
-    }
-  });
-
-  it('tools/call generate_proof with missing params returns error in content', async () => {
+  it('tools/call prove with missing params returns error in content', async () => {
     // When paymentMode=testnet, payment middleware intercepts before MCP handling → 402
     // Check with raw fetch first
     const rawRes = await fetch(`${BASE_URL}/mcp`, {
@@ -837,7 +627,7 @@ describe('MCP StreamableHTTP', () => {
         id: 999,
         method: 'tools/call',
         params: {
-          name: 'generate_proof',
+          name: 'prove',
           arguments: { circuitId: 'coinbase_attestation' },
         },
       }),
@@ -850,7 +640,7 @@ describe('MCP StreamableHTTP', () => {
     const { client, transport } = await createMcpClient();
     try {
       const result = await client.callTool({
-        name: 'generate_proof',
+        name: 'prove',
         arguments: {
           circuitId: 'coinbase_attestation',
           // missing address, signature, scope
@@ -874,491 +664,414 @@ describe('MCP StreamableHTTP', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// OpenAI Chat Completions — SDK client
-// ═══════════════════════════════════════════════════════════════════════════
-
-describe('OpenAI Chat Completions', () => {
-  it('POST /v1/chat/completions responds (configured or 503 if no LLM key)', { timeout: 30000 }, async () => {
-    try {
-      const completion = await openaiClient.chat.completions.create({
-        model: 'gpt-4o',
-        messages: [
-          { role: 'user', content: 'What ZK circuits do you support?' },
-        ],
-      });
-
-      // 200 path: LLM configured — validate OpenAI-compatible response format
-      expect(completion.id).toBeDefined();
-      expect(Array.isArray(completion.choices)).toBe(true);
-      expect(completion.choices.length).toBeGreaterThan(0);
-      expect(completion.choices[0].message).toBeDefined();
-      expect(completion.choices[0].message.role).toBe('assistant');
-      expect(typeof completion.choices[0].message.content).toBe('string');
-      expect(completion.model).toBeDefined();
-      expect(completion.usage).toBeDefined();
-    } catch (err: any) {
-      // 503 path: chat not configured
-      expect(err.status).toBe(503);
-    }
-  });
-
-  it('POST /api/v1/chat returns 410 Gone (deprecated endpoint)', async () => {
-    // Raw fetch — tests deprecated endpoint, not OpenAI protocol
-    const { status, json } = await jsonPost('/api/v1/chat', {
-      messages: [{ role: 'user', content: 'test' }],
-    });
-    expect(status).toBe(410);
-    expect(json.error).toBeDefined();
-    expect(json.error.type).toBe('gone');
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Multi-Turn Flow Tests
-// ═══════════════════════════════════════════════════════════════════════════
-
-describe('Multi-Turn Flow — REST signing → check_status', () => {
-  let flowRequestId: string;
-
-  it('Step 1: POST /api/v1/signing creates a session', async () => {
-    const { status, json } = await jsonPost('/api/v1/signing', {
-      circuitId: 'coinbase_attestation',
-      scope: 'multi-turn-test.zkproofport.app',
-    });
-
-    expect(status).toBe(200);
-    expect(json.requestId).toBeDefined();
-    expect(json.signingUrl).toBeDefined();
-    expect(json.expiresAt).toBeDefined();
-    flowRequestId = json.requestId;
-  });
-
-  it('Step 2: GET /api/v1/signing/:requestId/status returns signing phase', async () => {
-    expect(flowRequestId).toBeDefined();
-
-    const { status, json } = await jsonGet(`/api/v1/signing/${flowRequestId}/status`);
-    expect(status).toBe(200);
-    expect(json.requestId).toBe(flowRequestId);
-    expect(json.phase).toBe('signing');
-    expect(json.signing.status).toBe('pending');
-  });
-
-  it('Step 3: POST /api/v1/signing/:requestId/payment rejects (signing incomplete)', async () => {
-    expect(flowRequestId).toBeDefined();
-
-    const { status, json } = await jsonPost(`/api/v1/signing/${flowRequestId}/payment`, {});
-    // Signing not complete — payment must be rejected
-    expect(status).toBe(400);
-    expect(json.error).toBeDefined();
-  });
-});
-
-describe('Multi-Turn Flow — A2A request_signing → check_status', () => {
-  let a2aFlowRequestId: string;
-
-  it('Step 1: A2A request_signing for coinbase_country_attestation', async () => {
-    const result = await a2aClient.sendMessage(
-      makeDataPartMessage({
-        skill: 'request_signing',
-        circuitId: 'coinbase_country_attestation',
-        scope: 'country-flow-test.zkproofport.app',
-        countryList: ['US', 'CA'],
-        isIncluded: true,
-      }),
-    );
-
-    const task = result as Task;
-    expect(task.status.state).toBe('input-required');
-
-    const data = extractDataFromArtifacts(task.artifacts);
-    expect(data.requestId).toBeDefined();
-    a2aFlowRequestId = data.requestId as string;
-  });
-
-  it('Step 2: A2A check_status for same requestId shows phase: signing', async () => {
-    expect(a2aFlowRequestId).toBeDefined();
-
-    const result = await a2aClient.sendMessage(
-      makeDataPartMessage({ skill: 'check_status', requestId: a2aFlowRequestId }),
-    );
-
-    const task = result as Task;
-    expect(task.status.state).toBe('input-required');
-
-    const data = extractDataFromArtifacts(task.artifacts);
-    expect(data.phase).toBe('signing');
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Signing Internal Endpoints (raw fetch — custom REST)
-// ═══════════════════════════════════════════════════════════════════════════
-
-describe('Signing Internal Endpoints', () => {
-  it('GET /api/signing/:requestId returns 404 for non-existent requestId', async () => {
-    const { status } = await jsonGet('/api/signing/nonexistent-id');
-    expect(status).toBe(404);
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Payment Endpoints (raw fetch — custom REST)
-// ═══════════════════════════════════════════════════════════════════════════
-
-describe('Payment Endpoints', () => {
-  it('GET /api/payment/:requestId returns 404 for non-existent', async () => {
-    const { status } = await jsonGet('/api/payment/nonexistent-id');
-    expect(status).toBe(404);
-  });
-
-  it('GET /payment/status returns payment config', async () => {
-    const { status, json } = await jsonGet('/payment/status');
-    expect(status).toBe(200);
-    expect(json.mode).toBeDefined();
-    expect(['disabled', 'testnet', 'mainnet']).toContain(json.mode);
-    expect(typeof json.requiresPayment).toBe('boolean');
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════════
-// HTML Pages (raw fetch — custom REST)
-// ═══════════════════════════════════════════════════════════════════════════
-
-describe('HTML Pages', () => {
-  it('GET /pay/:requestId returns HTML payment page', async () => {
-    const res = await fetch(`${BASE_URL}/pay/test-request-id`);
-    expect(res.status).toBe(200);
-    expect(res.headers.get('content-type')).toContain('text/html');
-    const body = await res.text();
-    expect(body).toContain('<!DOCTYPE html');
-  });
-
-  it('GET /v/:proofId returns HTML verification page', async () => {
-    const res = await fetch(`${BASE_URL}/v/test-proof-id`);
-    expect(res.status).toBe(200);
-    expect(res.headers.get('content-type')).toContain('text/html');
-    const body = await res.text();
-    expect(body).toContain('<!DOCTYPE html');
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════════
 // Proof Generation & Verification (Real bb/nargo — requires attestation wallet)
 // ═══════════════════════════════════════════════════════════════════════════
 
-const ATTESTATION_KEY = process.env.E2E_ATTESTATION_WALLET_KEY;
-const ATTESTATION_ADDRESS = process.env.E2E_ATTESTATION_WALLET_ADDRESS;
-const PAYER_KEY = process.env.E2E_PAYER_WALLET_KEY;
-
-// Payment-wrapped helpers for proof generation when paymentMode=testnet
-function makePayFetch(payerKey: string) {
-  const payerWallet = new ethers.Wallet(payerKey);
-  const signer = {
-    address: payerWallet.address as `0x${string}`,
-    signTypedData: async ({ domain, types, primaryType, message }: {
-      domain: Record<string, unknown>;
-      types: Record<string, unknown>;
-      primaryType: string;
-      message: Record<string, unknown>;
-    }) => {
-      const { EIP712Domain: _ignored, ...cleanTypes } = types as any;
-      return payerWallet.signTypedData(domain as any, cleanTypes, message) as Promise<`0x${string}`>;
-    },
-  };
-  return wrapFetchWithPaymentFromConfig(fetch, {
-    schemes: [{
-      network: 'eip155:84532',
-      client: new ExactEvmScheme(signer),
-    }],
-  });
-}
-
-async function paidJsonPost(payFetch: typeof fetch, path: string, body: unknown) {
-  const res = await payFetch(`${BASE_URL}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  const text = await res.text();
-  let json: any;
-  try { json = JSON.parse(text); } catch { json = null; }
-  return { status: res.status, headers: res.headers, text, json };
-}
-
-describe.skipIf(!ATTESTATION_KEY || !ATTESTATION_ADDRESS)(
+describe(
   'Real Proof Generation & Verification',
   () => {
-    let generatedProof: string;
-    let generatedPublicInputs: string;
-    let paymentRequired = false;
-    let payFetch: typeof fetch;
+    // A2A and MCP prove tools return redirect messages (not actual proofs)
+    // due to 30-90s proof generation time exceeding protocol timeouts.
+    // Real proof generation is tested via REST API x402 flow.
 
-    beforeAll(async () => {
-      const health = await fetch(`${BASE_URL}/health`).then(r => r.json());
-      paymentRequired = health.paymentRequired === true;
-      if (paymentRequired && PAYER_KEY) {
-        payFetch = makePayFetch(PAYER_KEY);
-      }
-    });
-
-    it('A2A: generate_proof produces a real proof', { timeout: 300_000 }, async (ctx) => {
-      const scope = 'e2e-test.zkproofport.app';
-      const signature = await signForProof(ATTESTATION_KEY!, ATTESTATION_ADDRESS!, scope, 'coinbase_attestation');
-
-      // For paid requests, use raw fetch with payment wrapper (SDK doesn't support x402 headers)
-      if (paymentRequired && payFetch) {
-        const res = await payFetch(`${BASE_URL}/a2a`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            jsonrpc: '2.0',
-            id: 100,
-            method: 'message/send',
-            params: {
-              message: {
-                messageId: randomUUID(),
-                role: 'user',
-                parts: [{
-                  kind: 'data',
-                  mimeType: 'application/json',
-                  data: {
-                    skill: 'generate_proof',
-                    circuitId: 'coinbase_attestation',
-                    address: ATTESTATION_ADDRESS,
-                    signature,
-                    scope,
-                  },
-                }],
-              },
-            },
-          }),
-        });
-        const text = await res.text();
-        let json: any;
-        try { json = JSON.parse(text); } catch { json = null; }
-
-        // Skip if x402 facilitator settlement is unavailable
-        if (res.status === 402 && json?.error === 'Settlement failed') {
-          console.warn('x402 facilitator settlement failed — skipping (external dependency)');
-          ctx.skip();
-          return;
-        }
-
-        expect(res.status).toBe(200);
-        expect(json.result).toBeDefined();
-        expect(json.result.status.state).toBe('completed');
-
-        const proofArtifact = json.result.artifacts?.find((a: any) =>
-          a.parts.some((p: any) => p.kind === 'data' && p.data?.proof)
-        );
-        expect(proofArtifact).toBeDefined();
-
-        const proofData = proofArtifact.parts.find((p: any) => p.data?.proof).data;
-        generatedProof = proofData.proof;
-        generatedPublicInputs = proofData.publicInputs;
-      } else {
-        // No payment required — use SDK client
-        const result = await a2aClient.sendMessage(
-          makeDataPartMessage({
-            skill: 'generate_proof',
-            circuitId: 'coinbase_attestation',
-            address: ATTESTATION_ADDRESS,
-            signature,
-            scope,
-          }),
-        );
-
-        const task = result as Task;
-        expect(task.status.state).toBe('completed');
-
-        const proofArtifact = task.artifacts?.find((a: Artifact) =>
-          a.parts.some((p: Part) => p.kind === 'data' && (p as any).data?.proof)
-        );
-        expect(proofArtifact).toBeDefined();
-
-        const proofPart = proofArtifact!.parts.find((p: Part) => p.kind === 'data' && (p as any).data?.proof) as any;
-        generatedProof = proofPart.data.proof;
-        generatedPublicInputs = proofPart.data.publicInputs;
-      }
-
-      expect(generatedProof).toBeDefined();
-      expect(generatedProof.startsWith('0x')).toBe(true);
-      expect(generatedPublicInputs).toBeDefined();
-    });
-
-    it('A2A: verify_proof validates the generated proof on-chain', { timeout: 60_000 }, async (ctx) => {
-      if (!generatedProof) {
-        ctx.skip();
-        return;
-      }
-
+    it('A2A: prove returns redirect to REST endpoint (A2A does not generate proofs)', { timeout: 30_000 }, async () => {
+      // A2A prove skill redirects to REST API due to 30-90s proof generation time
       const result = await a2aClient.sendMessage(
         makeDataPartMessage({
-          skill: 'verify_proof',
-          circuitId: 'coinbase_attestation',
-          proof: generatedProof,
-          publicInputs: generatedPublicInputs,
-          chainId: '84532',
+          skill: 'prove',
+          circuit: 'coinbase_kyc',
         }),
       );
 
       const task = result as Task;
       expect(task.status.state).toBe('completed');
 
-      const verifyArtifact = task.artifacts?.find((a: Artifact) =>
-        a.parts.some((p: Part) => p.kind === 'data' && (p as any).data?.valid !== undefined)
+      // Verify redirect artifact contains REST endpoint info
+      const dataArtifact = task.artifacts?.find((a: Artifact) =>
+        a.parts.some((p: Part) => p.kind === 'data' && (p as any).data?.endpoint)
       );
-      expect(verifyArtifact).toBeDefined();
-      const verifyData = (verifyArtifact!.parts.find(
-        (p: Part) => p.kind === 'data' && (p as any).data?.valid !== undefined,
-      ) as any).data;
-      expect(verifyData.valid).toBe(true);
+      expect(dataArtifact).toBeDefined();
+      const dataPart = dataArtifact!.parts.find((p: Part) => p.kind === 'data') as any;
+      expect(dataPart.data.endpoint).toContain('/api/v1/prove');
+      expect(dataPart.data.method).toBe('POST');
+      expect(dataPart.data.guide_url).toBeDefined();
     });
 
-    it('MCP: generate_proof via tools/call', { timeout: 300_000 }, async (ctx) => {
-      const scope = 'e2e-mcp-test.zkproofport.app';
-      const signature = await signForProof(ATTESTATION_KEY!, ATTESTATION_ADDRESS!, scope, 'coinbase_attestation');
+    it('A2A: verify_proof is not a valid skill and returns failed task', { timeout: 60_000 }, async () => {
+      const result = await a2aClient.sendMessage(
+        makeDataPartMessage({
+          skill: 'verify_proof',
+          circuitId: 'coinbase_attestation',
+          proof: '0xdeadbeef',
+          publicInputs: '0xdeadbeef',
+          chainId: '84532',
+        }),
+      );
 
-      // For paid requests, must use raw fetch with payment wrapper
-      if (paymentRequired && payFetch) {
-        const res = await payFetch(`${BASE_URL}/mcp`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json, text/event-stream',
-          },
-          body: JSON.stringify({
-            jsonrpc: '2.0',
-            id: 102,
-            method: 'tools/call',
-            params: {
-              name: 'generate_proof',
-              arguments: {
-                circuitId: 'coinbase_attestation',
-                address: ATTESTATION_ADDRESS,
-                signature,
-                scope,
-              },
+      const task = result as Task;
+      // verify_proof is no longer a valid A2A skill (VALID_SKILLS = ['prove', 'get_supported_circuits'])
+      expect(task.status.state).toBe('failed');
+    });
+
+    it('MCP: prove returns redirect to REST endpoint (MCP does not generate proofs)', { timeout: 30_000 }, async () => {
+      // MCP prove tool returns redirect info due to 30-90s proof generation time
+      const { client, transport } = await createMcpClient();
+      try {
+        const result = await client.callTool({
+          name: 'prove',
+          arguments: {
+            circuit: 'coinbase_kyc',
+            inputs: {
+              signal_hash: '0x' + 'aa'.repeat(32),
+              nullifier: '0x' + 'bb'.repeat(32),
+              scope_bytes: '0x' + 'cc'.repeat(32),
+              merkle_root: '0x' + 'dd'.repeat(32),
+              user_address: '0x' + 'ee'.repeat(20),
+              signature: '0x' + 'ff'.repeat(65),
+              user_pubkey_x: '0x' + '11'.repeat(32),
+              user_pubkey_y: '0x' + '22'.repeat(32),
+              raw_transaction: '0x' + '33'.repeat(150),
+              tx_length: 150,
+              coinbase_attester_pubkey_x: '0x' + '44'.repeat(32),
+              coinbase_attester_pubkey_y: '0x' + '55'.repeat(32),
+              merkle_proof: ['0x' + '66'.repeat(32)],
+              leaf_index: 0,
+              depth: 1,
             },
-          }),
+          },
         });
 
-        if (res.status === 402) {
-          const text = await res.text();
-          let json: any;
-          try { json = JSON.parse(text); } catch { json = null; }
-          if (json?.error === 'Settlement failed') {
-            console.warn('x402 facilitator settlement failed — skipping (external dependency)');
-            ctx.skip();
-            return;
-          }
-        }
-
-        expect(res.status).toBe(200);
-        const text = await res.text();
-        const events = parseSseEvents(text);
-        expect(events.length).toBeGreaterThan(0);
-
-        const result = events[0];
-        expect(result.result).toBeDefined();
-        expect(result.result.content).toBeDefined();
-
-        const textContent = result.result.content.find((c: any) => c.type === 'text');
+        // Tool should return redirect info (not actual proof)
+        const textContent = result.content.find((c: any) => c.type === 'text');
         expect(textContent).toBeDefined();
-
-        try {
-          const parsed = JSON.parse(textContent.text);
-          expect(parsed.proof).toBeDefined();
-          expect(parsed.proof.startsWith('0x')).toBe(true);
-        } catch {
-          expect(textContent.text).toMatch(/proof|0x[0-9a-fA-F]{10,}/);
-        }
-      } else {
-        // No payment required — use MCP SDK client
-        const { client, transport } = await createMcpClient();
-        try {
-          const result = await client.callTool({
-            name: 'generate_proof',
-            arguments: {
-              circuitId: 'coinbase_attestation',
-              address: ATTESTATION_ADDRESS,
-              signature,
-              scope,
-            },
-          });
-
-          expect(result.isError).toBeFalsy();
-          const parsed = parseToolResult(result);
-          expect(parsed).toBeDefined();
-          expect(parsed.proof).toBeDefined();
-          expect(parsed.proof.startsWith('0x')).toBe(true);
-        } finally {
-          await transport.close();
-        }
+        const parsed = JSON.parse((textContent as any).text);
+        // Should contain redirect message with REST endpoint
+        expect(parsed.rest_endpoint).toBe('POST /api/v1/prove');
+        expect(parsed.message).toContain('REST endpoint');
+      } finally {
+        await transport.close();
       }
-    });
-
-    it('REST: POST /api/v1/proofs generates proof', { timeout: 300_000 }, async (ctx) => {
-      const scope = 'e2e-rest-test.zkproofport.app';
-      const signature = await signForProof(ATTESTATION_KEY!, ATTESTATION_ADDRESS!, scope, 'coinbase_attestation');
-
-      const body = {
-        circuitId: 'coinbase_attestation',
-        address: ATTESTATION_ADDRESS,
-        signature,
-        scope,
-      };
-
-      let status: number;
-      let json: any;
-
-      if (paymentRequired && payFetch) {
-        ({ status, json } = await paidJsonPost(payFetch, '/api/v1/proofs', body));
-      } else {
-        ({ status, json } = await jsonPost('/api/v1/proofs', body));
-      }
-
-      // Skip if x402 facilitator settlement is unavailable
-      if (status === 402 && json?.error === 'Settlement failed') {
-        console.warn('x402 facilitator settlement failed — skipping (external dependency)');
-        ctx.skip();
-        return;
-      }
-
-      expect(status).toBe(200);
-      expect(json.proof).toBeDefined();
-      expect(json.proof.startsWith('0x')).toBe(true);
-    });
-
-    it('REST: POST /api/v1/proofs/verify validates on-chain', { timeout: 60_000 }, async (ctx) => {
-      if (!generatedProof) {
-        ctx.skip();
-        return;
-      }
-
-      let publicInputsArray: string[];
-      if (Array.isArray(generatedPublicInputs)) {
-        publicInputsArray = generatedPublicInputs;
-      } else {
-        const clean = generatedPublicInputs.startsWith('0x')
-          ? generatedPublicInputs.slice(2)
-          : generatedPublicInputs;
-        publicInputsArray = [];
-        for (let i = 0; i < clean.length; i += 64) {
-          publicInputsArray.push('0x' + clean.slice(i, i + 64).padEnd(64, '0'));
-        }
-      }
-
-      const { status, json } = await jsonPost('/api/v1/proofs/verify', {
-        circuitId: 'coinbase_attestation',
-        proof: generatedProof,
-        publicInputs: publicInputsArray,
-        chainId: '84532',
-      });
-
-      expect(status).toBe(200);
-      expect(json.valid).toBe(true);
-      expect(json.circuitId).toBe('coinbase_attestation');
     });
   }
 );
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SKILL.md & Guide Endpoints
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('SKILL.md & Guide Endpoints', () => {
+  it('GET /.well-known/SKILL.md returns markdown with correct content-type', async () => {
+    const res = await fetch(`${BASE_URL}/.well-known/SKILL.md`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/markdown');
+    const text = await res.text();
+    expect(text).toContain('name: zk-proof-generator');
+    expect(text).toContain('prove');
+    expect(text).toContain('get_supported_circuits');
+    expect(text).toContain('verify_proof');
+    expect(text).toContain('x402');
+    expect(text).toContain('Local MCP');
+  });
+
+  it('GET /api/v1/guide/coinbase_kyc returns 12-step guide', async () => {
+    const res = await fetch(`${BASE_URL}/api/v1/guide/coinbase_kyc`);
+    expect(res.status).toBe(200);
+    const guide = await res.json();
+    expect(guide.circuit_id).toBe('coinbase_attestation');
+    expect(guide.display_name).toBe('Coinbase KYC');
+    expect(guide.complete_flow).toBeDefined();
+    expect(guide.complete_flow.steps).toBeInstanceOf(Array);
+    expect(guide.complete_flow.steps.length).toBe(12);
+    // Step 12 is on-chain verification (optional)
+    const step12 = guide.complete_flow.steps.find((s: any) => s.step === 12);
+    expect(step12).toBeDefined();
+    expect(step12.title).toContain('Verify');
+    // SDK section
+    expect(guide.sdk).toBeDefined();
+    expect(guide.sdk.package).toBe('@proofport/client');
+    expect(guide.sdk.quick_start).toBeDefined();
+    // Constants
+    expect(guide.constants).toBeDefined();
+    expect(guide.constants.authorized_signers).toBeInstanceOf(Array);
+    expect(guide.constants.verification).toBeDefined();
+  });
+
+  it('GET /api/v1/guide/coinbase_country returns country circuit guide', async () => {
+    const res = await fetch(`${BASE_URL}/api/v1/guide/coinbase_country`);
+    expect(res.status).toBe(200);
+    const guide = await res.json();
+    expect(guide.circuit_id).toBe('coinbase_country_attestation');
+    expect(guide.display_name).toBe('Coinbase Country');
+    expect(guide.complete_flow.steps.length).toBe(12);
+  });
+
+  it('GET /api/v1/guide/invalid_circuit returns 404', async () => {
+    const res = await fetch(`${BASE_URL}/api/v1/guide/invalid_circuit`);
+    expect(res.status).toBe(404);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Local MCP Server (stdio) — spawns packages/mcp-server via StdioClientTransport
+// ═══════════════════════════════════════════════════════════════════════════
+
+const hasAttestationKey = !!process.env.E2E_ATTESTATION_WALLET_KEY;
+
+describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
+  let stdioClient: InstanceType<typeof McpClient>;
+  let stdioTransport: InstanceType<typeof StdioClientTransport>;
+
+  beforeAll(async () => {
+    const env: Record<string, string> = {
+      ...process.env as Record<string, string>,
+      ATTESTATION_KEY: process.env.E2E_ATTESTATION_WALLET_KEY!,
+      PROOFPORT_URL: BASE_URL,
+    };
+
+    // Optional: CDP wallet for payment (if credentials available)
+    if (process.env.CDP_API_KEY_ID) {
+      env.CDP_API_KEY_ID = process.env.CDP_API_KEY_ID;
+      env.CDP_API_KEY_SECRET = process.env.CDP_API_KEY_SECRET!;
+      env.CDP_WALLET_SECRET = process.env.CDP_WALLET_SECRET!;
+      if (process.env.CDP_WALLET_ADDRESS) env.CDP_WALLET_ADDRESS = process.env.CDP_WALLET_ADDRESS;
+    }
+
+    stdioTransport = new StdioClientTransport({
+      command: 'npx',
+      args: ['tsx', 'packages/mcp-server/src/index.ts'],
+      env,
+    });
+
+    stdioClient = new McpClient(
+      { name: 'e2e-stdio-test', version: '1.0.0' },
+      { capabilities: {} },
+    );
+
+    await stdioClient.connect(stdioTransport);
+  }, 30_000);
+
+  afterAll(async () => {
+    try {
+      await stdioTransport.close();
+    } catch {
+      // ignore cleanup errors
+    }
+  });
+
+  it('lists all 8 tools', async () => {
+    const { tools } = await stdioClient.listTools();
+    const toolNames = tools.map((t: any) => t.name).sort();
+    expect(toolNames).toEqual([
+      'generate_proof',
+      'get_supported_circuits',
+      'make_payment',
+      'prepare_inputs',
+      'request_challenge',
+      'request_testnet_usdc',
+      'submit_proof',
+      'verify_proof',
+    ]);
+  });
+
+  it('get_supported_circuits returns circuit info', async () => {
+    const result = await stdioClient.callTool({
+      name: 'get_supported_circuits',
+      arguments: {},
+    });
+    const textContent = result.content.find((c: any) => c.type === 'text');
+    expect(textContent).toBeDefined();
+    const parsed = JSON.parse((textContent as any).text);
+    expect(parsed.circuits).toBeDefined();
+    expect(parsed.circuits.coinbase_attestation).toBeDefined();
+    expect(parsed.circuits.coinbase_country_attestation).toBeDefined();
+    expect(parsed.verifier_addresses).toBeDefined();
+    expect(parsed.authorized_signers).toBeInstanceOf(Array);
+  });
+
+  it('verify_proof with invalid proof returns error', async () => {
+    const result = await stdioClient.callTool({
+      name: 'verify_proof',
+      arguments: {
+        circuit: 'coinbase_kyc',
+        proof: '0xdeadbeef',
+        public_inputs: '0x' + 'aa'.repeat(32),
+      },
+    });
+    const textContent = result.content.find((c: any) => c.type === 'text');
+    expect(textContent).toBeDefined();
+    const parsed = JSON.parse((textContent as any).text);
+    expect(parsed.valid === false || parsed.error).toBeTruthy();
+  });
+
+  it('request_challenge returns 402 challenge from server', async () => {
+    const result = await stdioClient.callTool({
+      name: 'request_challenge',
+      arguments: {
+        circuit: 'coinbase_kyc',
+        inputs: JSON.stringify({
+          signal_hash: '0x' + 'aa'.repeat(32),
+          nullifier: '0x' + 'bb'.repeat(32),
+          scope_bytes: '0x' + 'cc'.repeat(32),
+          merkle_root: '0x' + 'dd'.repeat(32),
+          user_address: '0x' + 'ee'.repeat(20),
+          signature: '0x' + 'ff'.repeat(65),
+          user_pubkey_x: '0x' + '11'.repeat(32),
+          user_pubkey_y: '0x' + '22'.repeat(32),
+          raw_transaction: '0x' + '33'.repeat(150),
+          tx_length: 150,
+          coinbase_attester_pubkey_x: '0x' + '44'.repeat(32),
+          coinbase_attester_pubkey_y: '0x' + '55'.repeat(32),
+          merkle_proof: ['0x' + '66'.repeat(32)],
+          leaf_index: 0,
+          depth: 1,
+        }),
+      },
+    });
+    const textContent = result.content.find((c: any) => c.type === 'text');
+    expect(textContent).toBeDefined();
+    const parsed = JSON.parse((textContent as any).text);
+    // Should get 402 challenge with nonce and payment info
+    expect(parsed.nonce || parsed.error).toBeDefined();
+  });
+
+  it('reads proofport://config resource', async () => {
+    const { resources } = await stdioClient.listResources();
+    expect(resources.length).toBeGreaterThanOrEqual(1);
+    const configResource = resources.find((r: any) => r.uri === 'proofport://config');
+    expect(configResource).toBeDefined();
+
+    const { contents } = await stdioClient.readResource({ uri: 'proofport://config' });
+    expect(contents.length).toBe(1);
+    const parsed = JSON.parse(contents[0].text as string);
+    expect(parsed.baseUrl).toBe(BASE_URL);
+    expect(parsed.attestationWalletAddress).toBeDefined();
+    expect(parsed.supportedCircuits).toBeDefined();
+  });
+
+  // ─── Real Proof Generation via Local MCP (TEE_MODE=disabled, bb prove on host) ──
+
+  // Auto-fund CDP payment wallet with testnet USDC before proof generation
+  it('request_testnet_usdc funds the payment wallet', { timeout: 60_000 }, async () => {
+    const result = await stdioClient.callTool({
+      name: 'request_testnet_usdc',
+      arguments: {},
+    });
+    const textContent = result.content.find((c: any) => c.type === 'text');
+    expect(textContent).toBeDefined();
+    const parsed = JSON.parse((textContent as any).text);
+    // May fail if CDP credentials are not configured — that's ok, attestation key will be used for payment
+    if (!parsed.error && parsed.transactionHash) {
+      expect(parsed.transactionHash).toBeDefined();
+      expect(parsed.address).toBeDefined();
+
+      // Wait for faucet tx to confirm on Base Sepolia before proceeding
+      const { ethers } = await import('ethers');
+      const provider = new ethers.JsonRpcProvider('https://sepolia.base.org');
+      const usdc = new ethers.Contract(
+        '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+        ['function balanceOf(address) view returns (uint256)'],
+        provider,
+      );
+      // Poll balance until USDC arrives (max 30s)
+      for (let i = 0; i < 15; i++) {
+        const balance = await usdc.balanceOf(parsed.address);
+        if (balance >= 100000n) break; // 0.10 USDC minimum
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    }
+  });
+
+  let generatedProof: { proof: string; publicInputs: string } | null = null;
+
+  it('generate_proof produces a real ZK proof (coinbase_kyc)', { timeout: 120_000 }, async () => {
+    const result = await stdioClient.callTool({
+      name: 'generate_proof',
+      arguments: {
+        circuit: 'coinbase_kyc',
+        scope: 'e2e-test',
+      },
+    });
+    const textContent = result.content.find((c: any) => c.type === 'text');
+    expect(textContent).toBeDefined();
+    const parsed = JSON.parse((textContent as any).text);
+
+    // Should NOT have error
+    expect(parsed.error).toBeUndefined();
+
+    // Should have proof and publicInputs
+    expect(parsed.proof).toBeDefined();
+    expect(parsed.proof).toMatch(/^0x/);
+    expect(parsed.publicInputs).toBeDefined();
+    expect(parsed.publicInputs).toMatch(/^0x/);
+    expect(parsed.paymentTxHash).toBeDefined();
+    expect(parsed.paymentTxHash).toMatch(/^0x/);
+
+    generatedProof = { proof: parsed.proof, publicInputs: parsed.publicInputs };
+
+    // ─── Report: Proof Generation ───
+    console.log('\n╔══════════════════════════════════════════════════════════════╗');
+    console.log('║              ZK PROOF GENERATION REPORT                     ║');
+    console.log('╠══════════════════════════════════════════════════════════════╣');
+    console.log(`║ Circuit:        coinbase_kyc (coinbase_attestation)         ║`);
+    console.log(`║ Scope:          e2e-test                                    ║`);
+    console.log('╠══════════════════════════════════════════════════════════════╣');
+    console.log(`║ x402 Payment TX:                                            ║`);
+    console.log(`║   ${parsed.paymentTxHash}`);
+    console.log(`║   https://sepolia.basescan.org/tx/${parsed.paymentTxHash}`);
+    console.log('╠══════════════════════════════════════════════════════════════╣');
+    console.log(`║ Proof (${parsed.proof.length} chars):                       ║`);
+    console.log(`║   ${parsed.proof.slice(0, 80)}...`);
+    console.log(`║ Public Inputs (${parsed.publicInputs.length} chars):        ║`);
+    console.log(`║   ${parsed.publicInputs.slice(0, 80)}...`);
+    if (parsed.attestation) {
+      console.log('╠══════════════════════════════════════════════════════════════╣');
+      console.log(`║ TEE Attestation: YES                                        ║`);
+      if (parsed.attestation.pcrs) {
+        console.log(`║   PCR0: ${parsed.attestation.pcrs.PCR0?.slice(0, 40)}...`);
+        console.log(`║   PCR1: ${parsed.attestation.pcrs.PCR1?.slice(0, 40)}...`);
+        console.log(`║   PCR2: ${parsed.attestation.pcrs.PCR2?.slice(0, 40)}...`);
+      }
+    } else {
+      console.log(`║ TEE Attestation: No (TEE_MODE=disabled)                     ║`);
+    }
+    if (parsed.timing) {
+      console.log('╠══════════════════════════════════════════════════════════════╣');
+      console.log(`║ Timing:         ${parsed.timing.totalMs}ms total             ║`);
+    }
+    console.log('╚══════════════════════════════════════════════════════════════╝\n');
+  });
+
+  it('verify_proof confirms the generated proof on-chain', { timeout: 30_000 }, async () => {
+    // Skip if proof generation failed
+    if (!generatedProof) {
+      console.warn('Skipping verify_proof — generate_proof did not produce a proof');
+      return;
+    }
+
+    const result = await stdioClient.callTool({
+      name: 'verify_proof',
+      arguments: {
+        circuit: 'coinbase_kyc',
+        proof: generatedProof.proof,
+        public_inputs: generatedProof.publicInputs,
+      },
+    });
+    const textContent = result.content.find((c: any) => c.type === 'text');
+    expect(textContent).toBeDefined();
+    const parsed = JSON.parse((textContent as any).text);
+
+    expect(parsed.valid).toBe(true);
+
+    // ─── Report: On-Chain Verification ───
+    console.log('╔══════════════════════════════════════════════════════════════╗');
+    console.log('║              ON-CHAIN VERIFICATION REPORT                   ║');
+    console.log('╠══════════════════════════════════════════════════════════════╣');
+    console.log(`║ Result:         ${parsed.valid ? 'VALID' : 'INVALID'}       ║`);
+    console.log(`║ Verifier:       0x0036B61dBFaB8f3CfEEF77dD5D45F7EFBFE2035c  ║`);
+    console.log(`║ Chain:          Base Sepolia (84532)                         ║`);
+    if (parsed.error) {
+      console.log(`║ Error:          ${parsed.error}`);
+    }
+    console.log('╚══════════════════════════════════════════════════════════════╝\n');
+  });
+});

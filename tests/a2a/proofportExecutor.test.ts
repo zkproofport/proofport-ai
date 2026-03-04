@@ -5,22 +5,12 @@ import type { Task, Message } from '@a2a-js/sdk';
 // ─── Hoisted mock variables ───────────────────────────────────────────────────
 
 const {
-  mockHandleRequestSigning,
-  mockHandleCheckStatus,
-  mockHandleRequestPayment,
-  mockHandleGenerateProof,
-  mockHandleVerifyProof,
   mockHandleGetSupportedCircuits,
   mockHandleProofCompleted,
   mockJsonRpcProviderCtor,
   mockWalletCtor,
 } = vi.hoisted(() => {
   return {
-    mockHandleRequestSigning: vi.fn(),
-    mockHandleCheckStatus: vi.fn(),
-    mockHandleRequestPayment: vi.fn(),
-    mockHandleGenerateProof: vi.fn(),
-    mockHandleVerifyProof: vi.fn(),
     mockHandleGetSupportedCircuits: vi.fn(),
     mockHandleProofCompleted: vi.fn().mockResolvedValue(undefined),
     mockJsonRpcProviderCtor: vi.fn().mockImplementation(() => ({})),
@@ -31,11 +21,6 @@ const {
 // ─── Module mocks ─────────────────────────────────────────────────────────────
 
 vi.mock('../../src/skills/skillHandler.js', () => ({
-  handleRequestSigning: mockHandleRequestSigning,
-  handleCheckStatus: mockHandleCheckStatus,
-  handleRequestPayment: mockHandleRequestPayment,
-  handleGenerateProof: mockHandleGenerateProof,
-  handleVerifyProof: mockHandleVerifyProof,
   handleGetSupportedCircuits: mockHandleGetSupportedCircuits,
 }));
 
@@ -79,17 +64,13 @@ function makeEventBus(): ExecutionEventBus {
   } as unknown as ExecutionEventBus;
 }
 
-function makeTaskStore(overrides: Partial<{
-  getContextFlow: () => Promise<string | null>;
-  setContextFlow: () => Promise<void>;
-}> = {}) {
+function makeTaskStore() {
   return {
     save: vi.fn().mockResolvedValue(undefined),
     load: vi.fn().mockResolvedValue(undefined),
     setContextFlow: vi.fn().mockResolvedValue(undefined),
     getContextFlow: vi.fn().mockResolvedValue(null),
     redis: { get: vi.fn(), set: vi.fn(), del: vi.fn() },
-    ...overrides,
   };
 }
 
@@ -197,18 +178,17 @@ describe('ProofportExecutor', () => {
     });
 
     it('extracts additional params from DataPart alongside skill', async () => {
-      mockHandleCheckStatus.mockResolvedValue({ requestId: 'req-1', phase: 'signing' });
+      mockHandleGetSupportedCircuits.mockReturnValue({ circuits: [], chainId: '84532' });
 
       const ctx = makeContext({
         contextId: '',
-        userMessage: makeDataPartMessage('check_status', { requestId: 'req-explicit' }),
+        userMessage: makeDataPartMessage('get_supported_circuits', { chainId: '84532' }),
       });
 
       await executor.execute(ctx, eventBus);
 
-      // The first argument to handleCheckStatus should include requestId
-      const callArgs = mockHandleCheckStatus.mock.calls[0][0];
-      expect(callArgs.requestId).toBe('req-explicit');
+      const callArgs = mockHandleGetSupportedCircuits.mock.calls[0][0];
+      expect(callArgs.chainId).toBe('84532');
     });
 
     it('ignores non-data parts when looking for DataPart skill', async () => {
@@ -374,34 +354,22 @@ describe('ProofportExecutor', () => {
       expect(errorText).toContain('get_supported_circuits');
     });
 
-    it('accepts all 6 valid skill names without throwing', async () => {
+    it('accepts all 2 valid skill names without throwing', async () => {
       const validSkills = [
-        'request_signing',
-        'check_status',
-        'request_payment',
-        'generate_proof',
-        'verify_proof',
+        'prove',
         'get_supported_circuits',
       ];
 
-      mockHandleRequestSigning.mockResolvedValue({ requestId: 'r1', signingUrl: 'http://x' });
-      mockHandleCheckStatus.mockResolvedValue({ requestId: 'r1', phase: 'signing' });
-      mockHandleRequestPayment.mockResolvedValue({ requestId: 'r1', paymentUrl: 'http://x' });
-      mockHandleGenerateProof.mockResolvedValue({ proof: '0x', publicInputs: '0x', nullifier: '0x', signalHash: '0x', proofId: 'p1', verifyUrl: 'http://x' });
-      mockHandleVerifyProof.mockResolvedValue({ valid: true, circuitId: 'coinbase_attestation', verifierAddress: '0xVer', chainId: '84532' });
       mockHandleGetSupportedCircuits.mockReturnValue({ circuits: [], chainId: '84532' });
 
       const expectedStates: Record<string, string> = {
-        request_signing: 'input-required',
-        check_status: 'input-required',
-        request_payment: 'input-required',
-        generate_proof: 'completed',
-        verify_proof: 'completed',
+        prove: 'completed',
         get_supported_circuits: 'completed',
       };
 
       for (const skill of validSkills) {
         vi.clearAllMocks();
+        mockHandleGetSupportedCircuits.mockReturnValue({ circuits: [], chainId: '84532' });
         const localEventBus = makeEventBus();
         const ctx = makeContext({
           contextId: '',
@@ -476,46 +444,41 @@ describe('ProofportExecutor', () => {
       );
     });
 
-    it('calls request_signing handler when skill is request_signing', async () => {
-      mockHandleRequestSigning.mockResolvedValue({
-        requestId: 'req-1',
-        signingUrl: 'http://localhost:4002/s/req-1',
-        expiresAt: new Date().toISOString(),
-        circuitId: 'coinbase_attestation',
-        scope: 'test.com',
-      });
-
+    it('handles prove skill by returning REST endpoint redirect info', async () => {
       const ctx = makeContext({
         contextId: '',
-        userMessage: makeDataPartMessage('request_signing', {
-          circuitId: 'coinbase_attestation',
-          scope: 'test.com',
-        }),
+        userMessage: makeDataPartMessage('prove', { circuit: 'coinbase_kyc' }),
       });
 
       await executor.execute(ctx, eventBus);
 
-      expect(mockHandleRequestSigning).toHaveBeenCalledOnce();
+      const publishCalls = (eventBus.publish as ReturnType<typeof vi.fn>).mock.calls;
+      const artifactUpdates = publishCalls
+        .filter((call: any[]) => call[0]?.kind === 'artifact-update')
+        .map((call: any[]) => call[0]);
+
+      expect(artifactUpdates.length).toBe(1);
+      const dataPart = artifactUpdates[0].artifact.parts.find((p: any) => p.kind === 'data');
+      expect(dataPart).toBeDefined();
+      expect(dataPart.data).toHaveProperty('endpoint');
+      expect(dataPart.data).toHaveProperty('method', 'POST');
     });
 
-    it('calls generate_proof handler when skill is generate_proof', async () => {
-      mockHandleGenerateProof.mockResolvedValue({
-        proof: '0xproof',
-        publicInputs: '0xinputs',
-        nullifier: '0xnullifier',
-        signalHash: '0xhash',
-        proofId: 'proof-id-1',
-        verifyUrl: 'http://localhost:4002/v/proof-id-1',
-      });
-
+    it('prove skill includes guide_url based on circuit alias', async () => {
       const ctx = makeContext({
         contextId: '',
-        userMessage: makeDataPartMessage('generate_proof', { requestId: 'req-999' }),
+        userMessage: makeDataPartMessage('prove', { circuit: 'coinbase_country' }),
       });
 
       await executor.execute(ctx, eventBus);
 
-      expect(mockHandleGenerateProof).toHaveBeenCalledOnce();
+      const publishCalls = (eventBus.publish as ReturnType<typeof vi.fn>).mock.calls;
+      const artifactUpdates = publishCalls
+        .filter((call: any[]) => call[0]?.kind === 'artifact-update')
+        .map((call: any[]) => call[0]);
+
+      const dataPart = artifactUpdates[0].artifact.parts.find((p: any) => p.kind === 'data');
+      expect(dataPart.data.guide_url).toContain('coinbase_country');
     });
 
     it('publishes artifact-update event with TextPart and DataPart containing result', async () => {
@@ -542,7 +505,6 @@ describe('ProofportExecutor', () => {
       expect(textPart).toBeDefined();
       expect(textPart.text).toContain('Found');
       expect(dataPart).toBeDefined();
-      expect(dataPart.data).toEqual(mockResult);
     });
 
     it('artifact-update event has lastChunk=true', async () => {
@@ -625,123 +587,52 @@ describe('ProofportExecutor', () => {
     });
   });
 
-  // ─── execute - context flow auto-resolution ──────────────────────────────
+  // ─── execute - context flow (removed in current implementation) ──────────
 
-  describe('execute - context flow auto-resolution', () => {
-    it('auto-fills requestId for check_status when contextId has a stored requestId', async () => {
-      const storedRequestId = 'req-stored-from-context';
-      taskStore.getContextFlow = vi.fn().mockResolvedValue(storedRequestId);
-
-      mockHandleCheckStatus.mockResolvedValue({ requestId: storedRequestId, phase: 'signing' });
+  describe('execute - context flow (session flow removed)', () => {
+    it('does NOT call getContextFlow for any skill (context flow removed)', async () => {
+      mockHandleGetSupportedCircuits.mockReturnValue({ circuits: [], chainId: '84532' });
 
       const ctx = makeContext({
-        contextId: 'ctx-with-flow',
-        userMessage: makeDataPartMessage('check_status'), // no requestId in params
+        contextId: 'ctx-some-context',
+        userMessage: makeDataPartMessage('get_supported_circuits'),
       });
 
       await executor.execute(ctx, eventBus);
 
-      const callArgs = mockHandleCheckStatus.mock.calls[0][0];
-      expect(callArgs.requestId).toBe(storedRequestId);
+      expect(taskStore.getContextFlow).not.toHaveBeenCalled();
     });
 
-    it('auto-fills requestId for request_payment when contextId has a stored requestId', async () => {
-      const storedRequestId = 'req-pay-from-context';
-      taskStore.getContextFlow = vi.fn().mockResolvedValue(storedRequestId);
-
-      mockHandleRequestPayment.mockResolvedValue({
-        requestId: storedRequestId,
-        paymentUrl: 'http://x',
-        amount: '$0.10',
-        currency: 'USDC',
-        network: 'Base Sepolia',
-      });
-
+    it('does NOT call setContextFlow for any skill (context flow removed)', async () => {
       const ctx = makeContext({
-        contextId: 'ctx-pay',
-        userMessage: makeDataPartMessage('request_payment'), // no requestId in params
+        contextId: 'ctx-some-context',
+        userMessage: makeDataPartMessage('prove', { circuit: 'coinbase_kyc' }),
       });
 
       await executor.execute(ctx, eventBus);
 
-      const callArgs = mockHandleRequestPayment.mock.calls[0][0];
-      expect(callArgs.requestId).toBe(storedRequestId);
+      expect(taskStore.setContextFlow).not.toHaveBeenCalled();
     });
 
-    it('auto-fills requestId for generate_proof when contextId has a stored requestId', async () => {
-      const storedRequestId = 'req-gen-from-context';
-      taskStore.getContextFlow = vi.fn().mockResolvedValue(storedRequestId);
-
-      mockHandleGenerateProof.mockResolvedValue({
-        proof: '0xproof',
-        publicInputs: '0xinputs',
-        nullifier: '0xnull',
-        signalHash: '0xhash',
-        proofId: 'pid-1',
-        verifyUrl: 'http://x',
-      });
-
+    it('prove skill completes successfully without context flow lookup', async () => {
       const ctx = makeContext({
-        contextId: 'ctx-gen',
-        userMessage: makeDataPartMessage('generate_proof'), // no requestId
+        contextId: 'ctx-prove',
+        userMessage: makeDataPartMessage('prove', { circuit: 'coinbase_kyc' }),
       });
 
       await executor.execute(ctx, eventBus);
 
-      const callArgs = mockHandleGenerateProof.mock.calls[0][0];
-      expect(callArgs.requestId).toBe(storedRequestId);
+      const publishCalls = (eventBus.publish as ReturnType<typeof vi.fn>).mock.calls;
+      const completedUpdate = publishCalls
+        .filter((call: any[]) => call[0]?.kind === 'status-update')
+        .map((call: any[]) => call[0])
+        .find((e: any) => e.status?.state === 'completed');
+
+      expect(completedUpdate).toBeDefined();
+      expect(completedUpdate.final).toBe(true);
     });
 
-    it('does NOT auto-fill requestId when params already contain requestId', async () => {
-      const storedRequestId = 'req-from-context';
-      const explicitRequestId = 'req-explicit-in-params';
-      taskStore.getContextFlow = vi.fn().mockResolvedValue(storedRequestId);
-
-      mockHandleCheckStatus.mockResolvedValue({ requestId: explicitRequestId, phase: 'signing' });
-
-      const ctx = makeContext({
-        contextId: 'ctx-explicit',
-        userMessage: makeDataPartMessage('check_status', { requestId: explicitRequestId }),
-      });
-
-      await executor.execute(ctx, eventBus);
-
-      // explicitRequestId must NOT be overwritten by the context flow
-      const callArgs = mockHandleCheckStatus.mock.calls[0][0];
-      expect(callArgs.requestId).toBe(explicitRequestId);
-    });
-
-    it('does NOT auto-fill requestId for request_signing skill', async () => {
-      const storedRequestId = 'req-should-not-be-used';
-      taskStore.getContextFlow = vi.fn().mockResolvedValue(storedRequestId);
-
-      mockHandleRequestSigning.mockResolvedValue({
-        requestId: 'req-new',
-        signingUrl: 'http://x',
-        expiresAt: new Date().toISOString(),
-        circuitId: 'coinbase_attestation',
-        scope: 'test.com',
-      });
-
-      const ctx = makeContext({
-        contextId: 'ctx-sign',
-        userMessage: makeDataPartMessage('request_signing', {
-          circuitId: 'coinbase_attestation',
-          scope: 'test.com',
-        }),
-      });
-
-      await executor.execute(ctx, eventBus);
-
-      // request_signing should not receive requestId from context flow
-      const callArgs = mockHandleRequestSigning.mock.calls[0][0];
-      expect(callArgs.requestId).toBeUndefined();
-    });
-
-    it('does NOT auto-fill requestId for get_supported_circuits skill', async () => {
-      const storedRequestId = 'req-should-not-be-used';
-      taskStore.getContextFlow = vi.fn().mockResolvedValue(storedRequestId);
-
+    it('get_supported_circuits completes successfully without context flow lookup', async () => {
       mockHandleGetSupportedCircuits.mockReturnValue({ circuits: [], chainId: '84532' });
 
       const ctx = makeContext({
@@ -751,74 +642,12 @@ describe('ProofportExecutor', () => {
 
       await executor.execute(ctx, eventBus);
 
-      const callArgs = mockHandleGetSupportedCircuits.mock.calls[0][0];
-      expect(callArgs.requestId).toBeUndefined();
-    });
-
-    it('stores contextId→requestId mapping after successful request_signing', async () => {
-      const newRequestId = 'req-newly-created';
-      mockHandleRequestSigning.mockResolvedValue({
-        requestId: newRequestId,
-        signingUrl: 'http://x',
-        expiresAt: new Date().toISOString(),
-        circuitId: 'coinbase_attestation',
-        scope: 'test.com',
-      });
-
-      const ctx = makeContext({
-        contextId: 'ctx-to-store',
-        userMessage: makeDataPartMessage('request_signing', {
-          circuitId: 'coinbase_attestation',
-          scope: 'test.com',
-        }),
-      });
-
-      await executor.execute(ctx, eventBus);
-
-      expect(taskStore.setContextFlow).toHaveBeenCalledWith('ctx-to-store', newRequestId);
-    });
-
-    it('does not call setContextFlow when contextId is empty', async () => {
-      mockHandleRequestSigning.mockResolvedValue({
-        requestId: 'req-no-ctx',
-        signingUrl: 'http://x',
-        expiresAt: new Date().toISOString(),
-        circuitId: 'coinbase_attestation',
-        scope: 'test.com',
-      });
-
-      const ctx = makeContext({
-        contextId: '',
-        userMessage: makeDataPartMessage('request_signing', {
-          circuitId: 'coinbase_attestation',
-          scope: 'test.com',
-        }),
-      });
-
-      await executor.execute(ctx, eventBus);
-
-      expect(taskStore.setContextFlow).not.toHaveBeenCalled();
-    });
-
-    it('proceeds without error when getContextFlow throws', async () => {
-      taskStore.getContextFlow = vi.fn().mockRejectedValue(new Error('Redis connection failed'));
-
-      mockHandleGetSupportedCircuits.mockReturnValue({ circuits: [], chainId: '84532' });
-
-      const ctx = makeContext({
-        contextId: 'ctx-redis-fail',
-        userMessage: makeDataPartMessage('get_supported_circuits'),
-      });
-
-      // Should NOT throw — error is swallowed internally
-      await expect(executor.execute(ctx, eventBus)).resolves.toBeUndefined();
-
-      // Task should still complete successfully
       const publishCalls = (eventBus.publish as ReturnType<typeof vi.fn>).mock.calls;
       const completedUpdate = publishCalls
         .filter((call: any[]) => call[0]?.kind === 'status-update')
         .map((call: any[]) => call[0])
         .find((e: any) => e.status?.state === 'completed');
+
       expect(completedUpdate).toBeDefined();
     });
   });
@@ -826,13 +655,13 @@ describe('ProofportExecutor', () => {
   // ─── execute - error handling ────────────────────────────────────────────
 
   describe('execute - error handling', () => {
-    it('publishes error artifact with the error message when skill throws', async () => {
-      const errorMsg = 'Signing not yet completed';
-      mockHandleCheckStatus.mockRejectedValue(new Error(errorMsg));
+    it('publishes error artifact with the error message when skill handler throws', async () => {
+      const errorMsg = 'Redis connection error';
+      mockHandleGetSupportedCircuits.mockImplementation(() => { throw new Error(errorMsg); });
 
       const ctx = makeContext({
         contextId: '',
-        userMessage: makeDataPartMessage('check_status', { requestId: 'req-1' }),
+        userMessage: makeDataPartMessage('get_supported_circuits'),
       });
 
       await executor.execute(ctx, eventBus);
@@ -848,11 +677,11 @@ describe('ProofportExecutor', () => {
     });
 
     it('error artifact has lastChunk=true', async () => {
-      mockHandleCheckStatus.mockRejectedValue(new Error('fail'));
+      mockHandleGetSupportedCircuits.mockImplementation(() => { throw new Error('fail'); });
 
       const ctx = makeContext({
         contextId: '',
-        userMessage: makeDataPartMessage('check_status', { requestId: 'req-1' }),
+        userMessage: makeDataPartMessage('get_supported_circuits'),
       });
 
       await executor.execute(ctx, eventBus);
@@ -866,11 +695,11 @@ describe('ProofportExecutor', () => {
     });
 
     it('publishes failed status with state=failed and final=true when skill throws', async () => {
-      mockHandleGenerateProof.mockRejectedValue(new Error('Proof generation failed'));
+      mockHandleGetSupportedCircuits.mockImplementation(() => { throw new Error('Proof generation failed'); });
 
       const ctx = makeContext({
         contextId: '',
-        userMessage: makeDataPartMessage('generate_proof', { requestId: 'req-1' }),
+        userMessage: makeDataPartMessage('get_supported_circuits'),
       });
 
       await executor.execute(ctx, eventBus);
@@ -887,11 +716,11 @@ describe('ProofportExecutor', () => {
     });
 
     it('calls eventBus.finished() even when skill throws', async () => {
-      mockHandleGenerateProof.mockRejectedValue(new Error('Fatal error'));
+      mockHandleGetSupportedCircuits.mockImplementation(() => { throw new Error('Fatal error'); });
 
       const ctx = makeContext({
         contextId: '',
-        userMessage: makeDataPartMessage('generate_proof', { requestId: 'req-1' }),
+        userMessage: makeDataPartMessage('get_supported_circuits'),
       });
 
       await executor.execute(ctx, eventBus);
@@ -900,11 +729,11 @@ describe('ProofportExecutor', () => {
     });
 
     it('does not throw from execute() when skill rejects — returns undefined', async () => {
-      mockHandleVerifyProof.mockRejectedValue(new Error('Contract reverted'));
+      mockHandleGetSupportedCircuits.mockImplementation(() => { throw new Error('Contract reverted'); });
 
       const ctx = makeContext({
         contextId: '',
-        userMessage: makeDataPartMessage('verify_proof', { proofId: 'pid-1' }),
+        userMessage: makeDataPartMessage('get_supported_circuits'),
       });
 
       await expect(executor.execute(ctx, eventBus)).resolves.toBeUndefined();
@@ -939,7 +768,7 @@ describe('ProofportExecutor', () => {
   // ─── ERC-8004 reputation ─────────────────────────────────────────────────
 
   describe('ERC-8004 reputation', () => {
-    it('calls handleProofCompleted after generate_proof success when erc8004ReputationAddress is set', async () => {
+    it('calls handleProofCompleted after prove success when erc8004ReputationAddress is set', async () => {
       const configWithReputation = makeConfig({
         erc8004ReputationAddress: '0xReputationContract',
         chainRpcUrl: 'https://sepolia.base.org',
@@ -951,18 +780,9 @@ describe('ProofportExecutor', () => {
         config: configWithReputation,
       } as ExecutorDeps);
 
-      mockHandleGenerateProof.mockResolvedValue({
-        proof: '0xproof',
-        publicInputs: '0xinputs',
-        nullifier: '0xnull',
-        signalHash: '0xhash',
-        proofId: 'pid-rep',
-        verifyUrl: 'http://x',
-      });
-
       const ctx = makeContext({
         contextId: '',
-        userMessage: makeDataPartMessage('generate_proof', { requestId: 'req-1' }),
+        userMessage: makeDataPartMessage('prove', { circuit: 'coinbase_kyc' }),
       });
 
       await executorWithReputation.execute(ctx, eventBus);
@@ -983,18 +803,9 @@ describe('ProofportExecutor', () => {
 
     it('does NOT call handleProofCompleted when erc8004ReputationAddress is empty', async () => {
       // Default config has erc8004ReputationAddress: ''
-      mockHandleGenerateProof.mockResolvedValue({
-        proof: '0xproof',
-        publicInputs: '0xinputs',
-        nullifier: '0xnull',
-        signalHash: '0xhash',
-        proofId: 'pid-2',
-        verifyUrl: 'http://x',
-      });
-
       const ctx = makeContext({
         contextId: '',
-        userMessage: makeDataPartMessage('generate_proof', { requestId: 'req-2' }),
+        userMessage: makeDataPartMessage('prove', { circuit: 'coinbase_kyc' }),
       });
 
       await executor.execute(ctx, eventBus);
@@ -1003,7 +814,7 @@ describe('ProofportExecutor', () => {
       expect(mockHandleProofCompleted).not.toHaveBeenCalled();
     });
 
-    it('does NOT call handleProofCompleted for other skills even with reputation address set', async () => {
+    it('does NOT call handleProofCompleted for get_supported_circuits even with reputation address set', async () => {
       const configWithReputation = makeConfig({
         erc8004ReputationAddress: '0xReputationContract',
       });
@@ -1013,16 +824,14 @@ describe('ProofportExecutor', () => {
         config: configWithReputation,
       } as ExecutorDeps);
 
-      mockHandleVerifyProof.mockResolvedValue({
-        valid: true,
-        circuitId: 'coinbase_attestation',
-        verifierAddress: '0xVerifier',
+      mockHandleGetSupportedCircuits.mockReturnValue({
+        circuits: [],
         chainId: '84532',
       });
 
       const ctx = makeContext({
         contextId: '',
-        userMessage: makeDataPartMessage('verify_proof', { proofId: 'pid-3' }),
+        userMessage: makeDataPartMessage('get_supported_circuits'),
       });
 
       await executorWithReputation.execute(ctx, eventBus);
@@ -1043,18 +852,9 @@ describe('ProofportExecutor', () => {
         config: configWithReputation,
       } as ExecutorDeps);
 
-      mockHandleGenerateProof.mockResolvedValue({
-        proof: '0xproof',
-        publicInputs: '0xinputs',
-        nullifier: '0xnull',
-        signalHash: '0xhash',
-        proofId: 'pid-rep-fail',
-        verifyUrl: 'http://x',
-      });
-
       const ctx = makeContext({
         contextId: '',
-        userMessage: makeDataPartMessage('generate_proof', { requestId: 'req-rep-fail' }),
+        userMessage: makeDataPartMessage('prove', { circuit: 'coinbase_kyc' }),
       });
 
       await executorWithReputation.execute(ctx, eventBus);
@@ -1109,8 +909,6 @@ describe('ProofportExecutor', () => {
       await executor.cancelTask('task-cancel-4', eventBus);
 
       expect(mockHandleGetSupportedCircuits).not.toHaveBeenCalled();
-      expect(mockHandleGenerateProof).not.toHaveBeenCalled();
-      expect(mockHandleRequestSigning).not.toHaveBeenCalled();
     });
   });
 });
