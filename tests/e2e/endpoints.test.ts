@@ -149,9 +149,10 @@ describe('Discovery Endpoints', () => {
     expect(json.name).toBe('proveragent.base.eth');
     expect(json.protocolVersion).toBe('0.3.0');
     expect(Array.isArray(json.skills)).toBe(true);
-    expect(json.skills.length).toBe(2);
+    expect(json.skills.length).toBe(3);
     const skillIds = json.skills.map((s: any) => s.id).sort();
     expect(skillIds).toEqual([
+      'get_guide',
       'get_supported_circuits',
       'prove',
     ]);
@@ -170,9 +171,10 @@ describe('Discovery Endpoints', () => {
     expect(json.serverInfo).toBeDefined();
     expect(json.serverInfo.name).toBeDefined();
     expect(Array.isArray(json.tools)).toBe(true);
-    expect(json.tools.length).toBe(2);
+    expect(json.tools.length).toBe(3);
     const toolNames = json.tools.map((t: any) => t.name).sort();
     expect(toolNames).toEqual([
+      'get_guide',
       'get_supported_circuits',
       'prove',
     ]);
@@ -578,15 +580,16 @@ describe('MCP StreamableHTTP', () => {
     }
   });
 
-  it('tools/list returns all 2 tools', async () => {
+  it('tools/list returns all 3 tools', async () => {
     const { client, transport } = await createMcpClient();
     try {
       const result = await client.listTools();
       expect(result.tools).toBeDefined();
-      expect(result.tools.length).toBe(2);
+      expect(result.tools.length).toBe(3);
 
       const toolNames = result.tools.map((t) => t.name).sort();
       expect(toolNames).toEqual([
+        'get_guide',
         'get_supported_circuits',
         'prove',
       ]);
