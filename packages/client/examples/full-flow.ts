@@ -55,8 +55,8 @@ async function main() {
     console.log('');
     console.log('=== Proof Generated ===');
     console.log(`Payment:  ${result.paymentTxHash}`);
-    console.log(`Proof:    ${result.proof.slice(0, 66)}...`);
-    console.log(`Inputs:   ${result.publicInputs.slice(0, 66)}...`);
+    console.log(`Proof:    ${result.proof}`);
+    console.log(`Inputs:   ${result.publicInputs}`);
     console.log(`TEE:      ${result.attestation ? 'Yes' : 'No'}`);
     console.log(`Total:    ${result.timing.totalMs}ms`);
 

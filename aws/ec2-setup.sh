@@ -242,6 +242,10 @@ chown ec2-user:ec2-user "${APP_DIR}/.env"
 
 log "App directory structure created."
 
+# Initialize blue-green state (first deploy will target green)
+echo "blue" | sudo tee /opt/proofport-ai/active-slot > /dev/null
+log "Blue-green active-slot initialized to 'blue'."
+
 # ---------------------------------------------------------------------------
 # 8. Configure ECR authentication
 # ---------------------------------------------------------------------------
@@ -270,6 +274,18 @@ chmod +x "${APP_DIR}/vsock-bridge.py"
 chown ec2-user:ec2-user "${APP_DIR}/vsock-bridge.py"
 
 log "vsock-bridge.py installed to ${APP_DIR}/"
+
+echo "=== Installing blue-green deploy scripts ==="
+sudo cp "${SCRIPT_DIR}/deploy-blue-green.sh" /opt/proofport-ai/deploy-blue-green.sh
+sudo chmod +x /opt/proofport-ai/deploy-blue-green.sh
+
+sudo cp "${SCRIPT_DIR}/boot-active-slot.sh" /opt/proofport-ai/boot-active-slot.sh
+sudo chmod +x /opt/proofport-ai/boot-active-slot.sh
+
+sudo cp "${SCRIPT_DIR}/stop-active-slot.sh" /opt/proofport-ai/stop-active-slot.sh
+sudo chmod +x /opt/proofport-ai/stop-active-slot.sh
+
+log "Blue-green deploy scripts installed to ${APP_DIR}/"
 
 # ---------------------------------------------------------------------------
 # 10. Install systemd services

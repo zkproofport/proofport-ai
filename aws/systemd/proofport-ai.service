@@ -1,64 +1,28 @@
 [Unit]
-Description=proofport-ai MCP/A2A Server (Docker)
+Description=proofport-ai Blue-Green Container Manager
 Documentation=https://github.com/zkproofport/proofport-ai
 After=docker.service network-online.target proofport-ai-redis.service
 Wants=network-online.target
 Requires=docker.service proofport-ai-redis.service
 
 [Service]
-Type=simple
-Restart=always
-RestartSec=10
+Type=oneshot
+RemainAfterExit=yes
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=proofport-ai
 
-# Environment file — contains TEE_MODE, ENCLAVE_CID, RPC URLs, private key, etc.
+# Environment file — contains AI_IMAGE, DEPLOY_ENV, and all app config.
 # Operator must populate /opt/proofport-ai/.env before enabling this service.
 EnvironmentFile=/opt/proofport-ai/.env
 
-# Pull the latest image from ECR before starting.
-# Uses the EC2 IAM instance profile for ECR authentication.
-ExecStartPre=/usr/local/bin/ecr-login.sh
-ExecStartPre=/usr/bin/docker pull ${AI_IMAGE}
+# On boot: start the last-active blue-green slot container.
+# Reads /opt/proofport-ai/active-slot to determine which slot (blue or green)
+# was last deployed, then starts the corresponding container on the correct ports.
+ExecStart=/opt/proofport-ai/boot-active-slot.sh
 
-# Remove any stale container from a previous run
-ExecStartPre=-/usr/bin/docker rm -f proofport-ai
-
-# Run the app container.
-#
-# Flags:
-#   --name proofport-ai       — named container for ExecStop
-#   --network host            — required for vsock access to Nitro Enclave
-#   --device /dev/vsock       — vsock device for Nitro Enclave communication
-#   --env-file                — injects all vars from /opt/proofport-ai/.env
-#   -p 4002:4002              — MCP/A2A/REST API
-#   -p 3200:3200              — sign-page (Next.js signing UI)
-#   -v circuits               — compiled Noir circuit artifacts (bytecode + VK)
-#                               populated by the CI/CD pipeline or manually
-#
-# NOTE: --network host is intentional. The Node.js process communicates with
-# the Nitro Enclave via vsock (AF_VSOCK), which is a host-level transport.
-# Without host networking the container cannot open vsock connections.
-ExecStart=/usr/bin/docker run \
-  --name proofport-ai \
-  --rm \
-  --network host \
-  --device /dev/vsock \
-  --security-opt seccomp=unconfined \
-  --env-file /opt/proofport-ai/.env \
-  --log-driver=awslogs \
-  --log-opt awslogs-region=ap-northeast-2 \
-  --log-opt awslogs-group=/proofport-ai/${DEPLOY_ENV} \
-  --log-opt awslogs-stream=proofport-ai \
-  --log-opt awslogs-create-group=true \
-  -v /opt/proofport-ai/circuits:/app/circuits \
-  -v /opt/proofport-ai/logs:/app/logs \
-  ${AI_IMAGE}
-
-ExecStop=/usr/bin/docker stop proofport-ai
-
-# Give the container 30 seconds to shut down gracefully before SIGKILL
+# On stop: gracefully stop the active container.
+ExecStop=/opt/proofport-ai/stop-active-slot.sh
 TimeoutStopSec=30
 
 [Install]
