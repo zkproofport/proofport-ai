@@ -157,8 +157,11 @@ if [[ -f "$CADDY_ENV_CONF" ]]; then
   CADDY_DOMAIN=$(grep '^Environment=.*CADDY_DOMAIN=' "$CADDY_ENV_CONF" \
     | sed 's/.*CADDY_DOMAIN=//' | tr -d '"' | tr -d "'" | tr -d ' ')
 fi
-# Fall through to Caddy's own {$CADDY_DOMAIN} env substitution if not found;
-# the generated Caddyfile uses {$CADDY_DOMAIN} so it always works regardless.
+
+[[ -n "${CADDY_DOMAIN:-}" ]] || die "CADDY_DOMAIN not found in $CADDY_ENV_CONF — run ec2-setup.sh first"
+
+# Export so caddy reload subprocess can resolve {$CADDY_DOMAIN} in the Caddyfile
+export CADDY_DOMAIN
 
 # ---------------------------------------------------------------------------
 # Generate Caddyfile with updated port numbers
