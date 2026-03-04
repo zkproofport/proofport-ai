@@ -17,7 +17,7 @@ import { RateLimiter } from './redis/rateLimiter.js';
 import { ProofCache } from './redis/proofCache.js';
 import { PROOF_CACHE_TTL } from './redis/constants.js';
 import { CleanupWorker } from './redis/cleanupWorker.js';
-import { getAgentCardHandler, getMcpDiscoveryHandler, getOasfAgentHandler } from './a2a/agentCard.js';
+import { getAgentCardHandler, getMcpDiscoveryHandler, getOasfAgentHandler, getSkillMdHandler } from './a2a/agentCard.js';
 import { DefaultRequestHandler } from '@a2a-js/sdk/server';
 import { jsonRpcHandler, UserBuilder } from '@a2a-js/sdk/server/express';
 import { buildAgentCard } from './a2a/agentCard.js';
@@ -26,6 +26,7 @@ import { ProofportExecutor } from './a2a/proofportExecutor.js';
 import { validatePaymentConfig, getPaymentModeConfig } from './payment/freeTier.js';
 import { getTeeConfig, createTeeProvider, resolveTeeMode } from './tee/index.js';
 import { ensureAgentRegistered } from './identity/autoRegister.js';
+import { createAgentAuthMiddleware } from './identity/agentAuth.js';
 import { createProofRoutes } from './proof/proofRoutes.js';
 import type { LLMProvider } from './chat/llmProvider.js';
 import { OpenAIProvider } from './chat/openaiClient.js';
@@ -70,6 +71,9 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
 
   app.use(express.json());
 
+  // ERC-8128: Optional agent identity verification
+  app.use(createAgentAuthMiddleware(config));
+
   // Swagger UI
   app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
   app.get('/openapi.json', (_req, res) => res.json(swaggerSpec));
@@ -109,11 +113,12 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   app.use('/.well-known', a2aCorsMiddleware);
   app.use('/a2a', a2aCorsMiddleware);
 
-  // Discovery endpoints (A2A standard: agent.json = A2A v0.3 agent card)
-  app.get('/.well-known/agent.json', getAgentCardHandler(config, agentTokenId));
+  // Discovery endpoints (agent.json = OASF identity, agent-card.json = A2A v0.3)
+  app.get('/.well-known/agent.json', getOasfAgentHandler(config, agentTokenId));
   app.get('/.well-known/agent-card.json', getAgentCardHandler(config, agentTokenId));
   app.get('/.well-known/oasf.json', getOasfAgentHandler(config, agentTokenId));
   app.get('/.well-known/mcp.json', getMcpDiscoveryHandler(config));
+  app.get('/.well-known/SKILL.md', getSkillMdHandler(config));
 
   // LLM providers (created early — needed by both A2A text inference and chat endpoint)
   const llmProviders: LLMProvider[] = [];

@@ -52,3 +52,31 @@ export function validatePaymentConfig(config: {
     throw new Error('PAYMENT_PAY_TO is required when paymentMode is testnet or mainnet');
   }
 }
+
+/**
+ * Express middleware that gates requests behind x402 payment.
+ * Returns 402 when payment mode requires payment and no payment header is present.
+ */
+export function createPaymentGate(config: { paymentMode: string }) {
+  return (req: any, res: any, next: any) => {
+    if (config.paymentMode === 'disabled') {
+      req.paymentSkipped = true;
+      next();
+      return;
+    }
+
+    // Check for payment header (x-payment or payment-signature)
+    const paymentHeader = req.headers['x-payment'] || req.headers['payment-signature'];
+    if (!paymentHeader) {
+      const modeConfig = getPaymentModeConfig(config.paymentMode as any);
+      res.status(402).json({
+        error: 'Payment Required',
+        paymentMode: config.paymentMode,
+        network: modeConfig.network,
+      });
+      return;
+    }
+
+    next();
+  };
+}
