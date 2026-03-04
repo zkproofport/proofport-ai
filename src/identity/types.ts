@@ -11,6 +11,7 @@ export interface AgentMetadata {
   tee?: string;
   x402Support?: boolean;
   tags?: string[];
+  categories?: string[];
   services?: Array<{ name: string; endpoint: string; version?: string; tools?: string[]; mcpTools?: string[]; skills?: string[]; a2aSkills?: string[]; domains?: string[] }>;
   type?: string;
   image?: string;

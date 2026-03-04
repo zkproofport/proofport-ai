@@ -62,7 +62,9 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
             !currentMetadata.supportedTrust ||
             currentMetadata.supportedTrust.length === 0 ||
             !currentMetadata.tags ||
-            currentMetadata.tags.length === 0
+            currentMetadata.tags.length === 0 ||
+            !currentMetadata.categories ||
+            currentMetadata.categories.length === 0
           );
           if (needsUpdate) {
               log.info({ action: 'identity.metadata.needs_update' }, 'Agent metadata needs updating on-chain');
@@ -107,6 +109,7 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
                 protocols: ['mcp', 'a2a', 'x402'],
                 circuits: ['coinbase_attestation', 'coinbase_country_attestation'],
                 tags: ['ZK', 'Privacy', 'Proof', 'Coinbase', 'KYC', 'Attestation', 'x402', 'Identity', 'Country', 'Verification', 'Base', 'USDC', 'TEE', 'Noir', 'EAS', 'Zero-Knowledge'],
+                categories: ['privacy', 'security', 'verification', 'identity'],
                 ...(config.teeMode !== 'disabled' && { tee: config.teeMode }),
                 x402Support: config.paymentMode !== 'disabled',
                 type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
@@ -159,6 +162,7 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
       protocols: ['mcp', 'a2a', 'x402'],
       circuits: ['coinbase_attestation', 'coinbase_country_attestation'],
       tags: ['ZK', 'Privacy', 'Proof', 'Coinbase', 'KYC', 'Attestation', 'x402', 'Identity', 'Country', 'Verification', 'Base', 'USDC', 'TEE', 'Noir', 'EAS', 'Zero-Knowledge'],
+      categories: ['privacy', 'security', 'verification', 'identity'],
       ...(config.teeMode !== 'disabled' && { tee: config.teeMode }),
       x402Support: config.paymentMode !== 'disabled',
       type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
