@@ -60,7 +60,9 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
             currentMetadata.services.length === 0 ||
             !currentMetadata.type ||
             !currentMetadata.supportedTrust ||
-            currentMetadata.supportedTrust.length === 0
+            currentMetadata.supportedTrust.length === 0 ||
+            !currentMetadata.tags ||
+            currentMetadata.tags.length === 0
           );
           if (needsUpdate) {
               log.info({ action: 'identity.metadata.needs_update' }, 'Agent metadata needs updating on-chain');
@@ -104,14 +106,15 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
                 ],
                 protocols: ['mcp', 'a2a', 'x402'],
                 circuits: ['coinbase_attestation', 'coinbase_country_attestation'],
+                tags: ['ZK', 'Privacy', 'Proof', 'Coinbase', 'KYC', 'Attestation', 'x402', 'Identity', 'Country', 'Verification', 'Base', 'USDC', 'TEE', 'Noir', 'EAS', 'Zero-Knowledge'],
                 ...(config.teeMode !== 'disabled' && { tee: config.teeMode }),
                 x402Support: config.paymentMode !== 'disabled',
                 type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
                 image: `${config.a2aBaseUrl}/icon.png`,
                 services: [
                   { name: 'web', endpoint: config.websiteUrl },
-                  { name: 'MCP', endpoint: `${config.a2aBaseUrl}/mcp`, version: '2025-11-25' },
-                  { name: 'A2A', endpoint: `${config.a2aBaseUrl}/.well-known/agent-card.json`, version: '0.3.0' },
+                  { name: 'MCP', endpoint: `${config.a2aBaseUrl}/mcp`, version: '2025-11-25', mcpTools: ['prove', 'get_supported_circuits', 'get_guide'] },
+                  { name: 'A2A', endpoint: `${config.a2aBaseUrl}/.well-known/agent-card.json`, version: '0.3.0', a2aSkills: ['prove', 'get_supported_circuits', 'get_guide'] },
                 ],
                 registrations: [
                   {
@@ -155,14 +158,15 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
       ],
       protocols: ['mcp', 'a2a', 'x402'],
       circuits: ['coinbase_attestation', 'coinbase_country_attestation'],
+      tags: ['ZK', 'Privacy', 'Proof', 'Coinbase', 'KYC', 'Attestation', 'x402', 'Identity', 'Country', 'Verification', 'Base', 'USDC', 'TEE', 'Noir', 'EAS', 'Zero-Knowledge'],
       ...(config.teeMode !== 'disabled' && { tee: config.teeMode }),
       x402Support: config.paymentMode !== 'disabled',
       type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
       image: `${config.a2aBaseUrl}/icon.png`,
       services: [
         { name: 'web', endpoint: config.websiteUrl },
-        { name: 'MCP', endpoint: `${config.a2aBaseUrl}/mcp`, version: '2025-11-25' },
-        { name: 'A2A', endpoint: `${config.a2aBaseUrl}/.well-known/agent-card.json`, version: '0.3.0' },
+        { name: 'MCP', endpoint: `${config.a2aBaseUrl}/mcp`, version: '2025-11-25', mcpTools: ['prove', 'get_supported_circuits', 'get_guide'] },
+        { name: 'A2A', endpoint: `${config.a2aBaseUrl}/.well-known/agent-card.json`, version: '0.3.0', a2aSkills: ['prove', 'get_supported_circuits', 'get_guide'] },
       ],
       registrations: [],
       supportedTrust: ['tee-attestation'],

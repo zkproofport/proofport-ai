@@ -10,7 +10,8 @@ export interface AgentMetadata {
   circuits: string[];
   tee?: string;
   x402Support?: boolean;
-  services?: Array<{ name: string; endpoint: string; version?: string }>;
+  tags?: string[];
+  services?: Array<{ name: string; endpoint: string; version?: string; mcpTools?: string[]; a2aSkills?: string[]; skills?: string[]; domains?: string[] }>;
   type?: string;
   image?: string;
   registrations?: Array<{ agentRegistry: string; agentId: string; chainId?: string; tokenId?: string; txHash?: string; contract?: string }>;
