@@ -449,6 +449,26 @@ export function buildSwaggerSpec(baseUrl: string) {
         },
       },
     },
+    '/.well-known/SKILL.md': {
+      get: {
+        summary: 'SKILL.md — Agent capability document',
+        description: 'Returns a Markdown document describing this agent\'s capabilities, supported circuits, payment info, and usage examples. Part of the Base ecosystem SKILL.md standard for AI agent auto-discovery.',
+        tags: ['Discovery'],
+        responses: {
+          '200': {
+            description: 'SKILL.md document',
+            content: {
+              'text/markdown': {
+                schema: {
+                  type: 'string',
+                  description: 'Markdown-formatted agent capability document',
+                },
+              },
+            },
+          },
+        },
+      },
+    },
     '/.well-known/mcp.json': {
       get: {
         summary: 'MCP Discovery',
