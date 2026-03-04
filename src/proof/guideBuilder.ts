@@ -39,30 +39,31 @@ function buildStep1(config: Config, circuitId: CircuitId): GuideStep {
   const alias = circuitAlias(circuitId);
   return {
     step: 1,
-    title: 'Create Session',
+    title: 'Initiate Proof Request (x402 single-step)',
     description:
-      'Create a proof session by calling the proof/request endpoint. ' +
-      'The server responds with HTTP 402 containing session details and payment instructions. ' +
-      'Save session_id and payment fields for later steps.',
+      'Send the proof request to /api/v1/prove without payment headers. ' +
+      'The server responds with HTTP 402 containing a payment nonce. ' +
+      'Save the nonce — you will use it when paying and retry with X-Payment-TX and X-Payment-Nonce headers. ' +
+      'NOTE: You need all circuit inputs ready before this step. Prepare them in Steps 2-9 first, ' +
+      'then come back to initiate the request.',
     code: `\
-const response = await fetch('${config.a2aBaseUrl}/api/v1/proof/request', {
+// First call: no payment headers — server returns 402 with nonce
+const response = await fetch('${config.a2aBaseUrl}/api/v1/prove', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ circuit: '${alias}' }),
+  body: JSON.stringify({ circuit: '${alias}', inputs: { /* prepared in Steps 2-9 */ } }),
 });
 
 // Response status: 402 Payment Required
-const session = await response.json();
-// session = {
-//   session_id: string,
-//   payment: { nonce: string, recipient: string, amount: string, asset: string, network: string },
-//   tee_endpoint: string,
-//   expires_at: string,
-//   guide_url: string,
+const data = await response.json();
+// data = {
+//   error: 'PAYMENT_REQUIRED',
+//   nonce: '0x...',  // use this as the payment nonce
+//   payment: { recipient: string, amount: number, asset: string, network: string, ... },
 // }
 
-const sessionId = session.session_id;
-const payment = session.payment;  // { nonce, recipient, amount, asset, network }`,
+const paymentNonce = data.nonce;
+const payment = data.payment;  // { recipient, amount, asset, network }`,
   };
 }
 
@@ -367,7 +368,7 @@ function buildStep10(config: Config, usdcAddress: string, chainId: number, isTes
 // Base Sepolia USDC does NOT support EIP-3009 (transferWithAuthorization),
 // so we use a direct ERC-20 transfer with the session nonce appended to calldata.
 const USDC_ADDRESS = '${usdcAddress}';
-const payment = session.payment;  // from Step 1
+const payment = data.payment;  // from Step 1 (402 response body)
 
 // NOTE: The PAYER wallet can be DIFFERENT from the KYC wallet (userAddress).
 // The payer just needs USDC balance + ETH for gas.
@@ -377,10 +378,10 @@ const payerWallet = new ethers.Wallet(payerPrivateKey, provider);
 // Option B: Delegated — use user's signer
 // const payerWallet = userPayerSigner;
 
-// Encode transfer(to, amount) + append session nonce to calldata
+// Encode transfer(to, amount) + append payment nonce to calldata
 const iface = new ethers.Interface(['function transfer(address to, uint256 amount) returns (bool)']);
 const transferData = iface.encodeFunctionData('transfer', [payment.recipient, payment.amount]);
-const dataWithNonce = transferData + payment.nonce.slice(2); // append raw nonce bytes
+const dataWithNonce = transferData + paymentNonce.slice(2); // append raw nonce bytes
 
 const tx = await payerWallet.sendTransaction({
   to: USDC_ADDRESS,
@@ -411,7 +412,7 @@ const payment_tx_hash = tx.hash;  // Use this in Step 11`,
 // Sign an EIP-712 authorization, then submit to x402 facilitator (facilitator pays gas).
 const USDC_ADDRESS = '${usdcAddress}';
 const X402_FACILITATOR = 'https://www.x402.org/facilitator';
-const payment = session.payment;  // from Step 1
+const payment = data.payment;  // from Step 1 (402 response body)
 
 // NOTE: The PAYER wallet can be DIFFERENT from the KYC wallet (userAddress).
 const from = payerAddress;          // payer wallet (must hold USDC)
@@ -419,12 +420,12 @@ const to = payment.recipient;       // prover agent (payee)
 const value = payment.amount;       // USDC amount in base units
 const validAfter = 0;
 const validBefore = Math.floor(Date.now() / 1000) + 3600;
-// Session nonce is 16 bytes — zero-pad to 32 bytes for EIP-3009
-const nonce = ethers.zeroPadValue(payment.nonce, 32);
+// Payment nonce from Step 1 (402 response) — zero-pad to 32 bytes for EIP-3009
+const nonce = ethers.zeroPadValue(paymentNonce, 32);
 
 // Sign EIP-712 TransferWithAuthorization
 const domain = {
-  name: 'USD Coin',
+  name: '${isTestnet ? 'USDC' : 'USD Coin'}',
   version: '2',
   chainId: ${chainId},
   verifyingContract: USDC_ADDRESS,
@@ -481,7 +482,7 @@ const settleResponse = await fetch(X402_FACILITATOR + '/settle', {
       maxTimeoutSeconds: 300,
       asset: USDC_ADDRESS,
       extra: {
-        name: 'USD Coin',
+        name: '${isTestnet ? 'USDC' : 'USD Coin'}',
         version: '2',
       },
     },
@@ -498,6 +499,7 @@ const payment_tx_hash = settleResult.txHash;  // Use this in Step 11`,
 
 function buildStep11(config: Config, circuitId: CircuitId): GuideStep {
   const isCountry = circuitId === 'coinbase_country_attestation';
+  const alias = circuitAlias(circuitId);
 
   const countryComment = isCountry
     ? `\
@@ -511,17 +513,17 @@ function buildStep11(config: Config, circuitId: CircuitId): GuideStep {
 
   return {
     step: 11,
-    title: 'Submit Proof Request',
+    title: 'Submit Proof Request (with payment headers)',
     description:
-      'Submit all computed inputs along with the session ID and payment transaction hash to the prove endpoint. ' +
-      'The server generates the ZK proof inside a TEE and returns the proof, public inputs, and optional attestation. ' +
+      'Retry POST /api/v1/prove with payment headers (X-Payment-TX and X-Payment-Nonce). ' +
+      'The server verifies payment on-chain and generates the ZK proof inside a TEE. ' +
+      'Returns the proof, public inputs, and optional attestation. ' +
       (isCountry
         ? 'This is the coinbase_country circuit, so country_list and is_included fields are REQUIRED.'
         : 'For the coinbase_country circuit, you would also include country_list and is_included fields.'),
     code: `\
 const proveBody = {
-  session_id: sessionId,
-  payment_tx_hash: payment_tx_hash,
+  circuit: '${alias}',
   inputs: {
     signal_hash,
     nullifier,
@@ -542,9 +544,14 @@ ${countryComment}
   },
 };
 
+// payment_tx_hash comes from Step 10 (x402 facilitator or direct transfer)
 const response = await fetch('${config.a2aBaseUrl}/api/v1/prove', {
   method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
+  headers: {
+    'Content-Type': 'application/json',
+    'X-Payment-TX': payment_tx_hash,   // from Step 10
+    'X-Payment-Nonce': paymentNonce,   // from Step 1 (402 response)
+  },
   body: JSON.stringify(proveBody),
 });
 
@@ -648,6 +655,10 @@ function buildConstants(
       protocol: 'EIP-3009 TransferWithAuthorization',
       description: 'Client signs EIP-712 authorization, facilitator settles on-chain (facilitator pays gas)',
       testnet_note: 'x402/EIP-3009 is NOT available on Base Sepolia. Testnet uses direct transfer() instead.',
+      single_step_flow: {
+        description: 'x402 single-step flow for clients that do not use sessions. POST /prove with circuit + inputs → receive 402 with nonce in response body → client signs payment → retry with X-Payment-TX and X-Payment-Nonce headers.',
+        nonce_details: 'Server returns 32-byte nonce in 402 response body. Client must include nonce in retry as X-Payment-Nonce header. Nonce is single-use (consumed on first successful payment verification). Nonce is circuit-bound (cannot reuse a coinbase_kyc nonce for coinbase_country).',
+      },
     },
     verification: {
       description: 'On-chain proof verification using deployed Solidity verifier contracts',
@@ -760,13 +771,13 @@ const userPubkey = ethers.SigningKey.recoverPublicKey(ethSignedHash, signature);
       code: `\
 // === MAINNET (Base): x402 facilitator with EIP-3009 ===
 // 1. Sign EIP-712 TransferWithAuthorization
-const domain = { name: 'USD Coin', version: '2', chainId: ${chainId}, verifyingContract: USDC_ADDRESS };
+const domain = { name: '${chainId === 84532 ? 'USDC' : 'USD Coin'}', version: '2', chainId: ${chainId}, verifyingContract: USDC_ADDRESS };
 const types = { TransferWithAuthorization: [
   { name: 'from', type: 'address' }, { name: 'to', type: 'address' },
   { name: 'value', type: 'uint256' }, { name: 'validAfter', type: 'uint256' },
   { name: 'validBefore', type: 'uint256' }, { name: 'nonce', type: 'bytes32' },
 ]};
-const nonce = ethers.zeroPadValue(payment.nonce, 32); // bytes32
+const nonce = ethers.zeroPadValue(paymentNonce, 32); // bytes32 — paymentNonce from Step 1 (402 response)
 const sig = await wallet.signTypedData(domain, types, { from, to, value, validAfter: 0, validBefore, nonce });
 
 // 2. Settle via x402 facilitator (Coinbase x402 v1 API format)
@@ -779,7 +790,7 @@ const res = await fetch('https://www.x402.org/facilitator/settle', {
         validAfter: '0', validBefore: String(validBefore), nonce } } },
     paymentRequirements: { scheme: 'exact', network: 'base', maxAmountRequired: String(value),
       resource: '${config.a2aBaseUrl}/api/v1/prove', payTo: to, asset: '${usdcAddress}',
-      extra: { name: 'USD Coin', version: '2' } },
+      extra: { name: '${chainId === 84532 ? 'USDC' : 'USD Coin'}', version: '2' } },
   }),
 });
 const payment_tx_hash = (await res.json()).txHash;
@@ -827,7 +838,7 @@ curl -X POST https://www.x402.org/facilitator/settle \\
 
 # Expected response on success:
 # { "success": true, "txHash": "0x..." }
-# Use txHash as payment_tx_hash in Step 11`,
+# Use txHash as payment_tx_hash in Step 11 (retry with X-Payment-TX header)`,
     },
   };
 }
@@ -970,19 +981,13 @@ function buildInputSchema(circuitId: CircuitId) {
 function buildEndpoints(config: Config, circuitId: CircuitId) {
   const alias = circuitAlias(circuitId);
   return {
-    proof_request: {
-      method: 'POST',
-      url: `${config.a2aBaseUrl}/api/v1/proof/request`,
-      body: { circuit: alias },
-      response_status: 402,
-      description: 'Creates a proof session and returns payment instructions',
-    },
     prove: {
       method: 'POST',
       url: `${config.a2aBaseUrl}/api/v1/prove`,
       content_type: 'application/json',
+      flow: 'x402 single-step: POST with {circuit, inputs} → 402 with nonce → pay → retry with X-Payment-TX and X-Payment-Nonce headers',
       timeout_hint: '30-90 seconds',
-      description: 'Submits proof inputs, triggers ZK proof generation inside TEE',
+      description: 'Verifies payment on-chain and triggers ZK proof generation inside TEE',
     },
     guide: {
       method: 'GET',
@@ -1021,19 +1026,90 @@ export function buildGuide(circuitId: CircuitId, config: Config): object {
     display_name: circuit.displayName,
     description: circuit.description,
 
+    sdk: {
+      recommended: true,
+      package: '@proofport/client',
+      repository: 'https://github.com/zkproofport/proofport-ai',
+      install: 'git clone https://github.com/zkproofport/proofport-ai.git && cd proofport-ai/packages/client && npm install',
+      description:
+        'RECOMMENDED: Use the @proofport/client SDK instead of implementing steps manually. ' +
+        'The SDK handles all cryptographic computation, attestation fetching, payment, and proof submission.',
+      quick_start: {
+        full_flow: `\
+import { generateProof } from '@proofport/client';
+
+const result = await generateProof(
+  { baseUrl: '${config.a2aBaseUrl}' },
+  {
+    attestationPrivateKey: '0x...',  // wallet with Coinbase KYC attestation
+    paymentPrivateKey: '0x...',      // wallet with USDC balance (optional, defaults to attestation key)
+  },
+  { circuit: '${circuitAlias(circuitId)}', scope: 'proofport' },
+);
+
+console.log(result.proof);           // ZK proof hex
+console.log(result.publicInputs);    // public inputs hex
+console.log(result.proofWithInputs); // combined for on-chain verify`,
+        step_by_step: `\
+import { computeSignalHash, prepareInputs, requestChallenge, makePayment, submitProof, verifyOnChain, CIRCUIT_NAME_MAP, EthersWalletSigner, USDC_ADDRESSES } from '@proofport/client';
+import { ethers } from 'ethers';
+
+const config = { baseUrl: '${config.a2aBaseUrl}' };
+const circuit = '${circuitAlias(circuitId)}';
+const circuitId = CIRCUIT_NAME_MAP[circuit];
+const wallet = new ethers.Wallet('0x...');
+
+// 1. Sign signal hash
+const signalHash = computeSignalHash(wallet.address, 'proofport', circuitId);
+const signature = await wallet.signMessage(ethers.getBytes(ethers.hexlify(signalHash)));
+
+// 2. Prepare all inputs (fetches attestation, computes hashes, builds merkle tree)
+const inputs = await prepareInputs(config, {
+  circuitId, userAddress: wallet.address, userSignature: signature, scope: 'proofport',
+});
+
+// 3. Request 402 challenge — server returns nonce + payment requirements
+const challenge = await requestChallenge(config, circuit, inputs);
+
+// 4. Make payment using the nonce from step 3
+const provider = new ethers.JsonRpcProvider('https://sepolia.base.org');
+const signer = new EthersWalletSigner(wallet.connect(provider));
+const paymentTxHash = await makePayment(signer, {
+  nonce: challenge.nonce, recipient: challenge.payment.payTo,
+  amount: parseInt(challenge.payment.maxAmountRequired),
+  asset: USDC_ADDRESSES['base-sepolia'], network: 'base-sepolia',
+  instruction: challenge.payment.description,
+});
+
+// 5. Submit proof with payment headers
+const result = await submitProof(config, { circuit, inputs, paymentTxHash, paymentNonce: challenge.nonce });
+
+// 6. Verify on-chain (optional)
+const verification = await verifyOnChain(config, circuitId, result.proof, result.publicInputs);
+console.log('Valid:', verification.valid);`,
+        run_example: `\
+# Clone repo and run the full-flow example
+git clone https://github.com/zkproofport/proofport-ai.git
+cd proofport-ai/packages/client
+npm install
+
+# Run with environment variables
+ATTESTATION_KEY=0x... PAYMENT_KEY=0x... SERVER_URL=${config.a2aBaseUrl} npx tsx examples/full-flow.ts`,
+      },
+    },
+
     complete_flow: {
       overview:
-        'This guide teaches a client AI agent how to prepare ALL inputs needed for ZK proof generation, ' +
-        'step by step. The client is responsible for all data fetching, cryptographic computation, and payment. ' +
-        'The server only generates the ZK proof from the final inputs. ' +
-        'All code examples use ethers.js v6. ' +
+        'The recommended approach is to use the @proofport/client SDK (see the sdk section above). ' +
+        'The steps below document the manual process for reference or for agents that cannot install npm packages. ' +
         'IMPORTANT: This flow uses TWO chains. ' +
         'EAS attestation data (Steps 2-5) is ALWAYS on Base Mainnet (chain ID 8453, RPC: ' + config.baseRpcUrl + '). ' +
         'Payment and on-chain verification (Steps 10-12) use ' +
         (isTestnet ? 'Base Sepolia (testnet, chain ID 84532, RPC: ' + config.chainRpcUrl + ')' : 'Base Mainnet (chain ID 8453, RPC: ' + config.chainRpcUrl + ')') + '. ' +
         'Do NOT use the payment chain RPC for EAS data — attestation transactions will not be found on testnet.',
       prerequisites: [
-        'ethers.js v6 (npm install ethers)',
+        '@proofport/client SDK (recommended — handles all computation): git clone https://github.com/zkproofport/proofport-ai.git && cd proofport-ai/packages/client && npm install',
+        'ethers.js v6 (npm install ethers) — only if implementing steps manually',
         'User wallet address with Coinbase KYC attestation on Base',
         'User wallet capable of signing messages (personal_sign) and EIP-712 typed data',
         'USDC balance sufficient for proof fee (' + priceStr + ' USDC) on ' + (isTestnet ? 'Base Sepolia' : 'Base'),

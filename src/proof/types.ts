@@ -12,10 +12,6 @@ export interface ProofSession {
   expires_at: string;        // ISO timestamp (created_at + 10min)
 }
 
-export interface ProofSessionRequest {
-  circuit: 'coinbase_kyc' | 'coinbase_country';
-}
-
 export interface PaymentInfo {
   nonce: string;             // random nonce to embed in USDC transfer data
   recipient: string;         // "0x..." prover agent wallet (payTo)
@@ -23,14 +19,6 @@ export interface PaymentInfo {
   asset: string;             // USDC contract address
   network: string;           // "base-sepolia" | "base"
   instruction: string;       // human-readable instruction
-}
-
-export interface ProofSessionResponse {
-  session_id: string;
-  payment: PaymentInfo;
-  tee_endpoint: string;
-  expires_at: string;
-  guide_url: string;
 }
 
 export interface ProveRequestInputs {
@@ -55,9 +43,8 @@ export interface ProveRequestInputs {
 }
 
 export interface ProveRequest {
-  session_id: string;
-  payment_tx_hash: string;
-  inputs: ProveRequestInputs;
+  circuit: string;              // Required: "coinbase_kyc" or "coinbase_country"
+  inputs: ProveRequestInputs;   // Payment via X-Payment-TX / X-Payment-Nonce headers
 }
 
 export interface ProveResponse {
