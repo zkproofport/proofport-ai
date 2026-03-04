@@ -773,17 +773,22 @@ describe('SKILL.md & Guide Endpoints', () => {
     expect(text).toContain('Local MCP');
   });
 
-  it('GET /api/v1/guide/coinbase_kyc returns 12-step guide', async () => {
+  it('GET /api/v1/guide/coinbase_kyc returns guide with local MCP and manual reference', async () => {
     const res = await fetch(`${BASE_URL}/api/v1/guide/coinbase_kyc`);
     expect(res.status).toBe(200);
     const guide = await res.json();
     expect(guide.circuit_id).toBe('coinbase_attestation');
     expect(guide.display_name).toBe('Coinbase KYC');
-    expect(guide.complete_flow).toBeDefined();
-    expect(guide.complete_flow.steps).toBeInstanceOf(Array);
-    expect(guide.complete_flow.steps.length).toBe(12);
-    // Step 12 is on-chain verification (optional)
-    const step12 = guide.complete_flow.steps.find((s: any) => s.step === 12);
+    // Local MCP server section (primary recommendation)
+    expect(guide.local_mcp_server).toBeDefined();
+    expect(guide.local_mcp_server.recommended).toBe(true);
+    expect(guide.local_mcp_server.env_vars.ATTESTATION_KEY).toBeDefined();
+    expect(guide.local_mcp_server.tools).toBeInstanceOf(Array);
+    // Manual reference (formerly complete_flow)
+    expect(guide.manual_reference).toBeDefined();
+    expect(guide.manual_reference.steps).toBeInstanceOf(Array);
+    expect(guide.manual_reference.steps.length).toBe(12);
+    const step12 = guide.manual_reference.steps.find((s: any) => s.step === 12);
     expect(step12).toBeDefined();
     expect(step12.title).toContain('Verify');
     // SDK section
@@ -802,7 +807,7 @@ describe('SKILL.md & Guide Endpoints', () => {
     const guide = await res.json();
     expect(guide.circuit_id).toBe('coinbase_country_attestation');
     expect(guide.display_name).toBe('Coinbase Country');
-    expect(guide.complete_flow.steps.length).toBe(12);
+    expect(guide.manual_reference.steps.length).toBe(12);
   });
 
   it('GET /api/v1/guide/invalid_circuit returns 404', async () => {

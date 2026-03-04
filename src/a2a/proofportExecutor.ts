@@ -52,19 +52,31 @@ export const A2A_TOOLS: LLMTool[] = [
       required: [],
     },
   },
+  {
+    name: 'get_guide',
+    description: 'Get comprehensive step-by-step guide for preparing all inputs for a specific circuit. Read this BEFORE attempting proof generation.',
+    parameters: {
+      type: 'object',
+      properties: {
+        circuit: { type: 'string', description: 'Circuit alias: "coinbase_kyc" or "coinbase_country"' },
+      },
+      required: ['circuit'],
+    },
+  },
 ];
 import type { TeeProvider } from '../tee/types.js';
 import type { RedisTaskStore } from './redisTaskStore.js';
 
 const tracer = trace.getTracer('a2a-executor');
 
-const VALID_SKILLS = ['prove', 'get_supported_circuits'];
+const VALID_SKILLS = ['prove', 'get_supported_circuits', 'get_guide'];
 
 export const A2A_INFERENCE_PROMPT = `You are a skill router for proveragent.base.eth — a ZK proof generation agent for Coinbase KYC and country-of-residence verification. Given user text, determine which tool to call and extract parameters. ALWAYS respond with a tool call — never with plain text.
 
 Available tools:
 - prove: User wants to generate a ZK proof. Keywords: prove, generate proof, KYC proof, coinbase proof, verify identity, country proof, attestation, submit inputs, 증명 생성, 시작, KYC 검증, 나라 증명, 제출, 완료. Requires: circuit type (coinbase_kyc or coinbase_country).
 - get_supported_circuits: User asks about available circuits or capabilities. Keywords: what circuits, list, supported, available, what can you do, 뭐 할 수 있어, 어떤 증명, 목록.
+- get_guide: User wants to see the guide/instructions for preparing proof inputs. Keywords: guide, how to, instructions, steps, tutorial, help, 가이드, 방법, 어떻게.
 
 CRITICAL RULES:
 - NEVER guess or fabricate wallet addresses
@@ -237,6 +249,17 @@ export class ProofportExecutor implements AgentExecutor {
               guide_url: `${this.deps.config.a2aBaseUrl}/api/v1/guide/${aliasMap[circuit.id] ?? circuit.id}`,
             })),
           };
+          break;
+        }
+        case 'get_guide': {
+          const circuitAlias = (skillParams as any).circuit || 'coinbase_kyc';
+          const circuitIdMap: Record<string, string> = {
+            coinbase_kyc: 'coinbase_attestation',
+            coinbase_country: 'coinbase_country_attestation',
+          };
+          const circuitId = circuitIdMap[circuitAlias] || circuitAlias;
+          const { buildGuide } = await import('../proof/guideBuilder.js');
+          result = buildGuide(circuitId as any, this.deps.config);
           break;
         }
         default:

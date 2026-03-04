@@ -6,6 +6,7 @@ import {
   type SkillDeps,
 } from '../skills/skillHandler.js';
 import { getTaskOutcome } from '../skills/flowGuidance.js';
+import { buildGuide } from '../proof/guideBuilder.js';
 import type { RateLimiter } from '../redis/rateLimiter.js';
 import type { ProofCache } from '../redis/proofCache.js';
 import type { RedisClient } from '../redis/client.js';
@@ -212,6 +213,27 @@ Response fields:
         { type: 'text' as const, text: guidance },
         { type: 'text' as const, text: JSON.stringify(resultWithGuideUrls, null, 2) },
       ] };
+    },
+  );
+
+  // ─── get_guide ──────────────────────────────────────────────────────
+  server.tool(
+    'get_guide',
+    'Get a comprehensive step-by-step guide for preparing all inputs required for a specific circuit. Read this BEFORE attempting proof generation — the guide covers how to compute signal_hash, nullifier, scope_bytes, merkle_root, how to query EAS GraphQL for the attestation, how to RLP-encode the transaction, how to recover secp256k1 public keys, and how to build the Merkle proof.',
+    {
+      circuit: z.enum(['coinbase_kyc', 'coinbase_country']).describe('Circuit alias to get the guide for.'),
+    },
+    async ({ circuit }) => {
+      const resolvedConfig = config || loadConfig();
+      const circuitIdMap: Record<string, string> = {
+        coinbase_kyc: 'coinbase_attestation',
+        coinbase_country: 'coinbase_country_attestation',
+      };
+      const circuitId = circuitIdMap[circuit] ?? circuit;
+      const guide = buildGuide(circuitId as any, resolvedConfig);
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(guide, null, 2) }],
+      };
     },
   );
 

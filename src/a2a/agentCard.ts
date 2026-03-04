@@ -113,6 +113,19 @@ ON-CHAIN VERIFICATION:
         inputModes: ['application/json'],
         outputModes: ['application/json'],
       },
+      {
+        id: 'get_guide',
+        name: 'Get Circuit Guide',
+        description: '[GUIDE] Get a comprehensive step-by-step guide for preparing all inputs required for a specific circuit. Read this BEFORE attempting proof generation.',
+        tags: ['guide', 'instructions', 'tutorial', 'coinbase', 'kyc', 'country', 'inputs'],
+        examples: [
+          'How do I prepare inputs for coinbase_kyc?',
+          'Show me the guide for proof generation',
+          'What inputs do I need for country verification?',
+        ],
+        inputModes: ['application/json'],
+        outputModes: ['application/json'],
+      },
     ],
     defaultInputModes: ['application/json'],
     defaultOutputModes: ['application/json'],
@@ -200,6 +213,17 @@ export function buildMcpDiscovery(config: Config) {
           required: [],
         },
       },
+      {
+        name: 'get_guide',
+        description: '[GUIDE] Get a comprehensive step-by-step guide for preparing all inputs required for a specific circuit. Read this BEFORE attempting proof generation.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            circuit: { type: 'string', description: 'Circuit alias: "coinbase_kyc" or "coinbase_country"' },
+          },
+          required: ['circuit'],
+        },
+      },
     ],
     'x-guides': {
       description: 'Step-by-step guides for preparing proof inputs. Read the guide BEFORE calling prove.',
@@ -260,13 +284,13 @@ export function buildOasfAgent(config: Config, tokenId?: bigint | null) {
         name: 'A2A',
         endpoint: `${config.a2aBaseUrl}/.well-known/agent-card.json`,
         version: '0.3.0',
-        a2aSkills: ['prove', 'get_supported_circuits'],
+        a2aSkills: ['prove', 'get_supported_circuits', 'get_guide'],
       },
       {
         name: 'MCP',
         endpoint: `${config.a2aBaseUrl}/.well-known/mcp.json`,
         version: '2024-11-05',
-        mcpTools: ['prove', 'get_supported_circuits'],
+        mcpTools: ['prove', 'get_supported_circuits', 'get_guide'],
       },
     ],
     guides: {
@@ -383,6 +407,12 @@ Generates zero-knowledge proofs from Coinbase Verified Account attestations on B
 - **Input**: None
 - **Output**: Array of circuit objects with EAS schema IDs, verifier addresses, chain info
 
+### get_guide
+- **Description**: Get comprehensive step-by-step guide for preparing proof inputs.
+- **Method**: Available via MCP tool, A2A skill, or REST \`GET /api/v1/guide/{circuit}\`
+- **Input**: Circuit alias (\`coinbase_kyc\` or \`coinbase_country\`)
+- **Output**: Setup instructions, environment variables, manual step reference
+
 ### prove
 - **Description**: Generate a ZK proof via x402 single-step flow.
 - **Method**: \`POST ${config.a2aBaseUrl}/api/v1/prove\`
@@ -399,22 +429,15 @@ Generates zero-knowledge proofs from Coinbase Verified Account attestations on B
 - **Method**: ${isTestnet ? 'Direct USDC transfer with nonce in calldata (testnet USDC lacks EIP-3009)' : 'EIP-3009 TransferWithAuthorization via x402 facilitator (https://www.x402.org/facilitator)'}
 - **x402 Single-Step**: POST /prove with \`{ circuit, inputs }\` → 402 response includes nonce in body → pay with signature → retry with \`X-Payment-TX\` and \`X-Payment-Nonce\` headers. Nonce is single-use and circuit-bound.
 
-## Client SDK
+## Quick Start
+
+\`@proofport/client\` is **not published to npm** — clone the GitHub repo directly.
+
+### Option A: Local MCP Server (Recommended for Agents)
 
 \`\`\`bash
 git clone https://github.com/zkproofport/proofport-ai.git
-cd proofport-ai/packages/client && npm install
-ATTESTATION_KEY=0x... PAYMENT_KEY=0x... npx tsx examples/full-flow.ts
-\`\`\`
-
-Package: \`@proofport/client\` — handles all cryptographic computation, attestation fetching, payment, and proof submission.
-
-## Local MCP Server
-
-Install and run locally for Claude Code, Cursor, or any MCP-compatible agent:
-
-\`\`\`bash
-npx proofport-mcp
+cd proofport-ai && npm install
 \`\`\`
 
 Configure in \`claude_desktop_config.json\`:
@@ -423,9 +446,10 @@ Configure in \`claude_desktop_config.json\`:
   "mcpServers": {
     "proofport": {
       "command": "npx",
-      "args": ["proofport-mcp"],
+      "args": ["tsx", "packages/mcp-server/src/index.ts"],
       "env": {
-        "ATTESTATION_KEY": "0x...",
+        "ATTESTATION_KEY": "0x... (private key of wallet with Coinbase EAS attestation on Base)",
+        "PAYMENT_KEY": "0x... (optional: private key of wallet with USDC, defaults to ATTESTATION_KEY)",
         "PROOFPORT_URL": "${config.a2aBaseUrl}"
       }
     }
@@ -433,18 +457,55 @@ Configure in \`claude_desktop_config.json\`:
 }
 \`\`\`
 
-Tools: generate_proof, get_supported_circuits, request_challenge, prepare_inputs, make_payment, submit_proof, verify_proof (optional on-chain verification), request_testnet_usdc
-
-## CDP Wallet Support (Optional)
-
-Use Coinbase MPC wallet instead of raw private keys. Private keys never leave Coinbase's TEE.
-
+Or run directly:
 \`\`\`bash
-npm install @coinbase/agentkit @coinbase/cdp-sdk
-CDP_API_KEY_ID=... CDP_API_KEY_SECRET=... CDP_WALLET_SECRET=... npx proofport-mcp
+ATTESTATION_KEY=0x... npx tsx packages/mcp-server/src/index.ts
 \`\`\`
 
-Get CDP credentials at https://portal.cdp.coinbase.com
+Tools: generate_proof, get_supported_circuits, prepare_inputs, request_challenge, make_payment, submit_proof, verify_proof, request_testnet_usdc
+
+### Option B: SDK (Programmatic)
+
+\`\`\`bash
+git clone https://github.com/zkproofport/proofport-ai.git
+cd proofport-ai && npm install
+\`\`\`
+
+\`\`\`typescript
+import { generateProof } from '@proofport/client';
+const result = await generateProof(config, signers, { circuit: 'coinbase_kyc' });
+\`\`\`
+
+### Option C: CLI
+
+\`\`\`bash
+git clone https://github.com/zkproofport/proofport-ai.git
+cd proofport-ai && npm install
+ATTESTATION_KEY=0x... PAYMENT_KEY=0x... SERVER_URL=${config.a2aBaseUrl} npx tsx packages/client/examples/full-flow.ts
+\`\`\`
+
+## Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| ATTESTATION_KEY | Yes | Private key of wallet with Coinbase EAS attestation on Base |
+| PAYMENT_KEY | No | Private key of wallet with USDC balance (defaults to ATTESTATION_KEY) |
+| PROOFPORT_URL | No | Server URL (default: production) |
+
+## CDP Wallet (Optional)
+
+Use Coinbase MPC wallet instead of PAYMENT_KEY. Private keys never leave Coinbase's TEE.
+
+Set these env vars alongside ATTESTATION_KEY:
+
+| Variable | Description |
+|----------|-------------|
+| CDP_API_KEY_ID | Coinbase Developer Platform API key ID |
+| CDP_API_KEY_SECRET | CDP API key secret |
+| CDP_WALLET_SECRET | CDP wallet encryption secret |
+| CDP_WALLET_ADDRESS | (Optional) Existing CDP wallet address to reuse |
+
+Get credentials at https://portal.cdp.coinbase.com
 
 The \`request_testnet_usdc\` MCP tool auto-funds your wallet with testnet USDC via CDP faucet.
 
@@ -456,7 +517,8 @@ Detailed step-by-step guides for preparing proof inputs:
 
 ## Protocols
 
-- **MCP**: ${config.a2aBaseUrl}/mcp (StreamableHTTP, tools: prove, get_supported_circuits)
+- **MCP (Remote)**: ${config.a2aBaseUrl}/mcp (StreamableHTTP, tools: prove, get_supported_circuits, get_guide)
+- **MCP (Local)**: \`npx tsx packages/mcp-server/src/index.ts\` (stdio, tools: generate_proof, get_supported_circuits, prepare_inputs, request_challenge, make_payment, submit_proof, verify_proof, request_testnet_usdc)
 - **A2A**: ${config.a2aBaseUrl}/a2a (JSON-RPC v0.3)
 - **REST**: ${config.a2aBaseUrl}/api/v1/*
 

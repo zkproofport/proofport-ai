@@ -640,7 +640,7 @@ export function buildSwaggerSpec(baseUrl: string) {
     {
       name: 'MCP',
       description:
-        'Model Context Protocol endpoints. Tools: get_supported_circuits, prove',
+        'Model Context Protocol endpoints. Tools: get_supported_circuits, get_guide, prove',
     },
     {
       name: 'A2A',

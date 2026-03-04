@@ -1026,16 +1026,82 @@ export function buildGuide(circuitId: CircuitId, config: Config): object {
     display_name: circuit.displayName,
     description: circuit.description,
 
-    sdk: {
+    // PRIMARY RECOMMENDATION: Local MCP Server
+    local_mcp_server: {
       recommended: true,
+      description:
+        'RECOMMENDED: Install and run the local MCP server. It handles all cryptographic computation, ' +
+        'attestation fetching, payment, and proof submission automatically via MCP tools.',
+      setup: {
+        clone: 'git clone https://github.com/zkproofport/proofport-ai.git',
+        install: 'cd proofport-ai && npm install',
+        run: 'cd proofport-ai && ATTESTATION_KEY=0x... npx tsx packages/mcp-server/src/index.ts',
+      },
+      claude_desktop_config: {
+        mcpServers: {
+          proofport: {
+            command: 'npx',
+            args: ['tsx', 'packages/mcp-server/src/index.ts'],
+            env: {
+              ATTESTATION_KEY: '0x... (private key of wallet with Coinbase EAS attestation on Base)',
+              PAYMENT_KEY: '0x... (optional: private key of wallet with USDC, defaults to ATTESTATION_KEY)',
+              PROOFPORT_URL: config.a2aBaseUrl,
+            },
+          },
+        },
+      },
+      env_vars: {
+        ATTESTATION_KEY: {
+          required: true,
+          description: 'Private key of wallet with Coinbase EAS KYC attestation on Base. This wallet must have a valid, non-revoked Coinbase Verified Account attestation.',
+        },
+        PAYMENT_KEY: {
+          required: false,
+          description: 'Private key of wallet with USDC balance for proof payment. Defaults to ATTESTATION_KEY if not set. Can be a different wallet.',
+        },
+        PROOFPORT_URL: {
+          required: false,
+          default: config.a2aBaseUrl,
+          description: 'ZKProofport server URL for remote proof generation in TEE.',
+        },
+        CDP_API_KEY_ID: {
+          required: false,
+          description: 'Coinbase Developer Platform API key ID. Set this instead of PAYMENT_KEY to use a CDP MPC wallet for payment.',
+        },
+        CDP_API_KEY_SECRET: {
+          required: false,
+          description: 'CDP API key secret.',
+        },
+        CDP_WALLET_SECRET: {
+          required: false,
+          description: 'CDP wallet encryption secret.',
+        },
+        CDP_WALLET_ADDRESS: {
+          required: false,
+          description: 'Existing CDP wallet address to reuse. If omitted, a new wallet is created.',
+        },
+      },
+      tools: [
+        'generate_proof — All-in-one: prepare inputs + pay + generate proof',
+        'get_supported_circuits — List available circuits',
+        'prepare_inputs — Step 1: Prepare all circuit inputs',
+        'request_challenge — Step 2: Get 402 payment challenge',
+        'make_payment — Step 3: Pay USDC via x402',
+        'submit_proof — Step 4: Submit with payment to generate proof',
+        'verify_proof — Step 5 (optional): Verify proof on-chain',
+        'request_testnet_usdc — Fund wallet with testnet USDC via CDP faucet',
+      ],
+    },
+
+    // ALTERNATIVE: SDK for programmatic use
+    sdk: {
       package: '@proofport/client',
       repository: 'https://github.com/zkproofport/proofport-ai',
-      install: 'git clone https://github.com/zkproofport/proofport-ai.git && cd proofport-ai/packages/client && npm install',
+      note: 'Not yet published to npm. Clone the repository to use.',
+      install: 'git clone https://github.com/zkproofport/proofport-ai.git && cd proofport-ai && npm install',
       description:
-        'RECOMMENDED: Use the @proofport/client SDK instead of implementing steps manually. ' +
-        'The SDK handles all cryptographic computation, attestation fetching, payment, and proof submission.',
-      quick_start: {
-        full_flow: `\
+        'Use the @proofport/client SDK directly in your code for programmatic proof generation.',
+      quick_start: `\
 import { generateProof } from '@proofport/client';
 
 const result = await generateProof(
@@ -1050,66 +1116,27 @@ const result = await generateProof(
 console.log(result.proof);           // ZK proof hex
 console.log(result.publicInputs);    // public inputs hex
 console.log(result.proofWithInputs); // combined for on-chain verify`,
-        step_by_step: `\
-import { computeSignalHash, prepareInputs, requestChallenge, makePayment, submitProof, verifyOnChain, CIRCUIT_NAME_MAP, EthersWalletSigner, USDC_ADDRESSES } from '@proofport/client';
-import { ethers } from 'ethers';
-
-const config = { baseUrl: '${config.a2aBaseUrl}' };
-const circuit = '${circuitAlias(circuitId)}';
-const circuitId = CIRCUIT_NAME_MAP[circuit];
-const wallet = new ethers.Wallet('0x...');
-
-// 1. Sign signal hash
-const signalHash = computeSignalHash(wallet.address, 'proofport', circuitId);
-const signature = await wallet.signMessage(ethers.getBytes(ethers.hexlify(signalHash)));
-
-// 2. Prepare all inputs (fetches attestation, computes hashes, builds merkle tree)
-const inputs = await prepareInputs(config, {
-  circuitId, userAddress: wallet.address, userSignature: signature, scope: 'proofport',
-});
-
-// 3. Request 402 challenge — server returns nonce + payment requirements
-const challenge = await requestChallenge(config, circuit, inputs);
-
-// 4. Make payment using the nonce from step 3
-const provider = new ethers.JsonRpcProvider('https://sepolia.base.org');
-const signer = new EthersWalletSigner(wallet.connect(provider));
-const paymentTxHash = await makePayment(signer, {
-  nonce: challenge.nonce, recipient: challenge.payment.payTo,
-  amount: parseInt(challenge.payment.maxAmountRequired),
-  asset: USDC_ADDRESSES['base-sepolia'], network: 'base-sepolia',
-  instruction: challenge.payment.description,
-});
-
-// 5. Submit proof with payment headers
-const result = await submitProof(config, { circuit, inputs, paymentTxHash, paymentNonce: challenge.nonce });
-
-// 6. Verify on-chain (optional)
-const verification = await verifyOnChain(config, circuitId, result.proof, result.publicInputs);
-console.log('Valid:', verification.valid);`,
-        run_example: `\
-# Clone repo and run the full-flow example
+      cli: `\
+# Clone and install
 git clone https://github.com/zkproofport/proofport-ai.git
-cd proofport-ai/packages/client
-npm install
+cd proofport-ai && npm install
 
-# Run with environment variables
-ATTESTATION_KEY=0x... PAYMENT_KEY=0x... SERVER_URL=${config.a2aBaseUrl} npx tsx examples/full-flow.ts`,
-      },
+# Run full-flow example
+ATTESTATION_KEY=0x... PAYMENT_KEY=0x... SERVER_URL=${config.a2aBaseUrl} npx tsx packages/client/examples/full-flow.ts`,
     },
 
-    complete_flow: {
+    // MANUAL REFERENCE: For agents that cannot install npm packages
+    manual_reference: {
       overview:
-        'The recommended approach is to use the @proofport/client SDK (see the sdk section above). ' +
-        'The steps below document the manual process for reference or for agents that cannot install npm packages. ' +
+        'The steps below document the manual process for agents that CANNOT install npm packages. ' +
+        'If you can install packages, use the local MCP server or SDK above instead. ' +
         'IMPORTANT: This flow uses TWO chains. ' +
         'EAS attestation data (Steps 2-5) is ALWAYS on Base Mainnet (chain ID 8453, RPC: ' + config.baseRpcUrl + '). ' +
         'Payment and on-chain verification (Steps 10-12) use ' +
         (isTestnet ? 'Base Sepolia (testnet, chain ID 84532, RPC: ' + config.chainRpcUrl + ')' : 'Base Mainnet (chain ID 8453, RPC: ' + config.chainRpcUrl + ')') + '. ' +
         'Do NOT use the payment chain RPC for EAS data — attestation transactions will not be found on testnet.',
       prerequisites: [
-        '@proofport/client SDK (recommended — handles all computation): git clone https://github.com/zkproofport/proofport-ai.git && cd proofport-ai/packages/client && npm install',
-        'ethers.js v6 (npm install ethers) — only if implementing steps manually',
+        'ethers.js v6 (npm install ethers)',
         'User wallet address with Coinbase KYC attestation on Base',
         'User wallet capable of signing messages (personal_sign) and EIP-712 typed data',
         'USDC balance sufficient for proof fee (' + priceStr + ' USDC) on ' + (isTestnet ? 'Base Sepolia' : 'Base'),
@@ -1117,27 +1144,16 @@ ATTESTATION_KEY=0x... PAYMENT_KEY=0x... SERVER_URL=${config.a2aBaseUrl} npx tsx 
       ],
       agent_modes: {
         autonomous: {
-          description: 'Agent has private keys for two wallets. All 12 steps execute without any user interaction.',
-          wallets: {
-            kyc_wallet: 'Wallet with Coinbase KYC attestation on Base. Used for: EAS query (Step 2), signing signal_hash (Step 7), recovering user pubkey (Step 8).',
-            payer_wallet: 'Wallet with USDC balance. Used for: EIP-3009 payment authorization (Step 10). Can be the SAME wallet as kyc_wallet, or a DIFFERENT one.',
-          },
+          description: 'Agent has private keys. All steps execute without user interaction.',
           requirements: [
-            'Private key for KYC wallet (has Coinbase attestation)',
-            'Private key for payer wallet (has USDC balance) — can be same or different wallet',
-            'ethers.js v6',
+            'ATTESTATION_KEY: Private key for wallet with Coinbase EAS attestation',
+            'PAYMENT_KEY: Private key for wallet with USDC balance (can be same wallet)',
           ],
-          wallet_setup: "const kycWallet = new ethers.Wallet(kycPrivateKey, provider);\nconst payerWallet = new ethers.Wallet(payerPrivateKey, provider); // can be same key",
           fully_automatic: true,
         },
         delegated: {
-          description: 'Agent prepares all inputs but delegates wallet signing (Steps 7, 10) to the user. User may use one or two wallets.',
-          wallets: {
-            kyc_wallet: 'User wallet with Coinbase attestation — signs signal_hash in Step 7.',
-            payer_wallet: 'User wallet with USDC — signs EIP-712 authorization in Step 10. Can be same or different wallet.',
-          },
-          requirements: ['User provides KYC wallet address', 'User signs when prompted (2 signatures total)', 'Browser or WalletConnect session'],
-          user_interactions: ['Step 7: personal_sign of signal_hash (KYC wallet)', 'Step 10: EIP-712 signTypedData for USDC payment (payer wallet)'],
+          description: 'Agent prepares inputs but delegates signing to user.',
+          user_interactions: ['Step 7: personal_sign of signal_hash', 'Step 10: EIP-712 signTypedData for USDC payment'],
           fully_automatic: false,
         },
       },
