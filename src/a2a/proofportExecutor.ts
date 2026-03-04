@@ -24,8 +24,6 @@ import { ethers } from 'ethers';
 //   type SkillDeps,
 // } from '../skills/skillHandler.js';
 import { handleGetSupportedCircuits, type SkillDeps } from '../skills/skillHandler.js';
-import { ProofSessionManager } from '../proof/sessionManager.js';
-import type { ProofSessionRequest } from '../proof/types.js';
 import { handleProofCompleted } from '../identity/reputation.js';
 import { getTaskOutcome } from '../skills/flowGuidance.js';
 import type { LLMProvider } from '../chat/llmProvider.js';
@@ -33,28 +31,16 @@ import type { LLMTool } from '../chat/llmProvider.js';
 import type { Config } from '../config/index.js';
 
 /** Tool definitions for LLM-based skill routing in A2A text inference. */
-const A2A_TOOLS: LLMTool[] = [
+export const A2A_TOOLS: LLMTool[] = [
   {
-    name: 'proof_request',
-    description: 'Create a new proof session. Returns session_id, payment instructions, and a guide_url.',
+    name: 'prove',
+    description: 'Submit proof inputs to generate a ZK proof via x402 single-step flow. Use POST /api/v1/prove REST endpoint for actual execution.',
     parameters: {
       type: 'object',
       properties: {
         circuit: { type: 'string', description: 'Circuit alias: "coinbase_kyc" or "coinbase_country"' },
       },
       required: ['circuit'],
-    },
-  },
-  {
-    name: 'prove',
-    description: 'Submit proof inputs and payment to generate a ZK proof. Use POST /api/v1/prove REST endpoint for actual execution.',
-    parameters: {
-      type: 'object',
-      properties: {
-        session_id: { type: 'string', description: 'Session ID from proof_request' },
-        payment_tx_hash: { type: 'string', description: 'USDC payment transaction hash' },
-      },
-      required: ['session_id', 'payment_tx_hash'],
     },
   },
   {
@@ -72,22 +58,20 @@ import type { RedisTaskStore } from './redisTaskStore.js';
 
 const tracer = trace.getTracer('a2a-executor');
 
-const VALID_SKILLS = ['proof_request', 'prove', 'get_supported_circuits'];
+const VALID_SKILLS = ['prove', 'get_supported_circuits'];
 
 export const A2A_INFERENCE_PROMPT = `You are a skill router for proveragent.base.eth — a ZK proof generation agent for Coinbase KYC and country-of-residence verification. Given user text, determine which tool to call and extract parameters. ALWAYS respond with a tool call — never with plain text.
 
 Available tools:
-- proof_request: User wants to START a new proof generation session. Keywords: start, begin, create, generate proof, KYC proof, coinbase proof, verify identity, prove, country proof, attestation, 증명 생성, 시작, KYC 검증, 나라 증명. Always requires: circuit type (coinbase_kyc or coinbase_country).
-- prove: User wants to SUBMIT circuit inputs and complete proof generation. Keywords: submit, complete, finalize, generate, prove now, inputs ready, 제출, 완료, 증명 생성해. Requires: session_id, payment_tx_hash, inputs object.
+- prove: User wants to generate a ZK proof. Keywords: prove, generate proof, KYC proof, coinbase proof, verify identity, country proof, attestation, submit inputs, 증명 생성, 시작, KYC 검증, 나라 증명, 제출, 완료. Requires: circuit type (coinbase_kyc or coinbase_country).
 - get_supported_circuits: User asks about available circuits or capabilities. Keywords: what circuits, list, supported, available, what can you do, 뭐 할 수 있어, 어떤 증명, 목록.
 
 CRITICAL RULES:
-- NEVER guess or fabricate session_id, payment_tx_hash, or wallet addresses
-- If the user doesn't provide required parameters, ask them — do NOT make up values
-- For follow-up messages about an existing session, use prove (the user likely wants to submit inputs)
-- When in doubt between proof_request and prove: if the user mentions a session_id → prove. If not → proof_request.
+- NEVER guess or fabricate wallet addresses
+- If the user doesn't provide the circuit type, ask them — do NOT make up values
 - "Coinbase KYC" or just "KYC" → circuit = "coinbase_kyc"
-- "country" or "residency" → circuit = "coinbase_country"`;
+- "country" or "residency" → circuit = "coinbase_country"
+- The flow is x402 single-step: POST /api/v1/prove with circuit+inputs → 402 → pay → retry with X-Payment-TX/X-Payment-Nonce headers`;
 
 export interface ExecutorDeps {
   taskStore: RedisTaskStore;
@@ -192,23 +176,7 @@ export class ProofportExecutor implements AgentExecutor {
 
       span.setAttribute('a2a.skill', skill);
 
-      // Auto-resolve requestId from context flow.
-      // For text-inferred skills, ALWAYS override requestId with context flow
-      // because LLMs often hallucinate placeholder requestIds like "YOUR_REQUEST_ID".
-      // For DataPart skills, only fill in if not explicitly provided.
-      if (ctx.contextId) {
-        try {
-          const storedRequestId = await this.deps.taskStore.getContextFlow(ctx.contextId);
-          if (storedRequestId && ['prove'].includes(skill)) {
-            if (source === 'text' || !skillParams.session_id) {
-              log.info({ action: 'a2a.context.resolved', sessionId: storedRequestId, source, overridden: !!skillParams.session_id, contextId: ctx.contextId }, 'Auto-resolved session_id from context flow');
-              skillParams.session_id = storedRequestId;
-            }
-          }
-        } catch (e) {
-          log.error({ action: 'a2a.context.error', err: e, contextId: ctx.contextId }, 'Failed to resolve context flow');
-        }
-      }
+      // Context flow tracking is no longer needed (session flow removed)
 
       // Publish working status
       eventBus.publish({
@@ -224,58 +192,17 @@ export class ProofportExecutor implements AgentExecutor {
       let result: unknown;
 
       switch (skill) {
-        case 'proof_request': {
-          const sessionManager = new ProofSessionManager(this.deps.taskStore.redis);
-          const circuitMap: Record<string, string> = {
-            'coinbase_kyc': 'coinbase_attestation',
-            'coinbase_country': 'coinbase_country_attestation',
-            'coinbase_attestation': 'coinbase_attestation',
-            'coinbase_country_attestation': 'coinbase_country_attestation',
-          };
-          const circuitId = circuitMap[(skillParams as any).circuit] || (skillParams as any).circuit;
-          const session = await sessionManager.createSession({
-            circuit: circuitId as any,
-          });
-
-          const isTestnet = this.deps.config.paymentMode === 'testnet';
-          const network = isTestnet ? 'base-sepolia' : 'base';
-          const usdcAddress = isTestnet
-            ? '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
-            : '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
-          const priceStr = (this.deps.config.paymentProofPrice || '$0.10').replace('$', '');
-          const paymentAmount = Math.round(parseFloat(priceStr) * 1_000_000);
-
-          const circuitAliasMap: Record<string, string> = {
-            'coinbase_attestation': 'coinbase_kyc',
-            'coinbase_country_attestation': 'coinbase_country',
-          };
-          const circuitAlias = circuitAliasMap[circuitId] || circuitId;
-
-          result = {
-            session_id: session.session_id,
-            guide_url: `${this.deps.config.a2aBaseUrl}/api/v1/guide/${circuitAlias}`,
-            payment: {
-              nonce: session.payment_nonce,
-              recipient: this.deps.config.paymentPayTo,
-              amount: paymentAmount,
-              asset: usdcAddress,
-              network,
-              instruction: `Sign EIP-3009 TransferWithAuthorization for ${priceStr} USDC to ${this.deps.config.paymentPayTo} using nonce ${session.payment_nonce}. Settle via x402 facilitator (https://www.x402.org/facilitator/settle). Submit the resulting tx hash to POST /api/v1/prove.`,
-            },
-            tee_endpoint: `${this.deps.config.a2aBaseUrl}/api/v1/prove`,
-            expires_at: session.expires_at,
-          };
-          break;
-        }
         case 'prove': {
           // For prove, redirect to REST endpoint since A2A has timeout limitations
+          const circuitAlias = (skillParams as any).circuit || 'coinbase_kyc';
+          const guideUrl = `${this.deps.config.a2aBaseUrl}/api/v1/guide/${circuitAlias}`;
           result = {
-            message: 'Proof generation requires the REST API endpoint due to 30-90 second processing time. Read the guide_url from proof_request response to learn how to prepare all inputs.',
+            message: 'Proof generation requires the REST API endpoint due to 30-90 second processing time. Use the x402 single-step flow: POST with {circuit, inputs} → 402 with nonce → pay → retry with X-Payment-TX and X-Payment-Nonce headers.',
             endpoint: `${this.deps.config.a2aBaseUrl}/api/v1/prove`,
             method: 'POST',
+            guide_url: guideUrl,
             body_format: {
-              session_id: 'string (from proof_request)',
-              payment_tx_hash: 'string (USDC transfer TX hash)',
+              circuit: 'string ("coinbase_kyc" or "coinbase_country")',
               inputs: {
                 signal_hash: 'string (0x-prefixed 32-byte signal hash)',
                 nullifier: 'string (0x-prefixed 32-byte nullifier)',
@@ -314,24 +241,6 @@ export class ProofportExecutor implements AgentExecutor {
         }
         default:
           throw new Error(`Unknown skill: ${skill}`);
-      }
-
-      // Link contextId -> session_id for session-based auto-resolution
-      if (skill === 'proof_request' && ctx.contextId) {
-        try {
-          const sessionId = (result as any)?.session_id;
-          if (sessionId) {
-            // Only set context flow if no existing mapping (prevent accidental overwrite)
-            const existingId = await this.deps.taskStore.getContextFlow(ctx.contextId);
-            if (!existingId) {
-              await this.deps.taskStore.setContextFlow(ctx.contextId, sessionId);
-            } else {
-              log.info({ action: 'a2a.context.exists', existingId, newSessionId: sessionId, contextId: ctx.contextId }, 'Context flow already exists, not overwriting');
-            }
-          }
-        } catch (e) {
-          log.error({ action: 'a2a.context.link_failed', err: e, contextId: ctx.contextId }, 'Failed to link context flow');
-        }
       }
 
       // Determine task state and guidance text

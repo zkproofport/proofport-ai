@@ -103,31 +103,16 @@ export function buildSwaggerSpec(baseUrl: string) {
                     },
                   },
                 },
-                callProofRequest: {
-                  summary: 'Call proof_request — create session + get payment instructions',
+                callProve: {
+                  summary: 'Call prove — returns REST redirect (use POST /api/v1/prove instead)',
                   value: {
                     jsonrpc: '2.0',
                     id: 4,
                     method: 'tools/call',
                     params: {
-                      name: 'proof_request',
-                      arguments: {
-                        circuit: 'coinbase_kyc',
-                      },
-                    },
-                  },
-                },
-                callProve: {
-                  summary: 'Call prove — returns REST redirect (use POST /api/v1/prove instead)',
-                  value: {
-                    jsonrpc: '2.0',
-                    id: 5,
-                    method: 'tools/call',
-                    params: {
                       name: 'prove',
                       arguments: {
-                        session_id: '<session_id from proof_request>',
-                        payment_tx_hash: '0x...',
+                        circuit: 'coinbase_kyc',
                         inputs: {
                           signal_hash: '0x...',
                           nullifier: '0x...',
@@ -253,8 +238,8 @@ export function buildSwaggerSpec(baseUrl: string) {
                 },
               },
               examples: {
-                messageSendProofRequest: {
-                  summary: 'message/send — proof_request (create session)',
+                messageSendProve: {
+                  summary: 'message/send — prove (x402 single-step, returns REST redirect)',
                   value: {
                     jsonrpc: '2.0',
                     id: 'req-1',
@@ -262,13 +247,13 @@ export function buildSwaggerSpec(baseUrl: string) {
                     params: {
                       message: {
                         role: 'user',
-                        parts: [{ kind: 'data', mimeType: 'application/json', data: { skill: 'proof_request', circuit: 'coinbase_kyc' } }],
+                        parts: [{ kind: 'data', mimeType: 'application/json', data: { skill: 'prove', circuit: 'coinbase_kyc' } }],
                       },
                     },
                   },
                 },
-                messageStreamProofRequest: {
-                  summary: 'message/stream — proof_request (SSE)',
+                messageStreamProve: {
+                  summary: 'message/stream — prove (SSE)',
                   value: {
                     jsonrpc: '2.0',
                     id: 'req-2',
@@ -276,7 +261,7 @@ export function buildSwaggerSpec(baseUrl: string) {
                     params: {
                       message: {
                         role: 'user',
-                        parts: [{ kind: 'data', mimeType: 'application/json', data: { skill: 'proof_request', circuit: 'coinbase_kyc' } }],
+                        parts: [{ kind: 'data', mimeType: 'application/json', data: { skill: 'prove', circuit: 'coinbase_kyc' } }],
                       },
                     },
                   },
@@ -329,8 +314,8 @@ export function buildSwaggerSpec(baseUrl: string) {
                     },
                   },
                 },
-                messageSendProve: {
-                  summary: 'message/send — prove (returns REST redirect)',
+                messageSendProveWithInputs: {
+                  summary: 'message/send — prove with inputs (returns REST redirect)',
                   value: {
                     jsonrpc: '2.0',
                     id: 'req-7',
@@ -338,7 +323,7 @@ export function buildSwaggerSpec(baseUrl: string) {
                     params: {
                       message: {
                         role: 'user',
-                        parts: [{ kind: 'data', mimeType: 'application/json', data: { skill: 'prove', session_id: '<session_id>', payment_tx_hash: '0x...', inputs: {} } }],
+                        parts: [{ kind: 'data', mimeType: 'application/json', data: { skill: 'prove', circuit: 'coinbase_kyc', inputs: {} } }],
                       },
                     },
                   },
@@ -492,10 +477,10 @@ export function buildSwaggerSpec(baseUrl: string) {
         },
       },
     },
-    '/api/v1/proof/request': {
+    '/api/v1/prove': {
       post: {
-        summary: 'Create proof session',
-        description: 'Creates a new proof session. Returns session_id, guide_url with step-by-step instructions, and USDC payment instructions.',
+        summary: 'Generate ZK proof (x402 single-step)',
+        description: 'x402 single-step flow: POST circuit + inputs → 402 with nonce → pay USDC → retry with X-Payment-TX and X-Payment-Nonce headers. Atomically verifies USDC payment on-chain and generates ZK proof in TEE. Takes 30-90 seconds.',
         tags: ['Proof Generation'],
         requestBody: {
           required: true,
@@ -503,70 +488,12 @@ export function buildSwaggerSpec(baseUrl: string) {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['circuit'],
+                required: ['circuit', 'inputs'],
                 properties: {
                   circuit: {
                     type: 'string',
                     enum: ['coinbase_kyc', 'coinbase_country'],
                     description: 'Which circuit to use',
-                  },
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          '402': {
-            description: 'Session created — payment required',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    session_id: { type: 'string', description: 'Unique session ID' },
-                    guide_url: { type: 'string', description: 'URL to detailed step-by-step guide for preparing proof inputs' },
-                    payment: {
-                      type: 'object',
-                      properties: {
-                        nonce: { type: 'string', description: 'Payment nonce' },
-                        recipient: { type: 'string', description: 'USDC recipient address' },
-                        amount: { type: 'string', description: 'Amount in USDC smallest unit', example: '100000' },
-                        asset: { type: 'string', description: 'Payment asset', example: 'USDC' },
-                        network: { type: 'string', description: 'Payment network', example: 'base-sepolia' },
-                        instruction: { type: 'string', description: 'Payment instruction: Sign EIP-3009 TransferWithAuthorization with session nonce, then settle via x402 facilitator (https://www.x402.org/facilitator/settle). Use the returned tx hash in POST /prove.', example: 'Sign EIP-3009 TransferWithAuthorization with session nonce, then settle via x402 facilitator (https://www.x402.org/facilitator/settle). Use the returned tx hash in POST /prove.' },
-                      },
-                    },
-                    tee_endpoint: { type: 'string', description: 'TEE endpoint URL for proof generation' },
-                    expires_at: { type: 'string', format: 'date-time', description: 'When this session expires' },
-                  },
-                },
-              },
-            },
-          },
-          '400': { description: 'Invalid parameters (missing circuit)' },
-        },
-      },
-    },
-    '/api/v1/prove': {
-      post: {
-        summary: 'Generate ZK proof (atomic: verify payment + prove)',
-        description: 'Atomically verifies USDC payment on-chain and generates ZK proof in TEE. Takes 30-90 seconds.',
-        tags: ['Proof Generation'],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['session_id', 'payment_tx_hash', 'inputs'],
-                properties: {
-                  session_id: {
-                    type: 'string',
-                    description: 'Session ID from POST /api/v1/proof/request',
-                  },
-                  payment_tx_hash: {
-                    type: 'string',
-                    description: 'On-chain USDC payment transaction hash',
                   },
                   inputs: {
                     type: 'object',
@@ -693,7 +620,7 @@ export function buildSwaggerSpec(baseUrl: string) {
     {
       name: 'MCP',
       description:
-        'Model Context Protocol endpoints. Tools: get_supported_circuits, proof_request, prove',
+        'Model Context Protocol endpoints. Tools: get_supported_circuits, prove',
     },
     {
       name: 'A2A',
@@ -705,7 +632,7 @@ export function buildSwaggerSpec(baseUrl: string) {
     },
     {
       name: 'Proof Generation',
-      description: '2-step proof API: create session (proof/request) then generate proof (prove). Replaces the old multi-step signing/payment/proofs flow.',
+      description: 'x402 single-step proof API: POST /prove with circuit + inputs → 402 with nonce → pay USDC → retry with X-Payment-TX and X-Payment-Nonce headers.',
     },
     {
       name: 'Guide',

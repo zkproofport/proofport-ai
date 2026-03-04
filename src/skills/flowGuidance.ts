@@ -23,16 +23,7 @@ export function getTaskOutcome(skill: string, result: unknown): TaskOutcome {
       const r = result as GetSupportedCircuitsResult;
       return {
         state: 'completed',
-        guidance: `Found ${r.circuits.length} supported circuit(s). NEXT STEP: Call the MCP tool named exactly "proof_request" with a circuit parameter (e.g. circuit: "coinbase_kyc"). Available MCP tools are ONLY: get_supported_circuits, proof_request, prove. Do NOT call any other tool name.`,
-      };
-    }
-
-    case 'proof_request': {
-      const sessionId = (result as any)?.session_id;
-      const guideUrl = (result as any)?.guide_url;
-      return {
-        state: 'input-required' as const,
-        guidance: `Session created (${sessionId}). Read the circuit guide at ${guideUrl || '/api/v1/guide/{circuit}'} for step-by-step instructions to prepare all inputs. Pay via x402 (EIP-3009 TransferWithAuthorization with session nonce → settle via facilitator), then call POST /api/v1/prove.`,
+        guidance: `Found ${r.circuits.length} supported circuit(s). NEXT STEP: Use POST /api/v1/prove with the x402 single-step flow (circuit + inputs → 402 with nonce → pay → retry with X-Payment-TX and X-Payment-Nonce headers). Available MCP tools are ONLY: get_supported_circuits, prove. Do NOT call "proof_request" or any other tool name.`,
       };
     }
 
