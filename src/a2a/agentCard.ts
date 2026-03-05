@@ -2,6 +2,7 @@ import type { Config } from '../config/index.js';
 import type { Request, Response } from 'express';
 import type { AgentCard as SDKAgentCard } from '@a2a-js/sdk';
 import { ERC8004_ADDRESSES } from '../config/contracts.js';
+import { getChainVerifiers } from '../config/deployments.js';
 
 export type AgentCard = SDKAgentCard & {
   guides?: {
@@ -34,12 +35,16 @@ export type AgentCard = SDKAgentCard & {
  * @returns Agent Card JSON object
  */
 export function buildAgentCard(config: Config, tokenId?: bigint | null): AgentCard {
-  // Determine ERC-8004 identity based on environment
-  const isProduction = config.nodeEnv === 'production';
+  // Determine chain based on payment mode
+  const isProduction = config.paymentMode === 'mainnet';
   const erc8004Identity = isProduction
     ? ERC8004_ADDRESSES.mainnet.identity
     : ERC8004_ADDRESSES.sepolia.identity;
   const chainId = isProduction ? 8453 : 84532; // Base Mainnet : Base Sepolia
+  const chainName = isProduction ? 'Base Mainnet' : 'Base Sepolia';
+  const chainVerifiers = getChainVerifiers(String(chainId));
+  const kycVerifier = chainVerifiers['coinbase_attestation'] ?? '(address not yet loaded)';
+  const countryVerifier = chainVerifiers['coinbase_country_attestation'] ?? '(address not yet loaded)';
 
   return {
     name: 'proveragent.base.eth',
@@ -87,7 +92,7 @@ PAYMENT: 0.1 USDC on Base. x402 protocol — nonce returned in 402 body, pay, re
 RETURNS: proof (hex), publicInputs (hex), proofWithInputs (hex for on-chain verification), TEE attestation document
 
 ON-CHAIN VERIFICATION:
-- Verifier contracts on Base Sepolia: coinbase_attestation=0x0036B61dBFaB8f3CfEEF77dD5D45F7EFBFE2035c, coinbase_country_attestation=0xdEe363585926c3c28327Efd1eDd01cf4559738cf
+- Verifier contracts on ${chainName} (chainId=${chainId}): coinbase_attestation=${kycVerifier}, coinbase_country_attestation=${countryVerifier}
 - Call verifier.verify(proofWithInputs) to verify on-chain`,
         tags: ['zk-proof', 'generate', 'tee', 'noir', 'privacy', 'coinbase', 'attestation', 'on-chain-verification', 'x402', 'kyc', 'identity', 'country-verification', 'eas'],
         examples: [
@@ -159,6 +164,13 @@ ON-CHAIN VERIFICATION:
  * @returns MCP discovery JSON object
  */
 export function buildMcpDiscovery(config: Config) {
+  const isProduction = config.paymentMode === 'mainnet';
+  const chainId = isProduction ? 8453 : 84532;
+  const chainName = isProduction ? 'Base Mainnet' : 'Base Sepolia';
+  const chainVerifiers = getChainVerifiers(String(chainId));
+  const kycVerifier = chainVerifiers['coinbase_attestation'] ?? '(address not yet loaded)';
+  const countryVerifier = chainVerifiers['coinbase_country_attestation'] ?? '(address not yet loaded)';
+
   return {
     protocolVersion: '2025-11-25',
     serverInfo: {
@@ -172,7 +184,7 @@ export function buildMcpDiscovery(config: Config) {
     tools: [
       {
         name: 'prove',
-        description: '[SINGLE-STEP x402] Generate a zero-knowledge proof via x402 single-step flow. POST circuit + inputs → receive 402 with nonce → pay USDC → retry with X-Payment-TX and X-Payment-Nonce headers. Atomically verifies USDC payment on-chain and generates the ZK proof in AWS Nitro TEE. Takes 30-90 seconds. Supported circuits: coinbase_kyc (EAS schema 0xf8b05c79f090979bf4a80270aba232dff11a10d9ca55c4f88de95317970f0de9) and coinbase_country (EAS schema 0x1801901fabd0e6189356b4fb52bb0ab855276d84f7ec140839fbd1f6801ca065). Authorized signers: [0x952f32128AF084422539C4Ff96df5C525322E564, 0x8844591D47F17bcA6F5dF8f6B64F4a739F1C0080, 0x88fe64ea2e121f49bb77abea6c0a45e93638c3c5, 0x44ace9abb148e8412ac4492e9a1ae6bd88226803]. Returns proof (hex), publicInputs, proofWithInputs (for on-chain verification), and TEE attestation. Verifier contracts on Base Sepolia: coinbase_attestation=0x0036B61dBFaB8f3CfEEF77dD5D45F7EFBFE2035c, coinbase_country_attestation=0xdEe363585926c3c28327Efd1eDd01cf4559738cf.',
+        description: `[SINGLE-STEP x402] Generate a zero-knowledge proof via x402 single-step flow. POST circuit + inputs → receive 402 with nonce → pay USDC → retry with X-Payment-TX and X-Payment-Nonce headers. Atomically verifies USDC payment on-chain and generates the ZK proof in AWS Nitro TEE. Takes 30-90 seconds. Supported circuits: coinbase_kyc (EAS schema 0xf8b05c79f090979bf4a80270aba232dff11a10d9ca55c4f88de95317970f0de9) and coinbase_country (EAS schema 0x1801901fabd0e6189356b4fb52bb0ab855276d84f7ec140839fbd1f6801ca065). Authorized signers: [0x952f32128AF084422539C4Ff96df5C525322E564, 0x8844591D47F17bcA6F5dF8f6B64F4a739F1C0080, 0x88fe64ea2e121f49bb77abea6c0a45e93638c3c5, 0x44ace9abb148e8412ac4492e9a1ae6bd88226803]. Returns proof (hex), publicInputs, proofWithInputs (for on-chain verification), and TEE attestation. Verifier contracts on ${chainName} (chainId=${chainId}): coinbase_attestation=${kycVerifier}, coinbase_country_attestation=${countryVerifier}.`,
         inputSchema: {
           type: 'object',
           properties: {
@@ -254,7 +266,7 @@ export function buildMcpDiscovery(config: Config) {
  * @returns OASF agent JSON object
  */
 export function buildOasfAgent(config: Config, tokenId?: bigint | null) {
-  const isProduction = config.nodeEnv === 'production';
+  const isProduction = config.paymentMode === 'mainnet';
   const erc8004Identity = isProduction
     ? ERC8004_ADDRESSES.mainnet.identity
     : ERC8004_ADDRESSES.sepolia.identity;
@@ -426,7 +438,7 @@ Generates zero-knowledge proofs from Coinbase Verified Account attestations on B
 - **Protocol**: x402
 - **Amount**: ${priceStr} USDC
 - **Network**: ${network}
-- **Method**: ${isTestnet ? 'Direct USDC transfer with nonce in calldata (testnet USDC lacks EIP-3009)' : 'EIP-3009 TransferWithAuthorization via x402 facilitator (https://www.x402.org/facilitator)'}
+- **Method**: EIP-3009 TransferWithAuthorization via x402 facilitator (https://www.x402.org/facilitator)
 - **x402 Single-Step**: POST /prove with \`{ circuit, inputs }\` → 402 response includes nonce in body → pay with signature → retry with \`X-Payment-TX\` and \`X-Payment-Nonce\` headers. Nonce is single-use and circuit-bound.
 
 ## Quick Start

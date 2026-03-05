@@ -16,7 +16,7 @@ export class CdpWalletSigner implements ProofportSigner {
   /**
    * Create a CdpWalletSigner from environment variables.
    * Requires: CDP_API_KEY_ID, CDP_API_KEY_SECRET, CDP_WALLET_SECRET
-   * Optional: CDP_WALLET_ADDRESS (to load existing wallet), CDP_NETWORK_ID (default: base-sepolia)
+   * Optional: CDP_WALLET_ADDRESS (to load existing wallet), CDP_NETWORK_ID (required: "base-sepolia" or "base")
    */
   static async create(opts?: {
     apiKeyId?: string;
@@ -40,8 +40,14 @@ export class CdpWalletSigner implements ProofportSigner {
       apiKeyId: opts?.apiKeyId || process.env.CDP_API_KEY_ID,
       apiKeySecret: opts?.apiKeySecret || process.env.CDP_API_KEY_SECRET,
       walletSecret: opts?.walletSecret || process.env.CDP_WALLET_SECRET,
-      networkId: opts?.networkId || process.env.CDP_NETWORK_ID || 'base-sepolia',
+      networkId: opts?.networkId || process.env.CDP_NETWORK_ID,
     };
+
+    if (!config.networkId) {
+      throw new Error(
+        'CDP wallet requires networkId. Set CDP_NETWORK_ID env var or pass networkId option. Use "base-sepolia" for testnet or "base" for mainnet.'
+      );
+    }
 
     const address = opts?.address || process.env.CDP_WALLET_ADDRESS;
     if (address) {

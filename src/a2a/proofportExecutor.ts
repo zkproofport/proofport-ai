@@ -237,7 +237,7 @@ export class ProofportExecutor implements AgentExecutor {
           break;
         }
         case 'get_supported_circuits': {
-          const circuitsResult = handleGetSupportedCircuits(skillParams as any);
+          const circuitsResult = handleGetSupportedCircuits(skillParams as any, this.deps.config.paymentMode);
           const aliasMap: Record<string, string> = {
             coinbase_attestation: 'coinbase_kyc',
             coinbase_country_attestation: 'coinbase_country',

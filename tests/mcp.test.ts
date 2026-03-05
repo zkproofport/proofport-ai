@@ -158,9 +158,19 @@ describe('handleGetSupportedCircuits', () => {
     expect(ids).not.toContain('coinbase-kyc');
   });
 
-  it('should default to chainId 84532 when not specified', () => {
+  it('should default to chainId 84532 when paymentMode is testnet (default)', () => {
     const result = handleGetSupportedCircuits({});
 
+    expect(result.chainId).toBe('84532');
+  });
+
+  it('should default to chainId 8453 when paymentMode is mainnet', () => {
+    const result = handleGetSupportedCircuits({}, 'mainnet');
+    expect(result.chainId).toBe('8453');
+  });
+
+  it('should use explicit chainId over paymentMode default', () => {
+    const result = handleGetSupportedCircuits({ chainId: '84532' }, 'mainnet');
     expect(result.chainId).toBe('84532');
   });
 

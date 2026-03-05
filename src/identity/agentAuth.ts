@@ -56,8 +56,7 @@ declare global {
  * - NEVER blocks requests — verification failure logs a warning but continues
  */
 export function createAgentAuthMiddleware(config: Config) {
-  const isProduction = config.nodeEnv === 'production';
-  const identityAddress = isProduction
+  const identityAddress = config.paymentMode === 'mainnet'
     ? ERC8004_ADDRESSES.mainnet.identity
     : ERC8004_ADDRESSES.sepolia.identity;
   const rpcUrl = config.chainRpcUrl;

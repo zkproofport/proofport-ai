@@ -70,7 +70,6 @@ function buildConstants(
       network: isTestnet ? 'base-sepolia' : 'base',
       currency: 'USDC',
       decimals: 6,
-      testnet_note: 'Base Sepolia USDC does NOT support EIP-3009. Testnet uses direct transfer() + nonce in calldata instead of x402.',
     },
     rpc: {
       eas_rpc_url: config.baseRpcUrl,
@@ -85,7 +84,6 @@ function buildConstants(
       settle_endpoint: 'https://www.x402.org/facilitator/settle',
       protocol: 'EIP-3009 TransferWithAuthorization',
       description: 'Client signs EIP-712 authorization, facilitator settles on-chain (facilitator pays gas)',
-      testnet_note: 'x402/EIP-3009 is NOT available on Base Sepolia. Testnet uses direct transfer() instead.',
       single_step_flow: {
         description: 'x402 single-step flow for clients that do not use sessions. POST /prove with circuit + inputs → receive 402 with nonce in response body → client signs payment → retry with X-Payment-TX and X-Payment-Nonce headers.',
         nonce_details: 'Server returns 32-byte nonce in 402 response body. Client must include nonce in retry as X-Payment-Nonce header. Nonce is single-use (consumed on first successful payment verification). Nonce is circuit-bound (cannot reuse a coinbase_kyc nonce for coinbase_country).',

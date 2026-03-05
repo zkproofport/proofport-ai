@@ -7,6 +7,7 @@ import {
 } from '../skills/skillHandler.js';
 import { getTaskOutcome } from '../skills/flowGuidance.js';
 import { buildGuide } from '../proof/guideBuilder.js';
+import { getChainVerifiers } from '../config/deployments.js';
 import type { RateLimiter } from '../redis/rateLimiter.js';
 import type { ProofCache } from '../redis/proofCache.js';
 import type { RedisClient } from '../redis/client.js';
@@ -55,6 +56,13 @@ function buildSkillDeps(deps: McpServerDeps, config: ReturnType<typeof loadConfi
  *                 inside each tool handler (required for testing without env vars).
  */
 export function createMcpServer(deps: McpServerDeps = {}, config?: ReturnType<typeof loadConfig>): McpServer {
+  const isProduction = deps?.paymentMode === 'mainnet';
+  const chainName = isProduction ? 'Base Mainnet' : 'Base Sepolia';
+  const chainId = isProduction ? 8453 : 84532;
+  const chainVerifiers = getChainVerifiers(String(chainId));
+  const kycVerifier = chainVerifiers['coinbase_attestation'] ?? '(address not yet loaded)';
+  const countryVerifier = chainVerifiers['coinbase_country_attestation'] ?? '(address not yet loaded)';
+
   const server = new McpServer(
     {
       name: 'zkproofport-prover',
@@ -107,9 +115,9 @@ REQUEST BODY SCHEMA:
     }
   }
 
-VERIFIER ADDRESSES (Base Sepolia, chain ID 84532):
-  coinbase_kyc (coinbase_attestation):         0x0036B61dBFaB8f3CfEEF77dD5D45F7EFBFE2035c
-  coinbase_country (coinbase_country_attestation): 0xdEe363585926c3c28327Efd1eDd01cf4559738cf`,
+VERIFIER ADDRESSES (${chainName}, chain ID ${chainId}):
+  coinbase_kyc (coinbase_attestation):         ${kycVerifier}
+  coinbase_country (coinbase_country_attestation): ${countryVerifier}`,
     {
       circuit: z.enum(['coinbase_kyc', 'coinbase_country']).describe('Which circuit to use.'),
       inputs: z.object({
@@ -164,20 +172,19 @@ CIRCUITS:
   1. coinbase_attestation ("coinbase_kyc")
      - Proves the user has passed Coinbase KYC identity verification
      - EAS Schema ID: 0xf8b05c79f090979bf4a80270aba232dff11a10d9ca55c4f88de95317970f0de9
-     - Verifier (Base Sepolia, chain 84532): 0x0036B61dBFaB8f3CfEEF77dD5D45F7EFBFE2035c
+     - Verifier (${chainName}, chain ${chainId}): ${kycVerifier}
      - Required inputs: address, signature, scope
      - Use circuit = "coinbase_kyc" in the prove tool
 
   2. coinbase_country_attestation ("coinbase_country")
      - Proves the user's country of residence from Coinbase attestation is in (or not in) a given country list
      - EAS Schema ID: 0x1801901fabd0e6189356b4fb52bb0ab855276d84f7ec140839fbd1f6801ca065
-     - Verifier (Base Sepolia, chain 84532): 0xdEe363585926c3c28327Efd1eDd01cf4559738cf
+     - Verifier (${chainName}, chain ${chainId}): ${countryVerifier}
      - Required inputs: address, signature, scope, countryList, isIncluded
      - Use circuit = "coinbase_country" in the prove tool
 
 CHAIN INFORMATION:
-  - Current deployments are on Base Sepolia (chain ID 84532, testnet)
-  - Base mainnet (chain ID 8453) production deployment
+  - Current deployments are on ${chainName} (chain ID ${chainId})
   - EAS (Ethereum Attestation Service) on Base: https://base.easpcan.org/graphql
   - EAS on Base Sepolia: https://base-sepolia.easpcan.org/graphql
 
@@ -196,7 +203,7 @@ Response fields:
 - chainId (string): Chain ID for verifier addresses`,
     async () => {
       const resolvedConfig = config || loadConfig();
-      const result = handleGetSupportedCircuits({});
+      const result = handleGetSupportedCircuits({}, deps?.paymentMode);
       const circuitAliasMap: Record<string, string> = {
         coinbase_attestation: 'coinbase_kyc',
         coinbase_country_attestation: 'coinbase_country',
@@ -358,12 +365,12 @@ For coinbase_country circuit, include country_list and is_included in the plaint
 
 ---
 
-### VERIFIER CONTRACTS (Base Sepolia, chain 84532)
+### VERIFIER CONTRACTS (${chainName}, chain ${chainId})
 
 | Circuit | Address |
 |---------|---------|
-| coinbase_attestation | 0x0036B61dBFaB8f3CfEEF77dD5D45F7EFBFE2035c |
-| coinbase_country_attestation | 0xdEe363585926c3c28327Efd1eDd01cf4559738cf |
+| coinbase_attestation | ${kycVerifier} |
+| coinbase_country_attestation | ${countryVerifier} |
 
 Call \`verify(proof, publicInputs)\` on the verifier contract to confirm the proof on-chain.
 `,

@@ -430,8 +430,7 @@ components:
           description: Public inputs as bytes32 hex strings
         chainId:
           type: string
-          description: Chain ID for verification (default 84532 for Base Sepolia)
-          default: '84532'
+          description: Chain ID for verification. Use 84532 for Base Sepolia (staging) or 8453 for Base Mainnet (production). Server determines default based on environment.
 
     VerifyResponse:
       type: object
@@ -476,7 +475,7 @@ components:
               example: '$0.10'
             network:
               type: string
-              example: base-sepolia
+              description: Payment network (base-sepolia for staging, base for production)
             token:
               type: string
               example: USDC
@@ -485,10 +484,10 @@ components:
     x402:
       type: apiKey
       in: header
-      name: X-PAYMENT
+      name: X-Payment-TX
       description: |
-        x402 micropayment protocol. Include USDC payment proof in the X-PAYMENT header.
-        Payment is $0.10 USDC per proof generation/verification call on Base Sepolia.
+        x402 micropayment protocol. Include the on-chain USDC payment transaction hash.
+        Payment is $0.10 USDC per proof generation/verification call. Network depends on environment (Base Sepolia for staging, Base Mainnet for production).
         See https://www.x402.org for protocol details.
 
 tags:

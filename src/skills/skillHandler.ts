@@ -86,8 +86,10 @@ export interface GetSupportedCircuitsResult {
  */
 export function handleGetSupportedCircuits(
   params: GetSupportedCircuitsParams,
+  paymentMode: 'disabled' | 'testnet' | 'mainnet' = 'testnet',
 ): GetSupportedCircuitsResult {
-  const chainId = params.chainId || '84532';
+  const defaultChainId = paymentMode === 'mainnet' ? '8453' : '84532';
+  const chainId = params.chainId || defaultChainId;
   const chainVerifiers = getChainVerifiers(chainId);
 
   const circuits: CircuitInfo[] = Object.values(CIRCUITS).map(circuit => ({
