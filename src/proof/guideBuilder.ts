@@ -46,6 +46,7 @@ function buildConstants(
   chainId: number,
   usdcAddress: string,
   paymentAmount: string,
+  facilitatorUrl: string,
 ) {
   const circuit = CIRCUITS[circuitId];
   const chainVerifiers = getChainVerifiers(String(chainId));
@@ -80,8 +81,8 @@ function buildConstants(
       payment_rpc_note: 'Used for x402 payment settlement and on-chain proof verification.',
     },
     x402: {
-      facilitator_url: 'https://www.x402.org/facilitator',
-      settle_endpoint: 'https://www.x402.org/facilitator/settle',
+      facilitator_url: facilitatorUrl,
+      settle_endpoint: `${facilitatorUrl}/settle`,
       protocol: 'EIP-3009 TransferWithAuthorization',
       description: 'Client signs EIP-712 authorization, facilitator settles on-chain (facilitator pays gas)',
       single_step_flow: {
@@ -358,7 +359,7 @@ cd proofport-ai && npm install && npx tsc -p packages/sdk
 ATTESTATION_KEY=0x... PAYMENT_KEY=0x... SERVER_URL=${config.a2aBaseUrl} npx tsx packages/sdk/examples/full-flow.ts`,
     },
 
-    constants: buildConstants(config, circuitId, isTestnet, chainId, usdcAddress, paymentAmount),
+    constants: buildConstants(config, circuitId, isTestnet, chainId, usdcAddress, paymentAmount, config.x402FacilitatorUrl),
     formulas: buildFormulas(circuitId),
 
     input_schema: buildInputSchema(circuitId),

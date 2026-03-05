@@ -2,7 +2,7 @@ import { ethers } from 'ethers';
 import type { PaymentInfo } from './types.js';
 import type { ProofportSigner } from './signer.js';
 
-const X402_FACILITATOR = 'https://www.x402.org/facilitator';
+const DEFAULT_X402_FACILITATOR = 'https://x402.dexter.cash';
 
 const CHAIN_IDS: Record<string, number> = {
   'base-sepolia': 84532,
@@ -24,12 +24,15 @@ const USDC_DOMAIN_NAMES: Record<string, string> = {
  *
  * @param signer - ProofportSigner (ethers, CDP MPC, or any implementation)
  * @param payment - PaymentInfo from session or 402 response
+ * @param facilitatorUrl - Optional x402 facilitator URL (defaults to https://x402.dexter.cash)
  * @returns Transaction hash
  */
 export async function makePayment(
   signer: ProofportSigner,
   payment: PaymentInfo,
+  facilitatorUrl?: string,
 ): Promise<string> {
+  const facilitator = facilitatorUrl || DEFAULT_X402_FACILITATOR;
   const network = payment.network as 'base-sepolia' | 'base';
   const chainId = CHAIN_IDS[network];
   if (!chainId) {
@@ -113,7 +116,7 @@ export async function makePayment(
     },
   };
 
-  const settleResponse = await fetch(`${X402_FACILITATOR}/settle`, {
+  const settleResponse = await fetch(`${facilitator}/settle`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(settlePayload),

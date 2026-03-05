@@ -46,6 +46,7 @@ export function loadConfig() {
     // Payment (required when paymentMode !== 'disabled')
     paymentPayTo: process.env.PAYMENT_PAY_TO || '',
     paymentProofPrice: process.env.PAYMENT_PROOF_PRICE || '$0.10',
+    x402FacilitatorUrl: process.env.X402_FACILITATOR_URL || 'https://x402.dexter.cash',
 
     // TEE (optional)
     teeMode: validateTeeMode(process.env.TEE_MODE || 'disabled'),

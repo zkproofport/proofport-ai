@@ -27,6 +27,8 @@ export interface ClientConfig {
   easRpcUrl?: string;
   /** EAS GraphQL endpoint */
   easGraphqlUrl?: string;
+  /** x402 facilitator URL for payment settlement */
+  facilitatorUrl?: string;
 }
 
 // ─── Payment ────────────────────────────────────────────────────────────
@@ -58,6 +60,7 @@ export interface ChallengeResponse {
   message: string;
   nonce: string;
   payment: PaymentRequirements;
+  facilitatorUrl?: string;
   teePublicKey?: {
     publicKey: string;
     keyId: string;

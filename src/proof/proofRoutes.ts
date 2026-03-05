@@ -289,6 +289,7 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
           message: 'Send payment and retry with X-Payment-TX and X-Payment-Nonce headers',
           nonce,
           payment: paymentRequirements,
+          facilitatorUrl: config.x402FacilitatorUrl,
           teePublicKey,
         });
         return;
