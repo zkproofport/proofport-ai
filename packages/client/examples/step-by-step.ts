@@ -50,7 +50,7 @@ async function main() {
   const signalHashHex = ethers.hexlify(signalHash);
   const signature = await attestationWallet.signMessage(ethers.getBytes(signalHashHex));
   console.log(`  Signal hash: ${signalHashHex}`);
-  console.log(`  Signature:   ${signature.slice(0, 42)}...`);
+  console.log(`  Signature:   ${signature}`);
   console.log('');
 
   // -- Step 2: Prepare Circuit Inputs --
@@ -61,9 +61,9 @@ async function main() {
     userSignature: signature,
     scope,
   });
-  console.log(`  Signal hash:  ${inputs.signal_hash.slice(0, 18)}...`);
-  console.log(`  Nullifier:    ${inputs.nullifier.slice(0, 18)}...`);
-  console.log(`  Merkle root:  ${inputs.merkle_root.slice(0, 18)}...`);
+  console.log(`  Signal hash:  ${inputs.signal_hash}`);
+  console.log(`  Nullifier:    ${inputs.nullifier}`);
+  console.log(`  Merkle root:  ${inputs.merkle_root}`);
   console.log(`  TX length:    ${inputs.tx_length} bytes`);
   console.log('');
 
@@ -105,8 +105,8 @@ async function main() {
     paymentTxHash,
     paymentNonce: challenge.nonce,
   });
-  console.log(`  Proof:     ${proveResult.proof.slice(0, 42)}...`);
-  console.log(`  Inputs:    ${proveResult.publicInputs.slice(0, 42)}...`);
+  console.log(`  Proof:     ${proveResult.proof}`);
+  console.log(`  Inputs:    ${proveResult.publicInputs}`);
   console.log(`  TEE:       ${proveResult.attestation ? 'Attested' : 'None'}`);
   console.log(`  Timing:    ${proveResult.timing.totalMs}ms total`);
   console.log('');
