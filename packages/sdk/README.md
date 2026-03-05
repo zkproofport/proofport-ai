@@ -101,12 +101,35 @@ import { generateProof, createConfig, fromPrivateKey, CdpWalletSigner, verifyPro
 
 const config = createConfig();
 const attestationSigner = fromPrivateKey(process.env.ATTESTATION_KEY);
-const paymentSigner = await CdpWalletSigner.create({
-  apiKeyId: process.env.CDP_API_KEY_ID,
-  apiKeySecret: process.env.CDP_API_KEY_SECRET,
-  walletSecret: process.env.CDP_WALLET_SECRET,
-  address: process.env.CDP_WALLET_ADDRESS,
+const paymentSigner = new CdpWalletSigner({
+  getAddress: () => myWallet.getAddress(),
+  signMessage: (msg) => myWallet.signMessage(msg),
+  signTypedData: (domain, types, message) => myWallet.signTypedData(domain, types, message),
 });
+
+const result = await generateProof(
+  config,
+  { attestation: attestationSigner, payment: paymentSigner },
+  { circuit: 'coinbase_kyc', scope: 'my-app' }
+);
+
+const verification = await verifyProof(result);
+console.log('Valid:', verification.valid);
+```
+
+### External Wallet Adapter
+
+Wrap any external wallet (WalletConnect, MetaMask, etc.) using `fromExternalWallet()`:
+
+```typescript
+import { generateProof, createConfig, fromPrivateKey, fromExternalWallet, verifyProof } from '@zkproofport-ai/sdk';
+
+const config = createConfig();
+const attestationSigner = fromPrivateKey(process.env.ATTESTATION_KEY);
+
+// Wrap external wallet (e.g., from WalletConnect modal, Privy, etc.)
+const externalWallet = await getWalletFromUI(); // Your wallet integration
+const paymentSigner = fromExternalWallet(externalWallet);
 
 const result = await generateProof(
   config,
@@ -132,6 +155,14 @@ const config = createConfig({
   easRpcUrl: 'https://mainnet.base.org',
   easGraphqlUrl: 'https://base.easscan.org/graphql',
 });
+
+// Custom x402 facilitator (e.g., for CDP with JWT auth)
+const config = createConfig({
+  facilitatorUrl: 'https://facilitator.example.com',
+  facilitatorHeaders: {
+    'Authorization': `Bearer ${process.env.CDP_FACILITATOR_TOKEN}`,
+  },
+});
 ```
 
 **Configuration fields:**
@@ -141,6 +172,8 @@ const config = createConfig({
 | `baseUrl` | string | `https://ai.zkproofport.app` | proofport-ai server URL |
 | `easRpcUrl` | string | `https://mainnet.base.org` | Base Mainnet RPC for EAS attestation queries |
 | `easGraphqlUrl` | string | `https://base.easscan.org/graphql` | EAS GraphQL endpoint for attestation schema queries |
+| `facilitatorUrl` | string | `https://x402.dexter.cash` | x402 payment facilitator URL |
+| `facilitatorHeaders` | object | `{}` | Optional auth headers for custom facilitator (e.g., CDP with JWT) |
 
 ## Proof Generation
 
@@ -334,6 +367,8 @@ interface ClientConfig {
   baseUrl: string;
   easRpcUrl?: string;
   easGraphqlUrl?: string;
+  facilitatorUrl?: string;           // x402 facilitator URL (default: https://x402.dexter.cash)
+  facilitatorHeaders?: Record<string, string>; // Auth headers for custom facilitator
 }
 ```
 
@@ -346,6 +381,27 @@ interface ProofportSigner {
   signTypedData(domain: {...}, types: {...}, message: {...}): Promise<string>;
   sendTransaction(tx: {...}): Promise<{ hash: string; wait(): Promise<{...}> }>;
 }
+
+// Create signer from ethers private key
+function fromPrivateKey(key: string, provider?: ethers.Provider): ProofportSigner;
+
+// Create signer from any external wallet (CDP, WalletConnect, Privy, etc.)
+class CdpWalletSigner implements ProofportSigner {
+  constructor(wallet: {
+    getAddress(): string | Promise<string>;
+    signMessage(message: Uint8Array | string): Promise<string>;
+    signTypedData(domain: Record<string, unknown>, types: Record<string, Array<{ name: string; type: string }>>, message: Record<string, unknown>): Promise<string>;
+    sendTransaction?(tx: { to: string; data: string; value?: bigint }): Promise<{ hash: string; wait(): Promise<{ status: number | null }> }>;
+  });
+}
+
+// Wrap external wallet (WalletConnect, MetaMask, Privy, etc.)
+function fromExternalWallet(wallet: {
+  address: string | (() => Promise<string>);
+  signMessage(message: Uint8Array): Promise<string>;
+  signTypedData(domain: any, types: any, message: any): Promise<string>;
+  sendTransaction?(tx: any): Promise<{ hash: string; wait(): Promise<any> }>;
+}): ProofportSigner;
 ```
 
 **Proof Parameters:**
@@ -414,10 +470,24 @@ Payment is transparent to the application. When `generateProof()` runs, the user
 - Method: EIP-3009 `TransferWithAuthorization`
 - Token: USDC on Base Mainnet
 - Amount: $0.10 per proof
-- Facilitator: https://www.x402.org/facilitator (pays gas)
+- Facilitator: `https://x402.dexter.cash` (default, pays gas)
 - User cost: Only USDC, no ETH for gas
+- Custom facilitator: Use `facilitatorUrl` + `facilitatorHeaders` in `ClientConfig` for alternative facilitators (e.g., CDP with JWT auth)
 
 The payment transaction hash is included in `result.paymentTxHash` for settlement tracking.
+
+### Custom Facilitator (CDP Example)
+
+```typescript
+const config = createConfig({
+  facilitatorUrl: 'https://cdp-facilitator.example.com',
+  facilitatorHeaders: {
+    'Authorization': `Bearer ${process.env.CDP_JWT_TOKEN}`,
+  },
+});
+
+const result = await generateProof(config, signers, params);
+```
 
 ## Error Handling
 

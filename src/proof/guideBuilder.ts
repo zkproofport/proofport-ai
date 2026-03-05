@@ -357,6 +357,21 @@ cd proofport-ai && npm install && npx tsc -p packages/sdk
 
 # Run full-flow example
 ATTESTATION_KEY=0x... PAYMENT_KEY=0x... SERVER_URL=${config.a2aBaseUrl} npx tsx packages/sdk/examples/full-flow.ts`,
+      cdp_wallet: `\
+// CDP wallet or any external wallet adapter
+import { generateProof, CdpWalletSigner } from '@zkproofport-ai/sdk';
+
+const signer = new CdpWalletSigner({
+  getAddress: () => myWallet.getAddress(),
+  signMessage: (msg) => myWallet.signMessage(msg),
+  signTypedData: (domain, types, message) => myWallet.signTypedData(domain, types, message),
+});
+
+const result = await generateProof(
+  { baseUrl: '${config.a2aBaseUrl}' },
+  { attestation: signer },
+  { circuit: '${circuitAlias(circuitId)}', scope: 'proofport' },
+);`,
     },
 
     constants: buildConstants(config, circuitId, isTestnet, chainId, usdcAddress, paymentAmount, config.x402FacilitatorUrl),

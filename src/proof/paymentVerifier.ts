@@ -27,14 +27,26 @@ export async function verifyPaymentOnChain(params: {
   try {
     const provider = new ethers.JsonRpcProvider(rpcUrl);
 
+    log.info({ action: 'payment.verify.start', txHash, network, rpcUrl }, 'Verifying payment on-chain');
+
     // Get transaction and receipt
-    const [tx, receipt] = await Promise.all([
-      provider.getTransaction(txHash),
-      provider.getTransactionReceipt(txHash),
-    ]);
+    let tx = null;
+    let receipt = null;
+    // Retry loop: facilitator tx may not be visible on public RPC immediately
+    for (let attempt = 0; attempt < 5; attempt++) {
+      [tx, receipt] = await Promise.all([
+        provider.getTransaction(txHash),
+        provider.getTransactionReceipt(txHash),
+      ]);
+      if (tx) break;
+      if (attempt < 4) {
+        log.info({ action: 'payment.verify.retry', attempt: attempt + 1, txHash }, 'Transaction not found yet, retrying...');
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    }
 
     if (!tx) {
-      return { valid: false, error: 'Transaction not found', reason: 'tx_not_found' };
+      return { valid: false, error: 'Transaction not found after retries', reason: 'tx_not_found' };
     }
 
     if (!receipt) {

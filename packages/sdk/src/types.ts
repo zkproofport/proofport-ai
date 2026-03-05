@@ -29,6 +29,8 @@ export interface ClientConfig {
   easGraphqlUrl?: string;
   /** x402 facilitator URL for payment settlement */
   facilitatorUrl?: string;
+  /** Optional headers for facilitator auth (e.g., CDP Bearer token) */
+  facilitatorHeaders?: Record<string, string>;
 }
 
 // ─── Payment ────────────────────────────────────────────────────────────

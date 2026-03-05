@@ -25,12 +25,14 @@ const USDC_DOMAIN_NAMES: Record<string, string> = {
  * @param signer - ProofportSigner (ethers, CDP MPC, or any implementation)
  * @param payment - PaymentInfo from session or 402 response
  * @param facilitatorUrl - Optional x402 facilitator URL (defaults to https://x402.dexter.cash)
+ * @param facilitatorHeaders - Optional headers for facilitator auth (e.g., CDP Bearer token)
  * @returns Transaction hash
  */
 export async function makePayment(
   signer: ProofportSigner,
   payment: PaymentInfo,
   facilitatorUrl?: string,
+  facilitatorHeaders?: Record<string, string>,
 ): Promise<string> {
   const facilitator = facilitatorUrl || DEFAULT_X402_FACILITATOR;
   const network = payment.network as 'base-sepolia' | 'base';
@@ -118,7 +120,7 @@ export async function makePayment(
 
   const settleResponse = await fetch(`${facilitator}/settle`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...facilitatorHeaders },
     body: JSON.stringify(settlePayload),
   });
 

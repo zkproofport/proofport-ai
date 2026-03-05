@@ -91,7 +91,12 @@ export async function generateProof(
     network: challenge.payment.network,
     instruction: challenge.payment.description,
   };
-  const paymentTxHash = await makePayment(paymentSigner, paymentInfo, config.facilitatorUrl || challenge.facilitatorUrl);
+  const paymentTxHash = await makePayment(
+    paymentSigner,
+    paymentInfo,
+    config.facilitatorUrl || challenge.facilitatorUrl,
+    config.facilitatorHeaders,
+  );
   recordStep(4, 'Make Payment', { txHash: paymentTxHash }, t);
 
   // Step 5: Submit proof (encrypted or plaintext based on TEE availability)

@@ -86,6 +86,32 @@ log "Pulling image: $AI_IMAGE"
 docker pull "$AI_IMAGE"
 
 # ---------------------------------------------------------------------------
+# Ensure Redis is running (required before app starts)
+# ---------------------------------------------------------------------------
+log "Checking Redis..."
+
+if docker ps --format '{{.Names}}' | grep -q '^proofport-redis$'; then
+  log "Redis container already running"
+else
+  log "Redis not running — starting..."
+  docker rm -f proofport-redis 2>/dev/null || true
+  docker run -d \
+    --name proofport-redis \
+    --restart unless-stopped \
+    -p 6379:6379 \
+    -v /opt/proofport-ai/redis-data:/data \
+    redis:7-alpine redis-server --appendonly yes
+  sleep 2
+fi
+
+# Verify Redis responds
+if docker exec proofport-redis redis-cli ping | grep -q PONG; then
+  log "Redis is healthy"
+else
+  die "Redis health check failed"
+fi
+
+# ---------------------------------------------------------------------------
 # Remove stale container on new slot (if any)
 # ---------------------------------------------------------------------------
 log "Removing any stale container: $NEW_CONTAINER"

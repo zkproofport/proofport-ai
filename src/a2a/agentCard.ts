@@ -438,7 +438,7 @@ Generates zero-knowledge proofs from Coinbase Verified Account attestations on B
 - **Protocol**: x402
 - **Amount**: ${priceStr} USDC
 - **Network**: ${network}
-- **Method**: EIP-3009 TransferWithAuthorization via x402 facilitator (https://www.x402.org/facilitator)
+- **Method**: EIP-3009 TransferWithAuthorization via x402 facilitator (configurable, default: https://x402.dexter.cash)
 - **x402 Single-Step**: POST /prove with \`{ circuit, inputs }\` → 402 response includes nonce in body → pay with signature → retry with \`X-Payment-TX\` and \`X-Payment-Nonce\` headers. Nonce is single-use and circuit-bound.
 
 ## Quick Start

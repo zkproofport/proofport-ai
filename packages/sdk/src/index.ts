@@ -64,7 +64,8 @@ export type { ProofportSigner } from './signer.js';
 export { EthersWalletSigner, fromEthersWallet, fromPrivateKey } from './signer.js';
 
 // CDP (Coinbase Developer Platform) signer
-export { CdpWalletSigner } from './cdp.js';
+export { CdpWalletSigner, fromExternalWallet } from './cdp.js';
+export type { ExternalWallet } from './cdp.js';
 
 // Attestation
 export {
