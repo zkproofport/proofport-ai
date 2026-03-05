@@ -313,10 +313,11 @@ describe('MCP Endpoint E2E', () => {
         },
       });
 
-      // Verify all two tools are present
+      // Verify all three tools are present
       const tools = data.result.tools;
-      expect(tools).toHaveLength(2);
+      expect(tools).toHaveLength(3);
       expect(tools.map((t: any) => t.name).sort()).toEqual([
+        'get_guide',
         'get_supported_circuits',
         'prove',
       ]);
@@ -392,7 +393,7 @@ describe('MCP Endpoint E2E', () => {
     });
 
     it('should handle tools/call for unknown tool (verify_proof does not exist in remote MCP)', async () => {
-      // verify_proof is only in the local MCP server (packages/mcp-server), not the remote MCP server.
+      // verify_proof is only in the local MCP server (packages/mcp), not the remote MCP server.
       // The remote MCP server only has: prove, get_supported_circuits.
       const response = await request(app)
         .post('/mcp')
@@ -566,6 +567,7 @@ describe('MCP Endpoint E2E', () => {
       expect(body).toHaveProperty('tools');
       expect(Array.isArray(body.tools)).toBe(true);
       expect(body.tools.map((t: any) => t.name).sort()).toEqual([
+        'get_guide',
         'get_supported_circuits',
         'prove',
       ]);

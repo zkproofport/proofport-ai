@@ -282,15 +282,15 @@ describe('MCP SDK Client Integration', () => {
       }
     });
 
-    it('client.listTools() should return exactly 2 tools: prove and get_supported_circuits', async () => {
+    it('client.listTools() should return exactly 3 tools: prove, get_supported_circuits, get_guide', async () => {
       const { client, transport } = await createMcpClient(port);
       try {
         const result = await client.listTools();
         expect(result.tools).toBeDefined();
-        expect(result.tools).toHaveLength(2);
+        expect(result.tools).toHaveLength(3);
 
         const toolNames = result.tools.map((t) => t.name).sort();
-        expect(toolNames).toEqual(['get_supported_circuits', 'prove']);
+        expect(toolNames).toEqual(['get_guide', 'get_supported_circuits', 'prove']);
       } finally {
         await transport.close();
       }
