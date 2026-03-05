@@ -36,7 +36,7 @@ jobs:
           fi
 
       - name: Install dependencies
-        run: npm install
+        run: rm -f package-lock.json && npm install
 
       - name: Build SDK (always needed)
         run: npx tsc -p packages/sdk
