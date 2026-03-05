@@ -300,26 +300,23 @@ export function buildGuide(circuitId: CircuitId, config: Config): object {
     display_name: circuit.displayName,
     description: circuit.description,
 
-    // PRIMARY RECOMMENDATION: Local MCP Server
+    // PRIMARY RECOMMENDATION: Local MCP Server (npm package)
     local_mcp_server: {
       recommended: true,
+      npm_package: '@zkproofport-ai/mcp',
+      readme: 'https://www.npmjs.com/package/@zkproofport-ai/mcp',
       description:
-        'RECOMMENDED: Install and run the local MCP server. It handles all cryptographic computation, ' +
-        'attestation fetching, payment, and proof submission automatically via MCP tools.',
-      setup: {
-        clone: 'git clone https://github.com/zkproofport/proofport-ai.git',
-        install: 'cd proofport-ai && npm install && npx tsc -p packages/sdk',
-        run: 'cd proofport-ai && ATTESTATION_KEY=0x... npx tsx packages/mcp/src/index.ts',
-      },
-      claude_desktop_config: {
+        'RECOMMENDED: Install the @zkproofport-ai/mcp package via npx. It runs locally and handles all cryptographic computation, ' +
+        'attestation fetching, payment, and proof submission automatically via MCP tools. ' +
+        'Your private key never leaves your machine — only cryptographic signatures are sent to the server.',
+      install: 'npx -y @zkproofport-ai/mcp',
+      mcp_config: {
         mcpServers: {
-          proofport: {
+          zkproofport: {
             command: 'npx',
-            args: ['tsx', 'packages/mcp/src/index.ts'],
+            args: ['-y', '@zkproofport-ai/mcp'],
             env: {
-              ATTESTATION_KEY: '0x... (private key of wallet with Coinbase EAS attestation on Base)',
-              PAYMENT_KEY: '0x... (optional: private key of wallet with USDC, defaults to ATTESTATION_KEY)',
-              PROOFPORT_URL: config.a2aBaseUrl,
+              ATTESTATION_KEY: '0x_YOUR_ATTESTATION_WALLET_PRIVATE_KEY',
             },
           },
         },
@@ -327,36 +324,19 @@ export function buildGuide(circuitId: CircuitId, config: Config): object {
       env_vars: {
         ATTESTATION_KEY: {
           required: true,
-          description: 'Private key of wallet with Coinbase EAS KYC attestation on Base. This wallet must have a valid, non-revoked Coinbase Verified Account attestation.',
+          description: 'Private key of wallet with Coinbase EAS KYC attestation on Base.',
         },
         PAYMENT_KEY: {
           required: false,
-          description: 'Private key of wallet with USDC balance for proof payment. Defaults to ATTESTATION_KEY if not set. Can be a different wallet.',
-        },
-        PROOFPORT_URL: {
-          required: false,
-          default: config.a2aBaseUrl,
-          description: 'ZKProofport server URL for remote proof generation in TEE.',
+          description: 'Private key of separate wallet with USDC balance. Defaults to ATTESTATION_KEY.',
         },
         CDP_API_KEY_ID: {
           required: false,
-          description: 'Coinbase Developer Platform API key ID. Set this instead of PAYMENT_KEY to use a CDP MPC wallet for payment.',
-        },
-        CDP_API_KEY_SECRET: {
-          required: false,
-          description: 'CDP API key secret.',
-        },
-        CDP_WALLET_SECRET: {
-          required: false,
-          description: 'CDP wallet encryption secret.',
-        },
-        CDP_WALLET_ADDRESS: {
-          required: false,
-          description: 'Existing CDP wallet address to reuse. If omitted, a new wallet is created.',
+          description: 'CDP API key ID. Set CDP_API_KEY_ID + CDP_API_KEY_SECRET + CDP_WALLET_SECRET together to use a Coinbase MPC wallet for payment.',
         },
       },
       tools: [
-        'generate_proof — All-in-one: prepare inputs + pay + generate proof',
+        'generate_proof — All-in-one: prepare inputs + pay + generate proof (recommended)',
         'get_supported_circuits — List available circuits',
         'prepare_inputs — Step 1: Prepare all circuit inputs',
         'request_challenge — Step 2: Get 402 payment challenge',
