@@ -4,7 +4,12 @@ import { AUTHORIZED_SIGNERS, COINBASE_ATTESTER_CONTRACT, VERIFIER_ADDRESSES } fr
 import type { Config } from '../config/index.js';
 
 const require = createRequire(import.meta.url);
-const mcpPkgVersion: string = require('../../packages/mcp/package.json').version;
+let mcpPkgVersion: string;
+try {
+  mcpPkgVersion = require('../../packages/mcp/package.json').version;
+} catch {
+  mcpPkgVersion = '0.1.0';
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -279,9 +284,9 @@ function buildEndpoints(config: Config, circuitId: CircuitId) {
       method: 'POST',
       url: `${config.a2aBaseUrl}/api/v1/prove`,
       content_type: 'application/json',
-      flow: 'x402 single-step: POST with {circuit, inputs} → 402 with nonce → pay → retry with X-Payment-TX and X-Payment-Nonce headers',
+      flow: 'x402 single-step: POST with {circuit} → 402 with nonce + TEE public key → encrypt inputs → pay → retry with {circuit, encrypted_payload} + payment headers',
       timeout_hint: '10-30 seconds',
-      description: 'Verifies payment on-chain and triggers ZK proof generation inside TEE',
+      description: 'Verifies payment on-chain and triggers ZK proof generation inside TEE. Inputs are E2E encrypted — the server is a blind relay.',
     },
     guide: {
       method: 'GET',
@@ -303,6 +308,15 @@ export function buildGuide(circuitId: CircuitId, config: Config): object {
     circuit_id: circuitId,
     display_name: circuit.displayName,
     description: circuit.description,
+
+    // E2E Encryption with TEE (Trusted Execution Environment)
+    e2e_encryption: {
+      enabled: true,
+      description: 'All proof inputs are end-to-end encrypted using X25519 ECDH + AES-256-GCM. The server acts as a blind relay and cannot read your inputs.',
+      protocol: 'Client encrypts with TEE\'s attested X25519 public key (bound to AWS Nitro Enclave attestation). Only the TEE can decrypt and generate the proof.',
+      tee_public_key: 'Included in the 402 challenge response as teePublicKey field. Cryptographically verified via AWS Nitro attestation document (COSE Sign1).',
+      sdk_usage: 'generateProof() automatically detects and applies E2E encryption when TEE is available. No additional configuration needed.',
+    },
 
     // PRIMARY RECOMMENDATION: Local MCP Server (npm package)
     local_mcp_server: {

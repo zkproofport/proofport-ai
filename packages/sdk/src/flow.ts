@@ -11,9 +11,11 @@ import { CIRCUIT_NAME_MAP } from './types.js';
 import { requestChallenge } from './session.js';
 import { prepareInputs, computeSignalHash } from './inputs.js';
 import { makePayment } from './payment.js';
-import { submitProof } from './prove.js';
+import { submitProof, submitEncryptedProof } from './prove.js';
 import type { ProofportSigner } from './signer.js';
 import { USDC_ADDRESSES } from './constants.js';
+import { encryptForTee } from './tee.js';
+import { buildProverToml } from './toml.js';
 
 export interface FlowCallbacks {
   onStep?: (step: StepResult) => void;
@@ -21,6 +23,11 @@ export interface FlowCallbacks {
 
 /**
  * Generate a ZK proof end-to-end using x402 single-step flow.
+ *
+ * Automatically detects E2E encryption: if the server returns a TEE public key
+ * in the 402 challenge response (TEE mode = nitro), inputs are encrypted with
+ * the TEE's attested X25519 public key. Otherwise (TEE disabled), inputs are
+ * sent in plaintext.
  *
  * @param config - Server URL and RPC endpoints
  * @param signers - ProofportSigner for attestation (required) and payment (optional, defaults to attestation)
@@ -36,7 +43,6 @@ export async function generateProof(
 ): Promise<ProofResult> {
   const circuitId: CircuitId = CIRCUIT_NAME_MAP[params.circuit];
   const scope = params.scope || 'proofport';
-
   const paymentSigner = signers.payment || signers.attestation;
 
   const steps: StepResult[] = [];
@@ -47,7 +53,7 @@ export async function generateProof(
     return data;
   }
 
-  // Step 1: Sign signal hash with attestation signer
+  // Step 1: Sign signal hash
   let t = Date.now();
   const attestationAddress = await signers.attestation.getAddress();
   const signalHash = computeSignalHash(attestationAddress, scope, circuitId);
@@ -55,7 +61,7 @@ export async function generateProof(
   const signature = await signers.attestation.signMessage(signalHash);
   recordStep(1, 'Sign Signal Hash', { signalHash: signalHashHex, signature }, t);
 
-  // Step 2: Prepare circuit inputs
+  // Step 2: Prepare inputs + build proverToml locally
   t = Date.now();
   const inputs = await prepareInputs(config, {
     circuitId,
@@ -65,17 +71,18 @@ export async function generateProof(
     countryList: params.countryList,
     isIncluded: params.isIncluded,
   });
-  recordStep(2, 'Prepare Inputs', inputs, t);
+  const proverToml = buildProverToml(circuitId, inputs);
+  recordStep(2, 'Prepare Inputs', { inputFields: Object.keys(inputs).length, tomlLength: proverToml.length }, t);
 
-  // Step 3: Request 402 challenge (POST /prove without payment headers)
+  // Step 3: Request 402 challenge (without inputs — server only needs circuit)
   t = Date.now();
-  const challenge = await requestChallenge(config, params.circuit, inputs);
-  recordStep(3, 'Request Challenge', challenge, t);
+  const challenge = await requestChallenge(config, params.circuit);
+  const isE2E = !!challenge.teePublicKey;
+  recordStep(3, 'Request Challenge', { nonce: challenge.nonce, e2e: isE2E, keyId: challenge.teePublicKey?.keyId ?? null }, t);
 
   // Step 4: Make payment
   t = Date.now();
   const network = challenge.payment.network as string;
-
   const paymentInfo: PaymentInfo = {
     nonce: challenge.nonce,
     recipient: challenge.payment.payTo,
@@ -84,19 +91,36 @@ export async function generateProof(
     network: challenge.payment.network,
     instruction: challenge.payment.description,
   };
-
   const paymentTxHash = await makePayment(paymentSigner, paymentInfo);
   recordStep(4, 'Make Payment', { txHash: paymentTxHash }, t);
 
-  // Step 5: Submit proof with payment headers
+  // Step 5: Submit proof (encrypted or plaintext based on TEE availability)
   t = Date.now();
-  const proveResponse = await submitProof(config, {
-    circuit: params.circuit,
-    inputs,
-    paymentTxHash,
-    paymentNonce: challenge.nonce,
-  });
-  recordStep(5, 'Generate Proof', proveResponse, t);
+  let proveResponse;
+
+  if (isE2E) {
+    // E2E path: encrypt inputs with TEE's attested public key
+    const encryptedPayload = encryptForTee(
+      JSON.stringify({ circuitId, proverToml }),
+      challenge.teePublicKey!.publicKey,
+    );
+    proveResponse = await submitEncryptedProof(config, {
+      circuit: params.circuit,
+      encryptedPayload,
+      paymentTxHash,
+      paymentNonce: challenge.nonce,
+    });
+    recordStep(5, 'Generate Proof (E2E Encrypted)', proveResponse, t);
+  } else {
+    // Standard path: send plaintext inputs (TEE disabled / local dev)
+    proveResponse = await submitProof(config, {
+      circuit: params.circuit,
+      inputs,
+      paymentTxHash,
+      paymentNonce: challenge.nonce,
+    });
+    recordStep(5, 'Generate Proof', proveResponse, t);
+  }
 
   return {
     proof: proveResponse.proof,

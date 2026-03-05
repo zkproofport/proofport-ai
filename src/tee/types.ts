@@ -2,6 +2,8 @@
  * TEE (Trusted Execution Environment) type definitions
  */
 
+import type { EncryptedEnvelope, TeePublicKeyInfo } from './teeKeyExchange.js';
+
 /**
  * TeeMode defines the proof generation environment
  * - disabled: TEE not used, proofs generated locally via bbProver
@@ -36,10 +38,11 @@ export interface EnclaveImageConfig {
  * Request sent to enclave via vsock
  */
 export interface VsockRequest {
-  type: 'prove' | 'health';
+  type: 'prove' | 'health' | 'getPublicKey';
   circuitId?: string;
   inputs?: string[]; // DEPRECATED: kept for compatibility
   proverToml?: string; // Prover.toml content for bb CLI path
+  encryptedPayload?: EncryptedEnvelope; // E2E encrypted payload for TEE
   requestId: string;
 }
 
@@ -47,12 +50,14 @@ export interface VsockRequest {
  * Response received from enclave via vsock
  */
 export interface VsockResponse {
-  type: 'proof' | 'health' | 'error';
+  type: 'proof' | 'health' | 'error' | 'publicKey';
   requestId: string;
   proof?: string;
   publicInputs?: string[];
   attestationDocument?: string; // base64-encoded COSE Sign1
   error?: string;
+  publicKey?: string;  // hex-encoded X25519 public key
+  keyId?: string;      // key rotation identifier
 }
 
 /**
@@ -86,7 +91,9 @@ export interface AttestationDocument {
 export interface TeeProvider {
   readonly mode: TeeMode;
   prove(circuitId: string, inputs: string[], requestId: string, proverToml?: string): Promise<VsockResponse>;
+  proveEncrypted(encryptedPayload: EncryptedEnvelope, requestId: string): Promise<VsockResponse>;
   healthCheck(): Promise<boolean>;
   getAttestation(): Promise<AttestationDocument | null>;
   generateAttestation(proofHash: string, metadata?: Record<string, unknown>): Promise<AttestationResult | null>;
+  getTeePublicKey(): Promise<TeePublicKeyInfo | null>;
 }

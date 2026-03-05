@@ -7,13 +7,13 @@ import type { ClientConfig, CircuitName, ChallengeResponse, ProveInputs } from '
 export async function requestChallenge(
   config: ClientConfig,
   circuit: CircuitName,
-  inputs: ProveInputs,
+  inputs?: ProveInputs,
 ): Promise<ChallengeResponse> {
   const url = `${config.baseUrl}/api/v1/prove`;
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ circuit, inputs }),
+    body: JSON.stringify({ circuit, ...(inputs && { inputs }) }),
   });
 
   if (response.status !== 402) {

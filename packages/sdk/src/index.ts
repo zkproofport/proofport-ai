@@ -15,6 +15,7 @@ export type {
   ProofParams,
   ProofResult,
   StepResult,
+  EncryptedProveRequest,
 } from './types.js';
 
 export { CIRCUIT_NAME_MAP, CIRCUIT_ID_MAP } from './types.js';
@@ -37,7 +38,7 @@ export type { FlowCallbacks } from './flow.js';
 // Individual steps (for step-by-step usage)
 export { requestChallenge, createSession } from './session.js';
 export { makePayment } from './payment.js';
-export { submitProof } from './prove.js';
+export { submitProof, submitEncryptedProof } from './prove.js';
 export { verifyOnChain, verifyProof } from './verify.js';
 
 // Input computation
@@ -50,6 +51,13 @@ export {
   hexToBytes,
   extractPubkeyCoordinates,
 } from './inputs.js';
+
+// Prover.toml builder (for E2E encryption)
+export { buildProverToml } from './toml.js';
+
+// E2E Encryption
+export { encryptForTee } from './tee.js';
+export type { EncryptedEnvelope } from './tee.js';
 
 // Signer abstraction
 export type { ProofportSigner } from './signer.js';

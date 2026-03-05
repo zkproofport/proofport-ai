@@ -56,6 +56,18 @@ class DisabledProvider implements TeeProvider {
   async generateAttestation(): Promise<import('./types.js').AttestationResult | null> {
     return null;
   }
+
+  async proveEncrypted(): Promise<VsockResponse> {
+    return {
+      type: 'error',
+      requestId: '',
+      error: 'TEE is disabled - E2E encrypted proof not available',
+    };
+  }
+
+  async getTeePublicKey(): Promise<import('./teeKeyExchange.js').TeePublicKeyInfo | null> {
+    return null;
+  }
 }
 
 /**
@@ -92,3 +104,11 @@ export {
   generateDockerfileContent,
 } from './enclaveBuilder.js';
 export { ensureAgentValidated } from './validationSubmitter.js';
+export {
+  encryptForTee,
+  decryptFromTee,
+  computeKeyId,
+  serializeEnvelope,
+  deserializeEnvelope,
+} from './teeKeyExchange.js';
+export type { EncryptedEnvelope, TeePublicKeyInfo } from './teeKeyExchange.js';

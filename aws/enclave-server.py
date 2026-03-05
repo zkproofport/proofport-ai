@@ -6,13 +6,14 @@ Listens on AF_VSOCK port 5000, accepts JSON requests from the parent EC2 instanc
 and executes ZK proof operations using bb CLI and nargo.
 
 Request/Response protocol matches EnclaveClient.ts (src/tee/enclaveClient.ts):
-  VsockRequest  = { type, circuitId?, inputs?, requestId }
+  VsockRequest  = { type, circuitId?, inputs?, requestId, encryptedPayload? }
   VsockResponse = { type, requestId, proof?, publicInputs?, attestationDocument?, error? }
 
 Supported request types:
-  health      → { type: "health", requestId }
-  prove       → { type: "prove", circuitId, inputs, requestId }
-  attestation → { type: "attestation", requestId, proofHash?, metadata? }
+  health       → { type: "health", requestId }
+  prove        → { type: "prove", circuitId, inputs, requestId, encryptedPayload? }
+  attestation  → { type: "attestation", requestId, proofHash?, metadata? }
+  getPublicKey → { type: "getPublicKey", requestId }
 
 Circuit layout (baked into image by Dockerfile.enclave):
   /app/circuits/coinbase-attestation/target/coinbase_attestation.json
@@ -32,6 +33,7 @@ Logging: stderr only (no file I/O in enclave — no persistent disk).
 Timeout: 120 seconds per proof request.
 """
 
+import hashlib
 import json
 import os
 import socket
@@ -43,6 +45,10 @@ import threading
 import time
 import traceback
 from datetime import datetime, timezone
+
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 # ─────────────────────────────────────────────────────────────
 # Constants
@@ -69,6 +75,11 @@ CIRCUITS = {
 
 PROVE_TIMEOUT_SECONDS = 120
 HEALTH_RESPONSE = {"type": "health", "status": "ok"}
+
+# E2E encryption key pair (initialized at startup)
+ENCLAVE_PRIVATE_KEY: 'X25519PrivateKey | None' = None
+ENCLAVE_PUBLIC_KEY_BYTES: bytes = b""
+ENCLAVE_KEY_ID: str = ""
 
 
 # ─────────────────────────────────────────────────────────────
@@ -200,6 +211,79 @@ def get_nsm_attestation(user_data: bytes = b"", nonce: bytes = b"") -> bytes | N
         return None
     except Exception as e:
         log_error("NSM attestation failed", action="enclave.nsm.failed", error=str(e), traceback=traceback.format_exc())
+        return None
+
+
+def get_nsm_attestation_with_pubkey(public_key_bytes: bytes) -> bytes | None:
+    """
+    Request attestation with public_key bound into the document.
+    The NSM signs over the entire attestation including the public_key field,
+    proving cryptographically that this key was generated inside this enclave.
+    """
+    if not os.path.exists(NSM_DEVICE):
+        log_info("NSM device not available — skipping keyed attestation", action="enclave.nsm.skipped")
+        return None
+
+    try:
+        import cbor2
+        import ctypes
+        import fcntl
+
+        request_payload = {
+            "Attestation": {
+                "user_data": None,
+                "nonce": None,
+                "public_key": public_key_bytes,  # THIS IS THE KEY CHANGE - bind pubkey to attestation
+            }
+        }
+        cbor_request = cbor2.dumps(request_payload)
+
+        req_buf = ctypes.create_string_buffer(cbor_request, len(cbor_request))
+        resp_buf = ctypes.create_string_buffer(NSM_RESPONSE_BUF_SIZE)
+
+        msg = bytearray(struct.pack(
+            "QIIQII",
+            ctypes.addressof(req_buf),
+            len(cbor_request),
+            0,
+            ctypes.addressof(resp_buf),
+            NSM_RESPONSE_BUF_SIZE,
+            0,
+        ))
+
+        fd = os.open(NSM_DEVICE, os.O_RDWR)
+        try:
+            fcntl.ioctl(fd, NSM_IOCTL_CMD, msg)
+        finally:
+            os.close(fd)
+
+        actual_len = struct.unpack_from("I", msg, 24)[0]
+        if actual_len == 0:
+            log_error("NSM ioctl returned 0-length response for keyed attestation", action="enclave.nsm.failed")
+            return None
+
+        response_cbor = resp_buf.raw[:actual_len]
+        response = cbor2.loads(response_cbor)
+
+        if "Attestation" in response:
+            att = response["Attestation"]
+            if "document" in att:
+                doc_bytes = att["document"]
+                log_info("NSM keyed attestation obtained", action="enclave.nsm.keyed_obtained", docBytes=len(doc_bytes))
+                return doc_bytes
+
+        if "Error" in response:
+            log_error("NSM returned error for keyed attestation", action="enclave.nsm.failed", error=str(response["Error"]))
+            return None
+
+        log_error("Unexpected NSM response for keyed attestation", action="enclave.nsm.failed", keys=list(response.keys()))
+        return None
+
+    except ImportError:
+        log_error("cbor2 not installed", action="enclave.nsm.failed")
+        return None
+    except Exception as e:
+        log_error("NSM keyed attestation failed", action="enclave.nsm.failed", error=str(e), traceback=traceback.format_exc())
         return None
 
 
@@ -405,7 +489,6 @@ def generate_proof(circuit_id: str, inputs: list, request_id: str, prover_toml: 
         # If we're inside a real enclave, /dev/nsm MUST exist and attestation MUST succeed.
         # Returning a proof without attestation defeats the purpose of TEE execution.
         attestation_b64 = None
-        import hashlib
         proof_hash = hashlib.sha256(proof_bytes).digest()
         nsm_doc = get_nsm_attestation(user_data=proof_hash)
         if nsm_doc:
@@ -449,11 +532,92 @@ def handle_health(request: dict) -> dict:
     }
 
 
+def handle_get_public_key(request: dict) -> dict:
+    """Return TEE public key with NSM attestation binding."""
+    request_id = request.get("requestId", "")
+
+    if not ENCLAVE_PUBLIC_KEY_BYTES:
+        return {"type": "error", "requestId": request_id, "error": "Key pair not initialized"}
+
+    # Get NSM attestation with public_key bound into the signed document.
+    # The NSM signs over the entire attestation including the public_key field,
+    # proving cryptographically that this key was generated inside this enclave.
+    nsm_doc_with_key = get_nsm_attestation_with_pubkey(ENCLAVE_PUBLIC_KEY_BYTES)
+
+    response = {
+        "type": "publicKey",
+        "requestId": request_id,
+        "publicKey": ENCLAVE_PUBLIC_KEY_BYTES.hex(),
+        "keyId": ENCLAVE_KEY_ID,
+    }
+
+    if nsm_doc_with_key:
+        import base64
+        response["attestationDocument"] = base64.b64encode(nsm_doc_with_key).decode("ascii")
+
+    return response
+
+
+def decrypt_payload(encrypted_payload: dict) -> str:
+    """
+    Decrypt an encrypted payload using ECDH(teePrivateKey, ephemeralPublicKey) -> AES-256-GCM.
+
+    encrypted_payload format:
+    {
+        "ephemeralPublicKey": "<hex>",  # 32 bytes X25519 public key
+        "iv": "<hex>",                  # 12 bytes
+        "ciphertext": "<hex>",          # encrypted JSON string
+        "authTag": "<hex>",             # 16 bytes GCM auth tag
+        "keyId": "<hex>"                # must match our ENCLAVE_KEY_ID
+    }
+
+    Returns the decrypted plaintext (JSON string containing circuitId + proverToml).
+    """
+    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PublicKey
+
+    # Verify keyId matches
+    key_id = encrypted_payload.get("keyId", "")
+    if key_id != ENCLAVE_KEY_ID:
+        raise ValueError(f"Key ID mismatch: expected {ENCLAVE_KEY_ID}, got {key_id}")
+
+    # Parse components
+    ephemeral_pubkey_bytes = bytes.fromhex(encrypted_payload["ephemeralPublicKey"])
+    iv = bytes.fromhex(encrypted_payload["iv"])
+    ciphertext = bytes.fromhex(encrypted_payload["ciphertext"])
+    auth_tag = bytes.fromhex(encrypted_payload["authTag"])
+
+    # ECDH: derive shared secret
+    ephemeral_pubkey = X25519PublicKey.from_public_bytes(ephemeral_pubkey_bytes)
+    shared_secret = ENCLAVE_PRIVATE_KEY.exchange(ephemeral_pubkey)
+
+    # Derive AES key: SHA-256(shared_secret)
+    aes_key = hashlib.sha256(shared_secret).digest()
+
+    # AES-256-GCM decrypt (ciphertext + authTag concatenated for AESGCM)
+    aesgcm = AESGCM(aes_key)
+    plaintext = aesgcm.decrypt(iv, ciphertext + auth_tag, None)
+
+    return plaintext.decode("utf-8")
+
+
 def handle_prove(request: dict) -> dict:
     circuit_id = request.get("circuitId")
     inputs = request.get("inputs")
     prover_toml = request.get("proverToml")
     request_id = request.get("requestId", "")
+    encrypted_payload = request.get("encryptedPayload")  # E2E encrypted data
+
+    # If encrypted payload present, decrypt to get circuitId + proverToml
+    if encrypted_payload:
+        try:
+            decrypted = decrypt_payload(encrypted_payload)
+            decrypted_data = json.loads(decrypted)
+            circuit_id = decrypted_data.get("circuitId", circuit_id)
+            prover_toml = decrypted_data.get("proverToml", prover_toml)
+            log_info("Encrypted payload decrypted", action="enclave.decrypt.success", requestId=request_id, keyId=encrypted_payload.get("keyId"))
+        except Exception as e:
+            log_error("Encrypted payload decryption failed", action="enclave.decrypt.failed", requestId=request_id, error=str(e))
+            return {"type": "error", "requestId": request_id, "error": f"Decryption failed: {str(e)}"}
 
     if not circuit_id:
         return {"type": "error", "requestId": request_id, "error": "Missing circuitId"}
@@ -518,6 +682,8 @@ def dispatch(request: dict) -> dict:
         return handle_prove(request)
     elif req_type == "attestation":
         return handle_attestation(request)
+    elif req_type == "getPublicKey":
+        return handle_get_public_key(request)
     else:
         return {
             "type": "error",
@@ -689,5 +855,11 @@ if __name__ == "__main__":
                 bytecode_exists=os.path.exists(bytecode),
                 vk_exists=os.path.exists(vk),
             )
+
+    # Generate X25519 key pair for E2E encryption (private key never leaves enclave)
+    ENCLAVE_PRIVATE_KEY = X25519PrivateKey.generate()
+    ENCLAVE_PUBLIC_KEY_BYTES = ENCLAVE_PRIVATE_KEY.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+    ENCLAVE_KEY_ID = hashlib.sha256(ENCLAVE_PUBLIC_KEY_BYTES).hexdigest()[:16]
+    log_info("X25519 key pair generated", action="enclave.keygen.done", keyId=ENCLAVE_KEY_ID)
 
     run_server()

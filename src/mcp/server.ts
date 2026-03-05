@@ -248,7 +248,7 @@ Response fields:
           type: 'text',
           text: `## ZKProofport Autonomous Proof Generation Guide
 
-ZKProofport generates zero-knowledge proofs of Coinbase KYC and country-of-residence attestations using Noir circuits running in a Trusted Execution Environment (AWS Nitro Enclave). Proofs are verified on-chain via Groth16 SNARK verifier contracts on Base.
+ZKProofport generates zero-knowledge proofs of Coinbase KYC and country-of-residence attestations using Noir circuits running in a Trusted Execution Environment (AWS Nitro Enclave). All proof inputs are end-to-end encrypted (X25519 ECDH + AES-256-GCM) — the server acts as a blind relay and cannot read your inputs. Proofs are verified on-chain via Groth16 SNARK verifier contracts on Base.
 
 ---
 
@@ -290,31 +290,38 @@ Prepare ALL inputs required for the prove step:
 
 ---
 
-### STEP 3: x402 Single-Step Flow (via REST — MCP has timeout limitations)
+### STEP 3: x402 Single-Step Flow with E2E Encryption (via REST — MCP has timeout limitations)
 
 MCP timeout limitations prevent running 30-90 second proof generation via MCP tools. Use the REST API directly.
 
-**3a. First call — get payment nonce (no payment yet):**
+All inputs are E2E encrypted with the TEE's attested public key. The server acts as a blind relay — it cannot read your proof inputs.
+
+**3a. First call — get payment nonce + TEE public key (no payment yet):**
 \`\`\`
 POST https://stg-ai.zkproofport.app/api/v1/prove
 Content-Type: application/json
 
 {
-  "circuit": "coinbase_kyc",
-  "inputs": { ... all inputs ... }
+  "circuit": "coinbase_kyc"
 }
 \`\`\`
 
-Server returns 402 with nonce:
+Server returns 402 with nonce and TEE public key:
 \`\`\`json
-{ "nonce": "0x7f3a...", "payment": { "recipient": "0x5A3E...", "amount": 100000, ... } }
+{
+  "nonce": "0x7f3a...",
+  "payment": { "recipient": "0x5A3E...", "amount": 100000, ... },
+  "teePublicKey": { "publicKey": "<X25519 hex>", "keyId": "...", "attestationDocument": "..." }
+}
 \`\`\`
 
-**3b. Pay USDC** using the nonce. Amount = 100000 (6-decimal units = $0.10).
+**3b. Encrypt inputs** with the TEE's X25519 public key using ECDH + AES-256-GCM. Build Prover.toml locally, then encrypt \`{ circuitId, proverToml }\`.
+
+**3c. Pay USDC** using the nonce. Amount = 100000 (6-decimal units = $0.10).
 - Base Sepolia USDC: \`0x036CbD53842c5426634e7929541eC2318f3dCF7e\`
 - Base mainnet USDC: \`0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913\`
 
-**3c. Retry with payment headers:**
+**3d. Retry with encrypted payload + payment headers:**
 \`\`\`
 POST https://stg-ai.zkproofport.app/api/v1/prove
 Content-Type: application/json
@@ -323,15 +330,17 @@ X-Payment-Nonce: 0x7f3a...
 
 {
   "circuit": "coinbase_kyc",
-  "inputs": { ... same inputs ... }
+  "encrypted_payload": {
+    "ephemeralPublicKey": "...",
+    "iv": "...",
+    "ciphertext": "...",
+    "authTag": "...",
+    "keyId": "..."
+  }
 }
 \`\`\`
 
-For coinbase_country circuit, also include in inputs:
-\`\`\`json
-"country_list": ["US", "KR"],
-"is_included": true
-\`\`\`
+For coinbase_country circuit, include country_list and is_included in the plaintext BEFORE encryption.
 
 ---
 

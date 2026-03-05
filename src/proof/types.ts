@@ -1,4 +1,5 @@
 import type { CircuitId } from '../config/circuits.js';
+import type { EncryptedEnvelope } from '../tee/teeKeyExchange.js';
 
 export type ProofSessionStatus = 'PAYMENT_PENDING' | 'PROVING' | 'COMPLETED' | 'EXPIRED';
 
@@ -44,7 +45,8 @@ export interface ProveRequestInputs {
 
 export interface ProveRequest {
   circuit: string;              // Required: "coinbase_kyc" or "coinbase_country"
-  inputs: ProveRequestInputs;   // Payment via X-Payment-TX / X-Payment-Nonce headers
+  inputs?: ProveRequestInputs;  // Required for plaintext flow; absent when encrypted_payload is used
+  encrypted_payload?: EncryptedEnvelope;  // E2E: encrypted { circuitId, proverToml } — server acts as blind relay
 }
 
 export interface ProveResponse {

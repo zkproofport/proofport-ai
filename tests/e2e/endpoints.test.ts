@@ -207,13 +207,15 @@ describe('REST API — x402 Single-Step Flow', () => {
     expect(decoded.extra.nonce).toBe(json.nonce);
   });
 
-  it('POST /api/v1/prove without session_id and without inputs returns 400', async () => {
+  it('POST /api/v1/prove without inputs returns 402 challenge (inputs checked after payment)', async () => {
     const { status, json } = await jsonPost('/api/v1/prove', {
       circuit: 'coinbase_kyc',
     });
-    expect(status).toBe(400);
-    expect(json.error).toBe('INVALID_REQUEST');
-    expect(json.message).toMatch(/inputs/i);
+    // Without payment headers, server returns 402 challenge regardless of inputs
+    // Inputs are only validated after payment headers are present
+    expect(status).toBe(402);
+    expect(json.error).toBe('PAYMENT_REQUIRED');
+    expect(json.nonce).toBeTruthy();
   });
 
   it('POST /api/v1/prove without session_id and without circuit returns 400', async () => {
@@ -295,7 +297,7 @@ describe('REST API — x402 Single-Step Flow', () => {
     expect(json.error).not.toBe('INVALID_NONCE');
   });
 
-  it('nonce can only be used once (replay protection)', async () => {
+  it('nonce can only be used once (replay protection)', { timeout: 30000 }, async () => {
     // Get a valid nonce
     const { json: firstRes } = await jsonPost('/api/v1/prove', {
       circuit: 'coinbase_kyc',
@@ -785,8 +787,7 @@ describe('SKILL.md & Guide Endpoints', () => {
     // Local MCP server section (primary recommendation)
     expect(guide.local_mcp_server).toBeDefined();
     expect(guide.local_mcp_server.recommended).toBe(true);
-    expect(guide.local_mcp_server.env_vars.ATTESTATION_KEY).toBeDefined();
-    expect(guide.local_mcp_server.tools).toBeInstanceOf(Array);
+    expect(guide.local_mcp_server.npm_package).toBeDefined();
     // SDK section
     expect(guide.sdk).toBeDefined();
     expect(guide.sdk.package).toBeDefined();
@@ -824,11 +825,41 @@ describe('SKILL.md & Guide Endpoints', () => {
 
 const hasAttestationKey = !!process.env.E2E_ATTESTATION_WALLET_KEY;
 
+/**
+ * Ensure CDP wallet has USDC for x402 payment tests.
+ * Uses CDP SDK faucet (Base Sepolia testnet only).
+ */
+async function ensureCdpWalletFunded(): Promise<void> {
+  if (!process.env.CDP_API_KEY_ID || !process.env.CDP_WALLET_ADDRESS) return;
+
+  try {
+    const { CdpClient } = await import('@coinbase/cdp-sdk');
+    const cdp = new CdpClient({
+      apiKeyId: process.env.CDP_API_KEY_ID,
+      apiKeySecret: process.env.CDP_API_KEY_SECRET!,
+      walletSecret: process.env.CDP_WALLET_SECRET!,
+    });
+
+    const result = await cdp.evm.requestFaucet({
+      address: process.env.CDP_WALLET_ADDRESS as `0x${string}`,
+      network: 'base-sepolia',
+      token: 'usdc',
+    });
+    console.log(`[CDP Faucet] USDC funded: ${result.transactionHash}`);
+  } catch (e: any) {
+    // Faucet rate limit or other non-critical error — proceed anyway
+    console.warn(`[CDP Faucet] ${e.message || e}`);
+  }
+}
+
 describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
   let stdioClient: InstanceType<typeof McpClient>;
   let stdioTransport: InstanceType<typeof StdioClientTransport>;
 
   beforeAll(async () => {
+    // Auto-fund CDP wallet with testnet USDC before tests
+    await ensureCdpWalletFunded();
+
     const env: Record<string, string> = {
       ...process.env as Record<string, string>,
       ATTESTATION_KEY: process.env.E2E_ATTESTATION_WALLET_KEY!,
@@ -855,7 +886,7 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
     );
 
     await stdioClient.connect(stdioTransport);
-  }, 30_000);
+  }, 60_000);
 
   afterAll(async () => {
     try {

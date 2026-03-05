@@ -9,13 +9,26 @@ Local MCP server for zero-knowledge proof generation via ZKProofport.
 **How it works:**
 
 ```
-AI Agent ←→ Local MCP Server ←→ ZKProofport TEE Server (Nitro Enclave)
-              (your machine)         (remote, generates proof)
+AI Agent ←→ Local MCP Server ──[E2E encrypted]──→ ZKProofport Server ──→ Nitro Enclave
+              (your machine)                        (blind relay)         (decrypts & proves)
 ```
 
 - Your private key **never leaves your machine** — only cryptographic signatures are sent to the server
+- **All proof inputs are E2E encrypted** — X25519 ECDH + AES-256-GCM encryption ensures the server cannot read your inputs (blind relay)
 - Proofs are generated inside AWS Nitro Enclaves (trusted execution environment) with cryptographic attestation
 - Payment is gasless — you sign an EIP-3009 authorization, the x402 facilitator pays gas
+
+## E2E Encryption (Blind Relay)
+
+All proof inputs are **end-to-end encrypted** before leaving your machine. The ZKProofport server acts as a **blind relay** — it forwards encrypted data to the TEE (AWS Nitro Enclave) without being able to read it.
+
+**Encryption is fully automatic:**
+- `generate_proof` tool auto-detects TEE availability from the server's 402 response
+- When TEE is available, inputs are encrypted with the enclave's attested X25519 public key (verified via AWS Nitro COSE Sign1 attestation)
+- The encryption uses X25519 ECDH key agreement + AES-256-GCM (ECIES pattern)
+- In production, the server **rejects plaintext inputs** (`PLAINTEXT_REJECTED`) — E2E encryption is enforced
+
+No configuration needed. The MCP server handles encryption transparently.
 
 ## Prerequisites
 

@@ -38,7 +38,7 @@ export interface ProofRoutesDeps {
 /** Shared context for proof generation */
 interface ProveContext {
   circuitId: CircuitId;
-  inputs: ProveRequest['inputs'];
+  inputs: NonNullable<ProveRequest['inputs']>;
   paymentTxHash: string;
   paymentVerifyMs: number;
   startTime: number;
@@ -119,6 +119,8 @@ async function generateProofFromInputs(
 
   const teeMode = config.teeMode || 'disabled';
 
+  log.info({ action: 'prove.generate.start', requestId, circuit: circuitId, teeMode, encrypted: false }, 'Proof generation started (plaintext)');
+
   if (teeMode === 'nitro' && deps.teeProvider) {
     const vsockResponse = await deps.teeProvider.prove(
       circuitId,
@@ -148,6 +150,7 @@ async function generateProofFromInputs(
   }
 
   const proveMs = Date.now() - proveStart;
+  log.info({ action: 'prove.generate.complete', requestId, circuit: circuitId, teeMode, encrypted: false, proveMs, proofSize: proof.length }, 'Proof generation complete (plaintext)');
 
   // Build attestation info
   let attestation: ProveResponse['attestation'] = null;
@@ -224,11 +227,6 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
         }, 'Verified agent requesting proof');
       }
 
-      if (!body.inputs) {
-        res.status(400).json({ error: 'INVALID_REQUEST', message: 'Missing inputs' });
-        return;
-      }
-
       // Determine circuit from body
       const circuitName = body.circuit;
       if (!circuitName) {
@@ -268,13 +266,43 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
           },
         };
 
+        // Fetch TEE public key for E2E encryption (if TEE is available)
+        let teePublicKey: { publicKey: string; keyId: string; attestationDocument: string | null } | null = null;
+        if (deps.teeProvider && config.teeMode === 'nitro') {
+          try {
+            const teeKeyInfo = await deps.teeProvider.getTeePublicKey();
+            if (teeKeyInfo) {
+              teePublicKey = {
+                publicKey: teeKeyInfo.publicKey,
+                keyId: teeKeyInfo.keyId,
+                attestationDocument: teeKeyInfo.attestationDocument || null,
+              };
+            }
+          } catch (e) {
+            log.warn({ action: 'prove.tee_key.error', err: e }, 'Failed to fetch TEE public key for 402 response');
+          }
+        }
+
         res.setHeader('PAYMENT-REQUIRED', Buffer.from(JSON.stringify(paymentRequirements)).toString('base64'));
         res.status(402).json({
           error: 'PAYMENT_REQUIRED',
           message: 'Send payment and retry with X-Payment-TX and X-Payment-Nonce headers',
           nonce,
           payment: paymentRequirements,
+          teePublicKey,
         });
+        return;
+      }
+
+      // For plaintext flow, inputs are required (only checked when payment header present)
+      if (!body.encrypted_payload && !body.inputs) {
+        res.status(400).json({ error: 'INVALID_REQUEST', message: 'Missing inputs (or use encrypted_payload for E2E flow)' });
+        return;
+      }
+
+      // In nitro mode, require E2E encryption — plaintext inputs are rejected
+      if (config.teeMode === 'nitro' && !body.encrypted_payload) {
+        res.status(400).json({ error: 'PLAINTEXT_REJECTED', message: 'TEE mode requires E2E encrypted payload. Fetch TEE public key from 402 response and encrypt inputs before submitting.' });
         return;
       }
 
@@ -323,12 +351,82 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
       log.info({ action: 'prove.x402.payment_verified', txHash: paymentTxHeader, paymentVerifyMs }, 'x402 payment verified');
 
       const requestId = `x402-${ethers.hexlify(ethers.randomBytes(8)).slice(2)}`;
+
+      // Check for E2E encrypted payload — server acts as blind relay
+      if (body.encrypted_payload) {
+        log.info({ action: 'prove.generate.start', requestId, circuit: circuitId, teeMode: config.teeMode, encrypted: true, keyId: body.encrypted_payload.keyId }, 'Proof generation started (E2E encrypted)');
+
+        if (!deps.teeProvider || config.teeMode !== 'nitro') {
+          res.status(400).json({ error: 'E2E_REQUIRES_TEE', message: 'E2E encrypted proofs require TEE mode (nitro)' });
+          return;
+        }
+
+        const proveStart = Date.now();
+        const vsockResponse = await deps.teeProvider.proveEncrypted(body.encrypted_payload, requestId);
+
+        if (vsockResponse.type === 'error') {
+          // Handle key rotation
+          if (vsockResponse.error?.includes('Key ID mismatch')) {
+            res.status(409).json({ error: 'KEY_ROTATED', message: 'TEE key has rotated. Fetch new public key from GET /api/v1/tee/public-key and re-encrypt.' });
+            return;
+          }
+          throw new Error(`TEE proof generation failed: ${vsockResponse.error}`);
+        }
+
+        const proof = vsockResponse.proof || '';
+        const publicInputs = Array.isArray(vsockResponse.publicInputs) ? vsockResponse.publicInputs[0] || '' : '';
+        const proofWithInputs = proof + (publicInputs.startsWith('0x') ? publicInputs.slice(2) : publicInputs);
+        const attestationDoc = vsockResponse.attestationDocument;
+        const proveMs = Date.now() - proveStart;
+        log.info({ action: 'prove.generate.complete', requestId, circuit: circuitId, teeMode: config.teeMode, encrypted: true, proveMs, proofSize: proof.length }, 'Proof generation complete (E2E encrypted)');
+
+        // Build attestation info
+        let attestation: ProveResponse['attestation'] = null;
+        if (attestationDoc) {
+          try {
+            const parsedDoc = parseAttestationDocument(attestationDoc);
+            const verification = await verifyAttestationDocument(parsedDoc);
+            attestation = {
+              document: attestationDoc,
+              proof_hash: ethers.keccak256(proof),
+              verification: {
+                rootCaValid: verification.rootCaValid ?? false,
+                chainValid: verification.chainValid ?? false,
+                signatureValid: verification.signatureValid ?? false,
+                pcrs: Object.fromEntries(
+                  Array.from(parsedDoc.pcrs.entries()).map(([k, v]) => [k, ethers.hexlify(v)])
+                ),
+              },
+            };
+          } catch (e: unknown) {
+            log.warn({ action: 'prove.attestation.parse_error', err: e }, 'Failed to parse attestation');
+          }
+        }
+
+        const response: ProveResponse = {
+          proof,
+          publicInputs,
+          proofWithInputs,
+          attestation,
+          timing: {
+            totalMs: Date.now() - startTime,
+            paymentVerifyMs,
+            proveMs,
+          },
+          verification: null,  // E2E mode: server doesn't know the circuit, can't provide verifier address
+        };
+
+        res.json(response);
+        return;
+      }
+
       const chainId = isTestnet ? 84532 : 8453;
       const verifierAddress = VERIFIER_ADDRESSES[String(chainId)]?.[circuitId] || null;
       await generateProofFromInputs(
         {
           circuitId,
-          inputs: body.inputs,
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+          inputs: body.inputs!, // guarded above: non-encrypted path requires inputs
           paymentTxHash: paymentTxHeader,
           paymentVerifyMs,
           startTime,

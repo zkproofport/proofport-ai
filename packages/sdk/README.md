@@ -8,6 +8,23 @@ Client SDK for ZKProofport zero-knowledge proof generation on Base Mainnet.
 
 Proofs are generated in trusted execution environments (Nitro Enclaves) with cryptographic attestation. Payment is handled transparently via the x402 protocol using EIP-3009 (no user gas costs).
 
+## E2E Encryption (TEE Blind Relay)
+
+All proof inputs are **end-to-end encrypted** using X25519 ECDH + AES-256-GCM. The ZKProofport server acts as a **blind relay** — it cannot read your inputs, even during proof generation. Only the TEE (AWS Nitro Enclave) can decrypt.
+
+**How it works:**
+
+1. `generateProof()` requests a 402 payment challenge from the server
+2. The 402 response includes `teePublicKey` — the TEE's attested X25519 public key (cryptographically bound to the Nitro Enclave via COSE Sign1 attestation)
+3. The SDK generates an ephemeral X25519 keypair, performs ECDH key agreement, and encrypts all circuit inputs with AES-256-GCM
+4. The encrypted payload is sent to the server, which relays it blindly to the TEE
+5. The TEE decrypts, generates the ZK proof, and returns it
+
+**This is fully automatic.** `generateProof()` detects `teePublicKey` in the 402 response and applies E2E encryption when available. No additional configuration or code changes needed.
+
+- **TEE enabled (production):** Inputs are E2E encrypted. Server rejects plaintext (`PLAINTEXT_REJECTED`).
+- **TEE disabled (local dev):** Inputs are sent in plaintext. No encryption overhead.
+
 ## Installation
 
 ```bash
@@ -176,9 +193,10 @@ if (result.attestation) {
 2. Fetch Coinbase KYC attestation from EAS
 3. Build circuit inputs (Merkle tree, hashes)
 4. Request 402 payment challenge
-5. Sign EIP-3009 TransferWithAuthorization
-6. Submit payment via x402 facilitator
-7. Generate proof in TEE with payment proof
+5. **Auto-detect E2E encryption** — if `teePublicKey` is present in 402 response, encrypt inputs with X25519 ECDH + AES-256-GCM
+6. Sign EIP-3009 TransferWithAuthorization
+7. Submit payment via x402 facilitator
+8. Generate proof in TEE with payment proof (encrypted inputs if TEE enabled)
 
 **Result fields:**
 

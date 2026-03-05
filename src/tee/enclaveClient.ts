@@ -5,6 +5,8 @@
 import { createHash } from 'crypto';
 import { connect, Socket } from 'net';
 import type { TeeConfig, TeeProvider, VsockRequest, VsockResponse, AttestationDocument } from './types.js';
+import type { EncryptedEnvelope, TeePublicKeyInfo } from './teeKeyExchange.js';
+import { computeKeyId } from './teeKeyExchange.js';
 import { parseAttestationDocument } from './attestation.js';
 import { createLogger } from '../logger.js';
 
@@ -14,6 +16,7 @@ export class EnclaveClient implements TeeProvider {
   readonly mode: TeeConfig['mode'];
   private config: TeeConfig;
   private lastAttestation: AttestationDocument | null = null;
+  private teePublicKeyCache: TeePublicKeyInfo | null = null;
 
   constructor(config: TeeConfig) {
     this.config = config;
@@ -134,6 +137,78 @@ export class EnclaveClient implements TeeProvider {
       log.error({ action: 'enclave.attestation.failed', err: error }, 'Failed to get nitro attestation');
       return null;
     }
+  }
+
+  async getTeePublicKey(): Promise<TeePublicKeyInfo | null> {
+    if (this.mode === 'local' || this.mode === 'disabled') {
+      return null;
+    }
+
+    // Return cached key if available
+    if (this.teePublicKeyCache) {
+      return this.teePublicKeyCache;
+    }
+
+    try {
+      const request: VsockRequest = {
+        type: 'getPublicKey',
+        requestId: `pubkey-${Date.now()}`,
+      };
+
+      const response = await this.sendVsockRequest(request);
+
+      if (response.type === 'publicKey' && response.publicKey) {
+        this.teePublicKeyCache = {
+          publicKey: response.publicKey,
+          keyId: response.keyId || computeKeyId(response.publicKey),
+          attestationDocument: response.attestationDocument,
+        };
+
+        log.info({
+          action: 'enclave.publicKey.fetched',
+          keyId: this.teePublicKeyCache.keyId,
+        }, 'TEE public key fetched and cached');
+
+        return this.teePublicKeyCache;
+      }
+
+      log.error({ action: 'enclave.publicKey.failed', response }, 'Failed to get TEE public key');
+      return null;
+    } catch (error) {
+      log.error({ action: 'enclave.publicKey.error', err: error }, 'Failed to fetch TEE public key');
+      return null;
+    }
+  }
+
+  async proveEncrypted(encryptedPayload: EncryptedEnvelope, requestId: string): Promise<VsockResponse> {
+    if (this.mode === 'local') {
+      return { type: 'error', requestId, error: 'E2E encryption not supported in local mode' };
+    }
+
+    const request: VsockRequest = {
+      type: 'prove',
+      encryptedPayload,
+      requestId,
+    };
+
+    const response = await this.sendVsockRequest(request);
+
+    // Cache attestation document if present
+    if (response.attestationDocument && this.config.attestationEnabled) {
+      try {
+        this.lastAttestation = parseAttestationDocument(response.attestationDocument);
+      } catch (error) {
+        log.error({ action: 'enclave.attestation.parse_failed', err: error }, 'Failed to parse attestation document');
+      }
+    }
+
+    return response;
+  }
+
+  /** Invalidate cached TEE public key (called on KEY_ROTATED error) */
+  invalidatePublicKeyCache(): void {
+    this.teePublicKeyCache = null;
+    log.info({ action: 'enclave.publicKey.invalidated' }, 'TEE public key cache invalidated');
   }
 
   private async sendVsockRequest(request: VsockRequest): Promise<VsockResponse> {

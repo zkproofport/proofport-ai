@@ -58,6 +58,11 @@ export interface ChallengeResponse {
   message: string;
   nonce: string;
   payment: PaymentRequirements;
+  teePublicKey?: {
+    publicKey: string;
+    keyId: string;
+    attestationDocument: string | null;
+  } | null;
 }
 
 // ─── Prove (POST /prove) ────────────────────────────────────────────────
@@ -84,7 +89,20 @@ export interface ProveInputs {
 
 export interface ProveRequest {
   circuit: CircuitName;
-  inputs: ProveInputs;
+  inputs?: ProveInputs;
+  encrypted_payload?: EncryptedProveRequest['encrypted_payload'];
+}
+
+// ─── E2E Encryption types ────────────────────────────────────────────────
+
+export interface EncryptedProveRequest {
+  encrypted_payload: {
+    ephemeralPublicKey: string;
+    iv: string;
+    ciphertext: string;
+    authTag: string;
+    keyId: string;
+  };
 }
 
 export interface ProveResponse {
