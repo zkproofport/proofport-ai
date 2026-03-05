@@ -1,6 +1,10 @@
+import { createRequire } from 'module';
 import { CIRCUITS, type CircuitId } from '../config/circuits.js';
 import { AUTHORIZED_SIGNERS, COINBASE_ATTESTER_CONTRACT, VERIFIER_ADDRESSES } from '../config/contracts.js';
 import type { Config } from '../config/index.js';
+
+const require = createRequire(import.meta.url);
+const mcpPkgVersion: string = require('../../packages/mcp/package.json').version;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -304,46 +308,9 @@ export function buildGuide(circuitId: CircuitId, config: Config): object {
     local_mcp_server: {
       recommended: true,
       npm_package: '@zkproofport-ai/mcp',
+      version: mcpPkgVersion,
+      install: `npm install @zkproofport-ai/mcp@${mcpPkgVersion}`,
       readme: 'https://www.npmjs.com/package/@zkproofport-ai/mcp',
-      description:
-        'RECOMMENDED: Install the @zkproofport-ai/mcp package via npx. It runs locally and handles all cryptographic computation, ' +
-        'attestation fetching, payment, and proof submission automatically via MCP tools. ' +
-        'Your private key never leaves your machine — only cryptographic signatures are sent to the server.',
-      install: 'npx -y @zkproofport-ai/mcp',
-      mcp_config: {
-        mcpServers: {
-          zkproofport: {
-            command: 'npx',
-            args: ['-y', '@zkproofport-ai/mcp'],
-            env: {
-              ATTESTATION_KEY: '0x_YOUR_ATTESTATION_WALLET_PRIVATE_KEY',
-            },
-          },
-        },
-      },
-      env_vars: {
-        ATTESTATION_KEY: {
-          required: true,
-          description: 'Private key of wallet with Coinbase EAS KYC attestation on Base.',
-        },
-        PAYMENT_KEY: {
-          required: false,
-          description: 'Private key of separate wallet with USDC balance. Defaults to ATTESTATION_KEY.',
-        },
-        CDP_API_KEY_ID: {
-          required: false,
-          description: 'CDP API key ID. Set CDP_API_KEY_ID + CDP_API_KEY_SECRET + CDP_WALLET_SECRET together to use a Coinbase MPC wallet for payment.',
-        },
-      },
-      tools: [
-        'generate_proof — All-in-one: prepare inputs + pay + generate proof (recommended)',
-        'get_supported_circuits — List available circuits',
-        'prepare_inputs — Step 1: Prepare all circuit inputs',
-        'request_challenge — Step 2: Get 402 payment challenge',
-        'make_payment — Step 3: Pay USDC via x402',
-        'submit_proof — Step 4: Submit with payment to generate proof',
-        'verify_proof — Step 5 (optional): Verify proof on-chain',
-      ],
     },
 
     // ALTERNATIVE: SDK for programmatic use
