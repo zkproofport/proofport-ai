@@ -403,6 +403,9 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
           }
         }
 
+        const e2eChainId = isTestnet ? 84532 : 8453;
+        const e2eVerifierAddress = VERIFIER_ADDRESSES[String(e2eChainId)]?.[circuitId] || null;
+
         const response: ProveResponse = {
           proof,
           publicInputs,
@@ -413,7 +416,11 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
             paymentVerifyMs,
             proveMs,
           },
-          verification: null,  // E2E mode: server doesn't know the circuit, can't provide verifier address
+          verification: e2eVerifierAddress ? {
+            chainId: e2eChainId,
+            verifierAddress: e2eVerifierAddress,
+            rpcUrl: config.chainRpcUrl,
+          } : null,
         };
 
         res.json(response);
