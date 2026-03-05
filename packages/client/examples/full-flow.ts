@@ -11,8 +11,8 @@
  *   CIRCUIT          - Circuit name: coinbase_kyc | coinbase_country (default: coinbase_kyc)
  *   SCOPE            - Scope string (default: proofport)
  */
-import { generateProof, verifyProof, CIRCUIT_NAME_MAP, fromPrivateKey } from '../src/index.js';
-import type { ClientConfig, CircuitName, StepResult } from '../src/index.js';
+import { generateProof, verifyProof, fromPrivateKey, createConfig } from '../src/index.js';
+import type { CircuitName, StepResult } from '../src/index.js';
 
 async function main() {
   const attestationKey = process.env.ATTESTATION_KEY;
@@ -22,9 +22,9 @@ async function main() {
     process.exit(1);
   }
 
-  const config: ClientConfig = {
-    baseUrl: process.env.SERVER_URL || 'https://stg-ai.zkproofport.app',
-  };
+  const config = createConfig({
+    ...(process.env.SERVER_URL && { baseUrl: process.env.SERVER_URL }),
+  });
 
   const attestationSigner = fromPrivateKey(attestationKey);
   const paymentSigner = process.env.PAYMENT_KEY
@@ -61,10 +61,9 @@ async function main() {
     console.log(`Total:    ${result.timing.totalMs}ms`);
 
     // Optional: verify on-chain
-    const circuitId = CIRCUIT_NAME_MAP[circuit];
     console.log('');
     console.log('Verifying on-chain...');
-    const verification = await verifyProof(config, circuitId, result.proof, result.publicInputs);
+    const verification = await verifyProof(result);
     console.log(`On-chain: ${verification.valid ? 'VALID' : `INVALID - ${verification.error}`}`);
 
   } catch (error) {

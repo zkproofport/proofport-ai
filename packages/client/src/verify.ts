@@ -1,16 +1,12 @@
 import { ethers } from 'ethers';
-import type { ClientConfig, CircuitId, VerifyResult } from './types.js';
-import { VERIFIER_ADDRESSES, DEFAULT_PAYMENT_RPC } from './constants.js';
+import type { VerifyResult, ProveResponse } from './types.js';
 
-// UltraVerifier ABI — 2 arguments: proof bytes + publicInputs bytes32[]
 const VERIFIER_ABI = [
   'function verify(bytes calldata _proof, bytes32[] calldata _publicInputs) external view returns (bool)',
 ];
 
 /**
  * Split concatenated public inputs hex into array of bytes32 values.
- * Input: "0xaabb...ccdd" (N*32 bytes)
- * Output: ["0xaabb...32bytes", "0xccdd...32bytes", ...]
  */
 function splitPublicInputs(publicInputsHex: string): string[] {
   const hex = publicInputsHex.startsWith('0x') ? publicInputsHex.slice(2) : publicInputsHex;
@@ -22,38 +18,19 @@ function splitPublicInputs(publicInputsHex: string): string[] {
 }
 
 /**
- * Verify a ZK proof on-chain against the deployed verifier contract.
+ * Verify a ZK proof on-chain using server-provided verification info.
  *
- * @param config - Client configuration
- * @param circuitId - Circuit identifier (canonical)
- * @param proof - Raw proof hex from prove response
- * @param publicInputs - Concatenated public inputs hex from prove response
- * @param chainId - Chain ID where verifier is deployed (default: 84532 = Base Sepolia)
- * @param rpcUrl - Optional RPC URL override
+ * @param verification - Chain info from ProveResponse (chainId, verifierAddress, rpcUrl)
+ * @param proof - Raw proof hex
+ * @param publicInputs - Concatenated public inputs hex
  */
 export async function verifyOnChain(
-  config: ClientConfig,
-  circuitId: CircuitId,
+  verification: { chainId: number; verifierAddress: string; rpcUrl: string },
   proof: string,
   publicInputs: string,
-  chainId: string = '84532',
-  rpcUrl?: string,
 ): Promise<VerifyResult> {
-  const verifiersByChain = VERIFIER_ADDRESSES[chainId];
-  if (!verifiersByChain) {
-    return { valid: false, error: `No verifier addresses for chain ${chainId}` };
-  }
-
-  const verifierAddress = verifiersByChain[circuitId];
-  if (!verifierAddress) {
-    return { valid: false, error: `No verifier for circuit ${circuitId} on chain ${chainId}` };
-  }
-
-  const resolvedRpcUrl = rpcUrl || config.paymentRpcUrl || DEFAULT_PAYMENT_RPC['base-sepolia'];
-  const provider = new ethers.JsonRpcProvider(resolvedRpcUrl);
-  const verifier = new ethers.Contract(verifierAddress, VERIFIER_ABI, provider);
-
-  // Split publicInputs into bytes32[] array
+  const provider = new ethers.JsonRpcProvider(verification.rpcUrl);
+  const verifier = new ethers.Contract(verification.verifierAddress, VERIFIER_ABI, provider);
   const publicInputsArray = splitPublicInputs(publicInputs);
 
   try {
@@ -63,4 +40,25 @@ export async function verifyOnChain(
     const message = error instanceof Error ? error.message : String(error);
     return { valid: false, error: `On-chain verification failed: ${message}` };
   }
+}
+
+/**
+ * Verify a proof using the verification info from a ProveResponse.
+ * Convenience wrapper that extracts verification data from the prove result.
+ *
+ * @param result - The full ProveResponse from generateProof()
+ * @returns VerifyResult
+ *
+ * @example
+ * ```typescript
+ * const result = await generateProof(config, signers, params);
+ * const verified = await verifyProof(result);
+ * console.log(verified.valid); // true
+ * ```
+ */
+export async function verifyProof(result: ProveResponse): Promise<VerifyResult> {
+  if (!result.verification) {
+    return { valid: false, error: 'No verification info in response (verifier not deployed on this network)' };
+  }
+  return verifyOnChain(result.verification, result.proof, result.publicInputs);
 }

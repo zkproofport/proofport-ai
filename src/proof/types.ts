@@ -69,6 +69,12 @@ export interface ProveResponse {
     inputBuildMs?: number;
     proveMs?: number;
   };
+
+  verification: {
+    chainId: number;
+    verifierAddress: string;
+    rpcUrl: string;
+  } | null;
 }
 
 export interface PaymentVerificationResult {

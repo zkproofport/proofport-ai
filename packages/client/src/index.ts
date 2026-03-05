@@ -1,7 +1,6 @@
 // Types
 export type {
   ClientConfig,
-  WalletConfig,
   CircuitName,
   CircuitId,
   PaymentInfo,
@@ -25,19 +24,21 @@ export {
   CIRCUITS,
   COINBASE_ATTESTER_CONTRACT,
   AUTHORIZED_SIGNERS,
-  VERIFIER_ADDRESSES,
   USDC_ADDRESSES,
 } from './constants.js';
 
+// Configuration
+export { createConfig } from './config.js';
+
 // Flow (main entry point)
-export { generateProof, verifyProof } from './flow.js';
+export { generateProof } from './flow.js';
 export type { FlowCallbacks } from './flow.js';
 
 // Individual steps (for step-by-step usage)
 export { requestChallenge, createSession } from './session.js';
 export { makePayment } from './payment.js';
 export { submitProof } from './prove.js';
-export { verifyOnChain } from './verify.js';
+export { verifyOnChain, verifyProof } from './verify.js';
 
 // Input computation
 export {
@@ -53,6 +54,9 @@ export {
 // Signer abstraction
 export type { ProofportSigner } from './signer.js';
 export { EthersWalletSigner, fromEthersWallet, fromPrivateKey } from './signer.js';
+
+// CDP (Coinbase Developer Platform) signer
+export { CdpWalletSigner } from './cdp.js';
 
 // Attestation
 export {

@@ -6,17 +6,15 @@ import {
   prepareInputs,
   makePayment,
   submitProof,
-  verifyOnChain,
+  verifyProof,
   computeSignalHash,
   CIRCUITS,
-  VERIFIER_ADDRESSES,
   AUTHORIZED_SIGNERS,
   CIRCUIT_NAME_MAP,
   type ProofportSigner,
   type ClientConfig,
   type PaymentInfo,
-  type CircuitId,
-} from '@proofport/client';
+} from '@zkproofport-ai/sdk';
 
 function errorResult(message: string) {
   return {
@@ -97,7 +95,6 @@ RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and 
       try {
         return jsonResult({
           circuits: CIRCUITS,
-          verifier_addresses: VERIFIER_ADDRESSES,
           authorized_signers: AUTHORIZED_SIGNERS,
         });
       } catch (error) {
@@ -264,61 +261,39 @@ RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and 
   // ─── verify_proof ──────────────────────────────────────────────────────
   server.tool(
     'verify_proof',
-    `Step 5 (optional): Verify a ZK proof on-chain against the deployed verifier contract. Calls the UltraVerifier.verify() function on Base Sepolia (or Base mainnet). Returns { valid: true } if the proof is valid. Use this after generate_proof or submit_proof to confirm the proof passes on-chain verification.
-
-VERIFIER ADDRESSES (Base Sepolia, chain ID 84532):
-  - coinbase_kyc: 0x0036B61dBFaB8f3CfEEF77dD5D45F7EFBFE2035c
-  - coinbase_country: 0xdEe363585926c3c28327Efd1eDd01cf4559738cf`,
+    `Step 5 (optional): Verify a ZK proof on-chain against the deployed verifier contract. Requires the verification info from the prove response (verifier_address, chain_id, rpc_url). Returns { valid: true } if the proof is valid.`,
     {
-      circuit: z
-        .enum(['coinbase_kyc', 'coinbase_country'])
-        .describe('Which circuit was used to generate the proof'),
       proof: z
         .string()
         .describe('0x-prefixed proof hex bytes from generate_proof or submit_proof response'),
       public_inputs: z
         .string()
         .describe('0x-prefixed concatenated public inputs hex from generate_proof or submit_proof response'),
+      verifier_address: z
+        .string()
+        .describe('Verifier contract address from the prove response verification field'),
       chain_id: z
+        .number()
+        .describe('Chain ID from the prove response verification field (e.g. 84532 for Base Sepolia)'),
+      rpc_url: z
         .string()
-        .optional()
-        .describe('Chain ID where verifier is deployed. Default: "84532" (Base Sepolia)'),
+        .describe('RPC URL from the prove response verification field'),
     },
     async (params) => {
       try {
-        const circuitId: CircuitId = CIRCUIT_NAME_MAP[params.circuit];
-        const chainId = params.chain_id || '84532';
+        const result = await verifyProof({
+          proof: params.proof,
+          publicInputs: params.public_inputs,
+          proofWithInputs: '',
+          attestation: null,
+          timing: { totalMs: 0 },
+          verification: {
+            chainId: params.chain_id,
+            verifierAddress: params.verifier_address,
+            rpcUrl: params.rpc_url,
+          },
+        });
 
-        const result = await verifyOnChain(
-          config,
-          circuitId,
-          params.proof,
-          params.public_inputs,
-          chainId,
-        );
-
-        return jsonResult(result);
-      } catch (error) {
-        return errorResult(error instanceof Error ? error.message : String(error));
-      }
-    },
-  );
-
-  // ─── request_testnet_usdc ─────────────────────────────────────────────
-  server.tool(
-    'request_testnet_usdc',
-    `Request testnet USDC from the CDP faucet on Base Sepolia. Requires CDP API credentials (CDP_API_KEY_ID, CDP_API_KEY_SECRET, CDP_WALLET_SECRET). Useful for funding wallets before proof generation on testnet.`,
-    {
-      address: z
-        .string()
-        .optional()
-        .describe('Wallet address to fund. If omitted, uses the configured attestation wallet address.'),
-    },
-    async (params) => {
-      try {
-        const { requestTestnetUsdc } = await import('./cdp.js');
-        const targetAddress = params.address || await signer.getAddress();
-        const result = await requestTestnetUsdc({ address: targetAddress });
         return jsonResult(result);
       } catch (error) {
         return errorResult(error instanceof Error ? error.message : String(error));
@@ -336,7 +311,6 @@ VERIFIER ADDRESSES (Base Sepolia, chain ID 84532):
     const data = {
       baseUrl: config.baseUrl,
       easRpcUrl: config.easRpcUrl ?? null,
-      paymentRpcUrl: config.paymentRpcUrl ?? null,
       easGraphqlUrl: config.easGraphqlUrl ?? null,
       attestationWalletAddress: attestationAddress,
       paymentWalletAddress: paymentAddress,

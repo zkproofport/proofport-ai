@@ -1,4 +1,4 @@
-import type { ProofportSigner } from '@proofport/client';
+import type { ProofportSigner } from './signer.js';
 
 /**
  * CDP MPC Wallet adapter implementing ProofportSigner.
@@ -111,54 +111,5 @@ export class CdpWalletSigner implements ProofportSigner {
         }
       },
     };
-  }
-}
-
-/**
- * Request testnet USDC from CDP faucet.
- * Uses @coinbase/cdp-sdk directly.
- */
-export async function requestTestnetUsdc(opts?: {
-  apiKeyId?: string;
-  apiKeySecret?: string;
-  walletSecret?: string;
-  address?: string;
-}): Promise<{ transactionHash: string; address: string }> {
-  let CdpClient: any;
-  try {
-    // @ts-ignore — optional peer dependency, may not be installed
-    const mod = await import('@coinbase/cdp-sdk');
-    CdpClient = mod.CdpClient;
-  } catch {
-    throw new Error(
-      'CDP faucet requires @coinbase/cdp-sdk. Install it: npm install @coinbase/cdp-sdk'
-    );
-  }
-
-  const cdp = new CdpClient({
-    apiKeyId: opts?.apiKeyId || process.env.CDP_API_KEY_ID,
-    apiKeySecret: opts?.apiKeySecret || process.env.CDP_API_KEY_SECRET,
-    walletSecret: opts?.walletSecret || process.env.CDP_WALLET_SECRET,
-  });
-
-  // If address provided, request faucet for that address
-  // Otherwise create a new account and request faucet
-  const address = opts?.address || process.env.CDP_WALLET_ADDRESS;
-
-  if (address) {
-    // Use the EVM faucet action directly
-    const result = await cdp.evm.requestFaucet({
-      address,
-      network: 'base-sepolia',
-      token: 'usdc',
-    });
-    return { transactionHash: result.transactionHash, address };
-  } else {
-    const account = await cdp.evm.createAccount();
-    const result = await account.requestFaucet({
-      network: 'base-sepolia',
-      token: 'usdc',
-    });
-    return { transactionHash: result.transactionHash, address: account.address };
   }
 }

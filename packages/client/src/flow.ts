@@ -1,11 +1,10 @@
 import { ethers } from 'ethers';
 import type {
   ClientConfig,
+  CircuitId,
   ProofParams,
   ProofResult,
-  CircuitId,
   StepResult,
-  VerifyResult,
   PaymentInfo,
 } from './types.js';
 import { CIRCUIT_NAME_MAP } from './types.js';
@@ -13,7 +12,6 @@ import { requestChallenge } from './session.js';
 import { prepareInputs, computeSignalHash } from './inputs.js';
 import { makePayment } from './payment.js';
 import { submitProof } from './prove.js';
-import { verifyOnChain } from './verify.js';
 import type { ProofportSigner } from './signer.js';
 import { USDC_ADDRESSES } from './constants.js';
 
@@ -107,19 +105,6 @@ export async function generateProof(
     paymentTxHash,
     attestation: proveResponse.attestation,
     timing: proveResponse.timing,
+    verification: proveResponse.verification,
   };
-}
-
-/**
- * Verify an existing proof on-chain.
- * Convenience wrapper around verifyOnChain.
- */
-export async function verifyProof(
-  config: ClientConfig,
-  circuitId: CircuitId,
-  proof: string,
-  publicInputs: string,
-  chainId?: string,
-): Promise<VerifyResult> {
-  return verifyOnChain(config, circuitId, proof, publicInputs, chainId);
 }

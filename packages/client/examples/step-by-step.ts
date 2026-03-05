@@ -17,8 +17,9 @@ import {
   CIRCUIT_NAME_MAP,
   USDC_ADDRESSES,
   EthersWalletSigner,
+  createConfig,
 } from '../src/index.js';
-import type { ClientConfig, CircuitName, PaymentInfo } from '../src/index.js';
+import type { CircuitName, PaymentInfo } from '../src/index.js';
 
 async function main() {
   const attestationKey = process.env.ATTESTATION_KEY;
@@ -27,9 +28,9 @@ async function main() {
     process.exit(1);
   }
 
-  const config: ClientConfig = {
-    baseUrl: process.env.SERVER_URL || 'https://stg-ai.zkproofport.app',
-  };
+  const config = createConfig({
+    ...(process.env.SERVER_URL && { baseUrl: process.env.SERVER_URL }),
+  });
 
   const circuit: CircuitName = (process.env.CIRCUIT || 'coinbase_kyc') as CircuitName;
   const circuitId = CIRCUIT_NAME_MAP[circuit];
@@ -79,7 +80,7 @@ async function main() {
   // -- Step 4: Make Payment --
   console.log('[Step 4] Making payment via x402 facilitator...');
   const network = challenge.payment.network as keyof typeof USDC_ADDRESSES;
-  const rpcUrl = config.paymentRpcUrl || (network === 'base' ? 'https://mainnet.base.org' : 'https://sepolia.base.org');
+  const rpcUrl = network === 'base' ? 'https://mainnet.base.org' : 'https://sepolia.base.org';
   const provider = new ethers.JsonRpcProvider(rpcUrl);
   const connectedPaymentWallet = paymentWallet.connect(provider);
   const paymentSigner = new EthersWalletSigner(connectedPaymentWallet);
@@ -113,15 +114,18 @@ async function main() {
 
   // -- Step 6: On-Chain Verification --
   console.log('[Step 6] Verifying on-chain...');
-  const verification = await verifyOnChain(
-    config,
-    circuitId,
-    proveResult.proof,
-    proveResult.publicInputs,
-  );
-  console.log(`  Valid: ${verification.valid}`);
-  if (verification.error) {
-    console.log(`  Error: ${verification.error}`);
+  if (!proveResult.verification) {
+    console.log('  Skipped: no verifier deployed on this network');
+  } else {
+    const verification = await verifyOnChain(
+      proveResult.verification,
+      proveResult.proof,
+      proveResult.publicInputs,
+    );
+    console.log(`  Valid: ${verification.valid}`);
+    if (verification.error) {
+      console.log(`  Error: ${verification.error}`);
+    }
   }
 
   console.log('');

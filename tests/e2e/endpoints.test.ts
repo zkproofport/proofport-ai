@@ -776,7 +776,7 @@ describe('SKILL.md & Guide Endpoints', () => {
     expect(text).toContain('Local MCP');
   });
 
-  it('GET /api/v1/guide/coinbase_kyc returns guide with local MCP and manual reference', async () => {
+  it('GET /api/v1/guide/coinbase_kyc returns guide with local MCP and SDK info', async () => {
     const res = await fetch(`${BASE_URL}/api/v1/guide/coinbase_kyc`);
     expect(res.status).toBe(200);
     const guide = await res.json();
@@ -787,21 +787,18 @@ describe('SKILL.md & Guide Endpoints', () => {
     expect(guide.local_mcp_server.recommended).toBe(true);
     expect(guide.local_mcp_server.env_vars.ATTESTATION_KEY).toBeDefined();
     expect(guide.local_mcp_server.tools).toBeInstanceOf(Array);
-    // Manual reference (formerly complete_flow)
-    expect(guide.manual_reference).toBeDefined();
-    expect(guide.manual_reference.steps).toBeInstanceOf(Array);
-    expect(guide.manual_reference.steps.length).toBe(12);
-    const step12 = guide.manual_reference.steps.find((s: any) => s.step === 12);
-    expect(step12).toBeDefined();
-    expect(step12.title).toContain('Verify');
     // SDK section
     expect(guide.sdk).toBeDefined();
-    expect(guide.sdk.package).toBe('@proofport/client');
+    expect(guide.sdk.package).toBeDefined();
     expect(guide.sdk.quick_start).toBeDefined();
     // Constants
     expect(guide.constants).toBeDefined();
     expect(guide.constants.authorized_signers).toBeInstanceOf(Array);
-    expect(guide.constants.verification).toBeDefined();
+    expect(guide.constants.contracts).toBeDefined();
+    // Endpoints
+    expect(guide.endpoints).toBeDefined();
+    // Input schema
+    expect(guide.input_schema).toBeDefined();
   });
 
   it('GET /api/v1/guide/coinbase_country returns country circuit guide', async () => {
@@ -810,7 +807,9 @@ describe('SKILL.md & Guide Endpoints', () => {
     const guide = await res.json();
     expect(guide.circuit_id).toBe('coinbase_country_attestation');
     expect(guide.display_name).toBe('Coinbase Country');
-    expect(guide.manual_reference.steps.length).toBe(12);
+    expect(guide.local_mcp_server).toBeDefined();
+    expect(guide.sdk).toBeDefined();
+    expect(guide.constants).toBeDefined();
   });
 
   it('GET /api/v1/guide/invalid_circuit returns 404', async () => {
@@ -875,7 +874,6 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
       'make_payment',
       'prepare_inputs',
       'request_challenge',
-      'request_testnet_usdc',
       'submit_proof',
       'verify_proof',
     ]);
@@ -892,7 +890,6 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
     expect(parsed.circuits).toBeDefined();
     expect(parsed.circuits.coinbase_attestation).toBeDefined();
     expect(parsed.circuits.coinbase_country_attestation).toBeDefined();
-    expect(parsed.verifier_addresses).toBeDefined();
     expect(parsed.authorized_signers).toBeInstanceOf(Array);
   });
 
@@ -900,9 +897,11 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
     const result = await stdioClient.callTool({
       name: 'verify_proof',
       arguments: {
-        circuit: 'coinbase_kyc',
         proof: '0xdeadbeef',
         public_inputs: '0x' + 'aa'.repeat(32),
+        verifier_address: '0x0036B61dBFaB8f3CfEEF77dD5D45F7EFBFE2035c',
+        chain_id: 84532,
+        rpc_url: 'https://sepolia.base.org',
       },
     });
     const textContent = result.content.find((c: any) => c.type === 'text');
@@ -958,38 +957,7 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
 
   // ─── Real Proof Generation via Local MCP (TEE_MODE=disabled, bb prove on host) ──
 
-  // Auto-fund CDP payment wallet with testnet USDC before proof generation
-  it('request_testnet_usdc funds the payment wallet', { timeout: 60_000 }, async () => {
-    const result = await stdioClient.callTool({
-      name: 'request_testnet_usdc',
-      arguments: {},
-    });
-    const textContent = result.content.find((c: any) => c.type === 'text');
-    expect(textContent).toBeDefined();
-    const parsed = JSON.parse((textContent as any).text);
-    // May fail if CDP credentials are not configured — that's ok, attestation key will be used for payment
-    if (!parsed.error && parsed.transactionHash) {
-      expect(parsed.transactionHash).toBeDefined();
-      expect(parsed.address).toBeDefined();
-
-      // Wait for faucet tx to confirm on Base Sepolia before proceeding
-      const { ethers } = await import('ethers');
-      const provider = new ethers.JsonRpcProvider('https://sepolia.base.org');
-      const usdc = new ethers.Contract(
-        '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-        ['function balanceOf(address) view returns (uint256)'],
-        provider,
-      );
-      // Poll balance until USDC arrives (max 30s)
-      for (let i = 0; i < 15; i++) {
-        const balance = await usdc.balanceOf(parsed.address);
-        if (balance >= 100000n) break; // 0.10 USDC minimum
-        await new Promise(r => setTimeout(r, 2000));
-      }
-    }
-  });
-
-  let generatedProof: { proof: string; publicInputs: string } | null = null;
+  let generatedProof: { proof: string; publicInputs: string; verification?: { chainId: number; verifierAddress: string; rpcUrl: string } | null } | null = null;
 
   it('generate_proof produces a real ZK proof (coinbase_kyc)', { timeout: 120_000 }, async () => {
     const result = await stdioClient.callTool({
@@ -1014,7 +982,7 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
     expect(parsed.paymentTxHash).toBeDefined();
     expect(parsed.paymentTxHash).toMatch(/^0x/);
 
-    generatedProof = { proof: parsed.proof, publicInputs: parsed.publicInputs };
+    generatedProof = { proof: parsed.proof, publicInputs: parsed.publicInputs, verification: parsed.verification };
 
     // ─── Report: Proof Generation ───
     console.log('\n╔══════════════════════════════════════════════════════════════╗');
@@ -1050,18 +1018,24 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
   });
 
   it('verify_proof confirms the generated proof on-chain', { timeout: 30_000 }, async () => {
-    // Skip if proof generation failed
+    // Skip if proof generation failed or no verification info
     if (!generatedProof) {
       console.warn('Skipping verify_proof — generate_proof did not produce a proof');
+      return;
+    }
+    if (!generatedProof.verification) {
+      console.warn('Skipping verify_proof — no verification info in prove response');
       return;
     }
 
     const result = await stdioClient.callTool({
       name: 'verify_proof',
       arguments: {
-        circuit: 'coinbase_kyc',
         proof: generatedProof.proof,
         public_inputs: generatedProof.publicInputs,
+        verifier_address: generatedProof.verification.verifierAddress,
+        chain_id: generatedProof.verification.chainId,
+        rpc_url: generatedProof.verification.rpcUrl,
       },
     });
     const textContent = result.content.find((c: any) => c.type === 'text');

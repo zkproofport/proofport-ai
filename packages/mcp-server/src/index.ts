@@ -2,9 +2,8 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { fromPrivateKey, type ClientConfig, type ProofportSigner } from '@proofport/client';
+import { fromPrivateKey, createConfig, CdpWalletSigner, type ProofportSigner } from '@zkproofport-ai/sdk';
 import { registerTools } from './tools.js';
-import { CdpWalletSigner } from './cdp.js';
 
 // ─── Load config from environment variables ───────────────────────────
 const attestationKey = process.env.ATTESTATION_KEY;
@@ -13,12 +12,11 @@ if (!attestationKey) {
   process.exit(1);
 }
 
-const config: ClientConfig = {
+const config = createConfig({
   baseUrl: process.env.PROOFPORT_URL || 'https://stg-ai.zkproofport.app',
   easRpcUrl: process.env.EAS_RPC_URL,
-  paymentRpcUrl: process.env.PAYMENT_RPC_URL,
   easGraphqlUrl: process.env.EAS_GRAPHQL_URL,
-};
+});
 
 // ─── Attestation signer (always from private key — EAS attestation is tied to this address)
 const attestationSigner = fromPrivateKey(attestationKey);

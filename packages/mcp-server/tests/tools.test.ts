@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// ─── Mock @proofport/client ──────────────────────────────────────────────────
+// ─── Mock @zkproofport-ai/sdk ──────────────────────────────────────────────────
 const mockGenerateProof = vi.fn();
 const mockRequestChallenge = vi.fn();
 const mockPrepareInputs = vi.fn();
@@ -9,23 +9,17 @@ const mockSubmitProof = vi.fn();
 const mockVerifyOnChain = vi.fn();
 const mockComputeSignalHash = vi.fn().mockReturnValue('0xsignalhash');
 
-vi.mock('@proofport/client', () => ({
+vi.mock('@zkproofport-ai/sdk', () => ({
   generateProof: mockGenerateProof,
   requestChallenge: mockRequestChallenge,
   prepareInputs: mockPrepareInputs,
   makePayment: mockMakePayment,
   submitProof: mockSubmitProof,
-  verifyOnChain: mockVerifyOnChain,
+  verifyProof: mockVerifyOnChain,
   computeSignalHash: mockComputeSignalHash,
   CIRCUITS: {
     coinbase_attestation: { displayName: 'Coinbase KYC', easSchemaId: '0xschema1', functionSelector: '0xfunc1' },
     coinbase_country_attestation: { displayName: 'Coinbase Country', easSchemaId: '0xschema2', functionSelector: '0xfunc2' },
-  },
-  VERIFIER_ADDRESSES: {
-    '84532': {
-      coinbase_attestation: '0x0036B61dBFaB8f3CfEEF77dD5D45F7EFBFE2035c',
-      coinbase_country_attestation: '0xdEe363585926c3c28327Efd1eDd01cf4559738cf',
-    },
   },
   AUTHORIZED_SIGNERS: ['0x952f32128AF084422539C4Ff96df5C525322E564'],
   CIRCUIT_NAME_MAP: {
@@ -37,11 +31,6 @@ vi.mock('@proofport/client', () => ({
     'base': '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
   },
 }));
-
-// ─── Mock ./cdp.js (dynamic import in request_testnet_usdc) ──────────────────
-vi.mock('./cdp.js', () => {
-  throw new Error('CDP module not available');
-});
 
 // ─── Tool handler capture ────────────────────────────────────────────────────
 type ToolEntry = { schema: unknown; handler: Function };
@@ -57,7 +46,6 @@ let mockServer: {
 const testConfig = {
   baseUrl: 'https://test.example.com',
   easRpcUrl: 'https://mainnet.base.org',
-  paymentRpcUrl: 'https://sepolia.base.org',
 };
 
 const mockSigner = {
@@ -135,8 +123,8 @@ beforeEach(async () => {
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe('registerTools', () => {
-  it('registers all 8 tools', () => {
-    expect(mockServer.tool).toHaveBeenCalledTimes(8);
+  it('registers all 7 tools', () => {
+    expect(mockServer.tool).toHaveBeenCalledTimes(7);
     const registeredNames = Object.keys(toolHandlers);
     expect(registeredNames).toContain('generate_proof');
     expect(registeredNames).toContain('get_supported_circuits');
@@ -145,7 +133,6 @@ describe('registerTools', () => {
     expect(registeredNames).toContain('make_payment');
     expect(registeredNames).toContain('submit_proof');
     expect(registeredNames).toContain('verify_proof');
-    expect(registeredNames).toContain('request_testnet_usdc');
   });
 
   it('registers proofport://config resource', () => {
@@ -156,15 +143,13 @@ describe('registerTools', () => {
 });
 
 describe('get_supported_circuits', () => {
-  it('returns circuits, verifier addresses, and authorized signers', async () => {
+  it('returns circuits and authorized signers', async () => {
     const result = await callTool('get_supported_circuits');
     const data = parseToolResult(result);
 
     expect(data.circuits).toBeDefined();
     expect(data.circuits.coinbase_attestation).toBeDefined();
     expect(data.circuits.coinbase_country_attestation).toBeDefined();
-    expect(data.verifier_addresses).toBeDefined();
-    expect(data.verifier_addresses['84532']).toBeDefined();
     expect(data.authorized_signers).toEqual(['0x952f32128AF084422539C4Ff96df5C525322E564']);
     expect(result.isError).toBeUndefined();
   });
@@ -451,59 +436,35 @@ describe('submit_proof', () => {
 });
 
 describe('verify_proof', () => {
-  it('maps circuit name to circuitId', async () => {
+  it('calls verifyProof with verification info', async () => {
     mockVerifyOnChain.mockResolvedValue({ valid: true });
 
     await callTool('verify_proof', {
-      circuit: 'coinbase_kyc',
       proof: '0xproofbytes',
       public_inputs: '0xinputs',
+      verifier_address: '0x0036B61dBFaB8f3CfEEF77dD5D45F7EFBFE2035c',
+      chain_id: 84532,
+      rpc_url: 'https://sepolia.base.org',
     });
 
-    // Should map 'coinbase_kyc' -> 'coinbase_attestation'
-    expect(mockVerifyOnChain).toHaveBeenCalledWith(
-      testConfig,
-      'coinbase_attestation',
-      '0xproofbytes',
-      '0xinputs',
-      '84532',
-    );
-  });
-
-  it('defaults chainId to 84532', async () => {
-    mockVerifyOnChain.mockResolvedValue({ valid: true });
-
-    await callTool('verify_proof', {
-      circuit: 'coinbase_country',
-      proof: '0xproof',
-      public_inputs: '0xinputs',
-    });
-
-    const chainId = mockVerifyOnChain.mock.calls[0][4];
-    expect(chainId).toBe('84532');
-  });
-
-  it('passes custom chain_id', async () => {
-    mockVerifyOnChain.mockResolvedValue({ valid: true });
-
-    await callTool('verify_proof', {
-      circuit: 'coinbase_kyc',
-      proof: '0xproof',
-      public_inputs: '0xinputs',
-      chain_id: '8453',
-    });
-
-    const chainId = mockVerifyOnChain.mock.calls[0][4];
-    expect(chainId).toBe('8453');
+    expect(mockVerifyOnChain).toHaveBeenCalledOnce();
+    const passedArg = mockVerifyOnChain.mock.calls[0][0];
+    expect(passedArg.verification.chainId).toBe(84532);
+    expect(passedArg.verification.verifierAddress).toBe('0x0036B61dBFaB8f3CfEEF77dD5D45F7EFBFE2035c');
+    expect(passedArg.verification.rpcUrl).toBe('https://sepolia.base.org');
+    expect(passedArg.proof).toBe('0xproofbytes');
+    expect(passedArg.publicInputs).toBe('0xinputs');
   });
 
   it('returns verification result', async () => {
     mockVerifyOnChain.mockResolvedValue({ valid: true });
 
     const result = await callTool('verify_proof', {
-      circuit: 'coinbase_kyc',
       proof: '0xproof',
       public_inputs: '0xinputs',
+      verifier_address: '0xaddr',
+      chain_id: 84532,
+      rpc_url: 'https://sepolia.base.org',
     });
 
     const data = parseToolResult(result);
@@ -514,24 +475,16 @@ describe('verify_proof', () => {
     mockVerifyOnChain.mockRejectedValue(new Error('contract call reverted'));
 
     const result = await callTool('verify_proof', {
-      circuit: 'coinbase_kyc',
       proof: '0xproof',
       public_inputs: '0xinputs',
+      verifier_address: '0xaddr',
+      chain_id: 84532,
+      rpc_url: 'https://sepolia.base.org',
     });
 
     expect(result.isError).toBe(true);
     const data = parseToolResult(result);
     expect(data.error).toBe('contract call reverted');
-  });
-});
-
-describe('request_testnet_usdc', () => {
-  it('returns error when CDP module is not available', async () => {
-    const result = await callTool('request_testnet_usdc', {});
-
-    expect(result.isError).toBe(true);
-    const data = parseToolResult(result);
-    expect(data.error).toBeDefined();
   });
 });
 
@@ -546,7 +499,6 @@ describe('proofport://config resource', () => {
     const data = JSON.parse(result.contents[0].text);
     expect(data.baseUrl).toBe(testConfig.baseUrl);
     expect(data.easRpcUrl).toBe(testConfig.easRpcUrl);
-    expect(data.paymentRpcUrl).toBe(testConfig.paymentRpcUrl);
     expect(data.attestationWalletAddress).toBe('0xMockAttestationAddress');
     expect(data.paymentWalletAddress).toBe('0xMockPaymentAddress');
     expect(data.supportedCircuits).toBeDefined();

@@ -1,5 +1,5 @@
 {
-  "name": "@proofport/client",
+  "name": "@zkproofport-ai/sdk",
   "version": "0.1.0",
   "description": "Client SDK for ZKProofport proof generation",
   "type": "module",

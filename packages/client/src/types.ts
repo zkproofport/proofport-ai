@@ -25,17 +25,8 @@ export interface ClientConfig {
   baseUrl: string;
   /** Base Mainnet RPC for EAS attestation fetching */
   easRpcUrl?: string;
-  /** Base Sepolia/Mainnet RPC for payment transactions */
-  paymentRpcUrl?: string;
   /** EAS GraphQL endpoint */
   easGraphqlUrl?: string;
-}
-
-export interface WalletConfig {
-  /** Private key of the wallet holding an EAS attestation */
-  attestationPrivateKey: string;
-  /** Private key of the wallet holding USDC for payment (defaults to attestationPrivateKey) */
-  paymentPrivateKey?: string;
 }
 
 // ─── Payment ────────────────────────────────────────────────────────────
@@ -116,6 +107,11 @@ export interface ProveResponse {
     inputBuildMs?: number;
     proveMs?: number;
   };
+  verification: {
+    chainId: number;
+    verifierAddress: string;
+    rpcUrl: string;
+  } | null;
 }
 
 export interface VerifyResult {
@@ -160,6 +156,7 @@ export interface ProofResult {
   paymentTxHash: string;
   attestation: ProveResponse['attestation'];
   timing: ProveResponse['timing'];
+  verification: ProveResponse['verification'];
 }
 
 // ─── Step results for step-by-step execution ────────────────────────────

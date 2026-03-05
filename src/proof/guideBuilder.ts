@@ -363,20 +363,19 @@ export function buildGuide(circuitId: CircuitId, config: Config): object {
         'make_payment — Step 3: Pay USDC via x402',
         'submit_proof — Step 4: Submit with payment to generate proof',
         'verify_proof — Step 5 (optional): Verify proof on-chain',
-        'request_testnet_usdc — Fund wallet with testnet USDC via CDP faucet',
       ],
     },
 
     // ALTERNATIVE: SDK for programmatic use
     sdk: {
-      package: '@proofport/client',
+      package: '@zkproofport-ai/sdk',
       repository: 'https://github.com/zkproofport/proofport-ai',
-      note: 'Not yet published to npm. Clone the repository to use.',
-      install: 'git clone https://github.com/zkproofport/proofport-ai.git && cd proofport-ai && npm install && npx tsc -p packages/client',
+      note: 'Install via npm or clone the repository.',
+      install: 'npm install @zkproofport-ai/sdk ethers',
       description:
-        'Use the @proofport/client SDK directly in your code for programmatic proof generation.',
+        'Use the @zkproofport-ai/sdk SDK directly in your code for programmatic proof generation.',
       quick_start: `\
-import { generateProof, fromPrivateKey } from '@proofport/client';
+import { generateProof, fromPrivateKey } from '@zkproofport-ai/sdk';
 
 const attestationSigner = fromPrivateKey('0x...');  // wallet with Coinbase KYC attestation
 const paymentSigner = fromPrivateKey('0x...');      // wallet with USDC balance (optional, defaults to attestation signer)

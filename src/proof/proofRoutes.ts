@@ -9,6 +9,7 @@ import { BbProver } from '../prover/bbProver.js';
 import { hexToBytes } from '../input/inputBuilder.js';
 import type { CircuitParams } from '../input/inputBuilder.js';
 import { buildGuide } from './guideBuilder.js';
+import { VERIFIER_ADDRESSES } from '../config/contracts.js';
 import { ethers } from 'ethers';
 import { createLogger } from '../logger.js';
 import { parseAttestationDocument, verifyAttestationDocument } from '../tee/attestation.js';
@@ -42,6 +43,9 @@ interface ProveContext {
   paymentVerifyMs: number;
   startTime: number;
   requestId: string;
+  chainId: number;
+  verifierAddress: string | null;
+  chainRpcUrl: string;
 }
 
 /**
@@ -180,6 +184,11 @@ async function generateProofFromInputs(
       inputBuildMs,
       proveMs,
     },
+    verification: ctx.verifierAddress ? {
+      chainId: ctx.chainId,
+      verifierAddress: ctx.verifierAddress,
+      rpcUrl: ctx.chainRpcUrl,
+    } : null,
   };
 
   res.json(response);
@@ -314,6 +323,8 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
       log.info({ action: 'prove.x402.payment_verified', txHash: paymentTxHeader, paymentVerifyMs }, 'x402 payment verified');
 
       const requestId = `x402-${ethers.hexlify(ethers.randomBytes(8)).slice(2)}`;
+      const chainId = isTestnet ? 84532 : 8453;
+      const verifierAddress = VERIFIER_ADDRESSES[String(chainId)]?.[circuitId] || null;
       await generateProofFromInputs(
         {
           circuitId,
@@ -322,6 +333,9 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
           paymentVerifyMs,
           startTime,
           requestId,
+          chainId,
+          verifierAddress,
+          chainRpcUrl: config.chainRpcUrl,
         },
         deps,
         config,

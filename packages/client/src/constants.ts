@@ -26,13 +26,6 @@ export const AUTHORIZED_SIGNERS = [
   '0x44ace9abb148e8412ac4492e9a1ae6bd88226803',
 ];
 
-export const VERIFIER_ADDRESSES: Record<string, Record<string, string>> = {
-  '84532': {  // Base Sepolia
-    coinbase_attestation: '0x0036B61dBFaB8f3CfEEF77dD5D45F7EFBFE2035c',
-    coinbase_country_attestation: '0xdEe363585926c3c28327Efd1eDd01cf4559738cf',
-  },
-};
-
 export const USDC_ADDRESSES = {
   'base-sepolia': '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
   'base': '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
@@ -40,10 +33,6 @@ export const USDC_ADDRESSES = {
 
 export const DEFAULT_EAS_GRAPHQL = 'https://base.easscan.org/graphql';
 export const DEFAULT_EAS_RPC = 'https://mainnet.base.org';
-export const DEFAULT_PAYMENT_RPC: Record<string, string> = {
-  'base-sepolia': 'https://sepolia.base.org',
-  'base': 'https://mainnet.base.org',
-};
 
 export const RAW_TX_PADDED_LENGTH = 300;
 export const MERKLE_PROOF_MAX_DEPTH = 8;

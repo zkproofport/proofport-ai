@@ -431,7 +431,7 @@ Generates zero-knowledge proofs from Coinbase Verified Account attestations on B
 
 ## Quick Start
 
-\`@proofport/client\` is **not published to npm** — clone the GitHub repo directly.
+\`@zkproofport-ai/sdk\` — install via npm or clone the GitHub repo.
 
 ### Option A: Local MCP Server (Recommended for Agents)
 
@@ -462,7 +462,7 @@ Or run directly:
 ATTESTATION_KEY=0x... npx tsx packages/mcp-server/src/index.ts
 \`\`\`
 
-Tools: generate_proof, get_supported_circuits, prepare_inputs, request_challenge, make_payment, submit_proof, verify_proof, request_testnet_usdc
+Tools: generate_proof, get_supported_circuits, prepare_inputs, request_challenge, make_payment, submit_proof, verify_proof
 
 ### Option B: SDK (Programmatic)
 
@@ -472,7 +472,7 @@ cd proofport-ai && npm install
 \`\`\`
 
 \`\`\`typescript
-import { generateProof } from '@proofport/client';
+import { generateProof } from '@zkproofport-ai/sdk';
 const result = await generateProof(config, signers, { circuit: 'coinbase_kyc' });
 \`\`\`
 
@@ -507,8 +507,6 @@ Set these env vars alongside ATTESTATION_KEY:
 
 Get credentials at https://portal.cdp.coinbase.com
 
-The \`request_testnet_usdc\` MCP tool auto-funds your wallet with testnet USDC via CDP faucet.
-
 ## Guides
 
 Detailed step-by-step guides for preparing proof inputs:
@@ -518,7 +516,7 @@ Detailed step-by-step guides for preparing proof inputs:
 ## Protocols
 
 - **MCP (Remote)**: ${config.a2aBaseUrl}/mcp (StreamableHTTP, tools: prove, get_supported_circuits, get_guide)
-- **MCP (Local)**: \`npx tsx packages/mcp-server/src/index.ts\` (stdio, tools: generate_proof, get_supported_circuits, prepare_inputs, request_challenge, make_payment, submit_proof, verify_proof, request_testnet_usdc)
+- **MCP (Local)**: \`npx tsx packages/mcp-server/src/index.ts\` (stdio, tools: generate_proof, get_supported_circuits, prepare_inputs, request_challenge, make_payment, submit_proof, verify_proof)
 - **A2A**: ${config.a2aBaseUrl}/a2a (JSON-RPC v0.3)
 - **REST**: ${config.a2aBaseUrl}/api/v1/*
 
