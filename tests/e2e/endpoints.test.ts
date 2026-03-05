@@ -111,6 +111,7 @@ function parseToolResult(result: any): any {
 // ─── SDK Client Instances ────────────────────────────────────────────────────
 
 let a2aClient: A2AClient;
+let isNitroMode = false;
 
 // ─── Connectivity check + SDK client setup ───────────────────────────────────
 
@@ -118,6 +119,8 @@ beforeAll(async () => {
   try {
     const res = await fetch(`${BASE_URL}/health`, { signal: AbortSignal.timeout(5000) });
     if (!res.ok) throw new Error(`Health check failed: ${res.status}`);
+    const health = await res.json();
+    isNitroMode = health.tee?.mode === 'nitro';
   } catch (err) {
     throw new Error(
       `Cannot connect to ${BASE_URL}. Ensure the container is running:\n` +
@@ -236,6 +239,7 @@ describe('REST API — x402 Single-Step Flow', () => {
     expect(json.error).toBe('INVALID_CIRCUIT');
   });
 
+  // Nonce validation tests send plaintext inputs — in nitro mode, PLAINTEXT_REJECTED fires before nonce checks
   it('POST /api/v1/prove with X-Payment-TX but without X-Payment-Nonce returns 400', async () => {
     const res = await fetch(`${BASE_URL}/api/v1/prove`, {
       method: 'POST',
@@ -250,7 +254,11 @@ describe('REST API — x402 Single-Step Flow', () => {
     });
     const json = await res.json();
     expect(res.status).toBe(400);
-    expect(json.error).toBe('MISSING_NONCE');
+    if (isNitroMode) {
+      expect(json.error).toBe('PLAINTEXT_REJECTED');
+    } else {
+      expect(json.error).toBe('MISSING_NONCE');
+    }
   });
 
   it('POST /api/v1/prove with X-Payment-TX + invalid X-Payment-Nonce returns 400', async () => {
@@ -268,7 +276,11 @@ describe('REST API — x402 Single-Step Flow', () => {
     });
     const json = await res.json();
     expect(res.status).toBe(400);
-    expect(json.error).toBe('INVALID_NONCE');
+    if (isNitroMode) {
+      expect(json.error).toBe('PLAINTEXT_REJECTED');
+    } else {
+      expect(json.error).toBe('INVALID_NONCE');
+    }
   });
 
   it('402 nonce expires after 5 minutes (TTL check)', async () => {
@@ -298,6 +310,26 @@ describe('REST API — x402 Single-Step Flow', () => {
   });
 
   it('nonce can only be used once (replay protection)', { timeout: 30000 }, async () => {
+    // In nitro mode, plaintext is rejected before nonce check — verify PLAINTEXT_REJECTED instead
+    if (isNitroMode) {
+      const res = await fetch(`${BASE_URL}/api/v1/prove`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Payment-TX': '0x0000000000000000000000000000000000000000000000000000000000000001',
+          'X-Payment-Nonce': '0x' + '00'.repeat(32),
+        },
+        body: JSON.stringify({
+          circuit: 'coinbase_kyc',
+          inputs: { signal_hash: '0x01', nullifier: '0x02', scope_bytes: '0x03', merkle_root: '0x04', user_address: '0x05' },
+        }),
+      });
+      const json = await res.json();
+      expect(res.status).toBe(400);
+      expect(json.error).toBe('PLAINTEXT_REJECTED');
+      return;
+    }
+
     // Get a valid nonce
     const { json: firstRes } = await jsonPost('/api/v1/prove', {
       circuit: 'coinbase_kyc',
@@ -338,6 +370,26 @@ describe('REST API — x402 Single-Step Flow', () => {
   });
 
   it('nonce for wrong circuit returns NONCE_CIRCUIT_MISMATCH', async () => {
+    // In nitro mode, plaintext is rejected before nonce/circuit check
+    if (isNitroMode) {
+      const res = await fetch(`${BASE_URL}/api/v1/prove`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Payment-TX': '0x0000000000000000000000000000000000000000000000000000000000000001',
+          'X-Payment-Nonce': '0x' + '00'.repeat(32),
+        },
+        body: JSON.stringify({
+          circuit: 'coinbase_country',
+          inputs: { signal_hash: '0x01', nullifier: '0x02', scope_bytes: '0x03', merkle_root: '0x04', user_address: '0x05' },
+        }),
+      });
+      const json = await res.json();
+      expect(res.status).toBe(400);
+      expect(json.error).toBe('PLAINTEXT_REJECTED');
+      return;
+    }
+
     // Get nonce for coinbase_kyc
     const { json: firstRes } = await jsonPost('/api/v1/prove', {
       circuit: 'coinbase_kyc',
