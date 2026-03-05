@@ -446,7 +446,7 @@ Configure in \`claude_desktop_config.json\`:
   "mcpServers": {
     "proofport": {
       "command": "npx",
-      "args": ["tsx", "packages/mcp-server/src/index.ts"],
+      "args": ["tsx", "packages/mcp/src/index.ts"],
       "env": {
         "ATTESTATION_KEY": "0x... (private key of wallet with Coinbase EAS attestation on Base)",
         "PAYMENT_KEY": "0x... (optional: private key of wallet with USDC, defaults to ATTESTATION_KEY)",
@@ -459,7 +459,7 @@ Configure in \`claude_desktop_config.json\`:
 
 Or run directly:
 \`\`\`bash
-ATTESTATION_KEY=0x... npx tsx packages/mcp-server/src/index.ts
+ATTESTATION_KEY=0x... npx tsx packages/mcp/src/index.ts
 \`\`\`
 
 Tools: generate_proof, get_supported_circuits, prepare_inputs, request_challenge, make_payment, submit_proof, verify_proof
@@ -481,7 +481,7 @@ const result = await generateProof(config, signers, { circuit: 'coinbase_kyc' })
 \`\`\`bash
 git clone https://github.com/zkproofport/proofport-ai.git
 cd proofport-ai && npm install
-ATTESTATION_KEY=0x... PAYMENT_KEY=0x... SERVER_URL=${config.a2aBaseUrl} npx tsx packages/client/examples/full-flow.ts
+ATTESTATION_KEY=0x... PAYMENT_KEY=0x... SERVER_URL=${config.a2aBaseUrl} npx tsx packages/sdk/examples/full-flow.ts
 \`\`\`
 
 ## Environment Variables
@@ -516,7 +516,7 @@ Detailed step-by-step guides for preparing proof inputs:
 ## Protocols
 
 - **MCP (Remote)**: ${config.a2aBaseUrl}/mcp (StreamableHTTP, tools: prove, get_supported_circuits, get_guide)
-- **MCP (Local)**: \`npx tsx packages/mcp-server/src/index.ts\` (stdio, tools: generate_proof, get_supported_circuits, prepare_inputs, request_challenge, make_payment, submit_proof, verify_proof)
+- **MCP (Local)**: \`npx tsx packages/mcp/src/index.ts\` (stdio, tools: generate_proof, get_supported_circuits, prepare_inputs, request_challenge, make_payment, submit_proof, verify_proof)
 - **A2A**: ${config.a2aBaseUrl}/a2a (JSON-RPC v0.3)
 - **REST**: ${config.a2aBaseUrl}/api/v1/*
 

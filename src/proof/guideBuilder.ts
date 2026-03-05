@@ -308,14 +308,14 @@ export function buildGuide(circuitId: CircuitId, config: Config): object {
         'attestation fetching, payment, and proof submission automatically via MCP tools.',
       setup: {
         clone: 'git clone https://github.com/zkproofport/proofport-ai.git',
-        install: 'cd proofport-ai && npm install && npx tsc -p packages/client',
-        run: 'cd proofport-ai && ATTESTATION_KEY=0x... npx tsx packages/mcp-server/src/index.ts',
+        install: 'cd proofport-ai && npm install && npx tsc -p packages/sdk',
+        run: 'cd proofport-ai && ATTESTATION_KEY=0x... npx tsx packages/mcp/src/index.ts',
       },
       claude_desktop_config: {
         mcpServers: {
           proofport: {
             command: 'npx',
-            args: ['tsx', 'packages/mcp-server/src/index.ts'],
+            args: ['tsx', 'packages/mcp/src/index.ts'],
             env: {
               ATTESTATION_KEY: '0x... (private key of wallet with Coinbase EAS attestation on Base)',
               PAYMENT_KEY: '0x... (optional: private key of wallet with USDC, defaults to ATTESTATION_KEY)',
@@ -392,10 +392,10 @@ console.log(result.proofWithInputs); // combined for on-chain verify`,
       cli: `\
 # Clone, install, and build
 git clone https://github.com/zkproofport/proofport-ai.git
-cd proofport-ai && npm install && npx tsc -p packages/client
+cd proofport-ai && npm install && npx tsc -p packages/sdk
 
 # Run full-flow example
-ATTESTATION_KEY=0x... PAYMENT_KEY=0x... SERVER_URL=${config.a2aBaseUrl} npx tsx packages/client/examples/full-flow.ts`,
+ATTESTATION_KEY=0x... PAYMENT_KEY=0x... SERVER_URL=${config.a2aBaseUrl} npx tsx packages/sdk/examples/full-flow.ts`,
     },
 
     constants: buildConstants(config, circuitId, isTestnet, chainId, usdcAddress, paymentAmount),

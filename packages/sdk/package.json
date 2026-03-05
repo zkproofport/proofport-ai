@@ -29,6 +29,6 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/zkproofport/proofport-ai",
-    "directory": "packages/client"
+    "directory": "packages/sdk"
   }
 }

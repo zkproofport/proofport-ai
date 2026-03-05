@@ -1,5 +1,5 @@
 {
-  "name": "proofport-mcp",
+  "name": "@zkproofport-ai/mcp",
   "version": "0.1.0",
   "description": "Local MCP server for ZK proof generation via ZKProofport. Runs locally, calls remote TEE server for proof generation.",
   "type": "module",

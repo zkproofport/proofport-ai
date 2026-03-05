@@ -819,7 +819,7 @@ describe('SKILL.md & Guide Endpoints', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Local MCP Server (stdio) — spawns packages/mcp-server via StdioClientTransport
+// Local MCP Server (stdio) — spawns packages/mcp via StdioClientTransport
 // ═══════════════════════════════════════════════════════════════════════════
 
 const hasAttestationKey = !!process.env.E2E_ATTESTATION_WALLET_KEY;
@@ -845,7 +845,7 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
 
     stdioTransport = new StdioClientTransport({
       command: 'npx',
-      args: ['tsx', 'packages/mcp-server/src/index.ts'],
+      args: ['tsx', 'packages/mcp/src/index.ts'],
       env,
     });
 
