@@ -132,137 +132,6 @@ function buildFormulas(circuitId: CircuitId) {
   };
 }
 
-function buildCodeExamples(config: Config, circuitId: CircuitId, usdcAddress: string, chainId: number, paymentAmount: string) {
-  const circuit = CIRCUITS[circuitId];
-  return {
-    eas_query: {
-      description: 'GraphQL query to find attestations from EAS',
-      language: 'graphql',
-      code: `\
-query GetAttestation($schemaId: String!, $recipient: String!) {
-  attestations(
-    where: {
-      schemaId: { equals: $schemaId }
-      recipient: { equals: $recipient }
-      revoked: { equals: false }
-    }
-    orderBy: [{ time: desc }]
-    take: 1
-  ) {
-    id
-    txid
-    attester
-    recipient
-    time
-  }
-}`,
-    },
-    raw_tx_extraction: {
-      description: 'Extract signed RLP-encoded transaction bytes (EIP-1559, 12 fields)',
-      language: 'typescript',
-      code: `\
-const tx = await provider.getTransaction(txid);
-const rawTx = ethers.Transaction.from(tx).serialized;
-const rawTxBytes = ethers.getBytes(rawTx);
-const tx_length = rawTxBytes.length;
-const raw_transaction = ethers.hexlify(rawTxBytes);`,
-    },
-    pubkey_recovery: {
-      description: 'Recover uncompressed secp256k1 public key from a transaction',
-      language: 'typescript',
-      code: `\
-const unsignedTx = ethers.Transaction.from(txResponse);
-const unsignedHash = ethers.keccak256(unsignedTx.unsignedSerialized);
-const pubkey = ethers.SigningKey.recoverPublicKey(unsignedHash, txResponse.signature);
-// pubkey = "0x04" + x (64 hex) + y (64 hex)
-const x = '0x' + pubkey.slice(4, 68);
-const y = '0x' + pubkey.slice(68, 132);`,
-    },
-    user_signature: {
-      description: 'User signs signal_hash via personal_sign and recover public key',
-      language: 'typescript',
-      code: `\
-const signature = await wallet.signMessage(ethers.getBytes(signal_hash));
-const ethSignedHash = ethers.hashMessage(ethers.getBytes(signal_hash));
-const userPubkey = ethers.SigningKey.recoverPublicKey(ethSignedHash, signature);`,
-    },
-    payment: {
-      description: 'USDC payment. Testnet (Base Sepolia): direct transfer() + nonce in calldata (no EIP-3009 support). Mainnet (Base): x402 facilitator with EIP-3009 TransferWithAuthorization (facilitator pays gas).',
-      language: 'typescript',
-      code: `\
-// === MAINNET (Base): x402 facilitator with EIP-3009 ===
-// 1. Sign EIP-712 TransferWithAuthorization
-const domain = { name: '${chainId === 84532 ? 'USDC' : 'USD Coin'}', version: '2', chainId: ${chainId}, verifyingContract: USDC_ADDRESS };
-const types = { TransferWithAuthorization: [
-  { name: 'from', type: 'address' }, { name: 'to', type: 'address' },
-  { name: 'value', type: 'uint256' }, { name: 'validAfter', type: 'uint256' },
-  { name: 'validBefore', type: 'uint256' }, { name: 'nonce', type: 'bytes32' },
-]};
-const nonce = ethers.zeroPadValue(paymentNonce, 32); // bytes32 — paymentNonce from Step 1 (402 response)
-const sig = await wallet.signTypedData(domain, types, { from, to, value, validAfter: 0, validBefore, nonce });
-
-// 2. Settle via x402 facilitator (Coinbase x402 v1 API format)
-const res = await fetch('https://www.x402.org/facilitator/settle', {
-  method: 'POST', headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    x402Version: 1,
-    paymentPayload: { x402Version: 1, scheme: 'exact', network: 'base',
-      payload: { signature: sig, authorization: { from, to, value: String(value),
-        validAfter: '0', validBefore: String(validBefore), nonce } } },
-    paymentRequirements: { scheme: 'exact', network: 'base', maxAmountRequired: String(value),
-      resource: '${config.a2aBaseUrl}/api/v1/prove', payTo: to, asset: '${usdcAddress}',
-      extra: { name: '${chainId === 84532 ? 'USDC' : 'USD Coin'}', version: '2' } },
-  }),
-});
-const payment_tx_hash = (await res.json()).txHash;
-
-// === TESTNET (Base Sepolia): direct transfer() + nonce in calldata ===
-// const iface = new ethers.Interface(['function transfer(address to, uint256 amount) returns (bool)']);
-// const transferData = iface.encodeFunctionData('transfer', [payment.recipient, payment.amount]);
-// const dataWithNonce = transferData + payment.nonce.slice(2);
-// const tx = await payerWallet.sendTransaction({ to: USDC_ADDRESS, data: dataWithNonce });
-// const payment_tx_hash = tx.hash;`,
-    },
-    x402_curl: {
-      description: 'cURL example for x402 facilitator /settle call (for testing/debugging)',
-      language: 'bash',
-      code: `\
-# After obtaining the EIP-712 signature from the user's wallet:
-curl -X POST https://www.x402.org/facilitator/settle \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "payload": {
-      "signature": "0x<EIP-712-signature-hex>",
-      "scheme": "exact",
-      "networkId": "${chainId}",
-      "authorization": {
-        "from": "<user-address>",
-        "to": "${config.paymentPayTo}",
-        "value": "${paymentAmount}",
-        "validAfter": "0",
-        "validBefore": "<unix-timestamp-1h-from-now>",
-        "nonce": "<session-nonce-zero-padded-to-32-bytes>"
-      }
-    },
-    "accepted": {
-      "scheme": "exact",
-      "networkId": "${chainId}",
-      "maxAmountRequired": "${paymentAmount}",
-      "resource": "${config.a2aBaseUrl}/api/v1/prove",
-      "description": "ZK proof generation payment",
-      "mimeType": "application/json",
-      "payTo": "${config.paymentPayTo}",
-      "maxTimeoutSeconds": 300,
-      "asset": "${usdcAddress}"
-    }
-  }'
-
-# Expected response on success:
-# { "success": true, "txHash": "0x..." }
-# Use txHash as payment_tx_hash in Step 11 (retry with X-Payment-TX header)`,
-    },
-  };
-}
 
 function buildInputSchema(circuitId: CircuitId) {
   const baseFields = [
@@ -532,7 +401,7 @@ ATTESTATION_KEY=0x... PAYMENT_KEY=0x... SERVER_URL=${config.a2aBaseUrl} npx tsx 
 
     constants: buildConstants(config, circuitId, isTestnet, chainId, usdcAddress, paymentAmount),
     formulas: buildFormulas(circuitId),
-    code_examples: buildCodeExamples(config, circuitId, usdcAddress, chainId, paymentAmount),
+
     input_schema: buildInputSchema(circuitId),
     endpoints: buildEndpoints(config, circuitId),
   };
