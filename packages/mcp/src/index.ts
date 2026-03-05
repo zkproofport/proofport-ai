@@ -13,37 +13,42 @@ if (!attestationKey) {
 }
 
 const config = createConfig({
-  baseUrl: process.env.PROOFPORT_URL || 'https://stg-ai.zkproofport.app',
-  easRpcUrl: process.env.EAS_RPC_URL,
-  easGraphqlUrl: process.env.EAS_GRAPHQL_URL,
+  ...(process.env.PROOFPORT_URL && { baseUrl: process.env.PROOFPORT_URL }),
+  ...(process.env.EAS_RPC_URL && { easRpcUrl: process.env.EAS_RPC_URL }),
+  ...(process.env.EAS_GRAPHQL_URL && { easGraphqlUrl: process.env.EAS_GRAPHQL_URL }),
 });
 
 // ─── Attestation signer (always from private key — EAS attestation is tied to this address)
 const attestationSigner = fromPrivateKey(attestationKey);
-console.error(`[proofport-mcp] Attestation wallet: ${attestationSigner.getAddress()}`);
+console.error(`[zkproofport-mcp] Attestation wallet: ${attestationSigner.getAddress()}`);
 
-// ─── Payment signer (CDP wallet if credentials provided, otherwise attestation key)
+// ─── Payment signer (PAYMENT_KEY > CDP wallet > attestation key fallback)
 let paymentSigner: ProofportSigner | undefined;
 
-const cdpApiKeyId = process.env.CDP_API_KEY_ID;
-const cdpApiKeySecret = process.env.CDP_API_KEY_SECRET;
-const cdpWalletSecret = process.env.CDP_WALLET_SECRET;
-
-if (cdpApiKeyId && cdpApiKeySecret && cdpWalletSecret) {
-  paymentSigner = await CdpWalletSigner.create({
-    apiKeyId: cdpApiKeyId,
-    apiKeySecret: cdpApiKeySecret,
-    walletSecret: cdpWalletSecret,
-    address: process.env.CDP_WALLET_ADDRESS,
-  });
-  console.error(`[proofport-mcp] Payment wallet (CDP): ${paymentSigner.getAddress()}`);
+if (process.env.PAYMENT_KEY) {
+  paymentSigner = fromPrivateKey(process.env.PAYMENT_KEY);
+  console.error(`[zkproofport-mcp] Payment wallet: ${paymentSigner.getAddress()}`);
 } else {
-  console.error('[proofport-mcp] No CDP credentials — using attestation wallet for payment');
+  const cdpApiKeyId = process.env.CDP_API_KEY_ID;
+  const cdpApiKeySecret = process.env.CDP_API_KEY_SECRET;
+  const cdpWalletSecret = process.env.CDP_WALLET_SECRET;
+
+  if (cdpApiKeyId && cdpApiKeySecret && cdpWalletSecret) {
+    paymentSigner = await CdpWalletSigner.create({
+      apiKeyId: cdpApiKeyId,
+      apiKeySecret: cdpApiKeySecret,
+      walletSecret: cdpWalletSecret,
+      address: process.env.CDP_WALLET_ADDRESS,
+    });
+    console.error(`[zkproofport-mcp] Payment wallet (CDP): ${paymentSigner.getAddress()}`);
+  } else {
+    console.error('[zkproofport-mcp] No payment wallet configured — using attestation wallet for payment');
+  }
 }
 
 // ─── Create MCP server ────────────────────────────────────────────────
 const server = new McpServer({
-  name: 'proofport-mcp',
+  name: 'zkproofport-mcp',
   version: '0.1.0',
 });
 
@@ -52,4 +57,4 @@ registerTools(server, config, attestationSigner, paymentSigner);
 // ─── Connect via stdio ────────────────────────────────────────────────
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error('proofport-mcp server started on stdio');
+console.error('zkproofport-mcp server started on stdio');
