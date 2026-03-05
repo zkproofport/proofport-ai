@@ -294,19 +294,7 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
         return;
       }
 
-      // For plaintext flow, inputs are required (only checked when payment header present)
-      if (!body.encrypted_payload && !body.inputs) {
-        res.status(400).json({ error: 'INVALID_REQUEST', message: 'Missing inputs (or use encrypted_payload for E2E flow)' });
-        return;
-      }
-
-      // In nitro mode, require E2E encryption — plaintext inputs are rejected
-      if (config.teeMode === 'nitro' && !body.encrypted_payload) {
-        res.status(400).json({ error: 'PLAINTEXT_REJECTED', message: 'TEE mode requires E2E encrypted payload. Fetch TEE public key from 402 response and encrypt inputs before submitting.' });
-        return;
-      }
-
-      // Has payment header — validate nonce, verify payment, generate proof
+      // Has payment header — validate nonce first (replay protection is independent of encryption)
       log.info({ action: 'prove.x402.start', circuit: circuitId }, 'x402 proof request');
 
       if (!paymentNonceHeader) {
@@ -324,6 +312,18 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
       // Verify nonce was issued for the same circuit
       if (storedCircuit !== circuitId) {
         res.status(400).json({ error: 'NONCE_CIRCUIT_MISMATCH', message: `Nonce was issued for ${storedCircuit}, not ${circuitId}` });
+        return;
+      }
+
+      // For plaintext flow, inputs are required (only checked when payment header present)
+      if (!body.encrypted_payload && !body.inputs) {
+        res.status(400).json({ error: 'INVALID_REQUEST', message: 'Missing inputs (or use encrypted_payload for E2E flow)' });
+        return;
+      }
+
+      // In nitro mode, require E2E encryption — plaintext inputs are rejected
+      if (config.teeMode === 'nitro' && !body.encrypted_payload) {
+        res.status(400).json({ error: 'PLAINTEXT_REJECTED', message: 'TEE mode requires E2E encrypted payload. Fetch TEE public key from 402 response and encrypt inputs before submitting.' });
         return;
       }
 
