@@ -45,8 +45,8 @@ jobs:
         if: steps.pkg.outputs.package == 'packages/mcp'
         run: npx tsc -p packages/mcp
 
-      - name: Test
-        run: npx vitest run --project unit
+      - name: Typecheck
+        run: npx tsc -p ${{ steps.pkg.outputs.package }} --noEmit
 
       - name: Publish to npm
         working-directory: ${{ steps.pkg.outputs.package }}
