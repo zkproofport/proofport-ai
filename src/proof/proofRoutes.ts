@@ -9,7 +9,7 @@ import { BbProver } from '../prover/bbProver.js';
 import { hexToBytes } from '../input/inputBuilder.js';
 import type { CircuitParams } from '../input/inputBuilder.js';
 import { buildGuide } from './guideBuilder.js';
-import { VERIFIER_ADDRESSES } from '../config/contracts.js';
+import { getVerifierAddress } from '../config/deployments.js';
 import { ethers } from 'ethers';
 import { createLogger } from '../logger.js';
 import { parseAttestationDocument, verifyAttestationDocument } from '../tee/attestation.js';
@@ -404,7 +404,7 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
         }
 
         const e2eChainId = isTestnet ? 84532 : 8453;
-        const e2eVerifierAddress = VERIFIER_ADDRESSES[String(e2eChainId)]?.[circuitId] || null;
+        const e2eVerifierAddress = getVerifierAddress(circuitId, String(e2eChainId)) || null;
 
         const response: ProveResponse = {
           proof,
@@ -428,7 +428,7 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
       }
 
       const chainId = isTestnet ? 84532 : 8453;
-      const verifierAddress = VERIFIER_ADDRESSES[String(chainId)]?.[circuitId] || null;
+      const verifierAddress = getVerifierAddress(circuitId, String(chainId)) || null;
       await generateProofFromInputs(
         {
           circuitId,

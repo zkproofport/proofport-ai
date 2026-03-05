@@ -1,6 +1,7 @@
 import { createRequire } from 'module';
 import { CIRCUITS, type CircuitId } from '../config/circuits.js';
-import { AUTHORIZED_SIGNERS, COINBASE_ATTESTER_CONTRACT, VERIFIER_ADDRESSES } from '../config/contracts.js';
+import { AUTHORIZED_SIGNERS, COINBASE_ATTESTER_CONTRACT } from '../config/contracts.js';
+import { getChainVerifiers } from '../config/deployments.js';
 import type { Config } from '../config/index.js';
 
 const require = createRequire(import.meta.url);
@@ -47,7 +48,7 @@ function buildConstants(
   paymentAmount: string,
 ) {
   const circuit = CIRCUITS[circuitId];
-  const chainVerifiers = VERIFIER_ADDRESSES[String(chainId)] || {};
+  const chainVerifiers = getChainVerifiers(String(chainId));
   const verifierAddr = chainVerifiers[circuitId] || 'NOT_DEPLOYED';
 
   return {

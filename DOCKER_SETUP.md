@@ -60,7 +60,6 @@ cp .env.example .env
 | `BASE_RPC_URL` | Base mainnet RPC endpoint | `https://mainnet.base.org` |
 | `CHAIN_RPC_URL` | Chain RPC for verification | `https://mainnet.base.org` |
 | `EAS_GRAPHQL_ENDPOINT` | EAS GraphQL API | `https://base.easscan.org/graphql` |
-| `NULLIFIER_REGISTRY_ADDRESS` | Registry contract address | `0x1234...abcd` (checksummed) |
 | `PROVER_PRIVATE_KEY` | Prover wallet private key | `64 hex chars, NO 0x prefix` |
 | `PAYMENT_MODE` | Payment mode | `disabled` or `testnet` or `mainnet` |
 

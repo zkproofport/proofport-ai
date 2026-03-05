@@ -32,6 +32,7 @@ import type { LLMProvider } from './chat/llmProvider.js';
 import { OpenAIProvider } from './chat/openaiClient.js';
 import { GeminiProvider } from './chat/geminiClient.js';
 import { MultiLLMProvider } from './chat/multiProvider.js';
+import { syncDeployments } from './config/deployments.js';
 
 function createApp(config: Config, agentTokenId?: bigint | null) {
   // Validate payment config at startup
@@ -188,6 +189,14 @@ async function startServer() {
     // Download circuit artifacts if not present
     await ensureArtifacts(config.circuitsDir, config.circuitsRepoUrl);
     log.info({ action: 'server.artifacts.ready' }, 'Circuit artifacts ready');
+
+    // Sync verifier addresses from GitHub broadcast JSON
+    try {
+      const deploymentsUpdated = await syncDeployments(config.paymentMode);
+      log.info({ action: 'server.deployments.synced', updated: deploymentsUpdated }, 'Deployment addresses synced');
+    } catch (err) {
+      log.warn({ action: 'server.deployments.failed', err }, 'Deployment sync failed, using fallback addresses');
+    }
 
     // Create TEE provider early (needed for both registration and app)
     const teeConfig = getTeeConfig();

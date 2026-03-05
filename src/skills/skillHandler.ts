@@ -21,7 +21,7 @@ import { createLogger } from '../logger.js';
 
 const log = createLogger('Skill');
 import { CIRCUITS } from '../config/circuits.js';
-import { VERIFIER_ADDRESSES } from '../config/contracts.js';
+import { getChainVerifiers } from '../config/deployments.js';
 import type { RedisClient } from '../redis/client.js';
 import type { RateLimiter } from '../redis/rateLimiter.js';
 import type { ProofCache } from '../redis/proofCache.js';
@@ -88,7 +88,7 @@ export function handleGetSupportedCircuits(
   params: GetSupportedCircuitsParams,
 ): GetSupportedCircuitsResult {
   const chainId = params.chainId || '84532';
-  const chainVerifiers = VERIFIER_ADDRESSES[chainId] || {};
+  const chainVerifiers = getChainVerifiers(chainId);
 
   const circuits: CircuitInfo[] = Object.values(CIRCUITS).map(circuit => ({
     id: circuit.id,

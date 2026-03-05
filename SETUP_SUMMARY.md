@@ -32,7 +32,6 @@
   - `BASE_RPC_URL` - Base chain RPC endpoint
   - `EAS_GRAPHQL_ENDPOINT` - EAS GraphQL endpoint
   - `CHAIN_RPC_URL` - Chain RPC for verification
-  - `NULLIFIER_REGISTRY_ADDRESS` - On-chain nullifier registry
   - `PROVER_PRIVATE_KEY` - Prover agent's wallet key
   - `PAYMENT_MODE` - 'disabled' | 'testnet' | 'mainnet'
 

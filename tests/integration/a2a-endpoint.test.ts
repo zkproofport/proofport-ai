@@ -181,7 +181,6 @@ describe('A2A Endpoint E2E', () => {
       baseRpcUrl: 'https://base-rpc.example.com',
       easGraphqlEndpoint: 'https://eas.example.com',
       chainRpcUrl: 'https://chain.example.com',
-      nullifierRegistryAddress: '0x' + '11'.repeat(20),
       proverPrivateKey: '0x' + 'ab'.repeat(32),
       paymentMode: 'disabled' as const,
       a2aBaseUrl: 'https://a2a.example.com',

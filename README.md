@@ -331,7 +331,6 @@ The agent auto-registers on-chain at startup via the ERC-8004 Identity contract.
 | `BASE_RPC_URL` | Base chain RPC endpoint |
 | `CHAIN_RPC_URL` | RPC for proof verification |
 | `EAS_GRAPHQL_ENDPOINT` | EAS GraphQL endpoint for attestation queries |
-| `NULLIFIER_REGISTRY_ADDRESS` | ZKProofportNullifierRegistry contract |
 | `PROVER_PRIVATE_KEY` | Agent wallet private key (64 hex chars, no 0x) |
 | `PAYMENT_MODE` | `disabled` / `testnet` / `mainnet` |
 | `A2A_BASE_URL` | Public-facing service URL (for Agent Card) |

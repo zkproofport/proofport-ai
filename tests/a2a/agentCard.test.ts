@@ -20,7 +20,6 @@ describe('A2A Agent Card', () => {
       baseRpcUrl: 'https://mainnet.base.org',
       easGraphqlEndpoint: 'https://base.easscan.org/graphql',
       chainRpcUrl: 'https://sepolia.base.org',
-      nullifierRegistryAddress: '0x1234567890123456789012345678901234567890',
       proverPrivateKey: '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
       paymentMode: 'disabled',
       a2aBaseUrl: 'https://ai-dev.zkproofport.app',

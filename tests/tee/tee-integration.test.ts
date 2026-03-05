@@ -68,7 +68,6 @@ function makeTestConfig(overrides: Partial<Config> = {}): Config {
     baseRpcUrl: 'https://mainnet.base.org',
     easGraphqlEndpoint: 'https://base.easscan.org/graphql',
     chainRpcUrl: 'https://sepolia.base.org',
-    nullifierRegistryAddress: '0xC6a8dC34B1872a883aFCc808C90c31c038764d9a',
     proverPrivateKey: '0x5c8eb0e0dcdcdabdc87f1fae3e992132e8a06b83188dfba625ca95036876bb0a',
     paymentMode: 'disabled' as const,
     a2aBaseUrl: 'http://localhost:4002',

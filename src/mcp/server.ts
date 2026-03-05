@@ -177,7 +177,7 @@ CIRCUITS:
 
 CHAIN INFORMATION:
   - Current deployments are on Base Sepolia (chain ID 84532, testnet)
-  - Base mainnet (chain ID 8453) deployments TBD
+  - Base mainnet (chain ID 8453) production deployment
   - EAS (Ethereum Attestation Service) on Base: https://base.easpcan.org/graphql
   - EAS on Base Sepolia: https://base-sepolia.easpcan.org/graphql
 

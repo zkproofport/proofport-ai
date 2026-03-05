@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import { VERIFIER_ADDRESSES } from '../config/contracts.js';
+import { getVerifierAddress } from '../config/deployments.js';
 
 const VERIFIER_ABI = [
   'function verify(bytes calldata _proof, bytes32[] calldata _publicInputs) external view returns (bool)',
@@ -21,7 +21,7 @@ export interface VerifyOnChainResult {
 /**
  * Verify a ZK proof on-chain by calling the deployed verifier contract.
  *
- * Looks up the verifier address from VERIFIER_ADDRESSES[chainId][circuitId],
+ * Looks up the verifier address via getVerifierAddress(circuitId, chainId),
  * then calls verify(proof, publicInputs) on the contract.
  *
  * @throws If no verifier is found for the given chainId/circuitId combination.
@@ -31,14 +31,12 @@ export async function verifyOnChain(params: VerifyOnChainParams): Promise<Verify
   const { proof, publicInputs, circuitId, chainId, rpcUrl } = params;
 
   // Look up verifier address
-  const chainVerifiers = VERIFIER_ADDRESSES[chainId];
-  if (!chainVerifiers || !chainVerifiers[circuitId]) {
+  const verifierAddress = getVerifierAddress(circuitId, chainId);
+  if (!verifierAddress) {
     throw new Error(
       `No verifier found for circuit "${circuitId}" on chain "${chainId}"`
     );
   }
-
-  const verifierAddress = chainVerifiers[circuitId];
 
   // Create provider and contract instance (ethers v6)
   const provider = new ethers.JsonRpcProvider(rpcUrl);

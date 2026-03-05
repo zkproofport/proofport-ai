@@ -10,7 +10,7 @@ vi.mock('../src/prover/verifier.js', () => ({
 import { verifyOnChain } from '../src/prover/verifier.js';
 import { handleGetSupportedCircuits } from '../src/skills/skillHandler.js';
 import { CIRCUITS } from '../src/config/circuits.js';
-import { VERIFIER_ADDRESSES } from '../src/config/contracts.js';
+import { FALLBACK_VERIFIERS } from '../src/config/contracts.js';
 
 // ─── verify_proof (via verifyOnChain) ────────────────────────────────────
 
@@ -22,7 +22,7 @@ describe('verifyOnChain', () => {
   it('should verify a valid proof on-chain', async () => {
     (verifyOnChain as ReturnType<typeof vi.fn>).mockResolvedValue({
       isValid: true,
-      verifierAddress: VERIFIER_ADDRESSES['84532']['coinbase_attestation'],
+      verifierAddress: FALLBACK_VERIFIERS['84532']['coinbase_attestation'],
     });
 
     const result = await verifyOnChain({
@@ -34,7 +34,7 @@ describe('verifyOnChain', () => {
     });
 
     expect(result.isValid).toBe(true);
-    expect(result.verifierAddress).toBe(VERIFIER_ADDRESSES['84532']['coinbase_attestation']);
+    expect(result.verifierAddress).toBe(FALLBACK_VERIFIERS['84532']['coinbase_attestation']);
 
     expect(verifyOnChain).toHaveBeenCalledWith({
       proof: '0xvalidproof',
@@ -48,7 +48,7 @@ describe('verifyOnChain', () => {
   it('should return isValid: false for invalid proof', async () => {
     (verifyOnChain as ReturnType<typeof vi.fn>).mockResolvedValue({
       isValid: false,
-      verifierAddress: VERIFIER_ADDRESSES['84532']['coinbase_attestation'],
+      verifierAddress: FALLBACK_VERIFIERS['84532']['coinbase_attestation'],
     });
 
     const result = await verifyOnChain({
@@ -65,7 +65,7 @@ describe('verifyOnChain', () => {
   it('should verify coinbase_country_attestation', async () => {
     (verifyOnChain as ReturnType<typeof vi.fn>).mockResolvedValue({
       isValid: true,
-      verifierAddress: VERIFIER_ADDRESSES['84532']['coinbase_country_attestation'],
+      verifierAddress: FALLBACK_VERIFIERS['84532']['coinbase_country_attestation'],
     });
 
     const result = await verifyOnChain({
@@ -78,7 +78,7 @@ describe('verifyOnChain', () => {
 
     expect(result.isValid).toBe(true);
     expect(result.verifierAddress).toBe(
-      VERIFIER_ADDRESSES['84532']['coinbase_country_attestation']
+      FALLBACK_VERIFIERS['84532']['coinbase_country_attestation']
     );
   });
 
@@ -168,7 +168,7 @@ describe('handleGetSupportedCircuits', () => {
     const result = handleGetSupportedCircuits({ chainId: '84532' });
     const kyc = result.circuits.find(c => c.id === 'coinbase_attestation');
 
-    expect(kyc!.verifierAddress).toBe(VERIFIER_ADDRESSES['84532']['coinbase_attestation']);
+    expect(kyc!.verifierAddress).toBe(FALLBACK_VERIFIERS['84532']['coinbase_attestation']);
   });
 
   it('should return circuits without verifierAddress for unknown chain', () => {

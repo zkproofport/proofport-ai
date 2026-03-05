@@ -37,7 +37,6 @@ export function loadConfig() {
     baseRpcUrl: getRequiredEnv('BASE_RPC_URL'),
     easGraphqlEndpoint: getRequiredEnv('EAS_GRAPHQL_ENDPOINT'),
     chainRpcUrl: getRequiredEnv('CHAIN_RPC_URL'),
-    nullifierRegistryAddress: getRequiredEnv('NULLIFIER_REGISTRY_ADDRESS'),
     proverPrivateKey: getRequiredEnv('PROVER_PRIVATE_KEY'),
     paymentMode,
     a2aBaseUrl: getRequiredEnv('A2A_BASE_URL'),

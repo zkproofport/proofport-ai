@@ -87,7 +87,6 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     baseRpcUrl: 'https://mainnet.base.org',
     easGraphqlEndpoint: 'https://base.easscan.org/graphql',
     chainRpcUrl: 'https://sepolia.base.org',
-    nullifierRegistryAddress: '0xNullifierRegistry',
     proverPrivateKey: '0xdeadbeef',
     paymentMode: 'disabled',
     a2aBaseUrl: 'http://localhost:4002',

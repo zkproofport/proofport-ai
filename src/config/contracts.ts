@@ -7,7 +7,13 @@ export const AUTHORIZED_SIGNERS = [
   '0x44ace9abb148e8412ac4492e9a1ae6bd88226803',
 ];
 
-export const VERIFIER_ADDRESSES: Record<string, Record<string, string>> = {
+export type CircuitId = 'coinbase_attestation' | 'coinbase_country_attestation';
+
+export const FALLBACK_VERIFIERS: Record<string, Record<string, string>> = {
+  '8453': {
+    coinbase_attestation: '0xF7dED73E7a7fc8fb030c35c5A88D40ABe6865382',
+    coinbase_country_attestation: '0xF3D5A09d2C85B28C52EF2905c1BE3a852b609D0C',
+  },
   '84532': {
     coinbase_attestation: '0x0036B61dBFaB8f3CfEEF77dD5D45F7EFBFE2035c',
     coinbase_country_attestation: '0xdEe363585926c3c28327Efd1eDd01cf4559738cf',

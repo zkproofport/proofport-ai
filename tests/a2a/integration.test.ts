@@ -33,7 +33,6 @@ describe('A2A Integration Tests', () => {
       baseRpcUrl: 'https://base.example.com',
       easGraphqlEndpoint: 'https://eas.example.com',
       chainRpcUrl: 'https://chain.example.com',
-      nullifierRegistryAddress: '0x1234567890123456789012345678901234567890',
       proverPrivateKey: '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
       paymentMode: 'disabled',
       a2aBaseUrl: 'https://test.example.com',

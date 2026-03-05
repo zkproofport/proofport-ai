@@ -21,7 +21,7 @@ vi.mock('ethers', () => {
 
 import { ethers } from 'ethers';
 import { verifyOnChain } from '../src/prover/verifier.js';
-import { VERIFIER_ADDRESSES } from '../src/config/contracts.js';
+import { FALLBACK_VERIFIERS } from '../src/config/contracts.js';
 
 describe('verifyOnChain', () => {
   const mockVerifyFn = vi.fn();
@@ -47,7 +47,7 @@ describe('verifyOnChain', () => {
 
     expect(result.isValid).toBe(true);
     expect(result.verifierAddress).toBe(
-      VERIFIER_ADDRESSES['84532']['coinbase_attestation']
+      FALLBACK_VERIFIERS['84532']['coinbase_attestation']
     );
 
     // Verify JsonRpcProvider was called with the rpcUrl
@@ -55,7 +55,7 @@ describe('verifyOnChain', () => {
 
     // Verify Contract was instantiated with the correct verifier address
     expect(ethers.Contract).toHaveBeenCalledWith(
-      VERIFIER_ADDRESSES['84532']['coinbase_attestation'],
+      FALLBACK_VERIFIERS['84532']['coinbase_attestation'],
       expect.any(Array),
       expect.any(Object),
     );
@@ -77,7 +77,7 @@ describe('verifyOnChain', () => {
 
     expect(result.isValid).toBe(false);
     expect(result.verifierAddress).toBe(
-      VERIFIER_ADDRESSES['84532']['coinbase_attestation']
+      FALLBACK_VERIFIERS['84532']['coinbase_attestation']
     );
   });
 
@@ -94,7 +94,7 @@ describe('verifyOnChain', () => {
 
     expect(result.isValid).toBe(true);
     expect(result.verifierAddress).toBe(
-      VERIFIER_ADDRESSES['84532']['coinbase_country_attestation']
+      FALLBACK_VERIFIERS['84532']['coinbase_country_attestation']
     );
   });
 

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   COINBASE_ATTESTER_CONTRACT,
   AUTHORIZED_SIGNERS,
-  VERIFIER_ADDRESSES,
+  FALLBACK_VERIFIERS,
   ERC8004_ADDRESSES
 } from '../src/config/contracts.js';
 
@@ -33,15 +33,15 @@ describe('Contract Addresses', () => {
     });
   });
 
-  describe('VERIFIER_ADDRESSES', () => {
+  describe('FALLBACK_VERIFIERS', () => {
     it('should contain Base Sepolia (84532) verifiers', () => {
-      expect(VERIFIER_ADDRESSES['84532']).toBeDefined();
-      expect(VERIFIER_ADDRESSES['84532'].coinbase_attestation).toBe('0x0036B61dBFaB8f3CfEEF77dD5D45F7EFBFE2035c');
-      expect(VERIFIER_ADDRESSES['84532'].coinbase_country_attestation).toBe('0xdEe363585926c3c28327Efd1eDd01cf4559738cf');
+      expect(FALLBACK_VERIFIERS['84532']).toBeDefined();
+      expect(FALLBACK_VERIFIERS['84532'].coinbase_attestation).toBe('0x0036B61dBFaB8f3CfEEF77dD5D45F7EFBFE2035c');
+      expect(FALLBACK_VERIFIERS['84532'].coinbase_country_attestation).toBe('0xdEe363585926c3c28327Efd1eDd01cf4559738cf');
     });
 
     it('should have valid checksummed addresses for verifiers', () => {
-      Object.values(VERIFIER_ADDRESSES).forEach(chainVerifiers => {
+      Object.values(FALLBACK_VERIFIERS).forEach(chainVerifiers => {
         Object.values(chainVerifiers).forEach(address => {
           expect(address).toMatch(/^0x[a-fA-F0-9]{40}$/);
         });
