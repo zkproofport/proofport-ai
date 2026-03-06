@@ -25,3 +25,4 @@ prover/target/
 
 # OMC state
 .omc/
+circuits/
