@@ -65,6 +65,12 @@ export function loadConfig() {
 
     // Tracing (optional)
     phoenixCollectorEndpoint: process.env.PHOENIX_COLLECTOR_ENDPOINT || '',
+
+    // Virtuals Protocol ACP (optional)
+    virtualsEnabled: process.env.VIRTUALS_ENABLED === 'true',
+    virtualsWalletPk: process.env.VIRTUALS_WALLET_PK || '',
+    virtualsEntityId: process.env.VIRTUALS_ENTITY_ID ? parseInt(process.env.VIRTUALS_ENTITY_ID, 10) : 0,
+    virtualsAgentWallet: process.env.VIRTUALS_AGENT_WALLET || '',
   };
 }
 
