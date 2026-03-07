@@ -33,6 +33,7 @@ import { OpenAIProvider } from './chat/openaiClient.js';
 import { GeminiProvider } from './chat/geminiClient.js';
 import { MultiLLMProvider } from './chat/multiProvider.js';
 import { syncDeployments } from './config/deployments.js';
+import { startAcpSeller } from './virtuals/acpSeller.js';
 
 function createApp(config: Config, agentTokenId?: bigint | null) {
   // Validate payment config at startup
@@ -219,6 +220,11 @@ async function startServer() {
 
       cleanupWorker.start();
       log.info({ action: 'server.cleanup.started' }, 'CleanupWorker started');
+
+      // Start Virtuals ACP Seller (non-blocking, optional)
+      startAcpSeller(config).catch(err => {
+        log.warn({ action: 'server.virtuals.failed', err }, 'Virtuals ACP Seller failed to start (non-fatal)');
+      });
     });
   } catch (error) {
     log.error({ action: 'server.start.failed', err: error }, 'Failed to start server');
