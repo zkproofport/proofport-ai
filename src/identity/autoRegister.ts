@@ -64,7 +64,9 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
             !currentMetadata.tags ||
             currentMetadata.tags.length === 0 ||
             !currentMetadata.categories ||
-            currentMetadata.categories.length === 0
+            currentMetadata.categories.length === 0 ||
+            !currentMetadata.registrations ||
+            currentMetadata.registrations.length === 0
           );
           if (needsUpdate) {
               log.info({ action: 'identity.metadata.needs_update' }, 'Agent metadata needs updating on-chain');
@@ -85,6 +87,9 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
                 }
                 if (!currentMetadata.services || currentMetadata.services.length === 0) {
                   log.info({ action: 'identity.metadata.services_missing' }, 'Metadata services array missing or empty');
+                }
+                if (!currentMetadata.registrations || currentMetadata.registrations.length === 0) {
+                  log.info({ action: 'identity.metadata.registrations_empty' }, 'Metadata registrations array missing or empty');
                 }
                 if (!currentMetadata.type) {
                   log.info({ action: 'identity.metadata.type_missing' }, 'Metadata type field missing');
