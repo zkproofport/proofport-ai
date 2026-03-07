@@ -11,6 +11,16 @@ import { createLogger } from '../logger.js';
 
 const log = createLogger('AutoRegister');
 
+/** Wrap a promise with a timeout (rejects with TimeoutError after ms) */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`Timeout after ${ms}ms: ${label}`)), ms),
+    ),
+  ]);
+}
+
 /**
  * Ensure agent is registered on ERC-8004 Identity contract
  *
@@ -31,6 +41,7 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
   }
 
   try {
+    log.info({ action: 'identity.step.creating_registration' }, 'Creating AgentRegistration instance');
     const registration = new AgentRegistration({
       identityContractAddress: config.erc8004IdentityAddress,
       reputationContractAddress: config.erc8004ReputationAddress,
@@ -39,10 +50,15 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
     });
 
     // Check if already registered
-    const isRegistered = await registration.isRegistered();
+    log.info({ action: 'identity.step.checking_registered' }, 'Checking if agent is already registered (RPC call)');
+    const isRegistered = await withTimeout(registration.isRegistered(), 30000, 'isRegistered');
+    log.info({ action: 'identity.step.checked_registered', isRegistered }, 'isRegistered check complete');
 
     if (isRegistered) {
-      const info = await registration.getRegistration();
+      log.info({ action: 'identity.step.getting_registration' }, 'Getting registration info (RPC call)');
+      const info = await withTimeout(registration.getRegistration(), 30000, 'getRegistration');
+      log.info({ action: 'identity.step.got_registration', hasInfo: !!info, tokenId: info?.tokenId?.toString() }, 'getRegistration complete');
+
       if (info) {
         log.info({ action: 'identity.registration.already_registered', tokenId: info.tokenId.toString() }, 'Agent already registered on ERC-8004 Identity contract');
 
@@ -133,10 +149,9 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
                 supportedTrust: ['tee-attestation'],
               };
 
-              // Fire-and-forget: don't block server startup waiting for on-chain tx
-              registration.updateMetadata(info.tokenId, metadata)
-                .then(txHash => log.info({ action: 'identity.metadata.updated', txHash }, 'Metadata updated successfully'))
-                .catch(err => log.error({ action: 'identity.metadata.update_failed', err: err instanceof Error ? err : new Error(String(err)) }, 'Failed to update metadata'));
+              log.info({ action: 'identity.step.updating_metadata' }, 'Updating metadata on-chain (TX)');
+              const txHash = await withTimeout(registration.updateMetadata(info.tokenId, metadata), 120000, 'updateMetadata');
+              log.info({ action: 'identity.metadata.updated', txHash }, 'Metadata updated successfully');
             }
           } catch (error) {
             if (error instanceof Error) {
@@ -144,10 +159,15 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
             }
           }
 
-        // Submit TEE validation in background (don't block server startup)
+        // Submit TEE validation if configured
         if (teeProvider && teeProvider.mode !== 'disabled') {
-          ensureAgentValidated(config, info.tokenId, teeProvider)
-            .catch(err => log.error({ action: 'tee.validation.startup_failed', err: err instanceof Error ? err : new Error(String(err)) }, 'Background TEE validation failed'));
+          log.info({ action: 'identity.step.tee_validation' }, 'Starting TEE validation');
+          try {
+            await withTimeout(ensureAgentValidated(config, info.tokenId, teeProvider), 60000, 'ensureAgentValidated');
+            log.info({ action: 'identity.step.tee_validation_done' }, 'TEE validation complete');
+          } catch (err) {
+            log.error({ action: 'tee.validation.startup_failed', err: err instanceof Error ? err : new Error(String(err)) }, 'TEE validation failed (timeout or error)');
+          }
         }
 
         return info.tokenId;
@@ -186,17 +206,22 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
 
     // Register on-chain
     log.info({ action: 'identity.registration.started' }, 'Registering agent on ERC-8004 Identity contract');
-    const result = await registration.register(metadata);
+    const result = await withTimeout(registration.register(metadata), 120000, 'register');
 
     log.info(
       { action: 'identity.registration.completed', tokenId: result.tokenId.toString(), agentAddress: result.agentAddress, transactionHash: result.transactionHash },
       'Agent registered successfully',
     );
 
-    // Submit TEE validation in background (don't block server startup)
+    // Submit TEE validation if configured
     if (teeProvider && teeProvider.mode !== 'disabled') {
-      ensureAgentValidated(config, result.tokenId, teeProvider)
-        .catch(err => log.error({ action: 'tee.validation.startup_failed', err: err instanceof Error ? err : new Error(String(err)) }, 'Background TEE validation failed'));
+      log.info({ action: 'identity.step.tee_validation' }, 'Starting TEE validation');
+      try {
+        await withTimeout(ensureAgentValidated(config, result.tokenId, teeProvider), 60000, 'ensureAgentValidated');
+        log.info({ action: 'identity.step.tee_validation_done' }, 'TEE validation complete');
+      } catch (err) {
+        log.error({ action: 'tee.validation.startup_failed', err: err instanceof Error ? err : new Error(String(err)) }, 'TEE validation failed (timeout or error)');
+      }
     }
 
     return result.tokenId;
