@@ -144,9 +144,10 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
             }
           }
 
-        // Submit TEE validation if configured
+        // Submit TEE validation in background (don't block server startup)
         if (teeProvider && teeProvider.mode !== 'disabled') {
-          await ensureAgentValidated(config, info.tokenId, teeProvider);
+          ensureAgentValidated(config, info.tokenId, teeProvider)
+            .catch(err => log.error({ action: 'tee.validation.startup_failed', err: err instanceof Error ? err : new Error(String(err)) }, 'Background TEE validation failed'));
         }
 
         return info.tokenId;
@@ -192,9 +193,10 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
       'Agent registered successfully',
     );
 
-    // Submit TEE validation if configured
+    // Submit TEE validation in background (don't block server startup)
     if (teeProvider && teeProvider.mode !== 'disabled') {
-      await ensureAgentValidated(config, result.tokenId, teeProvider);
+      ensureAgentValidated(config, result.tokenId, teeProvider)
+        .catch(err => log.error({ action: 'tee.validation.startup_failed', err: err instanceof Error ? err : new Error(String(err)) }, 'Background TEE validation failed'));
     }
 
     return result.tokenId;
