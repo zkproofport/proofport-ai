@@ -92,18 +92,11 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
     });
   });
 
-  // CORS for A2A client UIs (e.g., a2a-ui on port 3000)
-  const a2aCorsOrigins = process.env.A2A_CORS_ORIGINS
-    ? process.env.A2A_CORS_ORIGINS.split(',').map(s => s.trim())
-    : [];
-
-  function a2aCorsMiddleware(req: express.Request, res: express.Response, next: express.NextFunction) {
-    const origin = req.headers.origin;
-    if (origin && a2aCorsOrigins.length > 0 && a2aCorsOrigins.includes(origin)) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept');
-    }
+  // CORS: public read-only endpoints allow any origin (discovery, health, MCP info)
+  function publicCorsMiddleware(req: express.Request, res: express.Response, next: express.NextFunction) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept');
     if (req.method === 'OPTIONS') {
       res.sendStatus(204);
       return;
@@ -111,8 +104,9 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
     next();
   }
 
-  app.use('/.well-known', a2aCorsMiddleware);
-  app.use('/a2a', a2aCorsMiddleware);
+  app.use('/.well-known', publicCorsMiddleware);
+  app.use('/a2a', publicCorsMiddleware);
+  app.use('/mcp', publicCorsMiddleware);
 
   // Discovery endpoints (agent.json = OASF identity, agent-card.json = A2A v0.3)
   app.get('/.well-known/agent.json', getOasfAgentHandler(config, agentTokenId));
@@ -171,7 +165,13 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   });
 
   app.get('/mcp', async (_req, res) => {
-    res.status(405).json({ error: 'SSE not supported in stateless mode. Use POST /mcp instead.' });
+    res.json({
+      name: 'proofport-ai',
+      version: '2025-11-25',
+      protocol: 'MCP StreamableHTTP',
+      description: 'ZK proof generation MCP server (stateless mode — use POST for JSON-RPC)',
+      tools: ['prove', 'get_supported_circuits', 'get_guide'],
+    });
   });
 
   app.delete('/mcp', async (_req, res) => {
