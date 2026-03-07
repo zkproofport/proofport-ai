@@ -144,7 +144,7 @@ docker run -d \
 # ---------------------------------------------------------------------------
 log "Waiting for $NEW_CONTAINER to become healthy (max 120s)..."
 
-MAX_RETRIES=24
+MAX_RETRIES=120
 RETRY_INTERVAL=5
 healthy=false
 
