@@ -142,9 +142,9 @@ docker run -d \
 # ---------------------------------------------------------------------------
 # Health check — new container must pass before traffic switches
 # ---------------------------------------------------------------------------
-log "Waiting for $NEW_CONTAINER to become healthy (max 120s)..."
+log "Waiting for $NEW_CONTAINER to become healthy (max 180s)..."
 
-MAX_RETRIES=120
+MAX_RETRIES=36
 RETRY_INTERVAL=5
 healthy=false
 
