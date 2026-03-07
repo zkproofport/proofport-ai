@@ -133,8 +133,10 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
                 supportedTrust: ['tee-attestation'],
               };
 
-              const txHash = await registration.updateMetadata(info.tokenId, metadata);
-              log.info({ action: 'identity.metadata.updated', txHash }, 'Metadata updated successfully');
+              // Fire-and-forget: don't block server startup waiting for on-chain tx
+              registration.updateMetadata(info.tokenId, metadata)
+                .then(txHash => log.info({ action: 'identity.metadata.updated', txHash }, 'Metadata updated successfully'))
+                .catch(err => log.error({ action: 'identity.metadata.update_failed', err: err instanceof Error ? err : new Error(String(err)) }, 'Failed to update metadata'));
             }
           } catch (error) {
             if (error instanceof Error) {
