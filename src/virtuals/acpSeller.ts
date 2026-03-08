@@ -65,6 +65,7 @@ export async function startAcpSeller(config: Config): Promise<void> {
           nextPhaseType: typeof nextPhase,
           jobName: job.name,
           requirement: typeof job.requirement === 'string' ? job.requirement?.slice(0, 200) : JSON.stringify(job.requirement)?.slice(0, 200),
+          memoToSign: memoToSign ? JSON.stringify(memoToSign).slice(0, 500) : null,
         }, `ACP job received: #${jobId} (phase=${phase}, nextPhase=${nextPhase})`);
 
         try {
