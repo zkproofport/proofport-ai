@@ -124,8 +124,12 @@ export async function startAcpSeller(config: Config): Promise<void> {
  * Maps ACP job names to existing proofport-ai skills.
  */
 function buildJobDeliverable(job: any, config: Config): { type: string; value: string } {
-  // Try to determine the skill from the job offering name or requirement text
-  const jobName = (job.offeringName || job.requirement || '').toLowerCase();
+  // Use job.name first (confirmed available as string, e.g. "generateKycProof")
+  // Fallback: try offeringName, then stringify requirement if it's an object
+  const rawName = job.name || job.offeringName || (typeof job.requirement === 'string' ? job.requirement : JSON.stringify(job.requirement || ''));
+  const jobName = String(rawName).toLowerCase();
+
+  log.info({ action: 'virtuals.job.buildDeliverable', jobName, rawName: String(rawName).slice(0, 200) }, `Building deliverable for: ${jobName}`);
 
   // generateKycProof or generateCountryProof → return x402 endpoint guide
   if (jobName.includes('kyc') || jobName.includes('proof') || jobName.includes('country')) {
