@@ -18,8 +18,7 @@
 
 import { createLogger } from '../logger.js';
 import type { Config } from '../config/index.js';
-import { handleGetSupportedCircuits } from '../skills/skillHandler.js';
-import { buildGuide } from '../proof/guideBuilder.js';
+
 
 const log = createLogger('VirtualsACP');
 
@@ -131,60 +130,28 @@ function buildJobDeliverable(job: any, config: Config): { type: string; value: s
 
   log.info({ action: 'virtuals.job.buildDeliverable', jobName, rawName: String(rawName).slice(0, 200) }, `Building deliverable for: ${jobName}`);
 
-  // generateKycProof or generateCountryProof → return x402 endpoint guide
+  // generateKycProof or generateCountryProof → return guide URL
   if (jobName.includes('kyc') || jobName.includes('proof') || jobName.includes('country')) {
     const circuitAlias = jobName.includes('country') ? 'coinbase_country' : 'coinbase_kyc';
-    const circuitIdMap: Record<string, string> = {
-      coinbase_kyc: 'coinbase_attestation',
-      coinbase_country: 'coinbase_country_attestation',
-    };
-    const circuitId = circuitIdMap[circuitAlias] || circuitAlias;
-
-    const guide = buildGuide(circuitId as any, config);
+    const guideUrl = `${config.a2aBaseUrl}/api/v1/guide/${circuitAlias}`;
 
     return {
       type: 'url',
-      value: JSON.stringify({
-        message: `ZK proof generation is available via x402 micropayment flow at the endpoint below. ` +
-                 `Send POST with {circuit, inputs} → receive 402 with nonce → pay USDC → retry with X-Payment-TX and X-Payment-Nonce headers.`,
-        endpoint: `${config.a2aBaseUrl}/api/v1/prove`,
-        method: 'POST',
-        circuit: circuitAlias,
-        price: config.paymentProofPrice,
-        guide_url: `${config.a2aBaseUrl}/api/v1/guide/${circuitAlias}`,
-        guide,
-      }),
+      value: guideUrl,
     };
   }
 
-  // getSupportedCircuits / getVerifierContracts → return data directly
+  // getSupportedCircuits / getVerifierContracts → return guide URL
   if (jobName.includes('circuit') || jobName.includes('verifier') || jobName.includes('contract')) {
-    const result = handleGetSupportedCircuits({}, config.paymentMode);
     return {
       type: 'url',
-      value: JSON.stringify({
-        ...result,
-        circuits: result.circuits.map(c => ({
-          ...c,
-          guide_url: `${config.a2aBaseUrl}/api/v1/guide/${c.id}`,
-        })),
-      }),
+      value: `${config.a2aBaseUrl}/api/v1/guide/coinbase_kyc`,
     };
   }
 
-  // Default: return agent capabilities overview
+  // Default: return MCP endpoint
   return {
     type: 'url',
-    value: JSON.stringify({
-      agent: 'ProverAgent',
-      description: 'Privacy-first ZK proof generation agent on Base',
-      capabilities: [
-        { skill: 'generateKycProof', endpoint: `${config.a2aBaseUrl}/api/v1/prove`, circuit: 'coinbase_kyc' },
-        { skill: 'generateCountryProof', endpoint: `${config.a2aBaseUrl}/api/v1/prove`, circuit: 'coinbase_country' },
-        { skill: 'getSupportedCircuits', endpoint: `${config.a2aBaseUrl}/api/v1/guide/coinbase_kyc` },
-      ],
-      mcp: `${config.a2aBaseUrl}/mcp`,
-      sdk: 'https://www.npmjs.com/package/@zkproofport-ai/sdk',
-    }),
+    value: `${config.a2aBaseUrl}/mcp`,
   };
 }
