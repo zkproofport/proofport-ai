@@ -82,7 +82,8 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
             !currentMetadata.categories ||
             currentMetadata.categories.length === 0 ||
             !currentMetadata.registrations ||
-            currentMetadata.registrations.length === 0
+            currentMetadata.registrations.length === 0 ||
+            !currentMetadata.active
           );
           if (needsUpdate) {
               log.info({ action: 'identity.metadata.needs_update' }, 'Agent metadata needs updating on-chain');
@@ -147,6 +148,7 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
                   },
                 ],
                 supportedTrust: ['tee-attestation'],
+                active: true,
               };
 
               log.info({ action: 'identity.step.updating_metadata' }, 'Updating metadata on-chain (TX)');
@@ -202,6 +204,7 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
       ],
       registrations: [],
       supportedTrust: ['tee-attestation'],
+      active: true,
     };
 
     // Register on-chain

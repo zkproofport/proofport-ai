@@ -265,6 +265,10 @@ export function createMetadataUri(metadata: AgentMetadata): string {
     json.supportedTrust = metadata.supportedTrust;
   }
 
+  if (metadata.active !== undefined) {
+    json.active = metadata.active;
+  }
+
   if (metadata.tags !== undefined && metadata.tags.length > 0) {
     json.tags = metadata.tags;
   }
