@@ -54,12 +54,23 @@ export async function startAcpSeller(config: Config): Promise<void> {
       onNewTask: async (job: any, memoToSign?: any) => {
         const jobId = job.id;
         const phase = job.phase;
+        const nextPhase = memoToSign?.nextPhase;
 
-        log.info({ action: 'virtuals.job.received', jobId, phase }, `ACP job received: #${jobId} (${phase})`);
+        log.info({
+          action: 'virtuals.job.received',
+          jobId,
+          phase,
+          phaseType: typeof phase,
+          nextPhase,
+          nextPhaseType: typeof nextPhase,
+          jobName: job.name,
+          requirement: typeof job.requirement === 'string' ? job.requirement?.slice(0, 200) : JSON.stringify(job.requirement)?.slice(0, 200),
+        }, `ACP job received: #${jobId} (phase=${phase}, nextPhase=${nextPhase})`);
 
         try {
-          // Phase 1: REQUEST → Accept and create requirement
-          if (phase === 'request' && memoToSign?.nextPhase === 'negotiation') {
+          // Phase 1: REQUEST(0) → Accept and create requirement
+          // AcpJobPhases: REQUEST=0, NEGOTIATION=1, TRANSACTION=2, EVALUATION=3
+          if (phase === 0 && nextPhase === 1) {
             log.info({ action: 'virtuals.job.accepting', jobId }, `Accepting ACP job #${jobId}`);
             await job.accept('ProverAgent can fulfill this ZK proof request');
             await job.createRequirement(
@@ -71,8 +82,8 @@ export async function startAcpSeller(config: Config): Promise<void> {
             return;
           }
 
-          // Phase 2: TRANSACTION → Execute skill and deliver
-          if (phase === 'transaction' && memoToSign?.nextPhase === 'evaluation') {
+          // Phase 2: TRANSACTION(2) → Execute skill and deliver
+          if (phase === 2 && nextPhase === 3) {
             log.info({ action: 'virtuals.job.executing', jobId }, `Executing ACP job #${jobId}`);
 
             const deliverable = buildJobDeliverable(job, config);
@@ -83,7 +94,7 @@ export async function startAcpSeller(config: Config): Promise<void> {
             return;
           }
 
-          log.debug({ action: 'virtuals.job.skipped', jobId, phase, nextPhase: memoToSign?.nextPhase }, `Skipping ACP job phase`);
+          log.info({ action: 'virtuals.job.unhandled', jobId, phase, nextPhase }, `Unhandled ACP job phase combination: phase=${phase} nextPhase=${nextPhase}`);
         } catch (err) {
           log.error({ action: 'virtuals.job.error', jobId, err }, `ACP job #${jobId} failed`);
           try {
