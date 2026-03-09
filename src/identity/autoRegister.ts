@@ -163,6 +163,14 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
               log.info({ action: 'identity.step.updating_metadata' }, 'Updating metadata on-chain (TX)');
               const txHash = await withTimeout(registration.updateMetadata(info.tokenId, metadata), 120000, 'updateMetadata');
               log.info({ action: 'identity.metadata.updated', txHash }, 'Metadata updated successfully');
+
+              // Sync on-chain active flag to match off-chain (fixes WA080 conflict on 8004scan)
+              try {
+                const activeTxHash = await withTimeout(registration.setOnchainMetadata(info.tokenId, 'active', 'true'), 60000, 'setOnchainActive');
+                log.info({ action: 'identity.metadata.active_set', txHash: activeTxHash }, 'On-chain active flag set to true');
+              } catch (err) {
+                log.warn({ action: 'identity.metadata.active_failed', err: err instanceof Error ? err : new Error(String(err)) }, 'Failed to set on-chain active flag (non-fatal)');
+              }
             }
           } catch (error) {
             if (error instanceof Error) {

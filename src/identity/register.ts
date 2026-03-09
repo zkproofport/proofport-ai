@@ -18,6 +18,7 @@ const IDENTITY_ABI = [
   'function balanceOf(address owner) external view returns (uint256)',
   'function totalSupply() external view returns (uint256)',
   'function tokenOfOwnerByIndex(address owner, uint256 index) external view returns (uint256)',
+  'function setMetadata(uint256 agentId, string metadataKey, string metadataValue) external',
   'event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)',
 ];
 
@@ -210,6 +211,15 @@ export class AgentRegistration {
    */
   async getTokenMetadata(tokenId: bigint): Promise<string> {
     return this.contract.tokenURI(tokenId);
+  }
+
+  /**
+   * Set on-chain key-value metadata (e.g., active status)
+   */
+  async setOnchainMetadata(tokenId: bigint, key: string, value: string): Promise<string> {
+    const tx = await this.contract.setMetadata(tokenId, key, value);
+    await tx.wait();
+    return tx.hash;
   }
 
   /**
