@@ -72,7 +72,7 @@ export async function ensureAgentValidated(
     } catch (error) {
       lastError = error;
       const errStr = error instanceof Error ? JSON.stringify((error as any).info?.error ?? '') + error.message : String(error);
-      const isRetryable = errStr.includes('rate limit') || errStr.includes('CALL_EXCEPTION');
+      const isRetryable = errStr.includes('rate limit') || errStr.includes('CALL_EXCEPTION') || errStr.includes('NONCE_EXPIRED');
       if (attempt < MAX_RETRIES && isRetryable) {
         const delay = INITIAL_DELAY_MS * attempt;
         log.warn({ action: 'tee.validation.retry', attempt, delay, err: error }, `RPC rate limited — retrying in ${delay}ms`);
