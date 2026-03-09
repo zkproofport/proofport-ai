@@ -47,7 +47,7 @@ export interface ValidationConfig {
  * and use the resulting tokenId for validation.
  */
 const MAX_RETRIES = 3;
-const INITIAL_DELAY_MS = 5000;
+const INITIAL_DELAY_MS = 10000;
 
 export async function ensureAgentValidated(
   config: Config,
@@ -71,8 +71,9 @@ export async function ensureAgentValidated(
       return;
     } catch (error) {
       lastError = error;
-      const isRateLimit = error instanceof Error && error.message.includes('rate limit');
-      if (attempt < MAX_RETRIES && isRateLimit) {
+      const errStr = error instanceof Error ? JSON.stringify((error as any).info?.error ?? '') + error.message : String(error);
+      const isRetryable = errStr.includes('rate limit') || errStr.includes('CALL_EXCEPTION');
+      if (attempt < MAX_RETRIES && isRetryable) {
         const delay = INITIAL_DELAY_MS * attempt;
         log.warn({ action: 'tee.validation.retry', attempt, delay, err: error }, `RPC rate limited — retrying in ${delay}ms`);
         await new Promise(r => setTimeout(r, delay));
