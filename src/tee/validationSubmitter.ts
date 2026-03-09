@@ -195,7 +195,7 @@ async function doValidation(
     requestURI,
     requestHash
   );
-  await reqTx.wait();
+  await reqTx.wait(2); // wait for 2 confirmations so RPC nodes sync the new state
   log.info({ action: 'tee.validation.request_submitted', tx: reqTx.hash }, 'validationRequest submitted');
 
   // Step 2: Submit validation response (self-validate with score 100)
