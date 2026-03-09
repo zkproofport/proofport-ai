@@ -5,6 +5,8 @@ import { ERC8004_ADDRESSES } from '../config/contracts.js';
 import { getChainVerifiers } from '../config/deployments.js';
 import { ethers } from 'ethers';
 
+export type TokenIdRef = { value: bigint | null | undefined };
+
 export type AgentCard = SDKAgentCard & {
   guides?: {
     description: string;
@@ -285,7 +287,7 @@ export function buildOasfAgent(config: Config, tokenId?: bigint | null) {
       'technology/cybersecurity',
       'trust_and_safety/identity_verification',
     ],
-    oasfSkills: [
+    skills: [
       'security_privacy/encryption_and_data_protection',
       'security_privacy/threat_detection_and_analysis',
     ],
@@ -367,10 +369,9 @@ export function buildOasfAgent(config: Config, tokenId?: bigint | null) {
  * @param tokenId - Optional ERC-8004 tokenId (set after registration)
  * @returns Express request handler
  */
-export function getAgentCardHandler(config: Config, tokenId?: bigint | null): (req: Request, res: Response) => void | Promise<void> {
-  const agentCard = buildAgentCard(config, tokenId);
-
+export function getAgentCardHandler(config: Config, tokenIdRef: TokenIdRef): (req: Request, res: Response) => void | Promise<void> {
   return (_req: Request, res: Response) => {
+    const agentCard = buildAgentCard(config, tokenIdRef.value);
     res.setHeader('Content-Type', 'application/json');
     res.json(agentCard);
   };
@@ -402,10 +403,9 @@ export function getMcpDiscoveryHandler(config: Config): (req: Request, res: Resp
  * @param tokenId - Optional ERC-8004 tokenId (set after registration)
  * @returns Express request handler
  */
-export function getOasfAgentHandler(config: Config, tokenId?: bigint | null): (req: Request, res: Response) => void | Promise<void> {
-  const oasfAgent = buildOasfAgent(config, tokenId);
-
+export function getOasfAgentHandler(config: Config, tokenIdRef: TokenIdRef): (req: Request, res: Response) => void | Promise<void> {
   return (_req: Request, res: Response) => {
+    const oasfAgent = buildOasfAgent(config, tokenIdRef.value);
     res.setHeader('Content-Type', 'application/json');
     res.json(oasfAgent);
   };
@@ -415,7 +415,7 @@ export function getOasfAgentHandler(config: Config, tokenId?: bigint | null): (r
  * Express handler for GET /.well-known/agent-registration.json
  * Provides bidirectional link between domain and on-chain identity (Rule 4)
  */
-export function getAgentRegistrationHandler(config: Config, tokenId?: bigint | null): (req: Request, res: Response) => void {
+export function getAgentRegistrationHandler(config: Config, tokenIdRef: TokenIdRef): (req: Request, res: Response) => void {
   const isProduction = config.paymentMode === 'mainnet';
   const erc8004Identity = isProduction
     ? ERC8004_ADDRESSES.mainnet.identity
@@ -423,6 +423,7 @@ export function getAgentRegistrationHandler(config: Config, tokenId?: bigint | n
   const chainId = isProduction ? 8453 : 84532;
 
   return (_req: Request, res: Response) => {
+    const tokenId = tokenIdRef.value;
     res.setHeader('Content-Type', 'application/json');
     res.json({
       agentId: tokenId !== null && tokenId !== undefined ? tokenId.toString() : null,

@@ -22,6 +22,7 @@ import { ProofCache } from './redis/proofCache.js';
 import { PROOF_CACHE_TTL } from './redis/constants.js';
 import { CleanupWorker } from './redis/cleanupWorker.js';
 import { getAgentCardHandler, getMcpDiscoveryHandler, getOasfAgentHandler, getSkillMdHandler, getAgentRegistrationHandler, getDidHandler } from './a2a/agentCard.js';
+import type { TokenIdRef } from './a2a/agentCard.js';
 import { DefaultRequestHandler } from '@a2a-js/sdk/server';
 import { jsonRpcHandler, UserBuilder } from '@a2a-js/sdk/server/express';
 import { buildAgentCard } from './a2a/agentCard.js';
@@ -42,6 +43,9 @@ import { startAcpSeller } from './virtuals/acpSeller.js';
 function createApp(config: Config, agentTokenId?: bigint | null) {
   // Validate payment config at startup
   validatePaymentConfig(config);
+
+  const initialTokenId = config.agentTokenId ? BigInt(config.agentTokenId) : (agentTokenId ?? null);
+  const tokenIdRef: TokenIdRef = { value: initialTokenId };
 
   const app = express();
 
@@ -114,13 +118,32 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   app.use('/a2a', publicCorsMiddleware);
   app.use('/mcp', publicCorsMiddleware);
 
+  app.get('/', (_req, res) => {
+    res.json({
+      name: 'proveragent.base.eth',
+      description: 'ZK proof generation agent. ERC-8004 identity. x402 payments.',
+      endpoints: {
+        a2a: '/a2a',
+        mcp: '/mcp',
+        health: '/health',
+        discovery: {
+          oasf: '/.well-known/agent.json',
+          a2a: '/.well-known/agent-card.json',
+          mcp: '/.well-known/mcp.json',
+          did: '/.well-known/did.json',
+          registration: '/.well-known/agent-registration.json',
+        },
+      },
+    });
+  });
+
   // Discovery endpoints (agent.json = OASF identity, agent-card.json = A2A v0.3)
-  app.get('/.well-known/agent.json', getOasfAgentHandler(config, agentTokenId));
-  app.get('/.well-known/agent-card.json', getAgentCardHandler(config, agentTokenId));
-  app.get('/.well-known/oasf.json', getOasfAgentHandler(config, agentTokenId));
+  app.get('/.well-known/agent.json', getOasfAgentHandler(config, tokenIdRef));
+  app.get('/.well-known/agent-card.json', getAgentCardHandler(config, tokenIdRef));
+  app.get('/.well-known/oasf.json', getOasfAgentHandler(config, tokenIdRef));
   app.get('/.well-known/mcp.json', getMcpDiscoveryHandler(config));
   app.get('/.well-known/SKILL.md', getSkillMdHandler(config));
-  app.get('/.well-known/agent-registration.json', getAgentRegistrationHandler(config, agentTokenId));
+  app.get('/.well-known/agent-registration.json', getAgentRegistrationHandler(config, tokenIdRef));
   app.get('/.well-known/did.json', getDidHandler(config));
 
   // LLM providers (created early — needed by both A2A text inference and chat endpoint)
@@ -186,7 +209,7 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
     res.status(405).json({ error: 'Session management not supported in stateless mode.' });
   });
 
-  return { app, teeProvider, cleanupWorker };
+  return { app, teeProvider, cleanupWorker, tokenIdRef };
 }
 
 async function startServer() {
@@ -212,7 +235,7 @@ async function startServer() {
     const earlyTeeProvider = createTeeProvider({ ...teeConfig, mode: resolvedTeeMode });
 
     // Create app without tokenId (registration runs in background after server starts)
-    const { app, teeProvider, cleanupWorker } = createApp(config, null);
+    const { app, teeProvider, cleanupWorker, tokenIdRef } = createApp(config, null);
 
     app.listen(config.port, () => {
       log.info({ action: 'server.started', port: config.port }, 'proofport-ai server listening');
@@ -231,9 +254,16 @@ async function startServer() {
       });
 
       // Register agent on ERC-8004 in background (non-blocking, does not delay server startup)
-      ensureAgentRegistered(config, earlyTeeProvider).catch(err => {
-        log.warn({ action: 'server.identity.failed', err }, 'ERC-8004 identity registration failed (non-fatal)');
-      });
+      ensureAgentRegistered(config, earlyTeeProvider)
+        .then(tokenId => {
+          if (tokenId !== null) {
+            tokenIdRef.value = tokenId;
+            log.info({ action: 'identity.tokenId.updated', tokenId: tokenId.toString() }, 'Discovery endpoints updated with tokenId');
+          }
+        })
+        .catch(err => {
+          log.warn({ action: 'server.identity.failed', err }, 'ERC-8004 identity registration failed (non-fatal)');
+        });
     });
   } catch (error) {
     log.error({ action: 'server.start.failed', err: error }, 'Failed to start server');
