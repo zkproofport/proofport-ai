@@ -72,7 +72,7 @@ export async function ensureAgentValidated(
     } catch (error) {
       lastError = error;
       const errStr = error instanceof Error ? JSON.stringify((error as any).info?.error ?? '') + error.message : String(error);
-      const isRetryable = errStr.includes('rate limit') || errStr.includes('CALL_EXCEPTION') || errStr.includes('NONCE_EXPIRED');
+      const isRetryable = errStr.includes('rate limit') || errStr.includes('CALL_EXCEPTION') || errStr.includes('NONCE_EXPIRED') || errStr.includes('attestation');
       if (attempt < MAX_RETRIES && isRetryable) {
         const delay = INITIAL_DELAY_MS * attempt;
         log.warn({ action: 'tee.validation.retry', attempt, delay, err: error }, `RPC rate limited — retrying in ${delay}ms`);
@@ -166,8 +166,7 @@ async function doValidation(
   const attestation = await teeProvider.generateAttestation(proofHash);
 
   if (!attestation) {
-    log.error({ action: 'tee.validation.attestation_failed' }, 'Failed to generate attestation — TEE provider returned null');
-    return;
+    throw new Error('Failed to generate attestation — TEE provider returned null');
   }
 
   // Build request data

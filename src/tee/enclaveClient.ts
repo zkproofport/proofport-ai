@@ -132,6 +132,7 @@ export class EnclaveClient implements TeeProvider {
         };
       }
 
+      log.error({ action: 'enclave.attestation.no_document', responseType: response.type, error: response.error }, 'Enclave responded without attestationDocument');
       return null;
     } catch (error) {
       log.error({ action: 'enclave.attestation.failed', err: error }, 'Failed to get nitro attestation');
