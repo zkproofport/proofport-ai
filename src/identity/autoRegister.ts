@@ -99,9 +99,9 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
             currentMetadata.registrations.length === 0 ||
             !currentMetadata.agentType ||
             !currentMetadata.active ||
-            // Detect A2A endpoint URL change (card URL -> RPC URL)
+            // Detect A2A endpoint not using discovery URL (should be /.well-known/agent-card.json per IA024)
             (currentMetadata.services && currentMetadata.services.some(
-              (s: { name: string; endpoint: string }) => s.name === 'A2A' && s.endpoint.includes('agent-card.json')
+              (s: { name: string; endpoint: string }) => s.name === 'A2A' && !s.endpoint.includes('.well-known/agent-card.json')
             )) ||
             // Detect registrations agentId type mismatch (string -> number)
             (currentMetadata.registrations && currentMetadata.registrations.length > 0 &&
@@ -166,7 +166,7 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
                 services: [
                   { name: 'web', endpoint: config.websiteUrl },
                   { name: 'MCP', endpoint: `${config.a2aBaseUrl}/mcp`, version: '2025-11-25', tools: ['prove', 'get_supported_circuits', 'get_guide'] },
-                  { name: 'A2A', endpoint: `${config.a2aBaseUrl}/a2a`, version: '0.3.0', skills: ['prove', 'get_supported_circuits', 'get_guide'] },
+                  { name: 'A2A', endpoint: `${config.a2aBaseUrl}/.well-known/agent-card.json`, version: '0.3.0', skills: ['prove', 'get_supported_circuits', 'get_guide'] },
                   { name: 'ENS', endpoint: 'proveragent.base.eth' },
                   { name: 'DID', endpoint: `did:web:${new URL(config.a2aBaseUrl).hostname}` },
                   { name: 'agentWallet', endpoint: `eip155:${config.paymentMode === 'mainnet' ? '8453' : '84532'}:${registration.agentAddress}` },
@@ -247,7 +247,7 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
       services: [
         { name: 'web', endpoint: config.websiteUrl },
         { name: 'MCP', endpoint: `${config.a2aBaseUrl}/mcp`, version: '2025-11-25', tools: ['prove', 'get_supported_circuits', 'get_guide'] },
-        { name: 'A2A', endpoint: `${config.a2aBaseUrl}/a2a`, version: '0.3.0', skills: ['prove', 'get_supported_circuits', 'get_guide'] },
+        { name: 'A2A', endpoint: `${config.a2aBaseUrl}/.well-known/agent-card.json`, version: '0.3.0', skills: ['prove', 'get_supported_circuits', 'get_guide'] },
         { name: 'ENS', endpoint: 'proveragent.base.eth' },
         { name: 'DID', endpoint: `did:web:${new URL(config.a2aBaseUrl).hostname}` },
         { name: 'agentWallet', endpoint: `eip155:${config.paymentMode === 'mainnet' ? '8453' : '84532'}:${registration.agentAddress}` },
