@@ -46,6 +46,9 @@ export interface ValidationConfig {
  * we originally registered on, we automatically register on that contract too
  * and use the resulting tokenId for validation.
  */
+const MAX_RETRIES = 3;
+const INITIAL_DELAY_MS = 5000;
+
 export async function ensureAgentValidated(
   config: Config,
   agentTokenId: bigint,
@@ -61,138 +64,160 @@ export async function ensureAgentValidated(
     return;
   }
 
-  try {
-    const provider = new ethers.JsonRpcProvider(config.chainRpcUrl);
-    const signer = new ethers.Wallet(config.proverPrivateKey, provider);
-    const contract = new ethers.Contract(
-      config.erc8004ValidationAddress,
-      VALIDATION_REGISTRY_ABI,
-      signer
-    );
-
-    // Resolve the correct tokenId for this ValidationRegistry
-    const registryIdentity: string = await contract.getIdentityRegistry();
-    let validationTokenId = agentTokenId;
-
-    if (registryIdentity.toLowerCase() !== config.erc8004IdentityAddress.toLowerCase()) {
-      log.info(
-        { action: 'tee.validation.identity_mismatch', registryIdentity, ourIdentity: config.erc8004IdentityAddress },
-        "ValidationRegistry uses different Identity contract — registering on ValidationRegistry's Identity contract"
-      );
-
-      const validationRegistration = new AgentRegistration({
-        identityContractAddress: registryIdentity,
-        reputationContractAddress: config.erc8004ReputationAddress,
-        chainRpcUrl: config.chainRpcUrl,
-        privateKey: config.proverPrivateKey,
-      });
-
-      const isRegistered = await validationRegistration.isRegistered();
-      if (isRegistered) {
-        const info = await validationRegistration.getRegistration();
-        if (info) {
-          validationTokenId = info.tokenId;
-          log.info({ action: 'tee.validation.already_registered', validationTokenId: validationTokenId.toString() }, "Already registered on ValidationRegistry's Identity");
-        }
-      } else {
-        const result = await validationRegistration.register({
-          name: 'proveragent.base.eth',
-          image: `${config.a2aBaseUrl}/icon.png`,
-          description: 'Autonomous ZK proof generation. ERC-8004 identity. x402 payments. Powered by ZKProofport',
-          agentUrl: config.a2aBaseUrl,
-          capabilities: ['proof_generation', 'proof_verification'],
-          protocols: ['mcp', 'a2a'],
-          circuits: ['coinbase_attestation', 'coinbase_country_attestation'],
-        });
-        validationTokenId = result.tokenId;
-        log.info(
-          { action: 'tee.validation.registered', validationTokenId: validationTokenId.toString(), tx: result.transactionHash },
-          "Registered on ValidationRegistry's Identity"
-        );
-      }
-    }
-
-    // Check if already validated
-    const existingValidations: string[] = await contract.getAgentValidations(validationTokenId);
-
-    for (const hash of existingValidations) {
-      try {
-        const status = await contract.getValidationStatus(hash);
-        // status[2] is the response (uint8), status[4] is the tag (bytes32)
-        if (Number(status[2]) > 0 && status[4] === ethers.encodeBytes32String(TEE_TAG)) {
-          log.info({ action: 'tee.validation.already_validated', requestHash: hash }, 'Agent already has TEE validation');
-          return;
-        }
-      } catch {
-        // Skip invalid/expired validations
-        continue;
-      }
-    }
-
-    // Generate attestation
-    log.info({ action: 'tee.validation.attestation_started' }, 'Generating TEE attestation');
-    const proofHash = ethers.keccak256(
-      ethers.toUtf8Bytes(`agent:${validationTokenId}:${Date.now()}`)
-    );
-    const attestation = await teeProvider.generateAttestation(proofHash);
-
-    if (!attestation) {
-      log.error({ action: 'tee.validation.attestation_failed' }, 'Failed to generate attestation — TEE provider returned null');
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      await doValidation(config, agentTokenId, teeProvider);
       return;
+    } catch (error) {
+      lastError = error;
+      const isRateLimit = error instanceof Error && error.message.includes('rate limit');
+      if (attempt < MAX_RETRIES && isRateLimit) {
+        const delay = INITIAL_DELAY_MS * attempt;
+        log.warn({ action: 'tee.validation.retry', attempt, delay, err: error }, `RPC rate limited — retrying in ${delay}ms`);
+        await new Promise(r => setTimeout(r, delay));
+      } else {
+        break;
+      }
     }
-
-    // Build request data
-    const requestData = {
-      type: 'tee-attestation',
-      agentId: validationTokenId.toString(),
-      attestation: {
-        document: attestation.document,
-        mode: attestation.mode,
-        proofHash: attestation.proofHash,
-        timestamp: attestation.timestamp,
-      },
-    };
-
-    const requestJson = JSON.stringify(requestData);
-    const requestBase64 = Buffer.from(requestJson, 'utf-8').toString('base64');
-    const requestURI = `data:application/json;base64,${requestBase64}`;
-    const requestHash = ethers.keccak256(ethers.toUtf8Bytes(requestJson));
-
-    // Step 1: Submit validation request (agent address as validator for self-validation)
-    log.info({ action: 'tee.validation.request_submitting' }, 'Submitting validationRequest to ValidationRegistry');
-    const reqTx = await contract.validationRequest(
-      signer.address, // self-validate: use own address as validator
-      validationTokenId,
-      requestURI,
-      requestHash
-    );
-    await reqTx.wait();
-    log.info({ action: 'tee.validation.request_submitted', tx: reqTx.hash }, 'validationRequest submitted');
-
-    // Step 2: Submit validation response (self-validate with score 100)
-    const responseData = {
-      type: 'tee-attestation-response',
-      mode: attestation.mode,
-      verified: true,
-      timestamp: Date.now(),
-    };
-    const responseJson = JSON.stringify(responseData);
-    const responseBase64 = Buffer.from(responseJson, 'utf-8').toString('base64');
-    const responseURI = `data:application/json;base64,${responseBase64}`;
-    const responseHash = ethers.keccak256(ethers.toUtf8Bytes(responseJson));
-
-    log.info({ action: 'tee.validation.response_submitting' }, 'Submitting validationResponse to ValidationRegistry');
-    const resTx = await contract.validationResponse(
-      requestHash,
-      100, // score: 100 = fully validated
-      responseURI,
-      responseHash,
-      ethers.encodeBytes32String(TEE_TAG)
-    );
-    await resTx.wait();
-    log.info({ action: 'tee.validation.response_submitted', tx: resTx.hash }, 'validationResponse submitted');
-    log.info({ action: 'tee.validation.completed' }, 'TEE attestation registered on-chain successfully');
-  } catch (error) {
-    log.error({ action: 'tee.validation.submit_failed', err: error }, 'Failed to submit TEE validation');
   }
+  log.error({ action: 'tee.validation.submit_failed', err: lastError }, 'Failed to submit TEE validation after retries');
+  throw lastError;
+}
+
+async function doValidation(
+  config: Config,
+  agentTokenId: bigint,
+  teeProvider: TeeProvider
+): Promise<void> {
+  const provider = new ethers.JsonRpcProvider(config.chainRpcUrl);
+  const signer = new ethers.Wallet(config.proverPrivateKey, provider);
+  const contract = new ethers.Contract(
+    config.erc8004ValidationAddress,
+    VALIDATION_REGISTRY_ABI,
+    signer
+  );
+
+  // Resolve the correct tokenId for this ValidationRegistry
+  const registryIdentity: string = await contract.getIdentityRegistry();
+  let validationTokenId = agentTokenId;
+
+  if (registryIdentity.toLowerCase() !== config.erc8004IdentityAddress.toLowerCase()) {
+    log.info(
+      { action: 'tee.validation.identity_mismatch', registryIdentity, ourIdentity: config.erc8004IdentityAddress },
+      "ValidationRegistry uses different Identity contract — registering on ValidationRegistry's Identity contract"
+    );
+
+    const validationRegistration = new AgentRegistration({
+      identityContractAddress: registryIdentity,
+      reputationContractAddress: config.erc8004ReputationAddress,
+      chainRpcUrl: config.chainRpcUrl,
+      privateKey: config.proverPrivateKey,
+    });
+
+    const isRegistered = await validationRegistration.isRegistered();
+    if (isRegistered) {
+      const info = await validationRegistration.getRegistration();
+      if (info) {
+        validationTokenId = info.tokenId;
+        log.info({ action: 'tee.validation.already_registered', validationTokenId: validationTokenId.toString() }, "Already registered on ValidationRegistry's Identity");
+      }
+    } else {
+      const result = await validationRegistration.register({
+        name: 'proveragent.base.eth',
+        image: `${config.a2aBaseUrl}/icon.png`,
+        description: 'Autonomous ZK proof generation. ERC-8004 identity. x402 payments. Powered by ZKProofport',
+        agentUrl: config.a2aBaseUrl,
+        capabilities: ['proof_generation', 'proof_verification'],
+        protocols: ['mcp', 'a2a'],
+        circuits: ['coinbase_attestation', 'coinbase_country_attestation'],
+      });
+      validationTokenId = result.tokenId;
+      log.info(
+        { action: 'tee.validation.registered', validationTokenId: validationTokenId.toString(), tx: result.transactionHash },
+        "Registered on ValidationRegistry's Identity"
+      );
+    }
+  }
+
+  // Check if already validated
+  const existingValidations: string[] = await contract.getAgentValidations(validationTokenId);
+
+  for (const hash of existingValidations) {
+    try {
+      const status = await contract.getValidationStatus(hash);
+      // status[2] is the response (uint8), status[4] is the tag (bytes32)
+      if (Number(status[2]) > 0 && status[4] === ethers.encodeBytes32String(TEE_TAG)) {
+        log.info({ action: 'tee.validation.already_validated', requestHash: hash }, 'Agent already has TEE validation');
+        return;
+      }
+    } catch {
+      // Skip invalid/expired validations
+      continue;
+    }
+  }
+
+  // Generate attestation
+  log.info({ action: 'tee.validation.attestation_started' }, 'Generating TEE attestation');
+  const proofHash = ethers.keccak256(
+    ethers.toUtf8Bytes(`agent:${validationTokenId}:${Date.now()}`)
+  );
+  const attestation = await teeProvider.generateAttestation(proofHash);
+
+  if (!attestation) {
+    log.error({ action: 'tee.validation.attestation_failed' }, 'Failed to generate attestation — TEE provider returned null');
+    return;
+  }
+
+  // Build request data
+  const requestData = {
+    type: 'tee-attestation',
+    agentId: validationTokenId.toString(),
+    attestation: {
+      document: attestation.document,
+      mode: attestation.mode,
+      proofHash: attestation.proofHash,
+      timestamp: attestation.timestamp,
+    },
+  };
+
+  const requestJson = JSON.stringify(requestData);
+  const requestBase64 = Buffer.from(requestJson, 'utf-8').toString('base64');
+  const requestURI = `data:application/json;base64,${requestBase64}`;
+  const requestHash = ethers.keccak256(ethers.toUtf8Bytes(requestJson));
+
+  // Step 1: Submit validation request (agent address as validator for self-validation)
+  log.info({ action: 'tee.validation.request_submitting' }, 'Submitting validationRequest to ValidationRegistry');
+  const reqTx = await contract.validationRequest(
+    signer.address, // self-validate: use own address as validator
+    validationTokenId,
+    requestURI,
+    requestHash
+  );
+  await reqTx.wait();
+  log.info({ action: 'tee.validation.request_submitted', tx: reqTx.hash }, 'validationRequest submitted');
+
+  // Step 2: Submit validation response (self-validate with score 100)
+  const responseData = {
+    type: 'tee-attestation-response',
+    mode: attestation.mode,
+    verified: true,
+    timestamp: Date.now(),
+  };
+  const responseJson = JSON.stringify(responseData);
+  const responseBase64 = Buffer.from(responseJson, 'utf-8').toString('base64');
+  const responseURI = `data:application/json;base64,${responseBase64}`;
+  const responseHash = ethers.keccak256(ethers.toUtf8Bytes(responseJson));
+
+  log.info({ action: 'tee.validation.response_submitting' }, 'Submitting validationResponse to ValidationRegistry');
+  const resTx = await contract.validationResponse(
+    requestHash,
+    100, // score: 100 = fully validated
+    responseURI,
+    responseHash,
+    ethers.encodeBytes32String(TEE_TAG)
+  );
+  await resTx.wait();
+  log.info({ action: 'tee.validation.response_submitted', tx: resTx.hash }, 'validationResponse submitted');
+  log.info({ action: 'tee.validation.completed' }, 'TEE attestation registered on-chain successfully');
 }
