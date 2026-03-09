@@ -14,6 +14,30 @@ export function buildSwaggerSpec(baseUrl: string) {
       },
     ],
   paths: {
+    '/': {
+      get: {
+        summary: 'Service summary',
+        description: 'Returns agent name, description, and available endpoint paths.',
+        tags: ['System'],
+        responses: {
+          '200': {
+            description: 'Service summary with endpoint map',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    name: { type: 'string' },
+                    description: { type: 'string' },
+                    endpoints: { type: 'object' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
     '/health': {
       get: {
         summary: 'Health check',
@@ -489,6 +513,54 @@ export function buildSwaggerSpec(baseUrl: string) {
                       type: 'array',
                       items: { type: 'string' },
                     },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/.well-known/agent-registration.json': {
+      get: {
+        summary: 'Agent Registration (ERC-8004 Rule 4)',
+        description: 'Bidirectional link between domain and on-chain identity. Returns agentId (ERC-721 tokenId) and agentRegistry (EIP-155 contract reference).',
+        tags: ['Discovery'],
+        responses: {
+          '200': {
+            description: 'Agent registration document',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    agentId: { type: 'string', nullable: true, description: 'ERC-8004 token ID' },
+                    agentRegistry: { type: 'string', description: 'EIP-155 format registry address (eip155:{chainId}:{address})' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/.well-known/did.json': {
+      get: {
+        summary: 'DID Document (W3C did:web)',
+        description: 'W3C Decentralized Identifier document for did:web resolution. Contains verification method (EcdsaSecp256k1RecoveryMethod2020) and ERC8004Agent service endpoint.',
+        tags: ['Discovery'],
+        responses: {
+          '200': {
+            description: 'DID Document',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    '@context': { type: 'array', items: { type: 'string' } },
+                    id: { type: 'string', description: 'DID identifier (did:web:{hostname})' },
+                    verificationMethod: { type: 'array', items: { type: 'object' } },
+                    service: { type: 'array', items: { type: 'object' } },
                   },
                 },
               },
