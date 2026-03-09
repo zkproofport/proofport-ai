@@ -279,6 +279,10 @@ export function createMetadataUri(metadata: AgentMetadata): string {
     circuits: metadata.circuits,
   };
 
+  if (metadata.agentType !== undefined) {
+    json.agentType = metadata.agentType;
+  }
+
   if (metadata.tee !== undefined) {
     json.tee = metadata.tee;
   }
