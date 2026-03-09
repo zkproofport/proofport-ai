@@ -4,7 +4,11 @@ import { createLogger } from './logger.js';
 
 const log = createLogger('Server');
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+
+const require = createRequire(import.meta.url);
+const { version } = require('../package.json');
 import swaggerUi from 'swagger-ui-express';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { Config } from './config/index.js';
@@ -83,6 +87,7 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   app.get('/health', (_req, res) => {
     res.json({
       status: 'healthy',
+      version,
       service: 'proofport-ai',
       paymentMode: paymentModeConfig.mode,
       paymentRequired: paymentModeConfig.requiresPayment,

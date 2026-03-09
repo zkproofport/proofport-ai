@@ -5,6 +5,8 @@ on:
     branches:
       - main
     paths:
+      - 'src/**'
+      - 'package.json'
       - 'packages/sdk/**'
       - 'packages/mcp/**'
 
