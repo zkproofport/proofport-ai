@@ -209,11 +209,8 @@ async function startServer() {
     const resolvedTeeMode = resolveTeeMode(teeConfig.mode);
     const earlyTeeProvider = createTeeProvider({ ...teeConfig, mode: resolvedTeeMode });
 
-    // Register agent on ERC-8004 (if configured) + submit TEE validation
-    const agentTokenId = await ensureAgentRegistered(config, earlyTeeProvider);
-
-    // Create app with tokenId
-    const { app, teeProvider, cleanupWorker } = createApp(config, agentTokenId);
+    // Create app without tokenId (registration runs in background after server starts)
+    const { app, teeProvider, cleanupWorker } = createApp(config, null);
 
     app.listen(config.port, () => {
       log.info({ action: 'server.started', port: config.port }, 'proofport-ai server listening');
@@ -229,6 +226,11 @@ async function startServer() {
       // Start Virtuals ACP Seller (non-blocking, optional)
       startAcpSeller(config).catch(err => {
         log.warn({ action: 'server.virtuals.failed', err }, 'Virtuals ACP Seller failed to start (non-fatal)');
+      });
+
+      // Register agent on ERC-8004 in background (non-blocking, does not delay server startup)
+      ensureAgentRegistered(config, earlyTeeProvider).catch(err => {
+        log.warn({ action: 'server.identity.failed', err }, 'ERC-8004 identity registration failed (non-fatal)');
       });
     });
   } catch (error) {

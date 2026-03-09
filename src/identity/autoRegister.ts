@@ -56,7 +56,7 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
 
     if (isRegistered) {
       log.info({ action: 'identity.step.getting_registration' }, 'Getting registration info (RPC call)');
-      const info = await withTimeout(registration.getRegistration(), 120000, 'getRegistration');
+      const info = await withTimeout(registration.getRegistration(), 30000, 'getRegistration');
       log.info({ action: 'identity.step.got_registration', hasInfo: !!info, tokenId: info?.tokenId?.toString() }, 'getRegistration complete');
 
       if (info) {
