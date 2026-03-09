@@ -21,7 +21,7 @@ import { RateLimiter } from './redis/rateLimiter.js';
 import { ProofCache } from './redis/proofCache.js';
 import { PROOF_CACHE_TTL } from './redis/constants.js';
 import { CleanupWorker } from './redis/cleanupWorker.js';
-import { getAgentCardHandler, getMcpDiscoveryHandler, getOasfAgentHandler, getSkillMdHandler } from './a2a/agentCard.js';
+import { getAgentCardHandler, getMcpDiscoveryHandler, getOasfAgentHandler, getSkillMdHandler, getAgentRegistrationHandler, getDidHandler } from './a2a/agentCard.js';
 import { DefaultRequestHandler } from '@a2a-js/sdk/server';
 import { jsonRpcHandler, UserBuilder } from '@a2a-js/sdk/server/express';
 import { buildAgentCard } from './a2a/agentCard.js';
@@ -120,6 +120,8 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
   app.get('/.well-known/oasf.json', getOasfAgentHandler(config, agentTokenId));
   app.get('/.well-known/mcp.json', getMcpDiscoveryHandler(config));
   app.get('/.well-known/SKILL.md', getSkillMdHandler(config));
+  app.get('/.well-known/agent-registration.json', getAgentRegistrationHandler(config, agentTokenId));
+  app.get('/.well-known/did.json', getDidHandler(config));
 
   // LLM providers (created early — needed by both A2A text inference and chat endpoint)
   const llmProviders: LLMProvider[] = [];

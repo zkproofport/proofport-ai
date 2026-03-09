@@ -3,6 +3,7 @@ import type { Request, Response } from 'express';
 import type { AgentCard as SDKAgentCard } from '@a2a-js/sdk';
 import { ERC8004_ADDRESSES } from '../config/contracts.js';
 import { getChainVerifiers } from '../config/deployments.js';
+import { ethers } from 'ethers';
 
 export type AgentCard = SDKAgentCard & {
   guides?: {
@@ -279,6 +280,15 @@ export function buildOasfAgent(config: Config, tokenId?: bigint | null) {
     image: `${config.a2aBaseUrl}/icon.png`,
     agentType: 'service',
     tags: ['ZK', 'Privacy', 'Proof', 'Coinbase', 'KYC', 'Attestation', 'x402', 'Identity', 'Country', 'Verification', 'Base', 'USDC', 'TEE', 'Noir', 'EAS', 'Zero-Knowledge'],
+    domains: [
+      'technology/blockchain_and_web3',
+      'technology/cybersecurity',
+      'trust_and_safety/identity_verification',
+    ],
+    oasfSkills: [
+      'security_privacy/encryption_and_data_protection',
+      'security_privacy/threat_detection_and_analysis',
+    ],
     services: [
       {
         name: 'web',
@@ -303,6 +313,18 @@ export function buildOasfAgent(config: Config, tokenId?: bigint | null) {
         endpoint: `${config.a2aBaseUrl}/.well-known/mcp.json`,
         version: '2024-11-05',
         mcpTools: ['prove', 'get_supported_circuits', 'get_guide'],
+      },
+      {
+        name: 'ENS',
+        endpoint: 'proveragent.base.eth',
+      },
+      {
+        name: 'DID',
+        endpoint: `did:web:${new URL(config.a2aBaseUrl).hostname}`,
+      },
+      {
+        name: 'agentWallet',
+        endpoint: `eip155:${isProduction ? '8453' : '84532'}:${new ethers.Wallet(config.proverPrivateKey).address}`,
       },
     ],
     guides: {
@@ -386,6 +408,57 @@ export function getOasfAgentHandler(config: Config, tokenId?: bigint | null): (r
   return (_req: Request, res: Response) => {
     res.setHeader('Content-Type', 'application/json');
     res.json(oasfAgent);
+  };
+}
+
+/**
+ * Express handler for GET /.well-known/agent-registration.json
+ * Provides bidirectional link between domain and on-chain identity (Rule 4)
+ */
+export function getAgentRegistrationHandler(config: Config, tokenId?: bigint | null): (req: Request, res: Response) => void {
+  const isProduction = config.paymentMode === 'mainnet';
+  const erc8004Identity = isProduction
+    ? ERC8004_ADDRESSES.mainnet.identity
+    : ERC8004_ADDRESSES.sepolia.identity;
+  const chainId = isProduction ? 8453 : 84532;
+
+  return (_req: Request, res: Response) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.json({
+      agentId: tokenId !== null && tokenId !== undefined ? tokenId.toString() : null,
+      agentRegistry: `eip155:${chainId}:${erc8004Identity}`,
+    });
+  };
+}
+
+/**
+ * Express handler for GET /.well-known/did.json
+ * W3C DID Document for did:web resolution
+ */
+export function getDidHandler(config: Config): (req: Request, res: Response) => void {
+  const hostname = new URL(config.a2aBaseUrl).hostname;
+  const agentAddress = new ethers.Wallet(config.proverPrivateKey).address;
+
+  return (_req: Request, res: Response) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.json({
+      '@context': [
+        'https://www.w3.org/ns/did/v1',
+        'https://w3id.org/security/suites/secp256k1recovery-2020/v2',
+      ],
+      id: `did:web:${hostname}`,
+      verificationMethod: [{
+        id: `did:web:${hostname}#key-1`,
+        type: 'EcdsaSecp256k1RecoveryMethod2020',
+        controller: `did:web:${hostname}`,
+        blockchainAccountId: `eip155:${config.paymentMode === 'mainnet' ? '8453' : '84532'}:${agentAddress}`,
+      }],
+      service: [{
+        id: `did:web:${hostname}#agent`,
+        type: 'ERC8004Agent',
+        serviceEndpoint: config.a2aBaseUrl,
+      }],
+    });
   };
 }
 

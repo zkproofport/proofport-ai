@@ -91,6 +91,10 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
             currentMetadata.tags.length === 0 ||
             !currentMetadata.categories ||
             currentMetadata.categories.length === 0 ||
+            !currentMetadata.domains ||
+            currentMetadata.domains.length === 0 ||
+            !currentMetadata.skills ||
+            currentMetadata.skills.length === 0 ||
             !currentMetadata.registrations ||
             currentMetadata.registrations.length === 0 ||
             !currentMetadata.active
@@ -145,7 +149,6 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
                 protocols: ['mcp', 'a2a', 'x402'],
                 circuits: ['coinbase_attestation', 'coinbase_country_attestation'],
                 tags: ['ZK', 'Privacy', 'Proof', 'Coinbase', 'KYC', 'Attestation', 'x402', 'Identity', 'Country', 'Verification', 'Base', 'USDC', 'TEE', 'Noir', 'EAS', 'Zero-Knowledge'],
-                categories: ['privacy', 'security', 'verification', 'identity'],
                 ...(config.teeMode !== 'disabled' && { tee: config.teeMode }),
                 x402Support: config.paymentMode !== 'disabled',
                 type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
@@ -154,6 +157,19 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
                   { name: 'web', endpoint: config.websiteUrl },
                   { name: 'MCP', endpoint: `${config.a2aBaseUrl}/mcp`, version: '2025-11-25', tools: ['prove', 'get_supported_circuits', 'get_guide'] },
                   { name: 'A2A', endpoint: `${config.a2aBaseUrl}/.well-known/agent-card.json`, version: '0.3.0', skills: ['prove', 'get_supported_circuits', 'get_guide'] },
+                  { name: 'ENS', endpoint: 'proveragent.base.eth' },
+                  { name: 'DID', endpoint: `did:web:${new URL(config.a2aBaseUrl).hostname}` },
+                  { name: 'agentWallet', endpoint: `eip155:${config.paymentMode === 'mainnet' ? '8453' : '84532'}:${registration.agentAddress}` },
+                ],
+                categories: ['privacy', 'security', 'verification', 'identity'],
+                domains: [
+                  'technology/blockchain_and_web3',
+                  'technology/cybersecurity',
+                  'trust_and_safety/identity_verification',
+                ],
+                skills: [
+                  'security_privacy/encryption_and_data_protection',
+                  'security_privacy/threat_detection_and_analysis',
                 ],
                 registrations: [
                   {
@@ -213,7 +229,6 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
       protocols: ['mcp', 'a2a', 'x402'],
       circuits: ['coinbase_attestation', 'coinbase_country_attestation'],
       tags: ['ZK', 'Privacy', 'Proof', 'Coinbase', 'KYC', 'Attestation', 'x402', 'Identity', 'Country', 'Verification', 'Base', 'USDC', 'TEE', 'Noir', 'EAS', 'Zero-Knowledge'],
-      categories: ['privacy', 'security', 'verification', 'identity'],
       ...(config.teeMode !== 'disabled' && { tee: config.teeMode }),
       x402Support: config.paymentMode !== 'disabled',
       type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
@@ -222,6 +237,19 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
         { name: 'web', endpoint: config.websiteUrl },
         { name: 'MCP', endpoint: `${config.a2aBaseUrl}/mcp`, version: '2025-11-25', tools: ['prove', 'get_supported_circuits', 'get_guide'] },
         { name: 'A2A', endpoint: `${config.a2aBaseUrl}/.well-known/agent-card.json`, version: '0.3.0', skills: ['prove', 'get_supported_circuits', 'get_guide'] },
+        { name: 'ENS', endpoint: 'proveragent.base.eth' },
+        { name: 'DID', endpoint: `did:web:${new URL(config.a2aBaseUrl).hostname}` },
+        { name: 'agentWallet', endpoint: `eip155:${config.paymentMode === 'mainnet' ? '8453' : '84532'}:${registration.agentAddress}` },
+      ],
+      categories: ['privacy', 'security', 'verification', 'identity'],
+      domains: [
+        'technology/blockchain_and_web3',
+        'technology/cybersecurity',
+        'trust_and_safety/identity_verification',
+      ],
+      skills: [
+        'security_privacy/encryption_and_data_protection',
+        'security_privacy/threat_detection_and_analysis',
       ],
       registrations: [],
       supportedTrust: ['tee-attestation'],
