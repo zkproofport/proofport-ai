@@ -174,7 +174,7 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
                 registrations: [
                   {
                     agentRegistry: `eip155:${config.paymentMode === 'mainnet' ? '8453' : '84532'}:${config.erc8004IdentityAddress}`,
-                    agentId: info.tokenId.toString(),
+                    agentId: Number(info.tokenId),
                   },
                 ],
                 supportedTrust: ['tee-attestation'],

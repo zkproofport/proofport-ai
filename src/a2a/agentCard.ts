@@ -340,7 +340,7 @@ export function buildOasfAgent(config: Config, tokenId?: bigint | null) {
       ...(tokenId !== null && tokenId !== undefined
         ? [
             {
-              agentId: tokenId.toString(),
+              agentId: Number(tokenId),
               agentRegistry: `eip155:${isProduction ? '8453' : '84532'}:${erc8004Identity}`,
             },
           ]
@@ -426,7 +426,7 @@ export function getAgentRegistrationHandler(config: Config, tokenIdRef: TokenIdR
     const tokenId = tokenIdRef.value;
     res.setHeader('Content-Type', 'application/json');
     res.json({
-      agentId: tokenId !== null && tokenId !== undefined ? tokenId.toString() : null,
+      agentId: tokenId !== null && tokenId !== undefined ? Number(tokenId) : null,
       agentRegistry: `eip155:${chainId}:${erc8004Identity}`,
     });
   };

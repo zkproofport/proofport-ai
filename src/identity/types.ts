@@ -17,7 +17,7 @@ export interface AgentMetadata {
   services?: Array<{ name: string; endpoint: string; version?: string; tools?: string[]; mcpTools?: string[]; skills?: string[]; a2aSkills?: string[]; domains?: string[] }>;
   type?: string;
   image?: string;
-  registrations?: Array<{ agentRegistry: string; agentId: string; chainId?: string; tokenId?: string; txHash?: string; contract?: string }>;
+  registrations?: Array<{ agentRegistry: string; agentId: number; chainId?: string; tokenId?: string; txHash?: string; contract?: string }>;
   supportedTrust?: string[];
   active?: boolean;
 }
