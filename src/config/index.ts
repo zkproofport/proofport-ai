@@ -58,6 +58,7 @@ export function loadConfig() {
     erc8004IdentityAddress: process.env.ERC8004_IDENTITY_ADDRESS || '',
     erc8004ReputationAddress: process.env.ERC8004_REPUTATION_ADDRESS || '',
     erc8004ValidationAddress: process.env.ERC8004_VALIDATION_ADDRESS || '',
+    agentTokenId: process.env.AGENT_TOKEN_ID || '',
 
     // Chat / LLM (optional)
     openaiApiKey: process.env.OPENAI_API_KEY || '',

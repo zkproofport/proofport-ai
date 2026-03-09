@@ -55,8 +55,17 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
     log.info({ action: 'identity.step.checked_registered', isRegistered }, 'isRegistered check complete');
 
     if (isRegistered) {
-      log.info({ action: 'identity.step.getting_registration' }, 'Getting registration info (RPC call)');
-      const info = await withTimeout(registration.getRegistration(), 120000, 'getRegistration');
+      // Use known tokenId from env var to skip slow RPC token scan (25K+ tokens on mainnet)
+      let info: Awaited<ReturnType<typeof registration.getRegistration>>;
+      if (config.agentTokenId) {
+        const knownTokenId = BigInt(config.agentTokenId);
+        log.info({ action: 'identity.step.using_known_token', tokenId: knownTokenId.toString() }, 'Using AGENT_TOKEN_ID from env');
+        const metadataUri = await withTimeout(registration.getTokenMetadata(knownTokenId), 30000, 'getTokenMetadata');
+        info = { tokenId: knownTokenId, owner: registration.agentAddress, metadataUri, isRegistered: true };
+      } else {
+        log.info({ action: 'identity.step.getting_registration' }, 'Getting registration info (RPC call)');
+        info = await withTimeout(registration.getRegistration(), 120000, 'getRegistration');
+      }
       log.info({ action: 'identity.step.got_registration', hasInfo: !!info, tokenId: info?.tokenId?.toString() }, 'getRegistration complete');
 
       if (info) {

@@ -206,6 +206,13 @@ export class AgentRegistration {
   }
 
   /**
+   * Get metadata URI for a known tokenId (single RPC call)
+   */
+  async getTokenMetadata(tokenId: bigint): Promise<string> {
+    return this.contract.tokenURI(tokenId);
+  }
+
+  /**
    * Update the metadata URI for a registered agent
    * @param tokenId Agent's ERC-721 token ID
    * @param metadata New agent metadata
