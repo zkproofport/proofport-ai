@@ -76,7 +76,8 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
           const currentMetadata = info.metadataUri ? parseMetadataUri(info.metadataUri) : null;
           const expectedName = 'proveragent.base.eth';
           const expectedImage = `${config.a2aBaseUrl}/icon.png`;
-          const needsUpdate = !currentMetadata || (
+          const onchainActive = await withTimeout(registration.getOnchainMetadata(info.tokenId, 'active'), 30000, 'getOnchainActive');
+          const offchainNeedsUpdate = !currentMetadata || (
             currentMetadata.name !== expectedName ||
             currentMetadata.image !== expectedImage ||
             currentMetadata.agentUrl !== config.a2aBaseUrl ||
@@ -94,6 +95,8 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
             currentMetadata.registrations.length === 0 ||
             !currentMetadata.active
           );
+          const activeNeedsUpdate = onchainActive !== 'true';
+          const needsUpdate = offchainNeedsUpdate || activeNeedsUpdate;
           if (needsUpdate) {
               log.info({ action: 'identity.metadata.needs_update' }, 'Agent metadata needs updating on-chain');
               if (!currentMetadata) {
@@ -163,14 +166,12 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
               log.info({ action: 'identity.step.updating_metadata' }, 'Updating metadata on-chain (TX)');
               const txHash = await withTimeout(registration.updateMetadata(info.tokenId, metadata), 120000, 'updateMetadata');
               log.info({ action: 'identity.metadata.updated', txHash }, 'Metadata updated successfully');
+            }
 
-              // Sync on-chain active flag to match off-chain (fixes WA080 conflict on 8004scan)
-              try {
-                const activeTxHash = await withTimeout(registration.setOnchainMetadata(info.tokenId, 'active', 'true'), 60000, 'setOnchainActive');
-                log.info({ action: 'identity.metadata.active_set', txHash: activeTxHash }, 'On-chain active flag set to true');
-              } catch (err) {
-                log.warn({ action: 'identity.metadata.active_failed', err: err instanceof Error ? err : new Error(String(err)) }, 'Failed to set on-chain active flag (non-fatal)');
-              }
+            if (activeNeedsUpdate) {
+              log.info({ action: 'identity.metadata.active_mismatch', onchain: JSON.stringify(onchainActive) }, 'On-chain active flag is not "true" — updating');
+              const activeTxHash = await withTimeout(registration.setOnchainMetadata(info.tokenId, 'active', 'true'), 60000, 'setOnchainActive');
+              log.info({ action: 'identity.metadata.active_set', txHash: activeTxHash }, 'On-chain active flag set to true');
             }
           } catch (error) {
             if (error instanceof Error) {
@@ -232,6 +233,14 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
       { action: 'identity.registration.completed', tokenId: result.tokenId.toString(), agentAddress: result.agentAddress, transactionHash: result.transactionHash },
       'Agent registered successfully',
     );
+
+    // Set on-chain active flag after fresh registration
+    try {
+      const activeTxHash = await withTimeout(registration.setOnchainMetadata(result.tokenId, 'active', 'true'), 60000, 'setOnchainActive');
+      log.info({ action: 'identity.metadata.active_set', txHash: activeTxHash }, 'On-chain active flag set to true');
+    } catch (err) {
+      log.warn({ action: 'identity.metadata.active_failed', err: err instanceof Error ? err : new Error(String(err)) }, 'Failed to set on-chain active flag (non-fatal)');
+    }
 
     // Submit TEE validation if configured
     if (teeProvider && teeProvider.mode !== 'disabled') {

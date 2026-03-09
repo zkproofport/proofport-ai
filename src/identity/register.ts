@@ -18,7 +18,8 @@ const IDENTITY_ABI = [
   'function balanceOf(address owner) external view returns (uint256)',
   'function totalSupply() external view returns (uint256)',
   'function tokenOfOwnerByIndex(address owner, uint256 index) external view returns (uint256)',
-  'function setMetadata(uint256 agentId, string metadataKey, string metadataValue) external',
+  'function setMetadata(uint256 agentId, string metadataKey, bytes metadataValue) external',
+  'function getMetadata(uint256 agentId, string metadataKey) external view returns (bytes)',
   'event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)',
 ];
 
@@ -214,10 +215,19 @@ export class AgentRegistration {
   }
 
   /**
+   * Get on-chain key-value metadata (returns decoded UTF-8 string)
+   */
+  async getOnchainMetadata(tokenId: bigint, key: string): Promise<string> {
+    const raw: string = await this.contract.getMetadata(tokenId, key);
+    return ethers.toUtf8String(raw);
+  }
+
+  /**
    * Set on-chain key-value metadata (e.g., active status)
+   * Value is encoded as UTF-8 bytes per ERC-8004 spec
    */
   async setOnchainMetadata(tokenId: bigint, key: string, value: string): Promise<string> {
-    const tx = await this.contract.setMetadata(tokenId, key, value);
+    const tx = await this.contract.setMetadata(tokenId, key, ethers.toUtf8Bytes(value));
     await tx.wait();
     return tx.hash;
   }
