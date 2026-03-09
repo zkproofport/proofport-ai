@@ -30,6 +30,7 @@ export class AgentRegistration {
   private readonly provider: ethers.JsonRpcProvider;
   private readonly signer: ethers.Wallet;
   private readonly contract: ethers.Contract;
+  private lastTxNonce: number = -1;
 
   constructor(config: AgentRegistrationConfig) {
     // Validate all required fields
@@ -56,6 +57,17 @@ export class AgentRegistration {
   }
 
   /**
+   * Get next nonce, tracking locally to prevent provider cache staleness
+   * between sequential transactions in the same session
+   */
+  private async getNextNonce(): Promise<number> {
+    const providerNonce = await this.provider.getTransactionCount(this.signer.address, 'latest');
+    const nextNonce = Math.max(providerNonce, this.lastTxNonce + 1);
+    this.lastTxNonce = nextNonce;
+    return nextNonce;
+  }
+
+  /**
    * Register agent on ERC-8004 Identity contract
    */
   async register(metadata: AgentMetadata): Promise<AgentRegistrationResult> {
@@ -63,7 +75,7 @@ export class AgentRegistration {
     const metadataUri = createMetadataUri(metadata);
 
     // Call contract.register
-    const tx = await this.contract.register(metadataUri);
+    const tx = await this.contract.register(metadataUri, { nonce: await this.getNextNonce() });
 
     // Wait for transaction receipt
     const receipt = await tx.wait();
@@ -227,7 +239,7 @@ export class AgentRegistration {
    * Value is encoded as UTF-8 bytes per ERC-8004 spec
    */
   async setOnchainMetadata(tokenId: bigint, key: string, value: string): Promise<string> {
-    const tx = await this.contract.setMetadata(tokenId, key, ethers.toUtf8Bytes(value));
+    const tx = await this.contract.setMetadata(tokenId, key, ethers.toUtf8Bytes(value), { nonce: await this.getNextNonce() });
     await tx.wait();
     return tx.hash;
   }
@@ -240,7 +252,7 @@ export class AgentRegistration {
    */
   async updateMetadata(tokenId: bigint, metadata: AgentMetadata): Promise<string> {
     const metadataUri = createMetadataUri(metadata);
-    const tx = await this.contract.setAgentURI(tokenId, metadataUri);
+    const tx = await this.contract.setAgentURI(tokenId, metadataUri, { nonce: await this.getNextNonce() });
     await tx.wait();
     return tx.hash;
   }

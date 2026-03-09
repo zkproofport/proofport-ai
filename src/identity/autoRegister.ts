@@ -99,6 +99,8 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
           const needsUpdate = offchainNeedsUpdate || activeNeedsUpdate;
           if (needsUpdate) {
               log.info({ action: 'identity.metadata.needs_update' }, 'Agent metadata needs updating on-chain');
+
+              if (offchainNeedsUpdate) {
               if (!currentMetadata) {
                 log.info({ action: 'identity.metadata.not_found' }, 'No on-chain metadata found — will set full metadata');
               } else {
@@ -166,12 +168,13 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
               log.info({ action: 'identity.step.updating_metadata' }, 'Updating metadata on-chain (TX)');
               const txHash = await withTimeout(registration.updateMetadata(info.tokenId, metadata), 120000, 'updateMetadata');
               log.info({ action: 'identity.metadata.updated', txHash }, 'Metadata updated successfully');
-            }
+              }
 
-            if (activeNeedsUpdate) {
-              log.info({ action: 'identity.metadata.active_mismatch', onchain: JSON.stringify(onchainActive) }, 'On-chain active flag is not "true" — updating');
-              const activeTxHash = await withTimeout(registration.setOnchainMetadata(info.tokenId, 'active', 'true'), 60000, 'setOnchainActive');
-              log.info({ action: 'identity.metadata.active_set', txHash: activeTxHash }, 'On-chain active flag set to true');
+              if (activeNeedsUpdate) {
+                log.info({ action: 'identity.metadata.active_mismatch', onchain: JSON.stringify(onchainActive) }, 'On-chain active flag is not "true" — updating');
+                const activeTxHash = await withTimeout(registration.setOnchainMetadata(info.tokenId, 'active', 'true'), 60000, 'setOnchainActive');
+                log.info({ action: 'identity.metadata.active_set', txHash: activeTxHash }, 'On-chain active flag set to true');
+              }
             }
           } catch (error) {
             if (error instanceof Error) {
