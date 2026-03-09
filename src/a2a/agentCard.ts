@@ -340,7 +340,7 @@ export function buildOasfAgent(config: Config, tokenId?: bigint | null) {
       ...(tokenId !== null && tokenId !== undefined
         ? [
             {
-              agentId: Number(tokenId),
+              agentId: tokenId.toString(),
               agentRegistry: `eip155:${isProduction ? '8453' : '84532'}:${erc8004Identity}`,
             },
           ]
