@@ -100,13 +100,16 @@ export class AgentRegistration {
       return null;
     }
 
-    // Find tokenId — try multiple strategies in order of reliability
+    // Find tokenId — try multiple strategies in order of efficiency
+    // 1. ERC-721 Enumerable (single RPC call — fastest)
+    // 2. Transfer event scan (indexed eth_getLogs — fast even on large collections)
+    // 3. ownerOf iteration (O(n) individual calls — last resort, slow on mainnet)
     let tokenId = await this.findTokenIdByEnumerable();
     if (tokenId === null) {
-      tokenId = await this.findTokenIdByTotalSupply();
+      tokenId = await this.findTokenId();
     }
     if (tokenId === null) {
-      tokenId = await this.findTokenId();
+      tokenId = await this.findTokenIdByTotalSupply();
     }
     if (tokenId === null) {
       log.warn({ action: 'identity.token.not_resolved' }, 'Agent is registered but tokenId could not be resolved — metadata update will be skipped');
