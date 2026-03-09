@@ -97,7 +97,16 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
             currentMetadata.skills.length === 0 ||
             !currentMetadata.registrations ||
             currentMetadata.registrations.length === 0 ||
-            !currentMetadata.active
+            !currentMetadata.agentType ||
+            !currentMetadata.active ||
+            // Detect A2A endpoint URL change (card URL -> RPC URL)
+            (currentMetadata.services && currentMetadata.services.some(
+              (s: { name: string; endpoint: string }) => s.name === 'A2A' && s.endpoint.includes('agent-card.json')
+            )) ||
+            // Detect registrations agentId type mismatch (string -> number)
+            (currentMetadata.registrations && currentMetadata.registrations.length > 0 &&
+              typeof currentMetadata.registrations[0].agentId === 'string'
+            )
           );
           const activeNeedsUpdate = onchainActive !== 'true';
           const needsUpdate = offchainNeedsUpdate || activeNeedsUpdate;
