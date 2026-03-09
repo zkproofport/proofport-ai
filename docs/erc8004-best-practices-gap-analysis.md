@@ -23,7 +23,7 @@ All three required fields are present and stored on-chain via `data:application/
 | Service Type | Status | Details |
 |-------------|--------|---------|
 | MCP | PASS | `{base}/mcp`, version `2025-11-25`, tools: `prove`, `get_supported_circuits`, `get_guide` |
-| A2A | PASS | `{base}/.well-known/agent-card.json`, version `0.3.0`, skills: `prove`, `get_supported_circuits`, `get_guide` |
+| A2A | PASS | `{base}/a2a` (JSON-RPC endpoint), version `0.3.0`, skills: `prove`, `get_supported_circuits`, `get_guide` |
 | web | PASS | `{websiteUrl}` |
 | agentWallet (on-chain) | PASS | Auto-set to token owner address on registration |
 | agentWallet (off-chain) | PASS | CAIP-10 format in `services` array |
@@ -120,6 +120,24 @@ app.get('/.well-known/agent-registration.json', (req, res) => {
 
 Fixed 2026-03-09. Both off-chain (tokenURI) and on-chain (`setMetadata`) active flags are set to `true`. 8004scan WA080 warning resolved.
 
+### agentType
+
+| Field | Status | Details |
+|-------|--------|---------|
+| `agentType` | PASS | `"service"` — added to on-chain metadata (2026-03-09) |
+
+### 8004scan Endpoint Verification
+
+| Field | Status | Details |
+|-------|--------|---------|
+| `is_endpoint_verified` | GAP | `false` — 8004scan has never verified endpoints |
+| `endpoint_last_checked_at` | GAP | `null` — health check never triggered |
+| A2A endpoint URL | FIXED | Changed from card URL (`/.well-known/agent-card.json`) to RPC endpoint (`/a2a`) — 2026-03-09 |
+
+**Root cause of Service=0**: 8004scan probes the registered A2A endpoint as a JSON-RPC server. The card URL does not respond to RPC calls, so `a2a_quality=0`. Additionally, endpoint verification has never been triggered (`POST /api/v1/agents/verify-endpoint/8453/25331` requires auth).
+
+**Note**: 8004scan applies a `no_service` penalty multiplier of 0.65 (35% reduction) to the total score when service health check has not passed.
+
 ---
 
 ## Reputation Best Practices
@@ -172,19 +190,26 @@ Best practice recommends facilitators publish cumulative revenue totals. Since r
 |----------|--------|---------|
 | TEE validation submission | PASS | Nitro Attestation → `validationRequest` + `validationResponse` on-chain |
 | Response score | PASS | Score `100` (passed) |
-| Validation tag | PASS | `tee-attestation` (bytes32) |
+| Validation tag | PASS | `tee-attestation` (string type, not bytes32) |
 | Independent validator | GAP | Self-validation (agent is both requester and validator) |
+| On-chain validation count | PASS | 6 validations on-chain (validation #5: response=100, tag=tee-attestation) |
+
+### 8004scan Does NOT Index On-Chain Validations
+
+**Critical finding (2026-03-09)**: 8004scan's `total_validations` metric is an **internal platform feature**, not sourced from on-chain ValidationRegistry events. The 8004scan API note states: "validation system is disabled until the official spec is finalized."
+
+Our 6 on-chain validations at `0x8004Cc8439f36fd5F9F049D9fF86523Df6dAAB58` are correctly stored but invisible to 8004scan scoring. The `validation_bonus: 6.0` in Publisher score comes from 8004scan's internal data.
 
 ### Self-Validation Limitation
 
-Currently, `validationSubmitter.ts` uses the agent's own address as both the requester and validator. While TEE attestation provides hardware-level trust (the attestation document is cryptographically signed by the Nitro NSM), 8004scan may weight independent validation higher.
+Currently, `validationSubmitter.ts` uses the agent's own address (`0xc5B29033e63A986b601Fe430806A2C9735F2ea97`) as both requester and validator. TEE attestation provides hardware-level trust (Nitro NSM cryptographic signature).
 
 **Options**:
 1. Deploy a standalone TEE verification service at a different address
 2. Partner with a third-party validator service
-3. Accept current self-validation (TEE hardware guarantee is still credible)
+3. Accept current self-validation (TEE hardware guarantee is credible)
 
-**Impact**: High effort for options 1-2. Option 3 is acceptable short-term.
+**Impact**: Low priority — 8004scan does not currently index on-chain validations regardless.
 
 ---
 
@@ -247,30 +272,41 @@ Current implementation is informational only. If access control is needed in the
 
 ## Action Items (Priority Order)
 
-### P1 — Quick Wins (low effort, immediate impact)
+### P0 — 8004scan Score Impact (highest ROI)
 
 | # | Item | Effort | Status |
 |---|------|--------|--------|
-| ~~1~~ | ~~Add `active: true` to metadata~~ | ~~5 min~~ | DONE (2026-03-09) |
-| 2 | Add `agentWallet` to off-chain `services` array (CAIP-10 format) | 10 min | DONE (2026-03-09) |
-| 3 | Add `/.well-known/agent-registration.json` endpoint | 15 min | DONE (2026-03-09) |
-| 4 | Add OASF `domains` and `skills` to metadata | 30 min | DONE (2026-03-09) |
+| 1 | Fix A2A service endpoint to `/a2a` (was card URL) | 5 min | DONE (2026-03-09) |
+| 2 | Add `agentType: "service"` to on-chain metadata | 5 min | DONE (2026-03-09) |
+| 3 | Trigger endpoint verification on 8004scan | Manual | TODO (needs auth token) |
+| 4 | Apply for publisher certification on 8004scan | Manual | TODO |
+
+### P1 — Quick Wins (completed)
+
+| # | Item | Effort | Status |
+|---|------|--------|--------|
+| 5 | Add `active: true` to metadata | 5 min | DONE (2026-03-09) |
+| 6 | Add `agentWallet` to off-chain `services` array (CAIP-10 format) | 10 min | DONE (2026-03-09) |
+| 7 | Add `/.well-known/agent-registration.json` endpoint | 15 min | DONE (2026-03-09) |
+| 8 | Add `/.well-known/did.json` endpoint | 15 min | DONE (2026-03-09) |
+| 9 | Add OASF `domains` and `skills` to metadata | 30 min | DONE (2026-03-09) |
 
 ### P2 — Medium Effort
 
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
-| 5 | Use `register(string, MetadataEntry[])` overload for atomic registration + active flag | 1-2 hrs | Optimization: single TX instead of two |
-| 6 | Add `getAgentWallet()` verification to startup health check | 30 min | Verify on-chain wallet is correctly set |
+| 10 | Use `register(string, MetadataEntry[])` overload for atomic registration + active flag | 1-2 hrs | Optimization: single TX instead of two |
+| 11 | Add `getAgentWallet()` verification to startup health check | 30 min | Verify on-chain wallet is correctly set |
+| 12 | Encourage 8004scan platform feedback/stars | Ongoing | Drives Engagement score (30% weight) |
 
 ### P3 — High Effort (future roadmap)
 
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
-| 7 | Reliability signal publishing (cron job) | 1-2 days | New worker service, metrics collection |
-| 8 | Independent TEE validator service | 2-3 days | Separate deployment, different wallet |
-| 9 | Client-facing feedback prompt after proof completion | 1 day | Return feedback URL to clients |
-| 10 | Revenue signal tracking via x402 facilitator | 1-2 days | Requires facilitator integration |
+| 13 | Reliability signal publishing (cron job) | 1-2 days | New worker service, metrics collection |
+| 14 | Independent TEE validator service | 2-3 days | Low priority — 8004scan doesn't index on-chain validations |
+| 15 | Client-facing feedback prompt after proof completion | 1 day | Return feedback URL to clients |
+| 16 | Revenue signal tracking via x402 facilitator | 1-2 days | Requires facilitator integration |
 
 ---
 
@@ -280,6 +316,8 @@ Current implementation is informational only. If access control is needed in the
 - [Registration Best Practices](https://github.com/erc-8004/best-practices/blob/main/Registration.md) — Four Golden Rules
 - [Reputation Best Practices](https://github.com/erc-8004/best-practices/blob/main/Reputation.md) — Feedback and signal publishing
 - [ERC-8004 Technical Spec (Draft)](https://github.com/erc-8004/best-practices/blob/main/src/ERC8004SPEC.md)
+- [8004scan OpenAPI Spec](https://api.8004scan.io/openapi.json) — Full API (v0.4.41, by Alt Research)
+- [8004scan Score API](https://api.8004scan.io/api/v1/agents/scores/v5/8453/25331) — Live score for our agent
 - [OASF v0.8.0 Schema](https://schema.oasf.outshift.com/0.8.0) — Agent capability taxonomy
 - [OASF GitHub](https://github.com/agntcy/oasf/tree/v0.8.0)
 - [8004scan](https://8004scan.io) — Agent explorer and metadata validator

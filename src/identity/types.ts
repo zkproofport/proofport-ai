@@ -4,6 +4,7 @@
 export interface AgentMetadata {
   name: string;
   description: string;
+  agentType?: string;
   agentUrl: string;
   capabilities: string[];
   protocols: string[];

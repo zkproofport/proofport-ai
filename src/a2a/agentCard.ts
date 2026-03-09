@@ -306,7 +306,7 @@ export function buildOasfAgent(config: Config, tokenId?: bigint | null) {
       },
       {
         name: 'A2A',
-        endpoint: `${config.a2aBaseUrl}/.well-known/agent-card.json`,
+        endpoint: `${config.a2aBaseUrl}/a2a`,
         version: '0.3.0',
         a2aSkills: ['prove', 'get_supported_circuits', 'get_guide'],
       },
