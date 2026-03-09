@@ -23,9 +23,9 @@ const log = createLogger('TeeValidation');
 const VALIDATION_REGISTRY_ABI = [
   'function getIdentityRegistry() external view returns (address)',
   'function validationRequest(address validatorAddress, uint256 agentId, string requestURI, bytes32 requestHash) external',
-  'function validationResponse(bytes32 requestHash, uint8 response, string responseURI, bytes32 responseHash, bytes32 tag) external',
+  'function validationResponse(bytes32 requestHash, uint8 response, string responseURI, bytes32 responseHash, string tag) external',
   'function getAgentValidations(uint256 agentId) external view returns (bytes32[])',
-  'function getValidationStatus(bytes32 requestHash) external view returns (address validatorAddress, uint256 agentId, uint8 response, bytes32 responseHash, bytes32 tag, uint256 lastUpdate)',
+  'function getValidationStatus(bytes32 requestHash) external view returns (address validatorAddress, uint256 agentId, uint8 response, bytes32 responseHash, string tag, uint256 lastUpdate)',
 ];
 
 const TEE_TAG = 'tee-attestation';
@@ -147,8 +147,8 @@ async function doValidation(
   for (const hash of existingValidations) {
     try {
       const status = await contract.getValidationStatus(hash);
-      // status[2] is the response (uint8), status[4] is the tag (bytes32)
-      if (Number(status[2]) > 0 && status[4] === ethers.encodeBytes32String(TEE_TAG)) {
+      // status[2] is the response (uint8), status[4] is the tag (string)
+      if (Number(status[2]) > 0 && status[4] === TEE_TAG) {
         log.info({ action: 'tee.validation.already_validated', requestHash: hash }, 'Agent already has TEE validation');
         return;
       }
@@ -216,7 +216,7 @@ async function doValidation(
     100, // score: 100 = fully validated
     responseURI,
     responseHash,
-    ethers.encodeBytes32String(TEE_TAG)
+    TEE_TAG
   );
   await resTx.wait();
   log.info({ action: 'tee.validation.response_submitted', tx: resTx.hash }, 'validationResponse submitted');
