@@ -2,7 +2,29 @@
 
 Comparison of our implementation against [ERC-8004 Best Practices](https://github.com/erc-8004/best-practices).
 
-Last updated: 2026-03-09
+Last updated: 2026-03-10
+
+---
+
+## Current 8004scan Score (2026-03-10)
+
+**Total: 58.82** | Rank: #3566 (global), #1548 (Base chain) | Completeness: `complete`
+
+| Dimension | Score | Weight | Weighted | Key Factor |
+|-----------|-------|--------|----------|------------|
+| Service | 0.0 | 25% | 0.0 | Endpoint verification pending — health check never ran |
+| Engagement | 12.8 | 30% | 3.84 | 0 user feedback, popularity 25.6 |
+| Publisher | 7.0 | 20% | 1.40 | wallet 1.0, validation_bonus 6.0, not certified |
+| Compliance | 60.0 | 15% | 9.00 | metadata 60/100, endpoint not verified |
+| Momentum | 48.3 | 10% | 4.83 | 3 days old, freshness boost 86.7 |
+
+**Multipliers**: `no_service` penalty applied (0.65x) — will be lifted after endpoint verification. `completeness` = 1.0x (complete tier).
+
+**Biggest improvement lever**: Service dimension (25% weight, currently 0). `verify-endpoint` was triggered 2026-03-09 for both production and testnet. After health check batch runs:
+1. A2A: 8004scan GETs `/.well-known/agent-card.json` → counts skills → `a2a_quality` populated (top agents get 89-100)
+2. MCP: 8004scan sends MCP protocol to `/mcp` → counts tools → `mcp_quality` populated (top agents get 73-97)
+3. `no_service` penalty (0.65x) lifted → estimated 35%+ score increase
+4. Domain verification via `.well-known/agent-registration.json` → `is_endpoint_verified = true` → compliance boost
 
 ---
 
@@ -23,7 +45,7 @@ All three required fields are present and stored on-chain via `data:application/
 | Service Type | Status | Details |
 |-------------|--------|---------|
 | MCP | PASS | `{base}/mcp`, version `2025-11-25`, tools: `prove`, `get_supported_circuits`, `get_guide` |
-| A2A | PASS | `{base}/a2a` (JSON-RPC endpoint), version `0.3.0`, skills: `prove`, `get_supported_circuits`, `get_guide` |
+| A2A | PASS | `{base}/.well-known/agent-card.json` (discovery per IA024), version `0.3.0`, skills: `prove`, `get_supported_circuits`, `get_guide`. RPC at `/a2a` |
 | web | PASS | `{websiteUrl}` |
 | agentWallet (on-chain) | PASS | Auto-set to token owner address on registration |
 | agentWallet (off-chain) | PASS | CAIP-10 format in `services` array |
@@ -34,17 +56,9 @@ All three required fields are present and stored on-chain via `data:application/
 
 The ERC-8004 spec auto-sets `agentWallet` to the token owner's address on registration. The `setAgentWallet()` function is only needed to **change** it to a different address (requires EIP-712 or ERC-1271 signature verification, 5-minute deadline). On token transfer, it resets to zero address.
 
-**On-chain status**: Already set to our prover wallet address (`0x5A3E649208Ae15ec52496c1Ae23b2Ff89Ac02f0c`) automatically.
+**On-chain status**: Set to prover wallet address (`0xc5B29033e63A986b601Fe430806A2C9735F2ea97`) automatically.
 
-**Off-chain GAP**: The `services` array in tokenURI metadata should include an `agentWallet` entry in CAIP-10 format:
-
-```json
-{ "name": "agentWallet", "endpoint": "eip155:8453:0x5A3E649208Ae15ec52496c1Ae23b2Ff89Ac02f0c" }
-```
-
-**Fix**: Add `agentWallet` entry to `services` array in `autoRegister.ts`.
-
-**Impact**: Low effort. Enables on-chain wallet resolution for agent-to-agent payments.
+**Off-chain status**: CAIP-10 entry present in `services` array: `eip155:8453:0xc5B29033e63A986b601Fe430806A2C9735F2ea97`. Fixed 2026-03-09.
 
 ---
 
@@ -87,26 +101,9 @@ Skills:
 
 ### Domain Verification (Optional)
 
-The best practice **optionally** recommends publishing a registration file at:
+Published at `/.well-known/agent-registration.json` with `agentId: 25331` and `agentRegistry: eip155:8453:0x8004A169FB4a3325136EB29fA0ceB6D2e539a432`. Fixed 2026-03-09.
 
-```
-https://{endpoint-domain}/.well-known/agent-registration.json
-```
-
-This provides a bidirectional link between the on-chain identity and the service endpoint.
-
-**Fix**: Add endpoint in `agentCard.ts`:
-
-```typescript
-app.get('/.well-known/agent-registration.json', (req, res) => {
-  res.json({
-    agentId: tokenId.toString(),
-    agentRegistry: `eip155:${chainId}:${identityContractAddress}`
-  });
-});
-```
-
-**Impact**: Low effort. Adds trust signal for 8004scan, though not strictly required.
+**8004scan verify-endpoint API**: `POST /api/v1/agents/verify-endpoint/8453/25331` checks this file for matching registration info. No auth required (per OpenAPI spec). Rate limit: 1 hour cooldown.
 
 ---
 
@@ -130,13 +127,33 @@ Fixed 2026-03-09. Both off-chain (tokenURI) and on-chain (`setMetadata`) active 
 
 | Field | Status | Details |
 |-------|--------|---------|
-| `is_endpoint_verified` | GAP | `false` — 8004scan has never verified endpoints |
+| `is_endpoint_verified` | GAP | `false` — domain verification failed (see error below) |
 | `endpoint_last_checked_at` | GAP | `null` — health check never triggered |
-| A2A endpoint URL | FIXED | Changed from card URL (`/.well-known/agent-card.json`) to RPC endpoint (`/a2a`) — 2026-03-09 |
+| A2A endpoint URL | PASS | `/.well-known/agent-card.json` (card discovery URL per IA024) — 8004scan warns IA024 if `/a2a` RPC URL used directly |
+| `agent-registration.json` format | FIX APPLIED | Was flat object `{agentId, agentRegistry}`, spec requires `{registrations: [{agentId, agentRegistry}]}` |
+| MCP service field name | FIX APPLIED | `tools` → `mcpTools` per best practices |
+| A2A service field name | FIX APPLIED | `skills` → `a2aSkills` per best practices |
+| OASF service entry | FIX APPLIED | Added as separate service entry (best practices pattern, e.g. Captain Dackie) |
 
-**Root cause of Service=0**: 8004scan probes the registered A2A endpoint as a JSON-RPC server. The card URL does not respond to RPC calls, so `a2a_quality=0`. Additionally, endpoint verification has never been triggered (`POST /api/v1/agents/verify-endpoint/8453/25331` requires auth).
+**Root cause of verification failure**: `endpoint_verification_error: "zkproofport.com: HTTP 404; ai.zkproofport.app: No matching registration"`.
 
-**Note**: 8004scan applies a `no_service` penalty multiplier of 0.65 (35% reduction) to the total score when service health check has not passed.
+Two issues:
+1. **`zkproofport.com: HTTP 404`** — 8004scan checks ALL service endpoint domains for `agent-registration.json`. Our `web` service points to `zkproofport.com` which doesn't have this file.
+2. **`ai.zkproofport.app: No matching registration`** — Our `agent-registration.json` returned a flat object `{agentId, agentRegistry}` but the ERC-8004 spec requires `{registrations: [{agentId, agentRegistry}]}`. Format mismatch caused "No matching registration".
+
+**Fix applied (2026-03-10)**: `agentCard.ts` updated to return `registrations` array. Needs deployment + re-trigger of `verify-endpoint`.
+
+**How 8004scan health checks work** (from top-5 agent analysis):
+- **A2A**: GETs the registered endpoint URL (`.well-known/agent-card.json`), parses as A2A AgentCard, counts skills. Top agents: quality 89-100.
+- **MCP**: Sends MCP protocol requests (`initialize`, `tools/list`) to the registered MCP URL. Counts `tools_count`, `prompts_count`, `has_name`. Top agents: quality 73-97.
+- Health checks run as a batch (all top agents checked at same timestamp). Agents are included in batches after `verify-endpoint` is triggered.
+- `is_endpoint_verified` (domain verification via `.well-known/agent-registration.json`) is separate from health check results — agents can have health checks without passing domain verification (e.g. Captain Dackie has no `agent-registration.json` at all, yet is healthy).
+
+**Timeline**:
+- 2026-03-09: `verify-endpoint` first triggered. Verification ran but failed with format mismatch.
+- 2026-03-10: Root cause identified, `registrations` array fix applied. Re-triggered `verify-endpoint` (queued, est. 11:37 UTC). Pending deployment.
+
+**Note**: 8004scan applies a `no_service` penalty multiplier of 0.65 (35% reduction) to the total score when health checks haven't passed.
 
 ---
 
@@ -191,8 +208,9 @@ Best practice recommends facilitators publish cumulative revenue totals. Since r
 | TEE validation submission | PASS | Nitro Attestation → `validationRequest` + `validationResponse` on-chain |
 | Response score | PASS | Score `100` (passed) |
 | Validation tag | PASS | `tee-attestation` (string type, not bytes32) |
+| Attestation retry on failure | PASS | `validationSubmitter.ts` retries up to 3x with backoff on null attestation (fixed 2026-03-09) |
 | Independent validator | GAP | Self-validation (agent is both requester and validator) |
-| On-chain validation count | PASS | 6 validations on-chain (validation #5: response=100, tag=tee-attestation) |
+| On-chain validation count | PASS | 7+ validations on-chain (latest: tx `0x9003509f...`, response=100, tag=tee-attestation) |
 
 ### 8004scan Does NOT Index On-Chain Validations
 
@@ -276,20 +294,23 @@ Current implementation is informational only. If access control is needed in the
 
 | # | Item | Effort | Status |
 |---|------|--------|--------|
-| 1 | Fix A2A service endpoint to `/a2a` (was card URL) | 5 min | DONE (2026-03-09) |
-| 2 | Add `agentType: "service"` to on-chain metadata | 5 min | DONE (2026-03-09) |
-| 3 | Trigger endpoint verification on 8004scan | Manual | TODO (needs auth token) |
-| 4 | Apply for publisher certification on 8004scan | Manual | TODO |
+| 1 | Fix `agent-registration.json` format (wrap in `registrations` array) | 5 min | FIX APPLIED (2026-03-10) — root cause of "No matching registration" error |
+| 2 | A2A endpoint uses `/.well-known/agent-card.json` per IA024 | — | PASS (IA024 requires card URL, not RPC URL) |
+| 3 | Add `agentType: "service"` to on-chain metadata | 5 min | DONE (2026-03-09) |
+| 4 | Use best-practices field names: `mcpTools`, `a2aSkills` | 5 min | FIX APPLIED (2026-03-10) |
+| 5 | Add OASF as separate service entry (best practices pattern) | 5 min | FIX APPLIED (2026-03-10) |
+| 6 | Deploy + re-trigger endpoint verification on 8004scan | Manual | PENDING DEPLOY |
+| 7 | Apply for publisher certification on 8004scan | Manual | TODO |
 
 ### P1 — Quick Wins (completed)
 
 | # | Item | Effort | Status |
 |---|------|--------|--------|
-| 5 | Add `active: true` to metadata | 5 min | DONE (2026-03-09) |
-| 6 | Add `agentWallet` to off-chain `services` array (CAIP-10 format) | 10 min | DONE (2026-03-09) |
-| 7 | Add `/.well-known/agent-registration.json` endpoint | 15 min | DONE (2026-03-09) |
-| 8 | Add `/.well-known/did.json` endpoint | 15 min | DONE (2026-03-09) |
-| 9 | Add OASF `domains` and `skills` to metadata | 30 min | DONE (2026-03-09) |
+| 8 | Add `active: true` to metadata | 5 min | DONE (2026-03-09) |
+| 9 | Add `agentWallet` to off-chain `services` array (CAIP-10 format) | 10 min | DONE (2026-03-09) |
+| 10 | Add `/.well-known/agent-registration.json` endpoint | 15 min | DONE (2026-03-09) |
+| 11 | Add `/.well-known/did.json` endpoint | 15 min | DONE (2026-03-09) |
+| 12 | Add OASF `domains` and `skills` to metadata | 30 min | DONE (2026-03-09) |
 
 ### P2 — Medium Effort
 

@@ -106,7 +106,15 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
             // Detect registrations agentId type mismatch (string -> number)
             (currentMetadata.registrations && currentMetadata.registrations.length > 0 &&
               typeof currentMetadata.registrations[0].agentId === 'string'
-            )
+            ) ||
+            // Detect missing OASF service entry (best practices: separate service)
+            (currentMetadata.services && !currentMetadata.services.some(
+              (s: { name: string }) => s.name === 'OASF'
+            )) ||
+            // Detect old MCP field name (tools -> mcpTools per best practices)
+            (currentMetadata.services && currentMetadata.services.some(
+              (s: { name: string; tools?: string[]; mcpTools?: string[] }) => s.name === 'MCP' && s.tools && !s.mcpTools
+            ))
           );
           const activeNeedsUpdate = onchainActive !== 'true';
           const needsUpdate = offchainNeedsUpdate || activeNeedsUpdate;
@@ -165,8 +173,9 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
                 image: `${config.a2aBaseUrl}/icon.png`,
                 services: [
                   { name: 'web', endpoint: config.websiteUrl },
-                  { name: 'MCP', endpoint: `${config.a2aBaseUrl}/mcp`, version: '2025-11-25', tools: ['prove', 'get_supported_circuits', 'get_guide'] },
-                  { name: 'A2A', endpoint: `${config.a2aBaseUrl}/.well-known/agent-card.json`, version: '0.3.0', skills: ['prove', 'get_supported_circuits', 'get_guide'] },
+                  { name: 'MCP', endpoint: `${config.a2aBaseUrl}/mcp`, version: '2025-11-25', mcpTools: ['prove', 'get_supported_circuits', 'get_guide'] },
+                  { name: 'A2A', endpoint: `${config.a2aBaseUrl}/.well-known/agent-card.json`, version: '0.3.0', a2aSkills: ['prove', 'get_supported_circuits', 'get_guide'] },
+                  { name: 'OASF', endpoint: 'https://github.com/agntcy/oasf/', version: 'v0.8.0', skills: ['security_privacy/encryption_and_data_protection', 'security_privacy/threat_detection_and_analysis'], domains: ['technology/blockchain_and_web3', 'technology/cybersecurity', 'trust_and_safety/identity_verification'] },
                   { name: 'ENS', endpoint: 'proveragent.base.eth' },
                   { name: 'DID', endpoint: `did:web:${new URL(config.a2aBaseUrl).hostname}` },
                   { name: 'agentWallet', endpoint: `eip155:${config.paymentMode === 'mainnet' ? '8453' : '84532'}:${registration.agentAddress}` },
@@ -246,8 +255,9 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
       image: `${config.a2aBaseUrl}/icon.png`,
       services: [
         { name: 'web', endpoint: config.websiteUrl },
-        { name: 'MCP', endpoint: `${config.a2aBaseUrl}/mcp`, version: '2025-11-25', tools: ['prove', 'get_supported_circuits', 'get_guide'] },
-        { name: 'A2A', endpoint: `${config.a2aBaseUrl}/.well-known/agent-card.json`, version: '0.3.0', skills: ['prove', 'get_supported_circuits', 'get_guide'] },
+        { name: 'MCP', endpoint: `${config.a2aBaseUrl}/mcp`, version: '2025-11-25', mcpTools: ['prove', 'get_supported_circuits', 'get_guide'] },
+        { name: 'A2A', endpoint: `${config.a2aBaseUrl}/.well-known/agent-card.json`, version: '0.3.0', a2aSkills: ['prove', 'get_supported_circuits', 'get_guide'] },
+        { name: 'OASF', endpoint: 'https://github.com/agntcy/oasf/', version: 'v0.8.0', skills: ['security_privacy/encryption_and_data_protection', 'security_privacy/threat_detection_and_analysis'], domains: ['technology/blockchain_and_web3', 'technology/cybersecurity', 'trust_and_safety/identity_verification'] },
         { name: 'ENS', endpoint: 'proveragent.base.eth' },
         { name: 'DID', endpoint: `did:web:${new URL(config.a2aBaseUrl).hostname}` },
         { name: 'agentWallet', endpoint: `eip155:${config.paymentMode === 'mainnet' ? '8453' : '84532'}:${registration.agentAddress}` },

@@ -426,8 +426,12 @@ export function getAgentRegistrationHandler(config: Config, tokenIdRef: TokenIdR
     const tokenId = tokenIdRef.value;
     res.setHeader('Content-Type', 'application/json');
     res.json({
-      agentId: tokenId !== null && tokenId !== undefined ? Number(tokenId) : null,
-      agentRegistry: `eip155:${chainId}:${erc8004Identity}`,
+      registrations: [
+        {
+          agentId: tokenId !== null && tokenId !== undefined ? Number(tokenId) : null,
+          agentRegistry: `eip155:${chainId}:${erc8004Identity}`,
+        },
+      ],
     });
   };
 }

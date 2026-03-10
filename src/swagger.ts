@@ -534,8 +534,16 @@ export function buildSwaggerSpec(baseUrl: string) {
                 schema: {
                   type: 'object',
                   properties: {
-                    agentId: { type: 'string', nullable: true, description: 'ERC-8004 token ID' },
-                    agentRegistry: { type: 'string', description: 'EIP-155 format registry address (eip155:{chainId}:{address})' },
+                    registrations: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          agentId: { type: 'number', nullable: true, description: 'ERC-8004 token ID' },
+                          agentRegistry: { type: 'string', description: 'EIP-155 format registry address (eip155:{chainId}:{address})' },
+                        },
+                      },
+                    },
                   },
                 },
               },
