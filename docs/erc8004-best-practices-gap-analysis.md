@@ -8,23 +8,25 @@ Last updated: 2026-03-10
 
 ## Current 8004scan Score (2026-03-10)
 
-**Total: 58.82** | Rank: #3566 (global), #1548 (Base chain) | Completeness: `complete`
+**Total: 58.87** | Rank: #3678 (global), #1552 (Base chain) | Completeness: `complete`
 
 | Dimension | Score | Weight | Weighted | Key Factor |
 |-----------|-------|--------|----------|------------|
-| Service | 0.0 | 25% | 0.0 | Endpoint verification pending — health check never ran |
-| Engagement | 12.8 | 30% | 3.84 | 0 user feedback, popularity 25.6 |
-| Publisher | 7.0 | 20% | 1.40 | wallet 1.0, validation_bonus 6.0, not certified |
-| Compliance | 60.0 | 15% | 9.00 | metadata 60/100, endpoint not verified |
-| Momentum | 48.3 | 10% | 4.83 | 3 days old, freshness boost 86.7 |
+| Service | 0.0 | 25% | 0.0 | Health check never ran yet — domain verification passed but health batch pending |
+| Engagement | 14.17 | 30% | 4.25 | 0 user feedback, popularity 28.35 |
+| Publisher | 7.33 | 20% | 1.47 | wallet 1.33, validation_bonus 6.0, not certified |
+| Compliance | 60.0 | 15% | 9.00 | metadata_completeness 60.0, `is_endpoint_verified: False` in scoring (cached before verification passed) |
+| Momentum | 46.33 | 10% | 4.63 | 4 days old, freshness boost 82.66, activity 10.0 |
 
-**Multipliers**: `no_service` penalty applied (0.65x) — will be lifted after endpoint verification. `completeness` = 1.0x (complete tier).
+**Multipliers**: `no_service` penalty applied (0.65x) — still active in current score (score was last calculated at 12:15 UTC, before domain verification passed at 14:10 UTC). `completeness` = 1.0x (complete tier).
 
-**Biggest improvement lever**: Service dimension (25% weight, currently 0). `verify-endpoint` was triggered 2026-03-09 for both production and testnet. After health check batch runs:
+**Note**: Domain verification passed 2026-03-10 14:10 UTC but score not recalculated yet. Next scoring batch will reflect `is_endpoint_verified: True` and potentially lift `no_service` penalty if health checks pass.
+
+**Biggest improvement lever**: Service dimension (25% weight, currently 0). After health check batch runs:
 1. A2A: 8004scan GETs `/.well-known/agent-card.json` → counts skills → `a2a_quality` populated (top agents get 89-100)
 2. MCP: 8004scan sends MCP protocol to `/mcp` → counts tools → `mcp_quality` populated (top agents get 73-97)
 3. `no_service` penalty (0.65x) lifted → estimated 35%+ score increase
-4. Domain verification via `.well-known/agent-registration.json` → `is_endpoint_verified = true` → compliance boost
+4. Compliance boost from `is_endpoint_verified: True` already queued for next batch
 
 ---
 
@@ -89,6 +91,8 @@ Skills:
 
 **Impact**: Low effort, high visibility. Enables proper categorization in 8004scan and agent directories.
 
+**Note**: 8004scan issues IA027/IA028 warnings for our OASF categories but these do NOT affect scoring. Captain Dackie (service_score: 100) has 10 similar OASF warnings. These are informational only.
+
 ---
 
 ## Rule 4: On-Chain Registration Confirmation (Required)
@@ -127,31 +131,34 @@ Fixed 2026-03-09. Both off-chain (tokenURI) and on-chain (`setMetadata`) active 
 
 | Field | Status | Details |
 |-------|--------|---------|
-| `is_endpoint_verified` | GAP | `false` — domain verification failed (see error below) |
-| `endpoint_last_checked_at` | GAP | `null` — health check never triggered |
+| `is_endpoint_verified` | PASS | `true` since 2026-03-10T14:10:49Z |
+| `endpoint_last_checked_at` | PASS | `2026-03-10T14:10:49Z` |
 | A2A endpoint URL | PASS | `/.well-known/agent-card.json` (card discovery URL per IA024) — 8004scan warns IA024 if `/a2a` RPC URL used directly |
-| `agent-registration.json` format | FIX APPLIED | Was flat object `{agentId, agentRegistry}`, spec requires `{registrations: [{agentId, agentRegistry}]}` |
-| MCP service field name | FIX APPLIED | `tools` → `mcpTools` per best practices |
-| A2A service field name | FIX APPLIED | `skills` → `a2aSkills` per best practices |
-| OASF service entry | FIX APPLIED | Added as separate service entry (best practices pattern, e.g. Captain Dackie) |
+| `agent-registration.json` format | DONE | Was flat object `{agentId, agentRegistry}`, spec requires `{registrations: [{agentId, agentRegistry}]}` — deployed and verified working |
+| MCP service field name | DONE | `tools` → `mcpTools` per best practices — deployed |
+| A2A service field name | DONE | `skills` → `a2aSkills` per best practices — deployed |
+| OASF service entry | DONE | Added as separate service entry (best practices pattern, e.g. Captain Dackie) — deployed |
+| `health_status` | PENDING | `None` — health check batch hasn't included our agent yet. Endpoints confirmed working: A2A (3 skills, version 1.0.0), MCP (initialize success, tools+prompts capabilities) |
 
-**Root cause of verification failure**: `endpoint_verification_error: "zkproofport.com: HTTP 404; ai.zkproofport.app: No matching registration"`.
+**Root cause of original verification failure**: `endpoint_verification_error: "zkproofport.com: HTTP 404; ai.zkproofport.app: No matching registration"`.
 
-Two issues:
-1. **`zkproofport.com: HTTP 404`** — 8004scan checks ALL service endpoint domains for `agent-registration.json`. Our `web` service points to `zkproofport.com` which doesn't have this file.
-2. **`ai.zkproofport.app: No matching registration`** — Our `agent-registration.json` returned a flat object `{agentId, agentRegistry}` but the ERC-8004 spec requires `{registrations: [{agentId, agentRegistry}]}`. Format mismatch caused "No matching registration".
-
-**Fix applied (2026-03-10)**: `agentCard.ts` updated to return `registrations` array. Needs deployment + re-trigger of `verify-endpoint`.
+Two issues (both resolved):
+1. **`zkproofport.com: HTTP 404`** — 8004scan checks ALL service endpoint domains for `agent-registration.json`. Our `web` service pointed to `zkproofport.com` which didn't have this file. Fixed by updating `web` service URL to `ai.zkproofport.app` (deployed 2026-03-10, commit 2adedc5).
+2. **`ai.zkproofport.app: No matching registration`** — Our `agent-registration.json` returned a flat object `{agentId, agentRegistry}` but the ERC-8004 spec requires `{registrations: [{agentId, agentRegistry}]}`. Format mismatch caused "No matching registration". Fixed in `agentCard.ts` (deployed 2026-03-10, commit 5168438).
 
 **How 8004scan health checks work** (from top-5 agent analysis):
 - **A2A**: GETs the registered endpoint URL (`.well-known/agent-card.json`), parses as A2A AgentCard, counts skills. Top agents: quality 89-100.
 - **MCP**: Sends MCP protocol requests (`initialize`, `tools/list`) to the registered MCP URL. Counts `tools_count`, `prompts_count`, `has_name`. Top agents: quality 73-97.
 - Health checks run as a batch (all top agents checked at same timestamp). Agents are included in batches after `verify-endpoint` is triggered.
 - `is_endpoint_verified` (domain verification via `.well-known/agent-registration.json`) is separate from health check results — agents can have health checks without passing domain verification (e.g. Captain Dackie has no `agent-registration.json` at all, yet is healthy).
+- **8004scan health check batch timing**: Captain Dackie (rank #1 Base) `health_checked_at: 2026-03-10T13:41:48Z`. Our agent was verified at 14:10 — health check batch may include us in next cycle.
 
 **Timeline**:
 - 2026-03-09: `verify-endpoint` first triggered. Verification ran but failed with format mismatch.
-- 2026-03-10: Root cause identified, `registrations` array fix applied. Re-triggered `verify-endpoint` (queued, est. 11:37 UTC). Pending deployment.
+- 2026-03-10 ~13:00: `registrations` array fix + `mcpTools`/`a2aSkills` + OASF deployed (commit 5168438).
+- 2026-03-10 14:10: Domain verification passed (`is_endpoint_verified: True`).
+- 2026-03-10 14:21: `web` endpoint changed to `ai.zkproofport.app` deployed (commit 2adedc5).
+- Health check: Pending — awaiting 8004scan batch cycle.
 
 **Note**: 8004scan applies a `no_service` penalty multiplier of 0.65 (35% reduction) to the total score when health checks haven't passed.
 
@@ -294,13 +301,14 @@ Current implementation is informational only. If access control is needed in the
 
 | # | Item | Effort | Status |
 |---|------|--------|--------|
-| 1 | Fix `agent-registration.json` format (wrap in `registrations` array) | 5 min | FIX APPLIED (2026-03-10) — root cause of "No matching registration" error |
+| 1 | Fix `agent-registration.json` format (wrap in `registrations` array) | 5 min | DONE (deployed 2026-03-10, verified working) |
 | 2 | A2A endpoint uses `/.well-known/agent-card.json` per IA024 | — | PASS (IA024 requires card URL, not RPC URL) |
 | 3 | Add `agentType: "service"` to on-chain metadata | 5 min | DONE (2026-03-09) |
-| 4 | Use best-practices field names: `mcpTools`, `a2aSkills` | 5 min | FIX APPLIED (2026-03-10) |
-| 5 | Add OASF as separate service entry (best practices pattern) | 5 min | FIX APPLIED (2026-03-10) |
-| 6 | Deploy + re-trigger endpoint verification on 8004scan | Manual | PENDING DEPLOY |
+| 4 | Use best-practices field names: `mcpTools`, `a2aSkills` | 5 min | DONE (deployed 2026-03-10) |
+| 5 | Add OASF as separate service entry (best practices pattern) | 5 min | DONE (deployed 2026-03-10) |
+| 6 | Deploy + re-trigger endpoint verification on 8004scan | Manual | DONE — domain verification passed (2026-03-10 14:10 UTC). Health check batch pending. |
 | 7 | Apply for publisher certification on 8004scan | Manual | TODO |
+| 8 | Wait for 8004scan health check batch to run | Passive | WAITING — health checks run on 8004scan's internal schedule |
 
 ### P1 — Quick Wins (completed)
 

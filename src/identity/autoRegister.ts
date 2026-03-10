@@ -107,6 +107,10 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
             (currentMetadata.registrations && currentMetadata.registrations.length > 0 &&
               typeof currentMetadata.registrations[0].agentId === 'string'
             ) ||
+            // Detect web service endpoint pointing to wrong URL
+            (currentMetadata.services && currentMetadata.services.some(
+              (s: { name: string; endpoint: string }) => s.name === 'web' && s.endpoint !== config.a2aBaseUrl
+            )) ||
             // Detect missing OASF service entry (best practices: separate service)
             (currentMetadata.services && !currentMetadata.services.some(
               (s: { name: string }) => s.name === 'OASF'
@@ -254,7 +258,7 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
       type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
       image: `${config.a2aBaseUrl}/icon.png`,
       services: [
-        { name: 'web', endpoint: config.websiteUrl },
+        { name: 'web', endpoint: config.a2aBaseUrl },
         { name: 'MCP', endpoint: `${config.a2aBaseUrl}/mcp`, version: '2025-11-25', mcpTools: ['prove', 'get_supported_circuits', 'get_guide'] },
         { name: 'A2A', endpoint: `${config.a2aBaseUrl}/.well-known/agent-card.json`, version: '0.3.0', a2aSkills: ['prove', 'get_supported_circuits', 'get_guide'] },
         { name: 'OASF', endpoint: 'https://github.com/agntcy/oasf/', version: 'v0.8.0', skills: ['security_privacy/encryption_and_data_protection', 'security_privacy/threat_detection_and_analysis'], domains: ['technology/blockchain_and_web3', 'technology/cybersecurity', 'trust_and_safety/identity_verification'] },

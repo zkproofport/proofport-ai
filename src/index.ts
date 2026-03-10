@@ -189,7 +189,7 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
     }
     next();
   }, async (req, res) => {
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     const server = createMcpServer({ rateLimiter, proofCache, redis, teeProvider }, config);
     await server.connect(transport);
     await transport.handleRequest(req, res, req.body);
