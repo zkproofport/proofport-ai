@@ -4,6 +4,8 @@ on:
   release:
     types: [published]
 
+# Only run for npm packages (sdk, mcp). Server releases use deploy-ai-aws.yml.
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -31,24 +33,29 @@ jobs:
             echo "package=packages/mcp" >> "$GITHUB_OUTPUT"
             echo "name=@zkproofport-ai/mcp" >> "$GITHUB_OUTPUT"
           else
-            echo "Unknown tag: $TAG" >&2
-            exit 1
+            echo "Skipping non-npm release: $TAG"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
       - name: Install dependencies
+        if: steps.pkg.outputs.skip != 'true'
         run: rm -f package-lock.json && npm install
 
       - name: Build SDK (always needed)
+        if: steps.pkg.outputs.skip != 'true'
         run: npx tsc -p packages/sdk
 
       - name: Build MCP (if publishing MCP)
-        if: steps.pkg.outputs.package == 'packages/mcp'
+        if: steps.pkg.outputs.skip != 'true' && steps.pkg.outputs.package == 'packages/mcp'
         run: npx tsc -p packages/mcp
 
       - name: Typecheck
+        if: steps.pkg.outputs.skip != 'true'
         run: npx tsc -p ${{ steps.pkg.outputs.package }} --noEmit
 
       - name: Publish to npm
+        if: steps.pkg.outputs.skip != 'true'
         working-directory: ${{ steps.pkg.outputs.package }}
         run: |
           TAG="${{ github.event.release.tag_name }}"
