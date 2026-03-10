@@ -43,6 +43,7 @@ Before using the SDK, you need:
 5. **Payment wallet** (optional) — Wallet with USDC balance for proof payment. Defaults to the attestation wallet. Choose one:
 
    - **Same as attestation wallet** — No additional setup. The attestation wallet must hold USDC.
+     > ⚠️ **Privacy risk:** Using the attestation wallet for payment exposes your KYC-verified wallet address on-chain in the payment transaction, linking your identity to on-chain activity. Use a separate payment wallet for privacy.
    - **Separate private key** — A different wallet with USDC balance.
    - **CDP MPC wallet** — Coinbase Developer Platform managed wallet. Private keys never leave Coinbase's TEE. Get credentials at [CDP Portal](https://portal.cdp.coinbase.com). Requires additional install:
      ```bash
