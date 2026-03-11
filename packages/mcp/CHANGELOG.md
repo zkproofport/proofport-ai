@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.1.1...mcp-v0.1.2) (2026-03-11)
+
+
+### Features
+
+* **mcp:** add zkproofport-prove CLI for direct proof generation ([718adb7](https://github.com/zkproofport/proofport-ai/commit/718adb7031c164dfd31e985cd65307875e0443b7))
+
 ## [0.1.1](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.1.0...mcp-v0.1.1) (2026-03-05)
 
 
