@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/zkproofport/proofport-ai/compare/server-v0.1.2...server-v0.1.3) (2026-03-11)
+
+
+### Bug Fixes
+
+* **mcp:** remove broken CdpWalletSigner.create() call ([132896a](https://github.com/zkproofport/proofport-ai/commit/132896a720ff86d97cf711efa17f1a7c40a757e7))
+
 ## [0.1.2](https://github.com/zkproofport/proofport-ai/compare/server-v0.1.1...server-v0.1.2) (2026-03-11)
 
 
