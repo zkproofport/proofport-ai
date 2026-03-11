@@ -77,6 +77,14 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
           const expectedName = 'proveragent.base.eth';
           const expectedImage = `${config.a2aBaseUrl}/icon.png`;
           const onchainActive = await withTimeout(registration.getOnchainMetadata(info.tokenId, 'active'), 30000, 'getOnchainActive');
+          log.info({
+            action: 'identity.metadata.diagnostic',
+            hasMetadata: !!currentMetadata,
+            oasfEndpoint: currentMetadata?.services?.find((s: any) => s.name === 'OASF')?.endpoint,
+            expectedBaseUrl: config.a2aBaseUrl,
+            servicesCount: currentMetadata?.services?.length,
+            onchainActive,
+          }, 'Metadata check diagnostic');
           const offchainNeedsUpdate = !currentMetadata || (
             currentMetadata.name !== expectedName ||
             currentMetadata.image !== expectedImage ||
@@ -210,6 +218,17 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
               log.info({ action: 'identity.step.updating_metadata' }, 'Updating metadata on-chain (TX)');
               const txHash = await withTimeout(registration.updateMetadata(info.tokenId, metadata), 120000, 'updateMetadata');
               log.info({ action: 'identity.metadata.updated', txHash }, 'Metadata updated successfully');
+              // Verify tokenURI was actually updated (ERC-8004 contract may use separate storage for setAgentURI)
+              try {
+                const verifyUri = await withTimeout(registration.getTokenMetadata(info.tokenId), 30000, 'verifyTokenURI');
+                const verifyMeta = verifyUri ? parseMetadataUri(verifyUri) : null;
+                const verifyOasf = verifyMeta?.services?.find((s: any) => s.name === 'OASF')?.endpoint;
+                if (verifyOasf !== config.a2aBaseUrl) {
+                  log.warn({ action: 'identity.metadata.setAgentURI_ineffective', oasfAfterUpdate: verifyOasf, expected: config.a2aBaseUrl }, 'setAgentURI TX succeeded but tokenURI was not updated — contract may store agentURI separately from tokenURI');
+                }
+              } catch {
+                // Non-critical verification
+              }
               }
 
               if (activeNeedsUpdate) {
@@ -219,9 +238,7 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
               }
             }
           } catch (error) {
-            if (error instanceof Error) {
-              log.error({ action: 'identity.metadata.update_failed', err: error }, 'Failed to update metadata');
-            }
+            log.error({ action: 'identity.metadata.update_failed', err: error instanceof Error ? error : new Error(String(error)) }, 'Failed to check/update metadata');
           }
 
         // TEE self-validation disabled: 8004scan does not index on-chain ValidationRegistry.
