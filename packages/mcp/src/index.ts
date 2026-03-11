@@ -2,7 +2,7 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { fromPrivateKey, createConfig, CdpWalletSigner, type ProofportSigner } from '@zkproofport-ai/sdk';
+import { fromPrivateKey, createConfig, type ProofportSigner } from '@zkproofport-ai/sdk';
 import { registerTools } from './tools.js';
 
 // ─── Load config from environment variables ───────────────────────────
@@ -34,14 +34,13 @@ if (process.env.PAYMENT_KEY) {
   const cdpWalletSecret = process.env.CDP_WALLET_SECRET;
 
   if (cdpApiKeyId && cdpApiKeySecret && cdpWalletSecret) {
-    paymentSigner = await CdpWalletSigner.create({
-      apiKeyId: cdpApiKeyId,
-      apiKeySecret: cdpApiKeySecret,
-      walletSecret: cdpWalletSecret,
-      address: process.env.CDP_WALLET_ADDRESS,
-    });
-    console.error(`[zkproofport-mcp] Payment wallet (CDP): ${paymentSigner.getAddress()}`);
-  } else {
+    // TODO: CDP MPC wallet support requires @coinbase/agentkit dependency.
+    // CdpWalletSigner.create() was removed in SDK v0.1.2 refactor.
+    // For now, fall through to attestation wallet fallback.
+    console.error('[zkproofport-mcp] CDP wallet credentials detected but CDP support is not yet available in this version.');
+    console.error('[zkproofport-mcp] Use PAYMENT_KEY instead for a separate payment wallet.');
+  }
+  {
     console.error('[zkproofport-mcp] No payment wallet configured — using attestation wallet for payment');
   }
 }
