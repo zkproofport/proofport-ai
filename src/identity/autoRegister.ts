@@ -179,7 +179,7 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
                   { name: 'web', endpoint: config.a2aBaseUrl },
                   { name: 'MCP', endpoint: `${config.a2aBaseUrl}/mcp`, version: '2025-11-25', mcpTools: ['prove', 'get_supported_circuits', 'get_guide'] },
                   { name: 'A2A', endpoint: `${config.a2aBaseUrl}/.well-known/agent-card.json`, version: '0.3.0', a2aSkills: ['prove', 'get_supported_circuits', 'get_guide'] },
-                  { name: 'OASF', endpoint: 'https://github.com/agntcy/oasf/', version: 'v0.8.0', skills: ['security_privacy/encryption_and_data_protection', 'security_privacy/threat_detection_and_analysis'], domains: ['technology/blockchain_and_web3', 'technology/cybersecurity', 'trust_and_safety/identity_verification'] },
+                  { name: 'OASF', endpoint: `${config.a2aBaseUrl}`, version: 'v0.8.0', skills: ['security_privacy/encryption_and_data_protection', 'security_privacy/threat_detection_and_analysis'], domains: ['technology/blockchain_and_web3', 'technology/cybersecurity', 'trust_and_safety/identity_verification'] },
                   { name: 'ENS', endpoint: 'proveragent.base.eth' },
                   { name: 'DID', endpoint: `did:web:${new URL(config.a2aBaseUrl).hostname}` },
                   { name: 'agentWallet', endpoint: `eip155:${config.paymentMode === 'mainnet' ? '8453' : '84532'}:${registration.agentAddress}` },
@@ -221,16 +221,17 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
             }
           }
 
-        // Submit TEE validation if configured
-        if (teeProvider && teeProvider.mode !== 'disabled') {
-          log.info({ action: 'identity.step.tee_validation' }, 'Starting TEE validation');
-          try {
-            await withTimeout(ensureAgentValidated(config, info.tokenId, teeProvider), 60000, 'ensureAgentValidated');
-            log.info({ action: 'identity.step.tee_validation_done' }, 'TEE validation complete');
-          } catch (err) {
-            log.error({ action: 'tee.validation.startup_failed', err: err instanceof Error ? err : new Error(String(err)) }, 'TEE validation failed (timeout or error)');
-          }
-        }
+        // TEE self-validation disabled: 8004scan does not index on-chain ValidationRegistry.
+        // Re-enable when 8004scan activates validation indexing.
+        // if (teeProvider && teeProvider.mode !== 'disabled') {
+        //   log.info({ action: 'identity.step.tee_validation' }, 'Starting TEE validation');
+        //   try {
+        //     await withTimeout(ensureAgentValidated(config, info.tokenId, teeProvider), 60000, 'ensureAgentValidated');
+        //     log.info({ action: 'identity.step.tee_validation_done' }, 'TEE validation complete');
+        //   } catch (err) {
+        //     log.error({ action: 'tee.validation.startup_failed', err: err instanceof Error ? err : new Error(String(err)) }, 'TEE validation failed (timeout or error)');
+        //   }
+        // }
 
         return info.tokenId;
       }
@@ -261,7 +262,7 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
         { name: 'web', endpoint: config.a2aBaseUrl },
         { name: 'MCP', endpoint: `${config.a2aBaseUrl}/mcp`, version: '2025-11-25', mcpTools: ['prove', 'get_supported_circuits', 'get_guide'] },
         { name: 'A2A', endpoint: `${config.a2aBaseUrl}/.well-known/agent-card.json`, version: '0.3.0', a2aSkills: ['prove', 'get_supported_circuits', 'get_guide'] },
-        { name: 'OASF', endpoint: 'https://github.com/agntcy/oasf/', version: 'v0.8.0', skills: ['security_privacy/encryption_and_data_protection', 'security_privacy/threat_detection_and_analysis'], domains: ['technology/blockchain_and_web3', 'technology/cybersecurity', 'trust_and_safety/identity_verification'] },
+        { name: 'OASF', endpoint: `${config.a2aBaseUrl}`, version: 'v0.8.0', skills: ['security_privacy/encryption_and_data_protection', 'security_privacy/threat_detection_and_analysis'], domains: ['technology/blockchain_and_web3', 'technology/cybersecurity', 'trust_and_safety/identity_verification'] },
         { name: 'ENS', endpoint: 'proveragent.base.eth' },
         { name: 'DID', endpoint: `did:web:${new URL(config.a2aBaseUrl).hostname}` },
         { name: 'agentWallet', endpoint: `eip155:${config.paymentMode === 'mainnet' ? '8453' : '84532'}:${registration.agentAddress}` },
@@ -298,16 +299,17 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
       log.warn({ action: 'identity.metadata.active_failed', err: err instanceof Error ? err : new Error(String(err)) }, 'Failed to set on-chain active flag (non-fatal)');
     }
 
-    // Submit TEE validation if configured
-    if (teeProvider && teeProvider.mode !== 'disabled') {
-      log.info({ action: 'identity.step.tee_validation' }, 'Starting TEE validation');
-      try {
-        await withTimeout(ensureAgentValidated(config, result.tokenId, teeProvider), 60000, 'ensureAgentValidated');
-        log.info({ action: 'identity.step.tee_validation_done' }, 'TEE validation complete');
-      } catch (err) {
-        log.error({ action: 'tee.validation.startup_failed', err: err instanceof Error ? err : new Error(String(err)) }, 'TEE validation failed (timeout or error)');
-      }
-    }
+    // TEE self-validation disabled: 8004scan does not index on-chain ValidationRegistry.
+    // Re-enable when 8004scan activates validation indexing.
+    // if (teeProvider && teeProvider.mode !== 'disabled') {
+    //   log.info({ action: 'identity.step.tee_validation' }, 'Starting TEE validation');
+    //   try {
+    //     await withTimeout(ensureAgentValidated(config, result.tokenId, teeProvider), 60000, 'ensureAgentValidated');
+    //     log.info({ action: 'identity.step.tee_validation_done' }, 'TEE validation complete');
+    //   } catch (err) {
+    //     log.error({ action: 'tee.validation.startup_failed', err: err instanceof Error ? err : new Error(String(err)) }, 'TEE validation failed (timeout or error)');
+    //   }
+    // }
 
     return result.tokenId;
   } catch (error) {

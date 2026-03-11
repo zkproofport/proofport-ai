@@ -2,31 +2,36 @@
 
 Comparison of our implementation against [ERC-8004 Best Practices](https://github.com/erc-8004/best-practices).
 
-Last updated: 2026-03-10
+Last updated: 2026-03-10 15:20 UTC
 
 ---
 
-## Current 8004scan Score (2026-03-10)
+## Current 8004scan Score (2026-03-10 15:17 UTC)
 
-**Total: 58.87** | Rank: #3678 (global), #1552 (Base chain) | Completeness: `complete`
+**Total: 59.33** | Rank: #3576 (global) | Completeness: `complete`
 
 | Dimension | Score | Weight | Weighted | Key Factor |
 |-----------|-------|--------|----------|------------|
-| Service | 0.0 | 25% | 0.0 | Health check never ran yet — domain verification passed but health batch pending |
-| Engagement | 14.17 | 30% | 4.25 | 0 user feedback, popularity 28.35 |
+| Service | 0.0 | 25% | 0.0 | Health check hasn't run yet — MCP format fixed to JSON, endpoints confirmed working |
+| Engagement | 14.27 | 30% | 4.28 | 0 user feedback, popularity 28.54, star_count 3 |
 | Publisher | 7.33 | 20% | 1.47 | wallet 1.33, validation_bonus 6.0, not certified |
-| Compliance | 60.0 | 15% | 9.00 | metadata_completeness 60.0, `is_endpoint_verified: False` in scoring (cached before verification passed) |
+| Compliance | 75.0 | 15% | 11.25 | metadata_completeness 65.0 (best among all checked agents), verification_bonus 10 |
 | Momentum | 46.33 | 10% | 4.63 | 4 days old, freshness boost 82.66, activity 10.0 |
 
-**Multipliers**: `no_service` penalty applied (0.65x) — still active in current score (score was last calculated at 12:15 UTC, before domain verification passed at 14:10 UTC). `completeness` = 1.0x (complete tier).
+**Key improvements since initial analysis:**
+- Compliance: 60.0 → 75.0 (endpoint verification bonus +10)
+- Score: 58.87 → 59.33
+- Rank: #3678 → #3576
+- metadata_completeness: 65.0 (highest among compared agents — Captain Dackie 57, ClawNews 60, Olas 57)
+- `is_endpoint_verified: True` (domain verification passed 2026-03-10 14:10 UTC)
+- `endpoint_verification_error: None` (previously had format errors)
 
-**Note**: Domain verification passed 2026-03-10 14:10 UTC but score not recalculated yet. Next scoring batch will reflect `is_endpoint_verified: True` and potentially lift `no_service` penalty if health checks pass.
+**Biggest improvement lever**: Service dimension (25% weight, currently 0). When health check batch runs:
+1. A2A: 8004scan GETs `/.well-known/agent-card.json` → counts skills → `a2a_quality` populated
+2. MCP: 8004scan sends MCP protocol to `/mcp` → counts tools → `mcp_quality` populated
+3. `no_service` penalty lifted → estimated 35%+ score increase
 
-**Biggest improvement lever**: Service dimension (25% weight, currently 0). After health check batch runs:
-1. A2A: 8004scan GETs `/.well-known/agent-card.json` → counts skills → `a2a_quality` populated (top agents get 89-100)
-2. MCP: 8004scan sends MCP protocol to `/mcp` → counts tools → `mcp_quality` populated (top agents get 73-97)
-3. `no_service` penalty (0.65x) lifted → estimated 35%+ score increase
-4. Compliance boost from `is_endpoint_verified: True` already queued for next batch
+**Note**: Health check batch has no public trigger API. Captain Dackie's last health check was 2026-03-06 (4+ days ago). Health checks run infrequently on 8004scan's internal schedule.
 
 ---
 
@@ -52,7 +57,7 @@ All three required fields are present and stored on-chain via `data:application/
 | agentWallet (on-chain) | PASS | Auto-set to token owner address on registration |
 | agentWallet (off-chain) | PASS | CAIP-10 format in `services` array |
 | ENS | PASS | `proveragent.base.eth` transferred to agent wallet |
-| DID | PASS | `did:web:{hostname}` — `/.well-known/did.json` endpoint |
+| DID | PASS | `did:web:ai.zkproofport.app` — `/.well-known/did.json` endpoint verified working. Includes verificationMethod (EcdsaSecp256k1RecoveryMethod2020) and ERC8004Agent service entry |
 
 ### agentWallet Details
 
@@ -138,7 +143,9 @@ Fixed 2026-03-09. Both off-chain (tokenURI) and on-chain (`setMetadata`) active 
 | MCP service field name | DONE | `tools` → `mcpTools` per best practices — deployed |
 | A2A service field name | DONE | `skills` → `a2aSkills` per best practices — deployed |
 | OASF service entry | DONE | Added as separate service entry (best practices pattern, e.g. Captain Dackie) — deployed |
-| `health_status` | PENDING | `None` — health check batch hasn't included our agent yet. Endpoints confirmed working: A2A (3 skills, version 1.0.0), MCP (initialize success, tools+prompts capabilities) |
+| `health_status` | PENDING | `None` — health check batch hasn't run yet (no public trigger API). All endpoints confirmed working locally: A2A (3 skills, version 1.0.0), MCP (initialize success, `Content-Type: application/json` — fixed from SSE). Captain Dackie last health-checked 2026-03-06 — batch runs infrequently |
+| MCP response format | DONE | Changed from `text/event-stream` (SSE) to `application/json` via `enableJsonResponse: true` in StreamableHTTPServerTransport. Deployed 2026-03-10 (commit 8682ca2) |
+| Metadata re-parsed | DONE | `last_parsed_at: 2026-03-10T15:17:36Z` — 8004scan re-parsed metadata after verify-endpoint trigger |
 
 **Root cause of original verification failure**: `endpoint_verification_error: "zkproofport.com: HTTP 404; ai.zkproofport.app: No matching registration"`.
 
@@ -154,11 +161,13 @@ Two issues (both resolved):
 - **8004scan health check batch timing**: Captain Dackie (rank #1 Base) `health_checked_at: 2026-03-10T13:41:48Z`. Our agent was verified at 14:10 — health check batch may include us in next cycle.
 
 **Timeline**:
-- 2026-03-09: `verify-endpoint` first triggered. Verification ran but failed with format mismatch.
-- 2026-03-10 ~13:00: `registrations` array fix + `mcpTools`/`a2aSkills` + OASF deployed (commit 5168438).
-- 2026-03-10 14:10: Domain verification passed (`is_endpoint_verified: True`).
-- 2026-03-10 14:21: `web` endpoint changed to `ai.zkproofport.app` deployed (commit 2adedc5).
-- Health check: Pending — awaiting 8004scan batch cycle.
+- 2026-03-09: Initial registration fixes (active, agentWallet, did.json, agent-registration.json, agentType)
+- 2026-03-10 ~13:00: `registrations` array fix + `mcpTools`/`a2aSkills` + OASF deployed (commit 5168438)
+- 2026-03-10 14:10: Domain verification passed (`is_endpoint_verified: True`)
+- 2026-03-10 14:21: `web` endpoint changed to `ai.zkproofport.app` + web endpoint detection in autoRegister (commit 2adedc5)
+- 2026-03-10 15:10: MCP `enableJsonResponse: true` + metadata detection fix deployed (commit 8682ca2)
+- 2026-03-10 15:14: verify-endpoint re-triggered → metadata re-parsed at 15:17
+- Health check: Pending — awaiting 8004scan internal batch cycle (no public trigger API)
 
 **Note**: 8004scan applies a `no_service` penalty multiplier of 0.65 (35% reduction) to the total score when health checks haven't passed.
 
@@ -307,8 +316,8 @@ Current implementation is informational only. If access control is needed in the
 | 4 | Use best-practices field names: `mcpTools`, `a2aSkills` | 5 min | DONE (deployed 2026-03-10) |
 | 5 | Add OASF as separate service entry (best practices pattern) | 5 min | DONE (deployed 2026-03-10) |
 | 6 | Deploy + re-trigger endpoint verification on 8004scan | Manual | DONE — domain verification passed (2026-03-10 14:10 UTC). Health check batch pending. |
-| 7 | Apply for publisher certification on 8004scan | Manual | TODO |
-| 8 | Wait for 8004scan health check batch to run | Passive | WAITING — health checks run on 8004scan's internal schedule |
+| 7 | Apply for publisher certification on 8004scan | Manual | TODO — API exists: `POST /api/v1/users/me/certifications/publisher/apply` (requires 8004scan account + wallet link). Affects Publisher score (cert_bonus, currently 0) |
+| 8 | Wait for 8004scan health check batch to run | Passive | WAITING — no public trigger API. Last known batch: 2026-03-06. All endpoints confirmed working |
 
 ### P1 — Quick Wins (completed)
 
@@ -336,6 +345,27 @@ Current implementation is informational only. If access control is needed in the
 | 14 | Independent TEE validator service | 2-3 days | Low priority — 8004scan doesn't index on-chain validations |
 | 15 | Client-facing feedback prompt after proof completion | 1 day | Return feedback URL to clients |
 | 16 | Revenue signal tracking via x402 facilitator | 1-2 days | Requires facilitator integration |
+
+---
+
+## Metadata Completeness Analysis
+
+**Our score: 65.0** — highest among all compared agents.
+
+| Agent | Completeness | Total Score | Notes |
+|-------|-------------|-------------|-------|
+| **Our agent (25331)** | **65.0** | 59.33 | Best metadata completeness |
+| ClawNews (1) | 60.0 | 78.08 | Higher total due to health check + engagement |
+| Olas agents (3, 5, 10) | 57.0 | 75-77 | Higher total due to health check + engagement |
+| Captain Dackie (17) | 57.0 | — | Reference agent |
+
+**`agent_type` field**: Shows `None` for ALL agents (including ClawNews, Olas, Captain Dackie). This is a platform-wide issue — 8004scan reads it from offchain metadata (`field_sources: "offchain"`) but doesn't parse it from any agent's tokenURI. Not actionable.
+
+**Field sources** (where 8004scan reads each field):
+- Offchain (tokenURI): name, description, image, x402_supported, tags, categories, capabilities, tee, skills, domains, agentUrl, circuits, services, protocols, agent_type, registrations, supportedTrust
+- Onchain (setMetadata): active
+- Hardcoded: agent_wallet
+- Derived (from health check): mcp_server, a2a_endpoint
 
 ---
 
