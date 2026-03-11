@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.1.2](https://github.com/zkproofport/proofport-ai/compare/server-v0.1.1...server-v0.1.2) (2026-03-11)
+
+
+### Features
+
+* **mcp:** add zkproofport-prove CLI for direct proof generation ([718adb7](https://github.com/zkproofport/proofport-ai/commit/718adb7031c164dfd31e985cd65307875e0443b7))
+
+
+### Bug Fixes
+
+* add diagnostic logging and fix silent error swallowing in metadata check ([01c2113](https://github.com/zkproofport/proofport-ai/commit/01c2113f83240af44c02eb88bb6a90c0d1e07c25))
+* change web service endpoint to ai.zkproofport.app for domain verification ([2adedc5](https://github.com/zkproofport/proofport-ai/commit/2adedc5892c98a9fc356e0de245c5b183521c7a1))
+* detect OASF endpoint URL change for on-chain metadata update ([2338a84](https://github.com/zkproofport/proofport-ai/commit/2338a847e87e3677aedf63d6d917c0cc14c1852a))
+* enable MCP JSON response and improve metadata update detection ([8682ca2](https://github.com/zkproofport/proofport-ai/commit/8682ca2ea02fb1d20f849efcf20ceebd719e7c34))
+* skip server releases in npm-publish workflow gracefully ([c6e9cfe](https://github.com/zkproofport/proofport-ai/commit/c6e9cfee60a87535641067830869ba77e5bf5f19))
+* wrap agent-registration.json in registrations array per ERC-8004 spec ([5168438](https://github.com/zkproofport/proofport-ai/commit/51684383b92edf4f8c324b21c9571cb7913c419b))
+
 ## [0.1.1](https://github.com/zkproofport/proofport-ai/compare/server-v0.1.0...server-v0.1.1) (2026-03-10)
 
 
