@@ -33,13 +33,132 @@ No configuration needed. The MCP server handles encryption transparently.
 ## Prerequisites
 
 1. **Coinbase account with KYC verification** — Complete identity verification on [Coinbase](https://www.coinbase.com/)
-2. **Coinbase KYC attestation on Base** — Obtain an on-chain EAS attestation via [Coinbase Verifications](https://www.coinbase.com/onchain-verify)
-3. **USDC on Base** — At least $0.10 per proof (gasless — you only sign, facilitator pays gas)
-4. **Private key** of the wallet holding the attestation
+2. **Coinbase KYC EAS attestation on Base** — Obtain an on-chain attestation via [Coinbase Verifications](https://www.coinbase.com/onchain-verify). This creates an EAS attestation on Base linked to your wallet address.
+3. **USDC balance on Base** — At least $0.10 per proof. Payment is gasless (EIP-3009 signature, facilitator pays gas).
+4. **Attestation wallet private key** (required) — The private key of the wallet that holds the EAS attestation. Set as `ATTESTATION_KEY` environment variable.
+
+5. **Payment wallet** (optional) — Wallet with USDC balance for proof payment. Defaults to the attestation wallet. Choose one:
+
+   - **Same as attestation wallet** — No additional setup. The attestation wallet must hold USDC.
+     > ⚠️ **Privacy risk:** Using the attestation wallet for payment exposes your KYC-verified wallet address on-chain in the payment transaction, linking your identity to on-chain activity. Use a separate payment wallet for privacy.
+   - **Separate private key** — Set `PAYMENT_KEY` environment variable with a different wallet's private key.
+   - **CDP MPC wallet** — Coinbase Developer Platform managed wallet. Private keys never leave Coinbase's TEE. Get credentials at [CDP Portal](https://portal.cdp.coinbase.com).
+     | Credential | Env Variable | Required | Description |
+     |------------|-------------|----------|-------------|
+     | API Key ID | `CDP_API_KEY_ID` | Yes | CDP API key ID |
+     | API Key Secret | `CDP_API_KEY_SECRET` | Yes | CDP API key secret |
+     | Wallet Secret | `CDP_WALLET_SECRET` | Yes | CDP wallet encryption secret |
+     | Wallet Address | `CDP_WALLET_ADDRESS` | No | Existing wallet address (creates new if omitted) |
 
 ## Quick Start
 
-### Claude Desktop
+### CLI (Recommended)
+
+The simplest way to generate a proof — one command from a terminal or any AI agent's shell. No MCP configuration needed.
+
+> **For AI agents:** Install with `npm install -g @zkproofport-ai/mcp`, then run `zkproofport-prove` from anywhere. Ask the user for `ATTESTATION_KEY` and `PAYMENT_KEY` environment variables if not already set. No MCP configuration needed.
+
+#### Step 1: Install
+
+```bash
+npm install -g @zkproofport-ai/mcp
+```
+
+#### Step 2: Set environment variables
+
+Choose one of the three payment options:
+
+**Option A: Separate payment wallet (Recommended)**
+
+```bash
+export ATTESTATION_KEY=0x_YOUR_ATTESTATION_WALLET_PRIVATE_KEY
+export PAYMENT_KEY=0x_YOUR_PAYMENT_WALLET_PRIVATE_KEY
+```
+
+**Option B: CDP MPC wallet**
+
+Uses a [Coinbase Developer Platform](https://portal.cdp.coinbase.com) managed wallet for payment. Private keys never leave Coinbase's TEE infrastructure.
+
+```bash
+export ATTESTATION_KEY=0x_YOUR_ATTESTATION_WALLET_PRIVATE_KEY
+export CDP_API_KEY_ID=your-cdp-api-key-id
+export CDP_API_KEY_SECRET=your-cdp-api-key-secret
+export CDP_WALLET_SECRET=your-cdp-wallet-secret
+export CDP_WALLET_ADDRESS=0x_YOUR_CDP_WALLET_ADDRESS  # optional, creates new if omitted
+```
+
+**Option C: Same wallet (not recommended)**
+
+```bash
+export ATTESTATION_KEY=0x_YOUR_ATTESTATION_WALLET_PRIVATE_KEY
+# No PAYMENT_KEY — attestation wallet pays
+```
+
+> **Privacy risk:** Using the attestation wallet for payment exposes your KYC-verified wallet address on-chain in the payment transaction, linking your identity to on-chain activity. Use a separate payment wallet (Option A or B) for privacy.
+
+#### Step 3: Run
+
+```bash
+# Coinbase KYC proof
+zkproofport-prove coinbase_kyc --scope my-app
+
+# Coinbase Country proof (prove wallet IS in US or KR)
+zkproofport-prove coinbase_country --countries US,KR --included true
+```
+
+The CLI spawns the MCP server internally, calls `generate_proof`, prints the result as JSON to stdout, and exits. Proof generation takes 30-90 seconds.
+
+#### Step 4: Result
+
+The CLI outputs a JSON object with these key fields:
+
+```json
+{
+  "proof": "0x28a3c1...",
+  "publicInputs": "0x00000001...",
+  "paymentTxHash": "0x9f2e7a...",
+  "attestation": {
+    "verification": { "valid": true, "... TEE attestation details" }
+  },
+  "timing": { "totalMs": 42150, "proofMs": 38200, "paymentMs": 3100 },
+  "verification": {
+    "verifierAddress": "0x1234...abcd",
+    "chainId": 84532,
+    "rpcUrl": "https://sepolia.base.org"
+  }
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `proof` | The ZK proof bytes (hex). Pass to `verify_proof` or on-chain verifier |
+| `publicInputs` | Public inputs for the proof (hex) |
+| `paymentTxHash` | USDC payment transaction hash. Check on [BaseScan](https://sepolia.basescan.org) |
+| `attestation.verification` | TEE attestation validity — confirms proof was generated inside a Nitro Enclave |
+| `timing` | Performance metrics (total, proof generation, payment) |
+| `verification` | On-chain verifier contract address, chain ID, and RPC URL for independent verification |
+
+#### CLI Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `[circuit]` | `coinbase_kyc` | Circuit to use: `coinbase_kyc` or `coinbase_country` |
+| `--scope <scope>` | `proofport` | Scope string for nullifier derivation |
+| `--countries <codes>` | -- | Comma-separated ISO codes (required for `coinbase_country`) |
+| `--included <true\|false>` | -- | Inclusion or exclusion proof (required for `coinbase_country`) |
+
+---
+
+### MCP Integration (Agent-to-Agent)
+
+Use MCP configuration when integrating ZKProofport as a **persistent tool** in an agent platform that supports the Model Context Protocol. This is for agent-to-agent workflows where your AI agent needs ZK proof generation as an always-available capability.
+
+> **When to use MCP vs CLI:**
+> - **CLI** — One-off proof generation, scripts, CI/CD, any AI agent with shell access
+> - **MCP** — Agent platforms that natively support MCP tools (e.g., Claude Desktop as a chatbot)
+
+<details>
+<summary>Claude Desktop</summary>
 
 Add to your `claude_desktop_config.json`:
 
@@ -50,14 +169,17 @@ Add to your `claude_desktop_config.json`:
       "command": "npx",
       "args": ["-y", "@zkproofport-ai/mcp"],
       "env": {
-        "ATTESTATION_KEY": "0x_YOUR_ATTESTATION_WALLET_PRIVATE_KEY"
+        "ATTESTATION_KEY": "0x_YOUR_ATTESTATION_WALLET_PRIVATE_KEY",
+        "PAYMENT_KEY": "0x_YOUR_PAYMENT_WALLET_PRIVATE_KEY"
       }
     }
   }
 }
 ```
+</details>
 
-### Claude Code
+<details>
+<summary>Claude Code</summary>
 
 Add to `.mcp.json` in your project root:
 
@@ -68,16 +190,19 @@ Add to `.mcp.json` in your project root:
       "command": "npx",
       "args": ["-y", "@zkproofport-ai/mcp"],
       "env": {
-        "ATTESTATION_KEY": "0x_YOUR_ATTESTATION_WALLET_PRIVATE_KEY"
+        "ATTESTATION_KEY": "0x_YOUR_ATTESTATION_WALLET_PRIVATE_KEY",
+        "PAYMENT_KEY": "0x_YOUR_PAYMENT_WALLET_PRIVATE_KEY"
       }
     }
   }
 }
 ```
+</details>
 
-### Cursor
+<details>
+<summary>Cursor / Windsurf / Other MCP Clients</summary>
 
-Add to `.cursor/mcp.json`:
+Add to your MCP configuration file (`.cursor/mcp.json`, `~/.codeium/windsurf/mcp_config.json`, etc.):
 
 ```json
 {
@@ -86,88 +211,14 @@ Add to `.cursor/mcp.json`:
       "command": "npx",
       "args": ["-y", "@zkproofport-ai/mcp"],
       "env": {
-        "ATTESTATION_KEY": "0x_YOUR_ATTESTATION_WALLET_PRIVATE_KEY"
+        "ATTESTATION_KEY": "0x_YOUR_ATTESTATION_WALLET_PRIVATE_KEY",
+        "PAYMENT_KEY": "0x_YOUR_PAYMENT_WALLET_PRIVATE_KEY"
       }
     }
   }
 }
 ```
-
-### Windsurf
-
-Add to `~/.codeium/windsurf/mcp_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "zkproofport": {
-      "command": "npx",
-      "args": ["-y", "@zkproofport-ai/mcp"],
-      "env": {
-        "ATTESTATION_KEY": "0x_YOUR_ATTESTATION_WALLET_PRIVATE_KEY"
-      }
-    }
-  }
-}
-```
-
-Once configured, ask your AI agent:
-
-> "Generate a Coinbase KYC proof for my wallet"
-
-The agent will use `generate_proof` and handle everything automatically.
-
-### Run Manually
-
-You can also install and run the MCP server directly:
-
-```bash
-mkdir mcp-test && cd mcp-test
-npm init -y
-npm install @zkproofport-ai/mcp
-```
-
-```bash
-ATTESTATION_KEY=0x... npx zkproofport-mcp
-```
-
-The server starts on stdio and waits for MCP JSON-RPC messages.
-
-### Programmatic Usage
-
-Use the MCP client SDK to call tools from code:
-
-```bash
-npm install @zkproofport-ai/mcp @modelcontextprotocol/sdk
-```
-
-```javascript
-// test-prove.mjs
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-
-const transport = new StdioClientTransport({
-  command: 'node',
-  args: ['node_modules/@zkproofport-ai/mcp/dist/index.js'],
-  env: { ...process.env, ATTESTATION_KEY: '0x...' },
-});
-
-const client = new Client({ name: 'my-agent', version: '1.0.0' });
-await client.connect(transport);
-
-// Generate a proof (30-90 seconds)
-const result = await client.callTool({
-  name: 'generate_proof',
-  arguments: { circuit: 'coinbase_kyc', scope: 'my-app' },
-});
-
-console.log(JSON.stringify(result, null, 2));
-await client.close();
-```
-
-```bash
-node test-prove.mjs
-```
+</details>
 
 ## Environment Variables
 
@@ -317,6 +368,20 @@ The payment transaction hash is included in every proof response for settlement 
 ## CDP Wallet Payment
 
 Instead of providing a raw `PAYMENT_KEY`, you can use a [Coinbase Developer Platform](https://portal.cdp.coinbase.com) MPC wallet. Private keys never leave Coinbase's TEE infrastructure.
+
+### CLI (environment variables)
+
+```bash
+export ATTESTATION_KEY=0x_YOUR_ATTESTATION_WALLET_PRIVATE_KEY
+export CDP_API_KEY_ID=your-cdp-api-key-id
+export CDP_API_KEY_SECRET=your-cdp-api-key-secret
+export CDP_WALLET_SECRET=your-cdp-wallet-secret
+export CDP_WALLET_ADDRESS=0x_YOUR_CDP_WALLET_ADDRESS  # optional, creates new if omitted
+
+zkproofport-prove coinbase_kyc --scope my-app
+```
+
+### MCP config
 
 ```json
 {

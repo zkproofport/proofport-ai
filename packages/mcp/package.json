@@ -6,7 +6,8 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "zkproofport-mcp": "dist/index.js"
+    "zkproofport-mcp": "dist/index.js",
+    "zkproofport-prove": "dist/prove.js"
   },
   "scripts": {
     "build": "tsc",
