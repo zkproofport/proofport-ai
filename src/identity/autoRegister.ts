@@ -218,7 +218,7 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
               log.info({ action: 'identity.step.updating_metadata' }, 'Updating metadata on-chain (TX)');
               const txHash = await withTimeout(registration.updateMetadata(info.tokenId, metadata), 120000, 'updateMetadata');
               log.info({ action: 'identity.metadata.updated', txHash }, 'Metadata updated successfully');
-              // Verify tokenURI was actually updated (ERC-8004 contract may use separate storage for setAgentURI)
+              // Verify tokenURI was actually updated after setAgentURI call
               try {
                 const verifyUri = await withTimeout(registration.getTokenMetadata(info.tokenId), 30000, 'verifyTokenURI');
                 const verifyMeta = verifyUri ? parseMetadataUri(verifyUri) : null;

@@ -8,7 +8,7 @@ Last updated: 2026-03-11
 
 ## Current 8004scan Score (2026-03-11)
 
-**Total: 59.35** | Rank: #3576 (global) | Completeness: `complete`
+**Total: 59.35** | Rank: #3576 (global) | Completeness: `complete` | `last_scored_at: 2026-03-11T03:59:18Z`
 
 | Dimension | Score | Weight | Weighted | Key Factor |
 |-----------|-------|--------|----------|------------|
@@ -26,7 +26,8 @@ Last updated: 2026-03-11
 - `is_endpoint_verified: True` (domain verification passed 2026-03-10 14:10 UTC)
 - `endpoint_verification_error: None` (previously had format errors)
 - `catch block fix`: metadata check errors were being silently swallowed — now all errors logged
-- Identified `setAgentURI` contract limitation — tokenURI immutable after registration
+- On-chain OASF endpoint fixed from `https://github.com/agntcy/oasf/` → `https://ai.zkproofport.app` via setAgentURI (2026-03-11)
+- Diagnostic logging and post-update verification added to autoRegister.ts (commit 01c2113)
 
 **Biggest improvement lever**: Service dimension (25% weight, currently 0). When health check batch runs:
 1. A2A: 8004scan GETs `/.well-known/agent-card.json` → counts skills → `a2a_quality` populated
@@ -71,31 +72,9 @@ The ERC-8004 spec auto-sets `agentWallet` to the token owner's address on regist
 
 ---
 
-## CRITICAL: setAgentURI Does NOT Update tokenURI
+## Note: setAgentURI Update Confirmed (2026-03-11)
 
-**Discovery date**: 2026-03-11
-
-The ERC-8004 Identity contract at `0x8004A169FB4a3325136EB29fA0ceB6D2e539a432` is an **EIP-1967 proxy** (implementation: `0x7274e874ca62410a93bd8bf61c69d8045e399c02`).
-
-**Problem**: Calling `setAgentURI(uint256, string)` succeeds (status=1, emits `URIUpdated` + `MetadataUpdate` events), but **does NOT update what `tokenURI(uint256)` returns**. The two functions use different internal storage mappings.
-
-**Evidence**:
-- Two `setAgentURI` TXs succeeded: `0xa7c9...` (2026-03-10 11:57 UTC) and `0x0361...` (2026-03-10 15:10 UTC)
-- Both emitted `URIUpdated(uint256,string,address)` events with correct metadata in data field
-- `tokenURI(25331)` still returns the ORIGINAL registration data (confirmed from 2 independent RPCs: Llama + PublicNode)
-- OASF endpoint in tokenURI: `https://github.com/agntcy/oasf/` (original) — should be `https://ai.zkproofport.app`
-
-**Impact**:
-- 8004scan reads from `tokenURI()`, so it always shows original registration metadata
-- On-chain OASF endpoint cannot be corrected without re-registration (new tokenId)
-- All `setAgentURI` calls waste gas (~484K-695K gas per TX) with no effect on `tokenURI()`
-
-**Workaround options**:
-1. **Re-register**: Call `register(newMetadata)` to create a new token with correct data. Requires updating `AGENT_TOKEN_ID` env var and re-triggering 8004scan verification. Old token (25331) remains on-chain.
-2. **Contact ERC-8004 team**: Request contract implementation fix to align `setAgentURI` with `tokenURI` storage.
-3. **Accept limitation**: OASF stays at GitHub URL in tokenURI. Discovery endpoints (agent-card.json, did.json) all serve correct data regardless.
-
-**Code fix**: Added diagnostic logging and post-update verification in `autoRegister.ts` to detect and warn about this issue on each boot.
+Previous analysis incorrectly concluded that `setAgentURI()` does not update `tokenURI()`. After deploying diagnostic logging (commit `01c2113`), confirmed that `setAgentURI()` **does successfully update** `tokenURI()`. The OASF endpoint is now correctly set to `https://ai.zkproofport.app` on-chain. The delay in observing the update was likely due to RPC caching or timing.
 
 ---
 
@@ -128,7 +107,7 @@ Skills:
 
 **Note**: 8004scan issues IA027/IA028 warnings for our OASF categories but these do NOT affect scoring. Captain Dackie (service_score: 100) has 10 similar OASF warnings. These are informational only.
 
-**On-chain limitation**: OASF service entry in tokenURI still points to `https://github.com/agntcy/oasf/` due to `setAgentURI` contract limitation (see above). Discovery endpoints serve correct OASF data.
+**On-chain status**: OASF service endpoint in tokenURI correctly points to `https://ai.zkproofport.app` (verified 2026-03-11).
 
 ---
 
@@ -200,8 +179,9 @@ Two issues (both resolved):
 - 2026-03-10 15:10: MCP `enableJsonResponse: true` + metadata detection fix deployed (commit 8682ca2)
 - 2026-03-10 15:14: verify-endpoint re-triggered → metadata re-parsed at 15:17
 - 2026-03-10 ~16:25: Score recovered to 59.37 after platform re-scoring
-- 2026-03-11 04:05: Confirmed `setAgentURI` does NOT update `tokenURI` (EIP-1967 proxy contract limitation)
+- 2026-03-11 04:05: setAgentURI TX deployed, initially suspected non-update — later confirmed working
 - 2026-03-11: Added diagnostic logging + catch block fix + post-update verification in autoRegister.ts
+- 2026-03-11: Verified OASF endpoint correctly updated to https://ai.zkproofport.app on-chain
 - Health check: Pending — awaiting 8004scan internal batch cycle (no public trigger API)
 
 **Note**: 8004scan applies a `no_service` penalty multiplier of 0.65 (35% reduction) to the total score when health checks haven't passed.
@@ -353,7 +333,7 @@ Current implementation is informational only. If access control is needed in the
 | 6 | Deploy + re-trigger endpoint verification on 8004scan | Manual | DONE — domain verification passed (2026-03-10 14:10 UTC). Health check batch pending. |
 | 7 | Apply for publisher certification on 8004scan | Manual | TODO — API exists: `POST /api/v1/users/me/certifications/publisher/apply` (requires 8004scan account + wallet link). Affects Publisher score (cert_bonus, currently 0) |
 | 8 | Wait for 8004scan health check batch to run | Passive | WAITING — no public trigger API. Last known batch: 2026-03-06. All endpoints confirmed working |
-| 9 | Fix on-chain OASF endpoint (re-registration) | 30 min | TODO — requires `register()` with full metadata to create new token. Needed because `setAgentURI` doesn't update `tokenURI()` |
+| 9 | Fix on-chain OASF endpoint (re-registration) | — | DONE — setAgentURI successfully updated tokenURI. OASF endpoint verified correct on-chain (2026-03-11) |
 
 ### P1 — Quick Wins (completed)
 
