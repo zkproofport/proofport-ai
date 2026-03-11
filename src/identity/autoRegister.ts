@@ -111,7 +111,10 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
             (currentMetadata.services && currentMetadata.services.some(
               (s: { name: string; endpoint: string }) => s.name === 'web' && s.endpoint !== config.a2aBaseUrl
             )) ||
-            // Detect missing OASF service entry (best practices: separate service)
+            // Detect missing or incorrect OASF service entry
+            (currentMetadata.services && currentMetadata.services.some(
+              (s: { name: string; endpoint: string }) => s.name === 'OASF' && s.endpoint !== config.a2aBaseUrl
+            )) ||
             (currentMetadata.services && !currentMetadata.services.some(
               (s: { name: string }) => s.name === 'OASF'
             )) ||
