@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.5](https://github.com/zkproofport/proofport-ai/compare/server-v0.1.4...server-v0.1.5) (2026-03-12)
+
+
+### Bug Fixes
+
+* add protocolVersions, securitySchemes to agent card and on-chain metadata ([d1d8acd](https://github.com/zkproofport/proofport-ai/commit/d1d8acd4760430e2a60087af2ad28351b21c9f58))
+* correct A2A/MCP endpoints and add securitySchemes for 8004scan service score ([edf93fc](https://github.com/zkproofport/proofport-ai/commit/edf93fc6d38c9cfb6879f015bd0b3339200b2060))
+* serialize protocolVersions, securitySchemes, security in createMetadataUri ([5c70626](https://github.com/zkproofport/proofport-ai/commit/5c706266fbe61198d3862496b17beccddd9e8bb9))
+* use OASF object format {name, id} for skills and domains ([0a3f3a7](https://github.com/zkproofport/proofport-ai/commit/0a3f3a7bcf32e62f2e28079e7c179fb883888571))
+
 ## [0.1.4](https://github.com/zkproofport/proofport-ai/compare/server-v0.1.3...server-v0.1.4) (2026-03-12)
 
 
