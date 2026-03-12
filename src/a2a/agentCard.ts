@@ -65,6 +65,14 @@ export function buildAgentCard(config: Config, tokenId?: bigint | null): AgentCa
       pushNotifications: false,
       stateTransitionHistory: true,
     },
+    securitySchemes: {
+      x402: {
+        type: 'apiKey',
+        in: 'header',
+        name: 'X-402-Payment',
+      },
+    },
+    security: [{ x402: [] }],
     skills: [
       {
         id: 'prove',
@@ -306,13 +314,13 @@ export function buildOasfAgent(config: Config, tokenId?: bigint | null) {
       },
       {
         name: 'A2A',
-        endpoint: `${config.a2aBaseUrl}/a2a`,
+        endpoint: `${config.a2aBaseUrl}/.well-known/agent-card.json`,
         version: '0.3.0',
         a2aSkills: ['prove', 'get_supported_circuits', 'get_guide'],
       },
       {
         name: 'MCP',
-        endpoint: `${config.a2aBaseUrl}/.well-known/mcp.json`,
+        endpoint: `${config.a2aBaseUrl}/mcp`,
         version: '2024-11-05',
         mcpTools: ['prove', 'get_supported_circuits', 'get_guide'],
       },

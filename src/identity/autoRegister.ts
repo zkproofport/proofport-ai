@@ -137,6 +137,10 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
             // Detect old MCP field name (tools -> mcpTools per best practices)
             (currentMetadata.services && currentMetadata.services.some(
               (s: { name: string; tools?: string[]; mcpTools?: string[] }) => s.name === 'MCP' && s.tools && !s.mcpTools
+            )) ||
+            // Detect MCP endpoint pointing to static JSON instead of actual MCP server
+            (currentMetadata.services && currentMetadata.services.some(
+              (s: { name: string; endpoint: string }) => s.name === 'MCP' && s.endpoint.includes('.well-known/mcp.json')
             ))
           );
           const activeNeedsUpdate = onchainActive !== 'true';
