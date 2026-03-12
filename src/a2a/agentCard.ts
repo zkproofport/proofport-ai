@@ -283,13 +283,13 @@ export function buildOasfAgent(config: Config, tokenId?: bigint | null) {
     agentType: 'service',
     tags: ['ZK', 'Privacy', 'Proof', 'Coinbase', 'KYC', 'Attestation', 'x402', 'Identity', 'Country', 'Verification', 'Base', 'USDC', 'TEE', 'Noir', 'EAS', 'Zero-Knowledge'],
     domains: [
-      'technology/blockchain_and_web3',
-      'technology/cybersecurity',
-      'trust_and_safety/identity_verification',
+      'technology/blockchain',
+      'technology/security',
+      'trust_and_safety/data_privacy',
     ],
     skills: [
-      'security_privacy/encryption_and_data_protection',
-      'security_privacy/threat_detection_and_analysis',
+      'security_privacy/privacy_risk_assessment',
+      'security_privacy/threat_detection',
     ],
     services: [
       {
