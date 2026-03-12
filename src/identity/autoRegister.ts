@@ -101,16 +101,12 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
             currentMetadata.categories.length === 0 ||
             !currentMetadata.domains ||
             currentMetadata.domains.length === 0 ||
-            // Detect outdated OASF domain values (must match standard taxonomy)
-            !['technology/blockchain', 'technology/security', 'trust_and_safety/data_privacy'].every(
-              (d: string) => currentMetadata.domains?.includes(d)
-            ) ||
+            // Detect outdated OASF domain values (must be objects with { name, id })
+            !currentMetadata.domains?.some((d: any) => typeof d === 'object' && d.id) ||
             !currentMetadata.skills ||
             currentMetadata.skills.length === 0 ||
-            // Detect outdated OASF skill values (must match standard taxonomy)
-            !['security_privacy/privacy_risk_assessment', 'security_privacy/threat_detection'].every(
-              (s: string) => currentMetadata.skills?.includes(s)
-            ) ||
+            // Detect outdated OASF skill values (must be objects with { name, id })
+            !currentMetadata.skills?.some((s: any) => typeof s === 'object' && s.id) ||
             !currentMetadata.registrations ||
             currentMetadata.registrations.length === 0 ||
             !currentMetadata.agentType ||
@@ -218,13 +214,13 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
                 ],
                 categories: ['privacy', 'security', 'verification', 'identity'],
                 domains: [
-                  'technology/blockchain',
-                  'technology/security',
-                  'trust_and_safety/data_privacy',
+                  { name: 'technology/blockchain', id: 109 },
+                  { name: 'technology/security', id: 107 },
+                  { name: 'trust_and_safety/data_privacy', id: 404 },
                 ],
                 skills: [
-                  'security_privacy/privacy_risk_assessment',
-                  'security_privacy/threat_detection',
+                  { name: 'security_privacy/privacy_risk_assessment', id: 804 },
+                  { name: 'security_privacy/threat_detection', id: 801 },
                 ],
                 registrations: [
                   {
@@ -315,13 +311,13 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
       ],
       categories: ['privacy', 'security', 'verification', 'identity'],
       domains: [
-        'technology/blockchain',
-        'technology/security',
-        'trust_and_safety/data_privacy',
+        { name: 'technology/blockchain', id: 109 },
+        { name: 'technology/security', id: 107 },
+        { name: 'trust_and_safety/data_privacy', id: 404 },
       ],
       skills: [
-        'security_privacy/privacy_risk_assessment',
-        'security_privacy/threat_detection',
+        { name: 'security_privacy/privacy_risk_assessment', id: 804 },
+        { name: 'security_privacy/threat_detection', id: 801 },
       ],
       registrations: [],
       supportedTrust: ['tee-attestation'],

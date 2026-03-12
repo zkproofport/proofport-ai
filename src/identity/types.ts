@@ -13,8 +13,8 @@ export interface AgentMetadata {
   x402Support?: boolean;
   tags?: string[];
   categories?: string[];
-  domains?: string[];
-  skills?: string[];
+  domains?: Array<string | { name: string; id: number }>;
+  skills?: Array<string | { name: string; id: number }>;
   services?: Array<{ name: string; endpoint: string; version?: string; tools?: string[]; mcpTools?: string[]; skills?: string[]; a2aSkills?: string[]; domains?: string[] }>;
   type?: string;
   image?: string;
