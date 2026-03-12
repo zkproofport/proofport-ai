@@ -104,6 +104,9 @@ zkproofport-prove coinbase_kyc --scope my-app
 
 # Coinbase Country proof (prove wallet IS in US or KR)
 zkproofport-prove coinbase_country --countries US,KR --included true
+
+# Silent mode — capture result as variable
+PROOF_RESULT=$(zkproofport-prove coinbase_kyc --scope my-app --silent)
 ```
 
 The CLI spawns the MCP server internally, calls `generate_proof`, prints the result as JSON to stdout, and exits. Proof generation takes 30-90 seconds.
@@ -146,6 +149,17 @@ The CLI outputs a JSON object with these key fields:
 | `--scope <scope>` | `proofport` | Scope string for nullifier derivation |
 | `--countries <codes>` | -- | Comma-separated ISO codes (required for `coinbase_country`) |
 | `--included <true\|false>` | -- | Inclusion or exclusion proof (required for `coinbase_country`) |
+| `--silent` | -- | Suppress all logs, output only raw proof JSON to stdout |
+
+#### Silent Mode
+
+Use `--silent` to suppress all log output and print only the raw proof JSON to stdout. This makes it easy to capture the result in a shell variable:
+
+```bash
+PROOF_RESULT=$(zkproofport-prove coinbase_kyc --scope my-app --silent)
+```
+
+Without `--silent`, the CLI prints progress logs (payment, proof generation steps) to stderr and the full MCP-wrapped result to stdout. With `--silent`, only the unwrapped proof JSON is written to stdout — no logs, no MCP wrapper.
 
 ---
 

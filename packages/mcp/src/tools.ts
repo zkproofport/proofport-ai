@@ -76,7 +76,9 @@ RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and 
           {
             onStep: (step) => {
               // Steps are logged to stderr so they don't interfere with MCP protocol
-              console.error(`[generate_proof] Step ${step.step}: ${step.name} (${step.durationMs}ms)`);
+              if (!process.env.ZKPROOFPORT_SILENT) {
+                console.error(`[generate_proof] Step ${step.step}: ${step.name} (${step.durationMs}ms)`);
+              }
             },
           },
         );
