@@ -8,6 +8,7 @@ import { ethers } from 'ethers';
 export type TokenIdRef = { value: bigint | null | undefined };
 
 export type AgentCard = SDKAgentCard & {
+  protocolVersions?: string[];
   guides?: {
     description: string;
     coinbase_kyc: string;
@@ -55,7 +56,7 @@ export function buildAgentCard(config: Config, tokenId?: bigint | null): AgentCa
     url: `${config.a2aBaseUrl}/a2a`,
     version: config.agentVersion,
     protocolVersion: '0.3.0',
-    preferredTransport: 'JSONRPC',
+    protocolVersions: ['0.3'],
     provider: {
       organization: 'ZKProofport',
       url: 'https://zkproofport.app',

@@ -141,7 +141,11 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
             // Detect MCP endpoint pointing to static JSON instead of actual MCP server
             (currentMetadata.services && currentMetadata.services.some(
               (s: { name: string; endpoint: string }) => s.name === 'MCP' && s.endpoint.includes('.well-known/mcp.json')
-            ))
+            )) ||
+            // Detect missing securitySchemes (required for A2A spec compliance)
+            !currentMetadata.securitySchemes ||
+            // Detect missing protocolVersions array
+            !currentMetadata.protocolVersions
           );
           const activeNeedsUpdate = onchainActive !== 'true';
           const needsUpdate = offchainNeedsUpdate || activeNeedsUpdate;
@@ -198,6 +202,11 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
                 x402Support: config.paymentMode !== 'disabled',
                 type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
                 image: `${config.a2aBaseUrl}/icon.png`,
+                protocolVersions: ['0.3'],
+                securitySchemes: {
+                  x402: { type: 'apiKey', in: 'header', name: 'X-402-Payment' },
+                },
+                security: [{ x402: [] }],
                 services: [
                   { name: 'web', endpoint: config.a2aBaseUrl },
                   { name: 'MCP', endpoint: `${config.a2aBaseUrl}/mcp`, version: '2025-11-25', mcpTools: ['prove', 'get_supported_circuits', 'get_guide'] },
@@ -290,6 +299,11 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
       x402Support: config.paymentMode !== 'disabled',
       type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
       image: `${config.a2aBaseUrl}/icon.png`,
+      protocolVersions: ['0.3'],
+      securitySchemes: {
+        x402: { type: 'apiKey', in: 'header', name: 'X-402-Payment' },
+      },
+      security: [{ x402: [] }],
       services: [
         { name: 'web', endpoint: config.a2aBaseUrl },
         { name: 'MCP', endpoint: `${config.a2aBaseUrl}/mcp`, version: '2025-11-25', mcpTools: ['prove', 'get_supported_circuits', 'get_guide'] },

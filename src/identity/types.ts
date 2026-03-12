@@ -21,6 +21,9 @@ export interface AgentMetadata {
   registrations?: Array<{ agentRegistry: string; agentId: number; chainId?: string; tokenId?: string; txHash?: string; contract?: string }>;
   supportedTrust?: string[];
   active?: boolean;
+  protocolVersions?: string[];
+  securitySchemes?: Record<string, { type: string; in?: string; name?: string; scheme?: string; bearerFormat?: string }>;
+  security?: Array<Record<string, string[]>>;
 }
 
 /**
