@@ -101,8 +101,16 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
             currentMetadata.categories.length === 0 ||
             !currentMetadata.domains ||
             currentMetadata.domains.length === 0 ||
+            // Detect outdated OASF domain values (must match standard taxonomy)
+            !['technology/blockchain', 'technology/security', 'trust_and_safety/data_privacy'].every(
+              (d: string) => currentMetadata.domains?.includes(d)
+            ) ||
             !currentMetadata.skills ||
             currentMetadata.skills.length === 0 ||
+            // Detect outdated OASF skill values (must match standard taxonomy)
+            !['security_privacy/privacy_risk_assessment', 'security_privacy/threat_detection'].every(
+              (s: string) => currentMetadata.skills?.includes(s)
+            ) ||
             !currentMetadata.registrations ||
             currentMetadata.registrations.length === 0 ||
             !currentMetadata.agentType ||
