@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.1.3...mcp-v0.1.4) (2026-03-12)
+
+
+### Features
+
+* **mcp:** add --silent flag to zkproofport-prove CLI ([7bd5df6](https://github.com/zkproofport/proofport-ai/commit/7bd5df6ff7b308c9c304e5bed727695bb9f3c054))
+
 ## [0.1.3](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.1.2...mcp-v0.1.3) (2026-03-11)
 
 

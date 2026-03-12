@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.4](https://github.com/zkproofport/proofport-ai/compare/server-v0.1.3...server-v0.1.4) (2026-03-12)
+
+
+### Features
+
+* **mcp:** add --silent flag to zkproofport-prove CLI ([7bd5df6](https://github.com/zkproofport/proofport-ai/commit/7bd5df6ff7b308c9c304e5bed727695bb9f3c054))
+
+
+### Bug Fixes
+
+* add OASF taxonomy value comparison to needsUpdate check ([e27d7a2](https://github.com/zkproofport/proofport-ai/commit/e27d7a208078335e0b088c579af136ae0e738cc8))
+* use standard OASF taxonomy for skill and domain categories ([e1a7e2b](https://github.com/zkproofport/proofport-ai/commit/e1a7e2bc60d37c072c166b33e224b0bc508590f7))
+
 ## [0.1.3](https://github.com/zkproofport/proofport-ai/compare/server-v0.1.2...server-v0.1.3) (2026-03-11)
 
 
