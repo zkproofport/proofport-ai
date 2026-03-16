@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.7](https://github.com/zkproofport/proofport-ai/compare/server-v0.1.6...server-v0.1.7) (2026-03-16)
+
+
+### Bug Fixes
+
+* move enclave-server.ts into src/ so tsc compiles it ([76ab940](https://github.com/zkproofport/proofport-ai/commit/76ab9407b9c1b7ff3584aa4711922af67994c437))
+* sync package-lock.json with workspace versions ([7a5adb1](https://github.com/zkproofport/proofport-ai/commit/7a5adb19bcb9fff663351248ba029d491bbf1f01))
+
+
+### Refactoring
+
+* enforce TEE-only Prover.toml build, delete legacy code ([159bd1f](https://github.com/zkproofport/proofport-ai/commit/159bd1f0daef998802ece3a7089046619eaf06f9))
+* remove easRpcUrl/easGraphqlUrl from SDK config ([15b01c5](https://github.com/zkproofport/proofport-ai/commit/15b01c5203945a67beebd1d119461fc613558d3f))
+* remove ethers dependency, use esbuild bundle for enclave ([5ee994c](https://github.com/zkproofport/proofport-ai/commit/5ee994c25a02566d6412581229a92bdb735c6aa1))
+
 ## [0.1.6](https://github.com/zkproofport/proofport-ai/compare/server-v0.1.5...server-v0.1.6) (2026-03-16)
 
 
