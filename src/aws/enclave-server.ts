@@ -29,8 +29,8 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 // Import toml builders (resolved at runtime from compiled JS)
-import { toProverToml, toOidcProverToml } from '../src/prover/tomlBuilder.js';
-import type { CircuitParams, OidcCircuitInputs } from '../src/prover/tomlBuilder.js';
+import { toProverToml, toOidcProverToml } from '../prover/tomlBuilder.js';
+import type { CircuitParams, OidcCircuitInputs } from '../prover/tomlBuilder.js';
 
 const execFileAsync = promisify(execFile);
 
