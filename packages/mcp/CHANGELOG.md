@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.7](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.1.6...mcp-v0.1.7) (2026-03-16)
+
+
+### Refactoring
+
+* enforce TEE-only Prover.toml build, delete legacy code ([159bd1f](https://github.com/zkproofport/proofport-ai/commit/159bd1f0daef998802ece3a7089046619eaf06f9))
+* remove easRpcUrl/easGraphqlUrl from SDK config ([15b01c5](https://github.com/zkproofport/proofport-ai/commit/15b01c5203945a67beebd1d119461fc613558d3f))
+
 ## [0.1.6](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.1.5...mcp-v0.1.6) (2026-03-16)
 
 
