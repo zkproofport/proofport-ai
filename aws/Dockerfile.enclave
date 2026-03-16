@@ -89,12 +89,10 @@ COPY --from=builder /root/.bb-crs/ /root/.bb-crs/
 # the build context (aws/circuits/) before running docker build.
 COPY circuits/ /app/circuits/
 
-# Copy compiled enclave server and dependencies
-# The enclave-server.ts imports from src/prover/tomlBuilder.ts, so we need
-# the compiled dist/ and node_modules from the main app build.
-COPY dist/ /app/dist/
-COPY node_modules/ /app/node_modules/
-COPY package.json /app/package.json
+# Copy pre-bundled enclave server (single file, no node_modules needed)
+# Built by esbuild in the deploy workflow: bundles dist/aws/enclave-server.js
+# with all dependencies (ethers, tomlBuilder, etc.) into one file.
+COPY enclave-server.bundle.js /app/enclave-server.bundle.js
 
 # Copy NSM attestation helper (Python, uses only stdlib)
 COPY nsm-helper.py /app/aws/nsm-helper.py
@@ -103,4 +101,4 @@ COPY nsm-helper.py /app/aws/nsm-helper.py
 # but this documents the convention used in EnclaveClient.ts)
 EXPOSE 5000
 
-CMD ["node", "/app/dist/aws/enclave-server.js"]
+CMD ["node", "/app/enclave-server.bundle.js"]

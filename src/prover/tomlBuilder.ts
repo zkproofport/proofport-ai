@@ -1,4 +1,3 @@
-import { ethers } from 'ethers';
 import type { CircuitParams } from '../input/inputBuilder.js';
 
 export type { CircuitParams };
@@ -44,12 +43,11 @@ function padBytes(bytes: number[], length: number): number[] {
 }
 
 function splitSignature(sig: string): number[] {
-  const signature = ethers.Signature.from(sig);
-  const rBytes = hexStringToBytes(signature.r);
-  // Use _s to get raw s value, bypassing canonical check
-  const sValue = (signature as any)._s || signature.s;
-  const sBytes = hexStringToBytes(sValue);
-  return [...rBytes, ...sBytes];
+  // Ethereum signature: 65 bytes = r(32) + s(32) + v(1)
+  const clean = sig.startsWith('0x') ? sig.slice(2) : sig;
+  const rHex = clean.slice(0, 64);
+  const sHex = clean.slice(64, 128);
+  return [...hexStringToBytes(rHex), ...hexStringToBytes(sHex)];
 }
 
 function formatMerkleProof(proof: string[], maxDepth: number): string {
