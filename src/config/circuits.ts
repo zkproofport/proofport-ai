@@ -15,6 +15,13 @@ export const CIRCUITS = {
     easSchemaId: '0x1801901fabd0e6189356b4fb52bb0ab855276d84f7ec140839fbd1f6801ca065',
     functionSelector: '0x0a225248',
   },
+  oidc_domain_attestation: {
+    id: 'oidc_domain_attestation',
+    displayName: 'OIDC Domain',
+    description: 'Prove email domain affiliation via OIDC JWT verification',
+    requiredInputs: ['jwt', 'scope'],
+    inputType: 'oidc',
+  },
 } as const;
 
 export type CircuitId = keyof typeof CIRCUITS;

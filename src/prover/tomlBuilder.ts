@@ -1,5 +1,6 @@
 import { ethers } from 'ethers';
 import type { CircuitParams } from '../input/inputBuilder.js';
+import { buildOidcProverToml, type OidcCircuitInputs } from '../oidc/inputs.js';
 
 export type { CircuitParams };
 
@@ -74,36 +75,41 @@ function formatCountryList(countries: string[], maxEntries: number): string {
 }
 
 export function toProverToml(
-  circuitId: 'coinbase_attestation' | 'coinbase_country_attestation',
-  params: CircuitParams
+  circuitId: 'coinbase_attestation' | 'coinbase_country_attestation' | 'oidc_domain_attestation',
+  params: CircuitParams | OidcCircuitInputs
 ): string {
-  const lines: string[] = [];
-
-  lines.push(`signal_hash = ${bytesToHexArray(params.signalHash)}`);
-  lines.push(`signer_list_merkle_root = ${bytesToHexArray(hexStringToBytes(params.merkleRoot))}`);
-
-  if (circuitId === 'coinbase_country_attestation') {
-    if (!params.countryList || params.countryListLength === undefined || params.isIncluded === undefined) {
-      throw new Error('countryList, countryListLength, and isIncluded are required for coinbase_country_attestation');
-    }
-    lines.push(`country_list = ${formatCountryList(params.countryList, 10)}`);
-    lines.push(`country_list_length = ${params.countryListLength}`);
-    lines.push(`is_included = ${params.isIncluded}`);
+  if (circuitId === 'oidc_domain_attestation') {
+    return buildOidcProverToml(params as unknown as OidcCircuitInputs);
   }
 
-  lines.push(`scope = ${bytesToHexArray(params.scopeBytes)}`);
-  lines.push(`nullifier = ${bytesToHexArray(params.nullifierBytes)}`);
-  lines.push(`user_address = ${bytesToHexArray(hexStringToBytes(params.userAddress))}`);
-  lines.push(`user_signature = ${bytesToHexArray(splitSignature(params.userSignature))}`);
-  lines.push(`user_pubkey_x = ${bytesToHexArray(hexStringToBytes(params.userPubkeyX))}`);
-  lines.push(`user_pubkey_y = ${bytesToHexArray(hexStringToBytes(params.userPubkeyY))}`);
-  lines.push(`tx_length = ${params.txLength}`);
-  lines.push(`raw_transaction = ${bytesToHexArray(padBytes(params.rawTxBytes, 300))}`);
-  lines.push(`coinbase_attester_pubkey_x = ${bytesToHexArray(hexStringToBytes(params.attesterPubkeyX))}`);
-  lines.push(`coinbase_attester_pubkey_y = ${bytesToHexArray(hexStringToBytes(params.attesterPubkeyY))}`);
-  lines.push(`coinbase_signer_merkle_proof = ${formatMerkleProof(params.merkleProof, 8)}`);
-  lines.push(`coinbase_signer_leaf_index = ${params.merkleLeafIndex}`);
-  lines.push(`merkle_proof_depth = ${params.merkleDepth}`);
+  const p = params as CircuitParams;
+  const lines: string[] = [];
+
+  lines.push(`signal_hash = ${bytesToHexArray(p.signalHash)}`);
+  lines.push(`signer_list_merkle_root = ${bytesToHexArray(hexStringToBytes(p.merkleRoot))}`);
+
+  if (circuitId === 'coinbase_country_attestation') {
+    if (!p.countryList || p.countryListLength === undefined || p.isIncluded === undefined) {
+      throw new Error('countryList, countryListLength, and isIncluded are required for coinbase_country_attestation');
+    }
+    lines.push(`country_list = ${formatCountryList(p.countryList, 10)}`);
+    lines.push(`country_list_length = ${p.countryListLength}`);
+    lines.push(`is_included = ${p.isIncluded}`);
+  }
+
+  lines.push(`scope = ${bytesToHexArray(p.scopeBytes)}`);
+  lines.push(`nullifier = ${bytesToHexArray(p.nullifierBytes)}`);
+  lines.push(`user_address = ${bytesToHexArray(hexStringToBytes(p.userAddress))}`);
+  lines.push(`user_signature = ${bytesToHexArray(splitSignature(p.userSignature))}`);
+  lines.push(`user_pubkey_x = ${bytesToHexArray(hexStringToBytes(p.userPubkeyX))}`);
+  lines.push(`user_pubkey_y = ${bytesToHexArray(hexStringToBytes(p.userPubkeyY))}`);
+  lines.push(`tx_length = ${p.txLength}`);
+  lines.push(`raw_transaction = ${bytesToHexArray(padBytes(p.rawTxBytes, 300))}`);
+  lines.push(`coinbase_attester_pubkey_x = ${bytesToHexArray(hexStringToBytes(p.attesterPubkeyX))}`);
+  lines.push(`coinbase_attester_pubkey_y = ${bytesToHexArray(hexStringToBytes(p.attesterPubkeyY))}`);
+  lines.push(`coinbase_signer_merkle_proof = ${formatMerkleProof(p.merkleProof, 8)}`);
+  lines.push(`coinbase_signer_leaf_index = ${p.merkleLeafIndex}`);
+  lines.push(`merkle_proof_depth = ${p.merkleDepth}`);
 
   return lines.join('\n');
 }

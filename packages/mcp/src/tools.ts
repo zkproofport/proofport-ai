@@ -43,16 +43,17 @@ export function registerTools(
 CIRCUITS:
   - "coinbase_kyc": Proves the user passed Coinbase KYC verification.
   - "coinbase_country": Proves the user's country of residence is (or is not) in a given list. Requires country_list and is_included.
+  - "oidc_domain": Proves the user authenticated via OIDC and their email belongs to a specific domain. Requires jwt and scope.
 
 RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and timing information. Use verify_proof separately to verify on-chain.`,
     {
       circuit: z
-        .enum(['coinbase_kyc', 'coinbase_country'])
+        .enum(['coinbase_kyc', 'coinbase_country', 'oidc_domain'])
         .describe('Which circuit to use'),
       scope: z
         .string()
         .optional()
-        .describe('Scope string for nullifier derivation. Defaults to "proofport" if omitted.'),
+        .describe('Scope string for nullifier derivation. Defaults to "proofport" if omitted. For oidc_domain circuit, this is the domain scope string.'),
       country_list: z
         .array(z.string())
         .optional()
@@ -61,6 +62,10 @@ RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and 
         .boolean()
         .optional()
         .describe('true = prove country IS in list, false = prove NOT in list. Required for coinbase_country circuit.'),
+      jwt: z
+        .string()
+        .optional()
+        .describe('OIDC JWT token (id_token) for oidc_domain circuit'),
     },
     async (params) => {
       try {
@@ -72,6 +77,7 @@ RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and 
             scope: params.scope,
             countryList: params.country_list,
             isIncluded: params.is_included,
+            ...(params.circuit === 'oidc_domain' && { jwt: params.jwt }),
           },
           {
             onStep: (step) => {
@@ -111,7 +117,7 @@ RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and 
     `Step 2 of the step-by-step flow (after prepare_inputs): Request a 402 payment challenge. Sends circuit + inputs to POST /api/v1/prove without payment headers. Server returns 402 with payment nonce and requirements. You MUST call prepare_inputs first to get the inputs parameter.`,
     {
       circuit: z
-        .enum(['coinbase_kyc', 'coinbase_country'])
+        .enum(['coinbase_kyc', 'coinbase_country', 'oidc_domain'])
         .describe('Which circuit to use'),
       inputs: z
         .union([z.string(), z.record(z.unknown())])
@@ -135,15 +141,15 @@ RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and 
   // ─── prepare_inputs ─────────────────────────────────────────────────
   server.tool(
     'prepare_inputs',
-    `Step 1 of the step-by-step flow: Prepare all circuit inputs. Computes signal hash, signs it with the attestation wallet, queries EAS for attestation data, builds Merkle proof, and returns all inputs needed for proof generation. Call this BEFORE request_challenge.`,
+    `Step 1 of the step-by-step flow: Prepare all circuit inputs. Computes signal hash, signs it with the attestation wallet, queries EAS for attestation data, builds Merkle proof, and returns all inputs needed for proof generation. Call this BEFORE request_challenge. For oidc_domain circuit, provide jwt and scope instead of Coinbase-specific parameters.`,
     {
       circuit: z
-        .enum(['coinbase_kyc', 'coinbase_country'])
+        .enum(['coinbase_kyc', 'coinbase_country', 'oidc_domain'])
         .describe('Which circuit to use'),
       scope: z
         .string()
         .optional()
-        .describe('Scope string for nullifier derivation. Defaults to "proofport" if omitted.'),
+        .describe('Scope string for nullifier derivation. Defaults to "proofport" if omitted. For oidc_domain circuit, this is the domain scope string.'),
       country_list: z
         .array(z.string())
         .optional()
@@ -152,6 +158,10 @@ RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and 
         .boolean()
         .optional()
         .describe('true = prove country IS in list, false = prove NOT in list. Required for coinbase_country circuit.'),
+      jwt: z
+        .string()
+        .optional()
+        .describe('OIDC JWT token (id_token) for oidc_domain circuit'),
     },
     async (params) => {
       try {
@@ -174,6 +184,7 @@ RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and 
           scope,
           countryList: params.country_list,
           isIncluded: params.is_included,
+          ...(params.circuit === 'oidc_domain' && { jwt: params.jwt }),
         });
 
         return jsonResult(inputs);
@@ -225,7 +236,7 @@ RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and 
     `Step 4 of the step-by-step flow: Submit prepared inputs with x402 payment headers to generate the ZK proof. The TEE server verifies payment on-chain, runs the Noir circuit, and returns the UltraHonk proof. This step may take 30-90 seconds.`,
     {
       circuit: z
-        .enum(['coinbase_kyc', 'coinbase_country'])
+        .enum(['coinbase_kyc', 'coinbase_country', 'oidc_domain'])
         .describe('Which circuit to use'),
       inputs: z
         .union([z.string(), z.record(z.unknown())])
@@ -263,40 +274,33 @@ RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and 
   // ─── verify_proof ──────────────────────────────────────────────────────
   server.tool(
     'verify_proof',
-    `Step 5 (optional): Verify a ZK proof on-chain against the deployed verifier contract. Requires the verification info from the prove response (verifier_address, chain_id, rpc_url). Returns { valid: true } if the proof is valid.`,
+    `Step 5 (optional): Verify a ZK proof on-chain against the deployed verifier contract. Pass the full generate_proof result object directly — verification info (verifierAddress, chainId, rpcUrl) is extracted automatically. Returns { valid: true } if the proof is valid.`,
     {
-      proof: z
-        .string()
-        .describe('0x-prefixed proof hex bytes from generate_proof or submit_proof response'),
-      public_inputs: z
-        .string()
-        .describe('0x-prefixed concatenated public inputs hex from generate_proof or submit_proof response'),
-      verifier_address: z
-        .string()
-        .describe('Verifier contract address from the prove response verification field'),
-      chain_id: z
-        .number()
-        .describe('Chain ID from the prove response verification field (e.g. 84532 for Base Sepolia)'),
-      rpc_url: z
-        .string()
-        .describe('RPC URL from the prove response verification field'),
+      result: z
+        .object({
+          proof: z.string().describe('0x-prefixed proof hex bytes'),
+          publicInputs: z.string().describe('0x-prefixed concatenated public inputs hex'),
+          verification: z.object({
+            verifierAddress: z.string().describe('Verifier contract address'),
+            chainId: z.number().describe('Chain ID (e.g. 8453 for Base, 84532 for Base Sepolia)'),
+            rpcUrl: z.string().describe('RPC URL for the chain'),
+          }),
+        })
+        .passthrough()
+        .describe('Full result object from generate_proof — pass it directly without extracting fields'),
     },
     async (params) => {
       try {
-        const result = await verifyProof({
-          proof: params.proof,
-          publicInputs: params.public_inputs,
+        const verification = await verifyProof({
+          proof: params.result.proof,
+          publicInputs: params.result.publicInputs,
           proofWithInputs: '',
           attestation: null,
           timing: { totalMs: 0 },
-          verification: {
-            chainId: params.chain_id,
-            verifierAddress: params.verifier_address,
-            rpcUrl: params.rpc_url,
-          },
+          verification: params.result.verification,
         });
 
-        return jsonResult(result);
+        return jsonResult(verification);
       } catch (error) {
         return errorResult(error instanceof Error ? error.message : String(error));
       }

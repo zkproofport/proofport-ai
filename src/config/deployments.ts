@@ -25,9 +25,11 @@ const BROADCAST_PATHS: Record<CircuitId, (chainId: number) => string> = {
     `broadcast/DeployCoinbaseAttestation.s.sol/${chainId}/run-latest.json`,
   coinbase_country_attestation: (chainId) =>
     `broadcast/DeployCoinbaseCountryAttestation.s.sol/${chainId}/run-latest.json`,
+  oidc_domain_attestation: (chainId) =>
+    `broadcast/DeployOidcDomainAttestation.s.sol/${chainId}/run-latest.json`,
 };
 
-const CIRCUIT_IDS: CircuitId[] = ['coinbase_attestation', 'coinbase_country_attestation'];
+const CIRCUIT_IDS: CircuitId[] = ['coinbase_attestation', 'coinbase_country_attestation', 'oidc_domain_attestation'];
 
 // ── In-memory cache ─────────────────────────────────────────────────────
 // Starts with fallback values, updated by syncDeployments() at startup.

@@ -7,6 +7,7 @@ export type {
   PaymentRequirements,
   ChallengeResponse,
   ProveInputs,
+  OidcProveInputs,
   ProveRequest,
   ProveResponse,
   VerifyResult,
@@ -15,7 +16,6 @@ export type {
   ProofParams,
   ProofResult,
   StepResult,
-  EncryptedProveRequest,
 } from './types.js';
 
 export { CIRCUIT_NAME_MAP, CIRCUIT_ID_MAP } from './types.js';
@@ -39,25 +39,15 @@ export type { FlowCallbacks } from './flow.js';
 export { requestChallenge, createSession } from './session.js';
 export { makePayment } from './payment.js';
 export { submitProof, submitEncryptedProof } from './prove.js';
-export { verifyOnChain, verifyProof } from './verify.js';
+export { verifyProof } from './verify.js';
 
-// Input computation
+// Input computation (customer-facing helpers)
 export {
   prepareInputs,
   computeSignalHash,
   computeScope,
   computeNullifier,
-  recoverUserPubkey,
-  hexToBytes,
-  extractPubkeyCoordinates,
 } from './inputs.js';
-
-// Prover.toml builder (for E2E encryption)
-export { buildProverToml } from './toml.js';
-
-// E2E Encryption
-export { encryptForTee } from './tee.js';
-export type { EncryptedEnvelope } from './tee.js';
 
 // Signer abstraction
 export type { ProofportSigner } from './signer.js';
@@ -67,18 +57,8 @@ export { EthersWalletSigner, fromEthersWallet, fromPrivateKey } from './signer.j
 export { CdpWalletSigner, fromExternalWallet } from './cdp.js';
 export type { ExternalWallet } from './cdp.js';
 
-// Attestation
+// Attestation (customer-facing helpers)
 export {
   fetchAttestation,
-  fetchAttestationFromEAS,
-  fetchRawTransaction,
-  recoverAttesterPubkey,
   getSignerAddress,
 } from './attestation.js';
-
-// Merkle
-export {
-  SimpleMerkleTree,
-  findSignerIndex,
-  buildSignerMerkleTree,
-} from './merkle.js';

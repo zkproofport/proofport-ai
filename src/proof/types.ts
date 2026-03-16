@@ -41,6 +41,10 @@ export interface ProveRequestInputs {
   depth: number;
   country_list?: string[];   // for country circuit
   is_included?: boolean;     // for country circuit
+  // OIDC fields
+  jwt?: string;              // raw JWT token for oidc_domain_attestation
+  scope_string?: string;     // scope string (not hashed) for OIDC nullifier
+  domain?: string;           // domain to prove (auto-extracted from email if omitted)
 }
 
 export interface ProveRequest {

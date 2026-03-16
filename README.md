@@ -254,7 +254,7 @@ npx zkproofport-mcp    # Starts stdio MCP server
 - Input schema with types and descriptions
 - EAS GraphQL query templates
 
-Circuits use aliases: `coinbase_kyc` → `coinbase_attestation`, `coinbase_country` → `coinbase_country_attestation`.
+Circuits use aliases: `coinbase_kyc` → `coinbase_attestation`, `coinbase_country` → `coinbase_country_attestation`, `oidc_domain` → `oidc_domain_attestation`.
 
 ## A2A Protocol
 
@@ -297,6 +297,15 @@ Proves holder's KYC country matches attestation.
 
 - **Aliases:** `coinbase_country`, `coinbase_country_attestation`
 - **Public Inputs:** address, country, scope
+- **Nullifier:** Yes (privacy, replay prevention)
+
+### OIDC Domain (`oidc_domain_attestation`)
+
+Proves holder owns an email address at a specific domain via OIDC JWT verification.
+
+- **Aliases:** `oidc_domain`, `oidc_domain_attestation`
+- **Input type:** OIDC JWT (`id_token` from Google, etc.)
+- **Public Inputs:** domain hash, scope
 - **Nullifier:** Yes (privacy, replay prevention)
 
 ## Contract Addresses

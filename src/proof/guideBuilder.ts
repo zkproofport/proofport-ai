@@ -31,7 +31,9 @@ function derivePaymentConstants(config: Config) {
 }
 
 function circuitAlias(circuitId: CircuitId): string {
-  return circuitId === 'coinbase_attestation' ? 'coinbase_kyc' : 'coinbase_country';
+  if (circuitId === 'coinbase_attestation') return 'coinbase_kyc';
+  if (circuitId === 'oidc_domain_attestation') return 'oidc_domain';
+  return 'coinbase_country';
 }
 
 // ---------------------------------------------------------------------------
@@ -52,14 +54,55 @@ function buildConstants(
   const chainVerifiers = getChainVerifiers(String(chainId));
   const verifierAddr = chainVerifiers[circuitId] || 'NOT_DEPLOYED';
 
+  // OIDC circuits have no EAS, no Coinbase contracts
+  if (circuitId === 'oidc_domain_attestation') {
+    return {
+      contracts: {
+        verifier_address: verifierAddr,
+        chain_id: chainId,
+      },
+      payment: {
+        recipient: config.paymentPayTo,
+        amount: paymentAmount,
+        asset: usdcAddress,
+        network: isTestnet ? 'base-sepolia' : 'base',
+        currency: 'USDC',
+        decimals: 6,
+      },
+      rpc: {
+        payment_rpc_url: config.chainRpcUrl,
+        payment_rpc_chain: isTestnet ? 'Base Sepolia (chain ID 84532)' : 'Base Mainnet (chain ID 8453)',
+        payment_rpc_note: 'Used for x402 payment settlement and on-chain proof verification.',
+      },
+      x402: {
+        facilitator_url: facilitatorUrl,
+        settle_endpoint: `${facilitatorUrl}/settle`,
+        protocol: 'EIP-3009 TransferWithAuthorization',
+        description: 'Client signs EIP-712 authorization, facilitator settles on-chain (facilitator pays gas)',
+        single_step_flow: {
+          description: 'x402 single-step flow. POST /prove with {circuit, inputs: {jwt, scope_string}} → 402 with nonce → pay → retry with payment headers.',
+          nonce_details: 'Server returns 32-byte nonce in 402 response body. Client must include nonce in retry as X-Payment-Nonce header.',
+        },
+      },
+      verification: {
+        description: 'On-chain proof verification using deployed Solidity verifier contracts',
+        verifier_address: verifierAddr,
+        chain_id: chainId,
+        chain_name: isTestnet ? 'Base Sepolia' : 'Base',
+        function_signature: 'verify(bytes calldata _proof, bytes32[] calldata _publicInputs) external view returns (bool)',
+        input_format: 'proof and publicInputs are separate fields. Split publicInputs hex blob into 32-byte (bytes32) chunks.',
+      },
+    };
+  }
+
   return {
     eas: {
       graphql_endpoint: config.easGraphqlEndpoint,
-      schema_id: circuit.easSchemaId,
+      schema_id: (circuit as any).easSchemaId,
     },
     contracts: {
       coinbase_attester: COINBASE_ATTESTER_CONTRACT,
-      function_selector: circuit.functionSelector,
+      function_selector: (circuit as any).functionSelector,
       verifier_address: verifierAddr,
       chain_id: chainId,
     },
@@ -102,6 +145,30 @@ function buildConstants(
 }
 
 function buildFormulas(circuitId: CircuitId) {
+  if (circuitId === 'oidc_domain_attestation') {
+    return {
+      scope: {
+        description: 'Keccak-256 hash of the scope string. Used to partition nullifiers.',
+        formula: 'scope = keccak256(toUtf8Bytes(scope_string))',
+      },
+      nullifier: {
+        description: 'Prevents double-proving for the same email + scope. Deterministic from email and scope.',
+        formula: 'nullifier = keccak256(keccak256(email_bytes) ++ scope_bytes)',
+      },
+      domain: {
+        description: 'Extracted from email claim in JWT payload (everything after @).',
+        formula: 'domain = email.split("@")[1]',
+      },
+      partial_sha256: {
+        description: 'SHA-256 is precomputed up to the "email" key in the JWT payload. The remaining data (containing email value) is passed as circuit input.',
+        formula: 'partialHash = SHA256(jwt_signed_data[0..emailKeyOffset])',
+      },
+      rsa_limbs: {
+        description: 'RSA-2048 values (modulus, signature, redc_params) are split into 18 x 120-bit limbs (little-endian).',
+        formula: 'limbs[i] = (value >> (i * 120)) & ((1 << 120) - 1)',
+      },
+    };
+  }
   return {
     signal_hash: {
       description:
@@ -143,6 +210,44 @@ function buildFormulas(circuitId: CircuitId) {
 
 
 function buildInputSchema(circuitId: CircuitId) {
+  if (circuitId === 'oidc_domain_attestation') {
+    return {
+      note: 'OIDC circuit inputs are computed SERVER-SIDE from the JWT. The client only sends jwt and scope_string.',
+      client_fields: [
+        {
+          name: 'jwt',
+          type: 'string',
+          description: 'Raw OIDC id_token (JWT) from provider (Google, Microsoft, Apple, etc.). Must use RS256 algorithm and contain email + email_verified claims.',
+          how_to_obtain: 'OIDC authentication flow with the identity provider',
+        },
+        {
+          name: 'scope_string',
+          type: 'string',
+          description: 'Scope string for nullifier partitioning (e.g. "myapp:membership")',
+          how_to_obtain: 'Defined by the requesting application',
+        },
+        {
+          name: 'domain',
+          type: 'string (optional)',
+          description: 'Domain to prove. If omitted, auto-extracted from email claim in JWT.',
+          how_to_obtain: 'Optional override',
+        },
+      ],
+      server_computed_fields: [
+        { name: 'pubkey_modulus_limbs', description: '18 x u128 RSA public key modulus limbs (from JWKS)' },
+        { name: 'domain', description: 'BoundedVec<u8, 64> — email domain bytes' },
+        { name: 'scope', description: '32-byte keccak256(scope_string)' },
+        { name: 'nullifier', description: '32-byte keccak256(keccak256(email) ++ scope)' },
+        { name: 'partial_data', description: 'BoundedVec<u8, 640> — remaining JWT data after partial SHA' },
+        { name: 'partial_hash', description: '8 x u32 — intermediate SHA-256 state' },
+        { name: 'full_data_length', description: 'Total byte length of JWT signed data' },
+        { name: 'base64_decode_offset', description: 'Alignment offset for base64 decoding' },
+        { name: 'redc_params_limbs', description: '18 x u128 Barrett reduction parameter limbs' },
+        { name: 'signature_limbs', description: '18 x u128 RSA signature limbs' },
+      ],
+    };
+  }
+
   const baseFields = [
     {
       name: 'signal_hash',
@@ -304,6 +409,57 @@ export function buildGuide(circuitId: CircuitId, config: Config): object {
   const circuit = CIRCUITS[circuitId];
   const { isTestnet, chainId, usdcAddress, paymentAmount } = derivePaymentConstants(config);
 
+  // OIDC-specific guide
+  if (circuitId === 'oidc_domain_attestation') {
+    return {
+      circuit_id: circuitId,
+      display_name: circuit.displayName,
+      description: circuit.description,
+
+      overview: {
+        what: 'Prove email domain affiliation (e.g. "@google.com") from an OIDC JWT token without revealing the full email address.',
+        how: 'Client sends a raw JWT (id_token from Google/Microsoft/Apple) and a scope string. The server fetches JWKS, verifies RSA signature structure, extracts the email domain, computes a nullifier, and generates a ZK proof.',
+        privacy: 'The proof reveals only the domain (e.g. "google.com") and a nullifier. The full email, JWT claims, and RSA key material remain private.',
+      },
+
+      sdk: {
+        package: '@zkproofport-ai/sdk',
+        repository: 'https://github.com/zkproofport/proofport-ai',
+        install: 'npm install @zkproofport-ai/sdk ethers',
+        description: 'For OIDC proofs, the client only needs to provide the JWT and scope. The server handles all cryptographic computation.',
+        quick_start: `\
+// OIDC Domain proof — client only sends JWT + scope
+const response = await fetch('${config.a2aBaseUrl}/api/v1/prove', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    circuit: 'oidc_domain',
+    inputs: {
+      jwt: '<OIDC id_token from Google/Microsoft/Apple>',
+      scope_string: 'myapp:membership',
+    },
+  }),
+});
+// First call returns 402 with payment nonce
+// After payment, retry with X-Payment-TX and X-Payment-Nonce headers`,
+      },
+
+      local_mcp_server: {
+        recommended: true,
+        npm_package: '@zkproofport-ai/mcp',
+        version: mcpPkgVersion,
+        install: `npm install @zkproofport-ai/mcp@${mcpPkgVersion}`,
+        readme: 'https://www.npmjs.com/package/@zkproofport-ai/mcp',
+      },
+
+      constants: buildConstants(config, circuitId, isTestnet, chainId, usdcAddress, paymentAmount, config.x402FacilitatorUrl),
+      formulas: buildFormulas(circuitId),
+      input_schema: buildInputSchema(circuitId),
+      endpoints: buildEndpoints(config, circuitId),
+    };
+  }
+
+  // Coinbase circuit guides
   return {
     circuit_id: circuitId,
     display_name: circuit.displayName,

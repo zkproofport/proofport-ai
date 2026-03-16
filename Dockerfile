@@ -86,6 +86,9 @@ RUN npm ci --omit=dev --ignore-scripts
 # Copy built JavaScript from builder stage
 COPY --from=builder /app/dist ./dist
 
+# Copy SDK dist (needed by src/oidc/inputs.ts runtime require)
+COPY packages/sdk/dist/ ./packages/sdk/dist/
+
 # Copy public static assets (agent icon, etc.)
 COPY public/ ./public/
 

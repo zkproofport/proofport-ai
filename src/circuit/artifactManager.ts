@@ -4,9 +4,10 @@ import * as os from 'node:os';
 import * as crypto from 'node:crypto';
 
 // Circuit metadata mapping
-const CIRCUIT_META: Record<string, { repoDir: string; packageName: string }> = {
+const CIRCUIT_META: Record<string, { repoDir: string; packageName: string; deps?: string }> = {
   coinbase_attestation: { repoDir: 'coinbase-attestation', packageName: 'coinbase_attestation' },
   coinbase_country_attestation: { repoDir: 'coinbase-country-attestation', packageName: 'coinbase_country_attestation' },
+  oidc_domain_attestation: { repoDir: 'oidc-domain-attestation', packageName: 'oidc_domain_attestation', deps: 'oidc' },
 };
 
 const COINBASE_LIBS_FILES = [
@@ -154,7 +155,19 @@ export async function createWorkDir(circuitsDir: string, circuitId: string): Pro
     await fs.mkdir(proofDir, { recursive: true });
 
     // Write Nargo.toml with real dependencies using absolute paths
-    const nargoToml = `[package]
+    let nargoToml: string;
+    if (meta.deps === 'oidc') {
+      nargoToml = `[package]
+name = "${meta.packageName}"
+type = "bin"
+compiler_version = ">= 1.0.0"
+
+[dependencies]
+jwt = { path = "${path.join(circuitsDir, 'deps', 'noir-jwt')}" }
+keccak256 = { path = "${path.join(circuitsDir, 'keccak256')}" }
+`;
+    } else {
+      nargoToml = `[package]
 name = "${meta.packageName}"
 type = "bin"
 compiler_version = ">= 1.0.0"
@@ -163,6 +176,7 @@ compiler_version = ">= 1.0.0"
 keccak256 = { path = "${path.join(circuitsDir, 'keccak256')}" }
 coinbase_libs = { path = "${path.join(circuitsDir, 'coinbase-libs')}" }
 `;
+    }
     await fs.writeFile(path.join(workDir, 'Nargo.toml'), nargoToml);
 
     // Create symlink to src directory

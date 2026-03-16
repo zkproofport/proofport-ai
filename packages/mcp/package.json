@@ -27,6 +27,9 @@
     "tsx": "^4.0.0",
     "vitest": "^3.0.0"
   },
+  "optionalDependencies": {
+    "@coinbase/cdp-sdk": "^1.44.1"
+  },
   "engines": {
     "node": ">=18"
   },

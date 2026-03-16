@@ -1,21 +1,23 @@
 // ─── Circuit name mappings ──────────────────────────────────────────────
 
 /** Client-friendly circuit aliases. */
-export type CircuitName = 'coinbase_kyc' | 'coinbase_country';
+export type CircuitName = 'coinbase_kyc' | 'coinbase_country' | 'oidc_domain';
 
 /** Canonical circuit IDs matching Nargo.toml names. */
-export type CircuitId = 'coinbase_attestation' | 'coinbase_country_attestation';
+export type CircuitId = 'coinbase_attestation' | 'coinbase_country_attestation' | 'oidc_domain_attestation';
 
 /** Map client-friendly names to canonical circuit IDs. */
 export const CIRCUIT_NAME_MAP: Record<CircuitName, CircuitId> = {
   coinbase_kyc: 'coinbase_attestation',
   coinbase_country: 'coinbase_country_attestation',
+  oidc_domain: 'oidc_domain_attestation',
 };
 
 /** Map canonical circuit IDs back to client-friendly names. */
 export const CIRCUIT_ID_MAP: Record<CircuitId, CircuitName> = {
   coinbase_attestation: 'coinbase_kyc',
   coinbase_country_attestation: 'coinbase_country',
+  oidc_domain_attestation: 'oidc_domain',
 };
 
 // ─── Configuration ──────────────────────────────────────────────────────
@@ -92,9 +94,14 @@ export interface ProveInputs {
   is_included?: boolean;
 }
 
+export interface OidcProveInputs {
+  jwt: string | undefined;
+  scope_string: string;
+}
+
 export interface ProveRequest {
   circuit: CircuitName;
-  inputs?: ProveInputs;
+  inputs?: ProveInputs | OidcProveInputs;
   encrypted_payload?: EncryptedProveRequest['encrypted_payload'];
 }
 
@@ -170,6 +177,8 @@ export interface ProofParams {
   countryList?: string[];
   /** Whether the country list is an inclusion or exclusion list */
   isIncluded?: boolean;
+  /** JWT token for OIDC circuit (oidc_domain) */
+  jwt?: string;
 }
 
 export interface ProofResult {

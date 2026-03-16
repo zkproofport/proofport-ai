@@ -20,6 +20,8 @@ Circuit layout (baked into image by Dockerfile.enclave):
   /app/circuits/coinbase-attestation/target/vk/vk
   /app/circuits/coinbase-country-attestation/target/coinbase_country_attestation.json
   /app/circuits/coinbase-country-attestation/target/vk/vk
+  /app/circuits/oidc-domain-attestation/target/oidc_domain_attestation.json
+  /app/circuits/oidc-domain-attestation/target/vk/vk
 
 Proof pipeline per request:
   1. Write decimal inputs to Prover.toml in a temp circuit dir
@@ -69,6 +71,11 @@ CIRCUITS = {
     "coinbase_country_attestation": {
         "dir": "coinbase-country-attestation",
         "bytecode": "coinbase_country_attestation.json",
+        "vk": "vk/vk",
+    },
+    "oidc_domain_attestation": {
+        "dir": "oidc-domain-attestation",
+        "bytecode": "oidc_domain_attestation.json",
         "vk": "vk/vk",
     },
 }

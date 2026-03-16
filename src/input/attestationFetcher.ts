@@ -54,7 +54,7 @@ export async function fetchAttestationFromEAS(
   circuitId: CircuitId,
   recipientAddress: string,
 ): Promise<EASAttestation> {
-  const circuit = CIRCUITS[circuitId];
+  const circuit = CIRCUITS[circuitId] as { easSchemaId: string; [key: string]: unknown };
   const schemaId = circuit.easSchemaId;
 
   const response = await fetch(easGraphqlEndpoint, {
@@ -230,7 +230,7 @@ export function validateAttestationTx(
   }
 
   // Check function selector
-  const expectedSelector = CIRCUITS[circuitId].functionSelector;
+  const expectedSelector = (CIRCUITS[circuitId] as { functionSelector: string }).functionSelector;
   const actualSelector = tx.data.slice(0, 10);
   if (actualSelector !== expectedSelector) {
     return {

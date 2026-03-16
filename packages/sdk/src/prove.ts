@@ -1,4 +1,4 @@
-import type { ClientConfig, CircuitName, ProveInputs, ProveResponse } from './types.js';
+import type { ClientConfig, CircuitName, ProveInputs, OidcProveInputs, ProveResponse } from './types.js';
 import type { EncryptedEnvelope } from './tee.js';
 
 /**
@@ -9,7 +9,7 @@ export async function submitProof(
   config: ClientConfig,
   request: {
     circuit: CircuitName;
-    inputs: ProveInputs;
+    inputs: ProveInputs | OidcProveInputs;
     paymentTxHash: string;
     paymentNonce: string;
   },

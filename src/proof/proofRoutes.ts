@@ -8,6 +8,7 @@ import { toProverToml } from '../prover/tomlBuilder.js';
 import { BbProver } from '../prover/bbProver.js';
 import { hexToBytes } from '../input/inputBuilder.js';
 import type { CircuitParams } from '../input/inputBuilder.js';
+import { prepareOidcInputs, buildOidcProverToml } from '../oidc/inputs.js';
 import { buildGuide } from './guideBuilder.js';
 import { getVerifierAddress } from '../config/deployments.js';
 import { ethers } from 'ethers';
@@ -27,6 +28,9 @@ const CIRCUIT_MAP: Record<string, CircuitId> = {
   // Also accept canonical IDs directly
   'coinbase_attestation': 'coinbase_attestation',
   'coinbase_country_attestation': 'coinbase_country_attestation',
+  // OIDC Domain
+  'oidc_domain': 'oidc_domain_attestation',
+  'oidc_domain_attestation': 'oidc_domain_attestation',
 };
 
 export interface ProofRoutesDeps {
@@ -59,6 +63,103 @@ async function generateProofFromInputs(
   res: Response,
 ): Promise<void> {
   const { circuitId, inputs, paymentVerifyMs, startTime, requestId } = ctx;
+
+  // ── OIDC flow: server computes all circuit inputs from JWT ──
+  if (circuitId === 'oidc_domain_attestation') {
+    if (!inputs.jwt) {
+      res.status(400).json({ error: 'INVALID_REQUEST', message: 'jwt is required for oidc_domain_attestation' });
+      return;
+    }
+
+    const inputBuildStart = Date.now();
+    const oidcInputs = await prepareOidcInputs({
+      jwt: inputs.jwt as string,
+      scope: (inputs.scope_string || 'proofport') as string,
+      domain: inputs.domain as string | undefined,
+    });
+    const proverToml = buildOidcProverToml(oidcInputs);
+    const inputBuildMs = Date.now() - inputBuildStart;
+
+    // Generate proof
+    const proveStart = Date.now();
+    let proof: string;
+    let publicInputs: string;
+    let proofWithInputs: string;
+    let attestationDoc: string | undefined;
+
+    const teeMode = config.teeMode || 'disabled';
+    log.info({ action: 'prove.generate.start', requestId, circuit: circuitId, teeMode, encrypted: false }, 'OIDC proof generation started');
+
+    if (teeMode === 'nitro' && deps.teeProvider) {
+      const vsockResponse = await deps.teeProvider.prove(circuitId, [], requestId, proverToml);
+      if (vsockResponse.type === 'error') {
+        throw new Error(`TEE proof generation failed: ${vsockResponse.error}`);
+      }
+      proof = vsockResponse.proof || '';
+      publicInputs = Array.isArray(vsockResponse.publicInputs) ? vsockResponse.publicInputs[0] || '' : '';
+      proofWithInputs = proof + (publicInputs.startsWith('0x') ? publicInputs.slice(2) : publicInputs);
+      attestationDoc = vsockResponse.attestationDocument;
+    } else {
+      const bbProver = new BbProver({
+        bbPath: config.bbPath,
+        nargoPath: config.nargoPath,
+        circuitsDir: config.circuitsDir,
+      });
+      const bbResult = await bbProver.prove(circuitId, {} as CircuitParams, proverToml);
+      proof = bbResult.proof;
+      publicInputs = bbResult.publicInputs;
+      proofWithInputs = bbResult.proofWithInputs;
+    }
+
+    const proveMs = Date.now() - proveStart;
+    log.info({ action: 'prove.generate.complete', requestId, circuit: circuitId, teeMode, proveMs, proofSize: proof.length }, 'OIDC proof generation complete');
+
+    // Build attestation info
+    let attestation: ProveResponse['attestation'] = null;
+    if (attestationDoc) {
+      try {
+        const parsedDoc = parseAttestationDocument(attestationDoc);
+        const verification = await verifyAttestationDocument(parsedDoc);
+        attestation = {
+          document: attestationDoc,
+          proof_hash: ethers.keccak256(proof),
+          verification: {
+            rootCaValid: verification.rootCaValid ?? false,
+            chainValid: verification.chainValid ?? false,
+            signatureValid: verification.signatureValid ?? false,
+            pcrs: Object.fromEntries(
+              Array.from(parsedDoc.pcrs.entries()).map(([k, v]) => [k, ethers.hexlify(v)])
+            ),
+          },
+        };
+      } catch (e: unknown) {
+        log.warn({ action: 'prove.attestation.parse_error', err: e }, 'Failed to parse attestation');
+      }
+    }
+
+    const response: ProveResponse = {
+      proof,
+      publicInputs,
+      proofWithInputs,
+      attestation,
+      timing: {
+        totalMs: Date.now() - startTime,
+        paymentVerifyMs,
+        inputBuildMs,
+        proveMs,
+      },
+      verification: ctx.verifierAddress ? {
+        chainId: ctx.chainId,
+        verifierAddress: ctx.verifierAddress,
+        rpcUrl: ctx.chainRpcUrl,
+      } : null,
+    };
+
+    res.json(response);
+    return;
+  }
+
+  // ── Coinbase flow: client provides all pre-computed fields ──
 
   // Validate required client-computed fields
   if (!inputs.signal_hash || !inputs.nullifier || !inputs.scope_bytes || !inputs.merkle_root || !inputs.user_address) {
@@ -239,11 +340,11 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
         return;
       }
 
-      // Check for payment in header
+      // Check for payment in header (skip if payment disabled)
       const paymentTxHeader = (req.headers['x-payment-tx'] as string) || '';
       const paymentNonceHeader = (req.headers['x-payment-nonce'] as string) || '';
 
-      if (!paymentTxHeader) {
+      if (!paymentTxHeader && config.paymentMode !== 'disabled') {
         // No payment yet — return 402 with payment requirements
         const nonce = ethers.hexlify(ethers.randomBytes(32));
 
@@ -295,61 +396,72 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
         return;
       }
 
-      // Has payment header — validate nonce first (replay protection is independent of encryption)
-      log.info({ action: 'prove.x402.start', circuit: circuitId }, 'x402 proof request');
+      // Payment disabled — skip all payment validation
+      let paymentVerifyMs = 0;
+      if (config.paymentMode === 'disabled') {
+        log.info({ action: 'prove.payment_skipped', circuit: circuitId }, 'Payment disabled, skipping');
 
-      if (!paymentNonceHeader) {
-        res.status(400).json({ error: 'MISSING_NONCE', message: 'X-Payment-Nonce header required with X-Payment-TX' });
-        return;
-      }
+        if (!body.inputs) {
+          res.status(400).json({ error: 'INVALID_REQUEST', message: 'Missing inputs' });
+          return;
+        }
+      } else {
+        // Has payment header — validate nonce first (replay protection is independent of encryption)
+        log.info({ action: 'prove.x402.start', circuit: circuitId }, 'x402 proof request');
 
-      // Atomically read and consume nonce (GETDEL prevents TOCTOU race)
-      const storedCircuit = await deps.redis.getdel(`x402:nonce:${paymentNonceHeader}`);
-      if (!storedCircuit) {
-        res.status(400).json({ error: 'INVALID_NONCE', message: 'Nonce not found or expired. Request a new 402 challenge.' });
-        return;
-      }
+        if (!paymentNonceHeader) {
+          res.status(400).json({ error: 'MISSING_NONCE', message: 'X-Payment-Nonce header required with X-Payment-TX' });
+          return;
+        }
 
-      // Verify nonce was issued for the same circuit
-      if (storedCircuit !== circuitId) {
-        res.status(400).json({ error: 'NONCE_CIRCUIT_MISMATCH', message: `Nonce was issued for ${storedCircuit}, not ${circuitId}` });
-        return;
-      }
+        // Atomically read and consume nonce (GETDEL prevents TOCTOU race)
+        const storedCircuit = await deps.redis.getdel(`x402:nonce:${paymentNonceHeader}`);
+        if (!storedCircuit) {
+          res.status(400).json({ error: 'INVALID_NONCE', message: 'Nonce not found or expired. Request a new 402 challenge.' });
+          return;
+        }
 
-      // For plaintext flow, inputs are required (only checked when payment header present)
-      if (!body.encrypted_payload && !body.inputs) {
-        res.status(400).json({ error: 'INVALID_REQUEST', message: 'Missing inputs (or use encrypted_payload for E2E flow)' });
-        return;
-      }
+        // Verify nonce was issued for the same circuit
+        if (storedCircuit !== circuitId) {
+          res.status(400).json({ error: 'NONCE_CIRCUIT_MISMATCH', message: `Nonce was issued for ${storedCircuit}, not ${circuitId}` });
+          return;
+        }
 
-      // In nitro mode, require E2E encryption — plaintext inputs are rejected
-      if (config.teeMode === 'nitro' && !body.encrypted_payload) {
-        res.status(400).json({ error: 'PLAINTEXT_REJECTED', message: 'TEE mode requires E2E encrypted payload. Fetch TEE public key from 402 response and encrypt inputs before submitting.' });
-        return;
-      }
+        // For plaintext flow, inputs are required (only checked when payment header present)
+        if (!body.encrypted_payload && !body.inputs) {
+          res.status(400).json({ error: 'INVALID_REQUEST', message: 'Missing inputs (or use encrypted_payload for E2E flow)' });
+          return;
+        }
 
-      const paymentStart = Date.now();
-      const paymentResult = await verifyPaymentOnChain({
-        txHash: paymentTxHeader,
-        expectedRecipient: config.paymentPayTo,
-        expectedNonce: paymentNonceHeader,
-        expectedMinAmount: BigInt(paymentAmount),
-        rpcUrl: config.chainRpcUrl,
-        network,
-      });
-      const paymentVerifyMs = Date.now() - paymentStart;
+        // In nitro mode, require E2E encryption — plaintext inputs are rejected
+        if (config.teeMode === 'nitro' && !body.encrypted_payload) {
+          res.status(400).json({ error: 'PLAINTEXT_REJECTED', message: 'TEE mode requires E2E encrypted payload. Fetch TEE public key from 402 response and encrypt inputs before submitting.' });
+          return;
+        }
 
-      if (!paymentResult.valid) {
-        log.warn({ action: 'prove.x402.payment_invalid', reason: paymentResult.reason, txHash: paymentTxHeader }, 'x402 payment invalid');
-        res.status(402).json({
-          error: 'PAYMENT_INVALID',
-          reason: paymentResult.reason,
-          message: paymentResult.error,
+        const paymentStart = Date.now();
+        const paymentResult = await verifyPaymentOnChain({
+          txHash: paymentTxHeader,
+          expectedRecipient: config.paymentPayTo,
+          expectedNonce: paymentNonceHeader,
+          expectedMinAmount: BigInt(paymentAmount),
+          rpcUrl: config.chainRpcUrl,
+          network,
         });
-        return;
-      }
+        paymentVerifyMs = Date.now() - paymentStart;
 
-      log.info({ action: 'prove.x402.payment_verified', txHash: paymentTxHeader, paymentVerifyMs }, 'x402 payment verified');
+        if (!paymentResult.valid) {
+          log.warn({ action: 'prove.x402.payment_invalid', reason: paymentResult.reason, txHash: paymentTxHeader }, 'x402 payment invalid');
+          res.status(402).json({
+            error: 'PAYMENT_INVALID',
+            reason: paymentResult.reason,
+            message: paymentResult.error,
+          });
+          return;
+        }
+
+        log.info({ action: 'prove.x402.payment_verified', txHash: paymentTxHeader, paymentVerifyMs }, 'x402 payment verified');
+      }
 
       const requestId = `x402-${ethers.hexlify(ethers.randomBytes(8)).slice(2)}`;
 

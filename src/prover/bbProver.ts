@@ -15,6 +15,7 @@ const execFileAsync = promisify(execFile);
 const CIRCUIT_PACKAGES: Record<string, string> = {
   coinbase_attestation: 'coinbase_attestation',
   coinbase_country_attestation: 'coinbase_country_attestation',
+  oidc_domain_attestation: 'oidc_domain_attestation',
 };
 
 export interface BbProveResult {
@@ -32,7 +33,9 @@ export class BbProver {
     }
   ) {}
 
-  async prove(circuitId: string, params: CircuitParams): Promise<BbProveResult> {
+  async prove(circuitId: string, params: CircuitParams): Promise<BbProveResult>;
+  async prove(circuitId: string, params: CircuitParams, proverTomlOverride: string): Promise<BbProveResult>;
+  async prove(circuitId: string, params: CircuitParams, proverTomlOverride?: string): Promise<BbProveResult> {
     const packageName = CIRCUIT_PACKAGES[circuitId];
     if (!packageName) {
       throw new Error(`Unknown circuit ID: ${circuitId}`);
@@ -43,7 +46,7 @@ export class BbProver {
 
     try {
       // 2. Write Prover.toml to workDir
-      const proverTomlContent = toProverToml(
+      const proverTomlContent = proverTomlOverride ?? toProverToml(
         circuitId as 'coinbase_attestation' | 'coinbase_country_attestation',
         params
       );

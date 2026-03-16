@@ -21,7 +21,7 @@ services:
     container_name: proofport-ai
     ports:
       - "4002:4002"
-      - "3200:3200"
+      - "13200:3200"
     env_file:
       - .env.development
     environment:

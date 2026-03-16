@@ -1,9 +1,10 @@
 import type { CircuitId } from './types.js';
 
-export const CIRCUITS: Record<CircuitId, {
+export const CIRCUITS: Record<string, {
   displayName: string;
-  easSchemaId: string;
-  functionSelector: string;
+  easSchemaId?: string;
+  functionSelector?: string;
+  inputType?: string;
 }> = {
   coinbase_attestation: {
     displayName: 'Coinbase KYC',
@@ -14,6 +15,10 @@ export const CIRCUITS: Record<CircuitId, {
     displayName: 'Coinbase Country',
     easSchemaId: '0x1801901fabd0e6189356b4fb52bb0ab855276d84f7ec140839fbd1f6801ca065',
     functionSelector: '0x0a225248',
+  },
+  oidc_domain_attestation: {
+    displayName: 'OIDC Domain',
+    inputType: 'oidc',
   },
 };
 

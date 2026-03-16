@@ -2,6 +2,7 @@ import { ethers } from 'ethers';
 import type {
   ClientConfig,
   CircuitId,
+  OidcProveInputs,
   ProofParams,
   ProofResult,
   StepResult,
@@ -13,7 +14,7 @@ import { prepareInputs, computeSignalHash } from './inputs.js';
 import { makePayment } from './payment.js';
 import { submitProof, submitEncryptedProof } from './prove.js';
 import type { ProofportSigner } from './signer.js';
-import { USDC_ADDRESSES } from './constants.js';
+import { CIRCUITS, USDC_ADDRESSES } from './constants.js';
 import { encryptForTee } from './tee.js';
 import { buildProverToml } from './toml.js';
 
@@ -44,6 +45,7 @@ export async function generateProof(
   const circuitId: CircuitId = CIRCUIT_NAME_MAP[params.circuit];
   const scope = params.scope || 'proofport';
   const paymentSigner = signers.payment || signers.attestation;
+  const isOidc = CIRCUITS[circuitId]?.inputType === 'oidc';
 
   const steps: StepResult[] = [];
   function recordStep<T>(step: number, name: string, data: T, startTime: number): T {
@@ -53,29 +55,39 @@ export async function generateProof(
     return data;
   }
 
-  // Step 1: Sign signal hash
-  let t = Date.now();
-  const attestationAddress = await signers.attestation.getAddress();
-  const signalHash = computeSignalHash(attestationAddress, scope, circuitId);
-  const signalHashHex = ethers.hexlify(signalHash);
-  const signature = await signers.attestation.signMessage(signalHash);
-  recordStep(1, 'Sign Signal Hash', { signalHash: signalHashHex, signature }, t);
+  // Steps 1-2: EAS attestation path (skipped for OIDC circuits)
+  let easInputs: Awaited<ReturnType<typeof prepareInputs>> | undefined;
+  let proverToml: string | undefined;
 
-  // Step 2: Prepare inputs + build proverToml locally
-  t = Date.now();
-  const inputs = await prepareInputs(config, {
-    circuitId,
-    userAddress: attestationAddress,
-    userSignature: signature,
-    scope,
-    countryList: params.countryList,
-    isIncluded: params.isIncluded,
-  });
-  const proverToml = buildProverToml(circuitId, inputs);
-  recordStep(2, 'Prepare Inputs', { inputFields: Object.keys(inputs).length, tomlLength: proverToml.length }, t);
+  if (!isOidc) {
+    // Step 1: Sign signal hash
+    let t = Date.now();
+    const attestationAddress = await signers.attestation.getAddress();
+    const signalHash = computeSignalHash(attestationAddress, scope, circuitId);
+    const signalHashHex = ethers.hexlify(signalHash);
+    const signature = await signers.attestation.signMessage(signalHash);
+    recordStep(1, 'Sign Signal Hash', { signalHash: signalHashHex, signature }, t);
+
+    // Step 2: Prepare inputs + build proverToml locally
+    t = Date.now();
+    easInputs = await prepareInputs(config, {
+      circuitId,
+      userAddress: attestationAddress,
+      userSignature: signature,
+      scope,
+      countryList: params.countryList,
+      isIncluded: params.isIncluded,
+    });
+    proverToml = buildProverToml(circuitId, easInputs);
+    recordStep(2, 'Prepare Inputs', { inputFields: Object.keys(easInputs).length, tomlLength: proverToml.length }, t);
+  } else {
+    // OIDC path: skip EAS attestation steps; server handles all input computation
+    recordStep(1, 'Sign Signal Hash', { skipped: true, reason: 'oidc' }, Date.now());
+    recordStep(2, 'Prepare Inputs', { skipped: true, reason: 'oidc' }, Date.now());
+  }
 
   // Step 3: Request 402 challenge (without inputs — server only needs circuit)
-  t = Date.now();
+  let t = Date.now();
   const challenge = await requestChallenge(config, params.circuit);
   const isE2E = !!challenge.teePublicKey;
   recordStep(3, 'Request Challenge', { nonce: challenge.nonce, e2e: isE2E, keyId: challenge.teePublicKey?.keyId ?? null }, t);
@@ -103,7 +115,17 @@ export async function generateProof(
   t = Date.now();
   let proveResponse;
 
-  if (isE2E) {
+  if (isOidc) {
+    // OIDC path: pass JWT and scope directly; server calls prepareOidcInputs internally
+    const oidcInputs: OidcProveInputs = { jwt: params.jwt, scope_string: scope };
+    proveResponse = await submitProof(config, {
+      circuit: params.circuit,
+      inputs: oidcInputs,
+      paymentTxHash,
+      paymentNonce: challenge.nonce,
+    });
+    recordStep(5, 'Generate Proof (OIDC)', proveResponse, t);
+  } else if (isE2E) {
     // E2E path: encrypt inputs with TEE's attested public key
     const encryptedPayload = encryptForTee(
       JSON.stringify({ circuitId, proverToml }),
@@ -120,7 +142,7 @@ export async function generateProof(
     // Standard path: send plaintext inputs (TEE disabled / local dev)
     proveResponse = await submitProof(config, {
       circuit: params.circuit,
-      inputs,
+      inputs: easInputs!,
       paymentTxHash,
       paymentNonce: challenge.nonce,
     });

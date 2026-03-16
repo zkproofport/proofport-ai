@@ -4,7 +4,7 @@ Client SDK for ZKProofport zero-knowledge proof generation on Base Mainnet.
 
 ## Overview
 
-@zkproofport-ai/sdk is a TypeScript SDK for generating privacy-preserving zero-knowledge proofs using Coinbase KYC attestations. Generate a proof with a single function call, or fine-tune each step for custom workflows.
+@zkproofport-ai/sdk is a TypeScript SDK for generating privacy-preserving zero-knowledge proofs using Coinbase KYC attestations and OIDC JWT tokens. Generate a proof with a single function call, or fine-tune each step for custom workflows.
 
 Proofs are generated in trusted execution environments (Nitro Enclaves) with cryptographic attestation. Payment is handled transparently via the x402 protocol using EIP-3009 (no user gas costs).
 
@@ -40,14 +40,14 @@ Before using the SDK, you need:
 3. **USDC balance on Base** — At least $0.10 per proof. Payment is gasless (EIP-3009 signature, facilitator pays gas).
 4. **Attestation wallet private key** (required) — The private key of the wallet that holds the EAS attestation. This is always a raw private key because the attestation is tied to a specific address.
 
-5. **Payment wallet** (optional) — Wallet with USDC balance for proof payment. Defaults to the attestation wallet. Choose one:
+5. **Payment wallet** (recommended) — Separate wallet with USDC balance for proof payment. Choose one:
 
-   - **Same as attestation wallet** — No additional setup. The attestation wallet must hold USDC.
-     > ⚠️ **Privacy risk:** Using the attestation wallet for payment exposes your KYC-verified wallet address on-chain in the payment transaction, linking your identity to on-chain activity. Use a separate payment wallet for privacy.
+   - **Same as attestation wallet (NOT recommended)** — No additional setup, but **defeats zero-knowledge privacy**.
+     > ⚠️ **Privacy risk:** Using the attestation wallet for payment exposes your KYC-verified wallet address on-chain in the payment transaction, **directly linking your real-world identity to on-chain activity**. This defeats the purpose of zero-knowledge proofs. Always use a separate payment wallet (private key or CDP) to preserve privacy.
    - **Separate private key** — A different wallet with USDC balance.
    - **CDP MPC wallet** — Coinbase Developer Platform managed wallet. Private keys never leave Coinbase's TEE. Get credentials at [CDP Portal](https://portal.cdp.coinbase.com). Requires additional install:
      ```bash
-     npm install @coinbase/agentkit @coinbase/cdp-sdk
+     npm install @coinbase/cdp-sdk
      ```
      | Credential | Required | Description |
      |------------|----------|-------------|
@@ -58,25 +58,7 @@ Before using the SDK, you need:
 
 ## Quick Start
 
-### Single Wallet (attestation + payment)
-
-```typescript
-import { generateProof, createConfig, fromPrivateKey, verifyProof } from '@zkproofport-ai/sdk';
-
-const config = createConfig();
-const signer = fromPrivateKey(process.env.PRIVATE_KEY);
-
-const result = await generateProof(
-  config,
-  { attestation: signer },
-  { circuit: 'coinbase_kyc', scope: 'my-app' }
-);
-
-const verification = await verifyProof(result);
-console.log('Valid:', verification.valid);
-```
-
-### Separate Payment Wallet
+### Separate Payment Wallet (Recommended)
 
 ```typescript
 import { generateProof, createConfig, fromPrivateKey, verifyProof } from '@zkproofport-ai/sdk';
@@ -98,14 +80,34 @@ console.log('Valid:', verification.valid);
 ### With CDP Payment Wallet
 
 ```typescript
-import { generateProof, createConfig, fromPrivateKey, CdpWalletSigner, verifyProof } from '@zkproofport-ai/sdk';
+import { generateProof, createConfig, fromPrivateKey, fromExternalWallet, verifyProof } from '@zkproofport-ai/sdk';
+import { CdpClient } from '@coinbase/cdp-sdk';
 
 const config = createConfig();
 const attestationSigner = fromPrivateKey(process.env.ATTESTATION_KEY);
-const paymentSigner = new CdpWalletSigner({
-  getAddress: () => myWallet.getAddress(),
-  signMessage: (msg) => myWallet.signMessage(msg),
-  signTypedData: (domain, types, message) => myWallet.signTypedData(domain, types, message),
+
+// Create CDP MPC wallet (private keys never leave Coinbase's TEE)
+const cdp = new CdpClient();
+const account = await cdp.evm.getOrCreateAccount({ name: 'proofport-payment' });
+
+const paymentSigner = fromExternalWallet({
+  getAddress: () => account.address!,
+  signMessage: async (msg) => {
+    const message = msg instanceof Uint8Array ? Buffer.from(msg).toString() : msg;
+    const result = await cdp.evm.signMessage({ address: account.address!, message });
+    return result.signature;
+  },
+  signTypedData: async (domain, types, message) => {
+    const primaryType = Object.keys(types).find(k => k !== 'EIP712Domain') || '';
+    const result = await cdp.evm.signTypedData({ address: account.address!, domain, types, primaryType, message });
+    return result.signature;
+  },
+  sendTransaction: async (tx) => {
+    const result = await cdp.evm.sendTransaction({
+      address: account.address!, transaction: tx, network: 'base-sepolia',
+    });
+    return { hash: result.transactionHash, wait: async () => ({ status: 1 }) };
+  },
 });
 
 const result = await generateProof(
@@ -352,13 +354,36 @@ const result = await generateProof(config, signers, {
 });
 ```
 
+### OIDC Domain
+
+Proves email domain affiliation using an OIDC JWT token (e.g., Google, Microsoft). No EAS attestation or Coinbase account required — only a payment wallet and a JWT `id_token`.
+
+```typescript
+import { createConfig, generateProof, fromPrivateKey } from '@zkproofport-ai/sdk';
+
+const config = createConfig();
+const paymentSigner = fromPrivateKey(process.env.PAYMENT_KEY);
+
+const result = await generateProof(
+  config,
+  { attestation: paymentSigner }, // OIDC skips attestation; payment signer is used for x402 payment only
+  {
+    circuit: 'oidc_domain',
+    jwt: idToken, // JWT id_token from Google/Microsoft OAuth
+    scope: 'myapp:verify-domain',
+  },
+);
+```
+
+> **Note:** For OIDC circuits, the `attestation` signer field is only used as a payment fallback. Pass your payment wallet — no EAS-attested wallet needed.
+
 ## Types Reference
 
 **Circuit Types:**
 
 ```typescript
-type CircuitName = 'coinbase_kyc' | 'coinbase_country';
-type CircuitId = 'coinbase_attestation' | 'coinbase_country_attestation';
+type CircuitName = 'coinbase_kyc' | 'coinbase_country' | 'oidc_domain';
+type CircuitId = 'coinbase_attestation' | 'coinbase_country_attestation' | 'oidc_domain_attestation';
 ```
 
 **Configuration:**
@@ -398,7 +423,7 @@ class CdpWalletSigner implements ProofportSigner {
 
 // Wrap external wallet (WalletConnect, MetaMask, Privy, etc.)
 function fromExternalWallet(wallet: {
-  address: string | (() => Promise<string>);
+  getAddress(): string | Promise<string>;
   signMessage(message: Uint8Array): Promise<string>;
   signTypedData(domain: any, types: any, message: any): Promise<string>;
   sendTransaction?(tx: any): Promise<{ hash: string; wait(): Promise<any> }>;
@@ -413,6 +438,7 @@ interface ProofParams {
   scope?: string; // defaults to 'proofport'
   countryList?: string[]; // for coinbase_country only
   isIncluded?: boolean; // for coinbase_country only
+  jwt?: string; // JWT id_token for OIDC circuits (required for oidc_domain)
 }
 ```
 
@@ -445,6 +471,15 @@ interface ProofResult {
     verifierAddress: string;
     rpcUrl: string;
   } | null;
+}
+```
+
+**OIDC Inputs:**
+
+```typescript
+interface OidcProveInputs {
+  jwt: string;
+  scope_string: string;
 }
 ```
 
