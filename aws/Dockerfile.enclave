@@ -97,8 +97,17 @@ COPY enclave-server.bundle.js /app/enclave-server.bundle.js
 # Copy NSM attestation helper (Python, uses only stdlib)
 COPY nsm-helper.py /app/aws/nsm-helper.py
 
+# Copy vsock-to-TCP bridge (Python, inside enclave)
+# Node.js net module doesn't support AF_VSOCK, so this Python bridge
+# listens on vsock:5000 and forwards to the Node.js server on TCP:15000
+COPY enclave-vsock-bridge.py /app/aws/enclave-vsock-bridge.py
+
+# Copy entrypoint script
+COPY enclave-entrypoint.sh /app/enclave-entrypoint.sh
+RUN chmod +x /app/enclave-entrypoint.sh
+
 # Vsock port 5000 (informational — vsock does not use TCP ports,
 # but this documents the convention used in EnclaveClient.ts)
 EXPOSE 5000
 
-CMD ["node", "/app/enclave-server.bundle.js"]
+CMD ["/app/enclave-entrypoint.sh"]
