@@ -22,20 +22,7 @@ RUN mkdir -p /opt/x86-libs && \
     cp /lib/x86_64-linux-gnu/libpthread.so.0 /opt/x86-libs/ || true && \
     cp /lib/x86_64-linux-gnu/libdl.so.2 /opt/x86-libs/ || true
 
-# Stage 2a: SDK Build (native arch)
-FROM node:20-slim AS sdk-builder
-
-WORKDIR /app/packages/sdk
-
-COPY packages/sdk/package*.json ./
-RUN npm ci --ignore-scripts
-
-COPY packages/sdk/tsconfig.json ./
-COPY packages/sdk/src/ ./src/
-
-RUN npx tsc
-
-# Stage 2b: TypeScript Build (native arch)
+# Stage 2: TypeScript Build (native arch)
 FROM node:20-slim AS builder
 
 WORKDIR /app
@@ -98,9 +85,6 @@ RUN npm ci --omit=dev --ignore-scripts
 
 # Copy built JavaScript from builder stage
 COPY --from=builder /app/dist ./dist
-
-# Copy SDK dist from build stage (needed by src/oidc/inputs.ts runtime require)
-COPY --from=sdk-builder /app/packages/sdk/dist/ ./packages/sdk/dist/
 
 # Copy public static assets (agent icon, etc.)
 COPY public/ ./public/
