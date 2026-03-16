@@ -8,6 +8,12 @@
 
 set -e
 
+# Nitro Enclaves don't auto-configure the loopback interface.
+# Without this, 127.0.0.1 is unreachable → "Network is unreachable" errors.
+echo "[entrypoint] Bringing up loopback interface..." >&2
+ip addr add 127.0.0.1/8 dev lo 2>/dev/null || true
+ip link set lo up 2>/dev/null || true
+
 echo "[entrypoint] Starting Node.js enclave server on TCP:15000..." >&2
 node /app/enclave-server.bundle.js &
 NODE_PID=$!
