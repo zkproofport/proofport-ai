@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.5](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.1.4...mcp-v0.1.5) (2026-03-16)
+
+
+### Features
+
+* add OIDC domain circuit support, simplify verify_proof API, add E2E tests ([33f7923](https://github.com/zkproofport/proofport-ai/commit/33f7923b78914eaab6354935ed45d5e94c9bc330))
+
 ## [0.1.4](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.1.3...mcp-v0.1.4) (2026-03-12)
 
 
