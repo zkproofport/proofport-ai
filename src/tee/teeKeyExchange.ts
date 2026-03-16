@@ -123,7 +123,7 @@ export function encryptForTee(plaintext: string, teePublicKeyHex: string): Encry
 
 /**
  * Decrypt an encrypted envelope (for testing purposes on host side).
- * In production, decryption happens inside the TEE (TypeScript aws/enclave-server.ts).
+ * In production, decryption happens inside the TEE (TypeScript src/aws/enclave-server.ts).
  *
  * @param envelope - The encrypted envelope
  * @param teePrivateKey - TEE's X25519 private key (KeyObject)

@@ -16,7 +16,7 @@
  *   attestation  → { type: "attestation", requestId, proofHash?, metadata? }
  *   getPublicKey → { type: "getPublicKey", requestId }
  *
- * Entry point: node aws/enclave-server.js
+ * Entry point: node enclave-server.bundle.js (esbuild bundled)
  */
 
 import * as net from 'node:net';
