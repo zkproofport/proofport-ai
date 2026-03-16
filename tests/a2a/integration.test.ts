@@ -44,7 +44,6 @@ describe('A2A Integration Tests', () => {
       privyAppId: '',
       privyApiSecret: '',
       privyApiUrl: '',
-      signPageUrl: '',
       signingTtlSeconds: 300,
       teeMode: 'disabled',
       enclaveCid: undefined,

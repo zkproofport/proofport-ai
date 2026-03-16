@@ -96,8 +96,7 @@ export interface ProveInputs {
 
 export interface ProveRequest {
   circuit: CircuitName;
-  inputs?: ProveInputs;
-  prover_toml?: string;
+  inputs?: ProveInputs | Record<string, unknown>;
   encrypted_payload?: EncryptedProveRequest['encrypted_payload'];
 }
 

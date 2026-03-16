@@ -98,7 +98,6 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     privyAppId: '',
     privyApiSecret: '',
     privyApiUrl: '',
-    signPageUrl: 'http://localhost:4002',
     signingTtlSeconds: 300,
     teeMode: 'disabled',
     enclaveCid: undefined,

@@ -83,7 +83,7 @@ function importX25519PublicKey(rawKeyHex: string): KeyObject {
  * Generates an ephemeral X25519 key pair, performs ECDH with the TEE's public key,
  * derives an AES-256-GCM key, and encrypts the payload.
  *
- * @param plaintext - The data to encrypt (e.g., JSON string of { circuitId, proverToml })
+ * @param plaintext - The data to encrypt (e.g., JSON string of { circuitId, inputs })
  * @param teePublicKeyHex - TEE's X25519 public key (hex-encoded, 32 bytes)
  * @returns EncryptedEnvelope ready to send to server
  */
@@ -123,7 +123,7 @@ export function encryptForTee(plaintext: string, teePublicKeyHex: string): Encry
 
 /**
  * Decrypt an encrypted envelope (for testing purposes on host side).
- * In production, decryption happens inside the TEE (Python enclave-server.py).
+ * In production, decryption happens inside the TEE (TypeScript aws/enclave-server.ts).
  *
  * @param envelope - The encrypted envelope
  * @param teePrivateKey - TEE's X25519 private key (KeyObject)

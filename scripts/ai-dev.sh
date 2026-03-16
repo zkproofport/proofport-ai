@@ -42,7 +42,6 @@ else
 fi
 export HOST_IP
 echo ""
-echo "[OK] SIGN_PAGE_URL=http://${HOST_IP}:4002"
 echo "[OK] A2A_BASE_URL=http://${HOST_IP}:4002"
 echo "[OK] NEXT_PUBLIC_API_BASE_URL=http://${HOST_IP}:4002"
 

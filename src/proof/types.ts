@@ -22,32 +22,44 @@ export interface PaymentInfo {
   instruction: string;       // human-readable instruction
 }
 
-export interface ProveRequestInputs {
-  // Client-computed derived values
-  signal_hash: string;         // "0x..." 32 bytes, keccak256(solidityPacked([address, scope, circuitId]))
+// Coinbase circuit inputs (coinbase_attestation, coinbase_country_attestation)
+export interface CoinbaseProveInputs {
+  signal_hash: string;         // "0x..." 32 bytes
   nullifier: string;           // "0x..." 32 bytes
-  scope_bytes: string;         // "0x..." 32 bytes, keccak256(toUtf8Bytes(scopeString))
+  scope_bytes: string;         // "0x..." 32 bytes
   merkle_root: string;         // "0x..." 32 bytes
   user_address: string;        // "0x..." 20 bytes
-  signature: string;         // "0x..." eth_sign(signal_hash), 65 bytes
-  user_pubkey_x: string;     // "0x..." 32 bytes
-  user_pubkey_y: string;     // "0x..." 32 bytes
-  raw_transaction: string;   // "0x..." RLP-encoded EAS attestation TX
-  tx_length: number;         // actual byte length before padding
-  coinbase_attester_pubkey_x: string;  // "0x..." 32 bytes
-  coinbase_attester_pubkey_y: string;  // "0x..." 32 bytes
-  merkle_proof: string[];    // ["0x...", ...] each 32 bytes
+  signature: string;           // "0x..." 65 bytes
+  user_pubkey_x: string;       // "0x..." 32 bytes
+  user_pubkey_y: string;       // "0x..." 32 bytes
+  raw_transaction: string;     // "0x..." RLP-encoded EAS attestation TX
+  tx_length: number;
+  coinbase_attester_pubkey_x: string;
+  coinbase_attester_pubkey_y: string;
+  merkle_proof: string[];
   leaf_index: number;
   depth: number;
-  country_list?: string[];   // for country circuit
-  is_included?: boolean;     // for country circuit
+  country_list?: string[];     // for country circuit
+  is_included?: boolean;       // for country circuit
 }
+
+// OIDC circuit inputs (oidc_domain_attestation)
+export interface OidcProveInputs {
+  pubkey_modulus_limbs: string[];
+  signature: string[];
+  scope: string;
+  nullifier: string;
+  domain: string;
+  [key: string]: unknown;      // allow additional OIDC fields
+}
+
+// Server is a blind relay — accepts any structured inputs
+export type ProveRequestInputs = CoinbaseProveInputs | OidcProveInputs;
 
 export interface ProveRequest {
   circuit: string;              // Required: "coinbase_kyc", "coinbase_country", or "oidc_domain"
-  inputs?: ProveRequestInputs;  // Required for coinbase plaintext flow; absent when encrypted_payload or prover_toml is used
-  prover_toml?: string;         // Pre-built Prover.toml from client (OIDC path — server never sees JWT)
-  encrypted_payload?: EncryptedEnvelope;  // E2E: encrypted { circuitId, proverToml } — server acts as blind relay
+  inputs?: ProveRequestInputs;  // Required for plaintext flow; absent when encrypted_payload is used
+  encrypted_payload?: EncryptedEnvelope;  // E2E: encrypted { circuitId, inputs } — server acts as blind relay
 }
 
 export interface ProveResponse {

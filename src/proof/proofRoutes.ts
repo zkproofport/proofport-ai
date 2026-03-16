@@ -4,7 +4,6 @@ import type { Config } from '../config/index.js';
 import type { TeeProvider } from '../tee/types.js';
 import type { CircuitId } from '../config/circuits.js';
 import { verifyPaymentOnChain } from './paymentVerifier.js';
-import { toProverToml } from '../prover/tomlBuilder.js';
 import { BbProver } from '../prover/bbProver.js';
 import { hexToBytes } from '../input/inputBuilder.js';
 import type { CircuitParams } from '../input/inputBuilder.js';
@@ -62,58 +61,68 @@ async function generateProofFromInputs(
   res: Response,
 ): Promise<void> {
   const { circuitId, inputs, paymentVerifyMs, startTime, requestId } = ctx;
+  const isOidc = circuitId === 'oidc_domain_attestation';
 
-  // ── Coinbase flow: client provides all pre-computed fields ──
+  // ── Build structured inputs for the prover ──
+  // Server is a BLIND RELAY: validates minimally, passes inputs as-is to TEE/bbProver.
+  // TEE/bbProver builds Prover.toml from these inputs.
 
-  // Validate required client-computed fields
-  if (!inputs.signal_hash || !inputs.nullifier || !inputs.scope_bytes || !inputs.merkle_root || !inputs.user_address) {
-    res.status(400).json({ error: 'INVALID_REQUEST', message: 'Missing required derived fields: signal_hash, nullifier, scope_bytes, merkle_root, user_address' });
-    return;
-  }
-
-  // Country circuit validation
-  if (circuitId === 'coinbase_country_attestation') {
-    if (!inputs.country_list || inputs.country_list.length === 0) {
-      res.status(400).json({ error: 'INVALID_REQUEST', message: 'country_list required for country circuit' });
-      return;
-    }
-    if (typeof inputs.is_included !== 'boolean') {
-      res.status(400).json({ error: 'INVALID_REQUEST', message: 'is_included required for country circuit' });
-      return;
-    }
-  }
-
-  // ALL values come from client -- server does ZERO computation
+  let proverInputs: Record<string, any>;
   const inputBuildStart = Date.now();
-  const rawTxBytes = hexToBytes(inputs.raw_transaction);
 
-  const circuitParams: CircuitParams = {
-    signalHash: ethers.getBytes(inputs.signal_hash),
-    merkleRoot: inputs.merkle_root,
-    scopeBytes: ethers.getBytes(inputs.scope_bytes),
-    nullifierBytes: ethers.getBytes(inputs.nullifier),
-    userAddress: inputs.user_address,
-    userSignature: inputs.signature,
-    userPubkeyX: inputs.user_pubkey_x,
-    userPubkeyY: inputs.user_pubkey_y,
-    rawTxBytes: Array.from(rawTxBytes),
-    txLength: inputs.tx_length,
-    attesterPubkeyX: inputs.coinbase_attester_pubkey_x,
-    attesterPubkeyY: inputs.coinbase_attester_pubkey_y,
-    merkleProof: inputs.merkle_proof,
-    merkleLeafIndex: inputs.leaf_index,
-    merkleDepth: inputs.depth,
-    ...(circuitId === 'coinbase_country_attestation' && {
-      countryList: inputs.country_list,
-      countryListLength: (inputs.country_list || []).length,
-      isIncluded: inputs.is_included,
-    }),
-  };
+  if (isOidc) {
+    // OIDC: pass OidcCircuitInputs directly — TEE/bbProver calls toOidcProverToml()
+    const oidc = inputs as import('./types.js').OidcProveInputs;
+    if (!oidc.pubkey_modulus_limbs || !oidc.scope || !oidc.nullifier) {
+      res.status(400).json({ error: 'INVALID_REQUEST', message: 'Missing required OIDC fields: pubkey_modulus_limbs, scope, nullifier' });
+      return;
+    }
+    proverInputs = inputs;
+  } else {
+    // Coinbase: validate and convert to CircuitParams — TEE/bbProver calls toProverToml()
+    const cb = inputs as import('./types.js').CoinbaseProveInputs;
+    if (!cb.signal_hash || !cb.nullifier || !cb.scope_bytes || !cb.merkle_root || !cb.user_address) {
+      res.status(400).json({ error: 'INVALID_REQUEST', message: 'Missing required derived fields: signal_hash, nullifier, scope_bytes, merkle_root, user_address' });
+      return;
+    }
+
+    if (circuitId === 'coinbase_country_attestation') {
+      if (!cb.country_list || cb.country_list.length === 0) {
+        res.status(400).json({ error: 'INVALID_REQUEST', message: 'country_list required for country circuit' });
+        return;
+      }
+      if (typeof cb.is_included !== 'boolean') {
+        res.status(400).json({ error: 'INVALID_REQUEST', message: 'is_included required for country circuit' });
+        return;
+      }
+    }
+
+    const rawTxBytes = hexToBytes(cb.raw_transaction);
+    proverInputs = {
+      signalHash: ethers.getBytes(cb.signal_hash),
+      merkleRoot: cb.merkle_root,
+      scopeBytes: ethers.getBytes(cb.scope_bytes),
+      nullifierBytes: ethers.getBytes(cb.nullifier),
+      userAddress: cb.user_address,
+      userSignature: cb.signature,
+      userPubkeyX: cb.user_pubkey_x,
+      userPubkeyY: cb.user_pubkey_y,
+      rawTxBytes: Array.from(rawTxBytes),
+      txLength: cb.tx_length,
+      attesterPubkeyX: cb.coinbase_attester_pubkey_x,
+      attesterPubkeyY: cb.coinbase_attester_pubkey_y,
+      merkleProof: cb.merkle_proof,
+      merkleLeafIndex: cb.leaf_index,
+      merkleDepth: cb.depth,
+      ...(circuitId === 'coinbase_country_attestation' && {
+        countryList: cb.country_list,
+        countryListLength: (cb.country_list || []).length,
+        isIncluded: cb.is_included,
+      }),
+    } satisfies CircuitParams;
+  }
 
   const inputBuildMs = Date.now() - inputBuildStart;
-
-  // Build proverToml
-  const proverToml = toProverToml(circuitId as 'coinbase_attestation' | 'coinbase_country_attestation', circuitParams);
 
   // Generate proof via TEE or BbProver
   const proveStart = Date.now();
@@ -129,9 +138,8 @@ async function generateProofFromInputs(
   if (teeMode === 'nitro' && deps.teeProvider) {
     const vsockResponse = await deps.teeProvider.prove(
       circuitId,
-      [],
+      proverInputs,
       requestId,
-      proverToml,
     );
 
     if (vsockResponse.type === 'error') {
@@ -148,7 +156,7 @@ async function generateProofFromInputs(
       nargoPath: config.nargoPath,
       circuitsDir: config.circuitsDir,
     });
-    const bbResult = await bbProver.prove(circuitId, circuitParams);
+    const bbResult = await bbProver.prove(circuitId, proverInputs);
     proof = bbResult.proof;
     publicInputs = bbResult.publicInputs;
     proofWithInputs = bbResult.proofWithInputs;
@@ -305,8 +313,8 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
       if (config.paymentMode === 'disabled') {
         log.info({ action: 'prove.payment_skipped', circuit: circuitId }, 'Payment disabled, skipping');
 
-        if (!body.inputs && !body.prover_toml) {
-          res.status(400).json({ error: 'INVALID_REQUEST', message: 'Missing inputs or prover_toml' });
+        if (!body.inputs) {
+          res.status(400).json({ error: 'INVALID_REQUEST', message: 'Missing inputs' });
           return;
         }
       } else {
@@ -331,9 +339,9 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
           return;
         }
 
-        // For plaintext flow, inputs or prover_toml are required (only checked when payment header present)
-        if (!body.encrypted_payload && !body.inputs && !body.prover_toml) {
-          res.status(400).json({ error: 'INVALID_REQUEST', message: 'Missing inputs/prover_toml (or use encrypted_payload for E2E flow)' });
+        // For plaintext flow, inputs are required (only checked when payment header present)
+        if (!body.encrypted_payload && !body.inputs) {
+          res.status(400).json({ error: 'INVALID_REQUEST', message: 'Missing inputs (or use encrypted_payload for E2E flow)' });
           return;
         }
 
@@ -447,90 +455,7 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
       const chainId = isTestnet ? 84532 : 8453;
       const verifierAddress = getVerifierAddress(circuitId, String(chainId)) || null;
 
-      // ── Pre-built proverToml path: client already prepared all inputs ──
-      // Used by OIDC circuits where JWT is parsed on the client side.
-      // Server acts as a blind relay — never sees the raw JWT content.
-      if (body.prover_toml) {
-        const proverToml = body.prover_toml;
-
-        const proveStart = Date.now();
-        let proof: string;
-        let publicInputs: string;
-        let proofWithInputs: string;
-        let attestationDoc: string | undefined;
-
-        const teeMode = config.teeMode || 'disabled';
-        log.info({ action: 'prove.generate.start', requestId, circuit: circuitId, teeMode, encrypted: false }, 'Proof generation started (pre-built proverToml)');
-
-        if (teeMode === 'nitro' && deps.teeProvider) {
-          const vsockResponse = await deps.teeProvider.prove(circuitId, [], requestId, proverToml);
-          if (vsockResponse.type === 'error') {
-            throw new Error(`TEE proof generation failed: ${vsockResponse.error}`);
-          }
-          proof = vsockResponse.proof || '';
-          publicInputs = Array.isArray(vsockResponse.publicInputs) ? vsockResponse.publicInputs[0] || '' : '';
-          proofWithInputs = proof + (publicInputs.startsWith('0x') ? publicInputs.slice(2) : publicInputs);
-          attestationDoc = vsockResponse.attestationDocument;
-        } else {
-          const bbProver = new BbProver({
-            bbPath: config.bbPath,
-            nargoPath: config.nargoPath,
-            circuitsDir: config.circuitsDir,
-          });
-          const bbResult = await bbProver.prove(circuitId, {} as CircuitParams, proverToml);
-          proof = bbResult.proof;
-          publicInputs = bbResult.publicInputs;
-          proofWithInputs = bbResult.proofWithInputs;
-        }
-
-        const proveMs = Date.now() - proveStart;
-        log.info({ action: 'prove.generate.complete', requestId, circuit: circuitId, teeMode, proveMs, proofSize: proof.length }, 'Proof generation complete (pre-built proverToml)');
-
-        // Build attestation info
-        let attestation: ProveResponse['attestation'] = null;
-        if (attestationDoc) {
-          try {
-            const parsedDoc = parseAttestationDocument(attestationDoc);
-            const verification = await verifyAttestationDocument(parsedDoc);
-            attestation = {
-              document: attestationDoc,
-              proof_hash: ethers.keccak256(proof),
-              verification: {
-                rootCaValid: verification.rootCaValid ?? false,
-                chainValid: verification.chainValid ?? false,
-                signatureValid: verification.signatureValid ?? false,
-                pcrs: Object.fromEntries(
-                  Array.from(parsedDoc.pcrs.entries()).map(([k, v]) => [k, ethers.hexlify(v)])
-                ),
-              },
-            };
-          } catch (e: unknown) {
-            log.warn({ action: 'prove.attestation.parse_error', err: e }, 'Failed to parse attestation');
-          }
-        }
-
-        const response: ProveResponse = {
-          proof,
-          publicInputs,
-          proofWithInputs,
-          attestation,
-          timing: {
-            totalMs: Date.now() - startTime,
-            paymentVerifyMs,
-            proveMs,
-          },
-          verification: verifierAddress ? {
-            chainId,
-            verifierAddress,
-            rpcUrl: config.chainRpcUrl,
-          } : null,
-        };
-
-        res.json(response);
-        return;
-      }
-
-      // ── Coinbase flow: client provides structured inputs, server builds proverToml ──
+      // ── Plaintext flow: client provides structured inputs, server relays to TEE/bbProver ──
       await generateProofFromInputs(
         {
           circuitId,

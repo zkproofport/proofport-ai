@@ -62,7 +62,7 @@ services:
       start_period: 5s
 
   # -------------------------------------------------------------------------
-  # proofport-ai — MCP/A2A server + sign-page
+  # proofport-ai — MCP/A2A server
   #
   # Image is pulled from ECR. Set AI_IMAGE in /opt/proofport-ai/.env.
   #
@@ -87,7 +87,6 @@ services:
       - /opt/proofport-ai/.env
     ports:
       - "4002:4002"  # MCP/A2A/REST API
-      - "3200:3200"  # sign-page (Next.js wallet signing UI)
     volumes:
       # Compiled Noir circuit artifacts (bytecode + verification key).
       # Populated by the CI/CD pipeline (sync-circuits step) or manually.

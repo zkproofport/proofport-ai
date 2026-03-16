@@ -49,7 +49,7 @@ export {
 } from './inputs.js';
 
 // OIDC input computation (client-side JWT parsing)
-export { prepareOidcInputs, buildOidcProverToml } from './oidc-inputs.js';
+export { prepareOidcInputs } from './oidc-inputs.js';
 export type { OidcCircuitInputs, PrepareOidcParams } from './oidc-inputs.js';
 
 // Signer abstraction

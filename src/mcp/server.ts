@@ -322,7 +322,7 @@ Server returns 402 with nonce and TEE public key:
 }
 \`\`\`
 
-**3b. Encrypt inputs** with the TEE's X25519 public key using ECDH + AES-256-GCM. Build Prover.toml locally, then encrypt \`{ circuitId, proverToml }\`.
+**3b. Encrypt inputs** with the TEE's X25519 public key using ECDH + AES-256-GCM. Encrypt structured inputs: \`{ circuitId, inputs }\`.
 
 **3c. Pay USDC** using the nonce. Amount = 100000 (6-decimal units = $0.10).
 - Base Sepolia USDC: \`0x036CbD53842c5426634e7929541eC2318f3dCF7e\`

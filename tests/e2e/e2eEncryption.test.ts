@@ -120,7 +120,7 @@ describe('E2E Encryption Flow', () => {
 
       // Encrypt a dummy payload
       const encryptedPayload = encryptForTee(
-        JSON.stringify({ circuitId: 'coinbase_attestation', proverToml: 'signal_hash = [0xab]' }),
+        JSON.stringify({ circuitId: 'coinbase_attestation', inputs: { signal_hash: '0xab' } }),
         challengeRes.json.teePublicKey.publicKey,
       );
 
@@ -142,7 +142,7 @@ describe('E2E Encryption Flow', () => {
       if (!challengeRes.json.teePublicKey) return;
 
       const encryptedPayload = encryptForTee(
-        JSON.stringify({ circuitId: 'coinbase_attestation', proverToml: 'signal_hash = [0xab]' }),
+        JSON.stringify({ circuitId: 'coinbase_attestation', inputs: { signal_hash: '0xab' } }),
         challengeRes.json.teePublicKey.publicKey,
       );
 

@@ -9,13 +9,10 @@
 #   Local  → EC2 :80 (HTTP) → app containers (health checks)
 #
 # Routing:
-#   /sign/*   → sign-page Next.js (port 3200)  — wallet signing UI
-#   /_next/*  → sign-page Next.js (port 3200)  — static assets (optimization)
 #   /*        → proofport-ai Node.js (port 4002) — MCP/A2A/REST API
 #
 # Ports:
 #   4002 — Main app: MCP, A2A, REST API, health check, payment endpoints
-#   3200 — sign-page: Next.js static signing UI (/sign/*, /pay/*)
 
 {
   # Admin API on loopback only (for health checks and config reload)
@@ -65,48 +62,7 @@
   tls internal
 
   # ---------------------------------------------------------------------------
-  # sign-page routing — Next.js wallet signing UI
-  #
-  # Routes:
-  #   /sign/:requestId   — attestation signing page (EIP-712 typed data)
-  #   /pay/:requestId    — x402 payment signing page (EIP-3009 transfer auth)
-  #   /s/:requestId      — short alias for /sign/:requestId
-  # ---------------------------------------------------------------------------
-  handle /sign/* {
-    reverse_proxy localhost:3200 {
-      header_up X-Real-IP {remote_host}
-      header_up X-Forwarded-For {remote_host}
-      header_up X-Forwarded-Proto {scheme}
-    }
-  }
-
-  handle /pay/* {
-    reverse_proxy localhost:3200 {
-      header_up X-Real-IP {remote_host}
-      header_up X-Forwarded-For {remote_host}
-      header_up X-Forwarded-Proto {scheme}
-    }
-  }
-
-  handle /s/* {
-    reverse_proxy localhost:3200 {
-      header_up X-Real-IP {remote_host}
-      header_up X-Forwarded-For {remote_host}
-      header_up X-Forwarded-Proto {scheme}
-    }
-  }
-
-  # Next.js static assets — direct to sign-page (avoids Express proxy hop)
-  handle /_next/* {
-    reverse_proxy localhost:3200 {
-      header_up X-Real-IP {remote_host}
-      header_up X-Forwarded-For {remote_host}
-      header_up X-Forwarded-Proto {scheme}
-    }
-  }
-
-  # ---------------------------------------------------------------------------
-  # Default — all other traffic goes to the main app (MCP/A2A/REST)
+  # Default — all traffic goes to the main app (MCP/A2A/REST)
   #
   # Includes:
   #   /mcp                  — MCP StreamableHTTP endpoint
@@ -140,38 +96,6 @@
 
 # HTTP listener — kept for local health checks (curl http://localhost/health)
 :80 {
-  handle /sign/* {
-    reverse_proxy localhost:3200 {
-      header_up X-Real-IP {remote_host}
-      header_up X-Forwarded-For {remote_host}
-      header_up X-Forwarded-Proto {scheme}
-    }
-  }
-
-  handle /pay/* {
-    reverse_proxy localhost:3200 {
-      header_up X-Real-IP {remote_host}
-      header_up X-Forwarded-For {remote_host}
-      header_up X-Forwarded-Proto {scheme}
-    }
-  }
-
-  handle /s/* {
-    reverse_proxy localhost:3200 {
-      header_up X-Real-IP {remote_host}
-      header_up X-Forwarded-For {remote_host}
-      header_up X-Forwarded-Proto {scheme}
-    }
-  }
-
-  handle /_next/* {
-    reverse_proxy localhost:3200 {
-      header_up X-Real-IP {remote_host}
-      header_up X-Forwarded-For {remote_host}
-      header_up X-Forwarded-Proto {scheme}
-    }
-  }
-
   handle {
     reverse_proxy localhost:4002 {
       header_up X-Real-IP {remote_host}

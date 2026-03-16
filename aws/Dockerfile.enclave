@@ -47,11 +47,13 @@ RUN curl -fsSL \
 # ONLY the SRS points needed for our circuit size (~32MB).
 COPY circuits/coinbase-attestation/target/coinbase_attestation.json /tmp/circuits/
 COPY circuits/coinbase-country-attestation/target/coinbase_country_attestation.json /tmp/circuits/
+COPY circuits/oidc-domain-attestation/target/oidc_domain_attestation.json /tmp/circuits/
 RUN ./bb write_vk -b /tmp/circuits/coinbase_attestation.json -o /tmp/vk_dummy \
     && ./bb write_vk -b /tmp/circuits/coinbase_country_attestation.json -o /tmp/vk_dummy2 \
+    && ./bb write_vk -b /tmp/circuits/oidc_domain_attestation.json -o /tmp/vk_dummy3 \
     && ls -la /root/.bb-crs/ \
     && du -sh /root/.bb-crs/ \
-    && rm -rf /tmp/circuits /tmp/vk_dummy /tmp/vk_dummy2
+    && rm -rf /tmp/circuits /tmp/vk_dummy /tmp/vk_dummy2 /tmp/vk_dummy3
 
 # ─────────────────────────────────────────────────────────────
 # Stage 2: Runtime image — minimal Ubuntu 24.04
@@ -61,18 +63,16 @@ FROM ubuntu:24.04
 # Install runtime dependencies
 # - jq:              bb uses it internally for JSON processing
 # - ca-certificates: for any TLS calls (SRS download, etc.)
-# - python3:         vsock server runtime
-# - cbor2:           CBOR encoding/decoding for NSM attestation ioctl
-# - cryptography:    X25519 ECDH + AES-256-GCM for E2E encryption
+# - python3:         NSM helper for /dev/nsm ioctl (stdlib only, no pip packages)
+# - nodejs:          Enclave server runtime (TypeScript compiled to JS)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     ca-certificates \
     python3 \
-    python3-pip \
-    && pip3 install --break-system-packages cbor2 cryptography \
-    && apt-get purge -y python3-pip \
-    && apt-get autoremove -y \
-    && rm -rf /var/lib/apt/lists/* /root/.cache/pip
+    curl \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -89,12 +89,18 @@ COPY --from=builder /root/.bb-crs/ /root/.bb-crs/
 # the build context (aws/circuits/) before running docker build.
 COPY circuits/ /app/circuits/
 
-# Copy vsock server
-COPY enclave-server.py /app/enclave-server.py
-RUN chmod +x /app/enclave-server.py
+# Copy compiled enclave server and dependencies
+# The enclave-server.ts imports from src/prover/tomlBuilder.ts, so we need
+# the compiled dist/ and node_modules from the main app build.
+COPY dist/ /app/dist/
+COPY node_modules/ /app/node_modules/
+COPY package.json /app/package.json
+
+# Copy NSM attestation helper (Python, uses only stdlib)
+COPY nsm-helper.py /app/aws/nsm-helper.py
 
 # Vsock port 5000 (informational — vsock does not use TCP ports,
 # but this documents the convention used in EnclaveClient.ts)
 EXPOSE 5000
 
-CMD ["python3", "/app/enclave-server.py"]
+CMD ["node", "/app/dist/aws/enclave-server.js"]

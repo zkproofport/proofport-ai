@@ -31,7 +31,6 @@ describe('A2A Agent Card', () => {
       privyAppId: '',
       privyApiSecret: '',
       privyApiUrl: '',
-      signPageUrl: '',
       signingTtlSeconds: 300,
       teeMode: 'disabled',
       enclaveCid: undefined,

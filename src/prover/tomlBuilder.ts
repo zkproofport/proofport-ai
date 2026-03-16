@@ -3,6 +3,24 @@ import type { CircuitParams } from '../input/inputBuilder.js';
 
 export type { CircuitParams };
 
+// ─── OIDC Circuit Inputs ────────────────────────────────────────────────
+
+export interface OidcCircuitInputs {
+  // Public inputs
+  pubkey_modulus_limbs: string[];   // 18 × u128 decimal strings
+  domain: { storage: number[]; len: number };
+  scope: number[];                  // 32 bytes
+  nullifier: number[];              // 32 bytes
+
+  // Private inputs
+  partial_data: { storage: number[]; len: number };
+  partial_hash: number[];           // 8 × u32
+  full_data_length: number;
+  base64_decode_offset: number;
+  redc_params_limbs: string[];      // 18 × u128 decimal strings
+  signature_limbs: string[];        // 18 × u128 decimal strings
+}
+
 function bytesToHexArray(bytes: number[] | Uint8Array): string {
   const arr = Array.from(bytes);
   return '[' + arr.map(b => '0x' + b.toString(16).padStart(2, '0')).join(', ') + ']';
@@ -107,4 +125,60 @@ export function toProverToml(
   lines.push(`merkle_proof_depth = ${p.merkleDepth}`);
 
   return lines.join('\n');
+}
+
+// ─── OIDC Prover.toml helpers ───────────────────────────────────────────
+
+function toHexArray(bytes: number[]): string {
+  const lines: string[] = [];
+  for (let i = 0; i < bytes.length; i += 16) {
+    const chunk = bytes.slice(i, i + 16);
+    lines.push('    ' + chunk.map(b => '0x' + b.toString(16).padStart(2, '0')).join(', '));
+  }
+  return '[\n' + lines.join(',\n') + '\n]';
+}
+
+function toDecimalArray(values: string[]): string {
+  return '[\n' + values.map((v, i) => {
+    const comma = i < values.length - 1 ? ',' : '';
+    return `    "${v}"${comma}`;
+  }).join('\n') + '\n]';
+}
+
+function toU32Array(values: number[]): string {
+  return '[\n' + values.map((v, i) => {
+    const comma = i < values.length - 1 ? ',' : '';
+    return `    ${v >>> 0}${comma}`;
+  }).join('\n') + '\n]';
+}
+
+/**
+ * Build a Prover.toml string from OidcCircuitInputs.
+ * Ported from packages/sdk/src/oidc-inputs.ts buildOidcProverToml().
+ */
+export function toOidcProverToml(inputs: OidcCircuitInputs): string {
+  const lines: string[] = [];
+
+  lines.push('# Public Inputs');
+  lines.push(`pubkey_modulus_limbs = ${toDecimalArray(inputs.pubkey_modulus_limbs)}`);
+  lines.push(`scope = ${toHexArray(inputs.scope)}`);
+  lines.push(`nullifier = ${toHexArray(inputs.nullifier)}`);
+  lines.push('');
+  lines.push('# Private Inputs');
+  lines.push(`partial_hash = ${toU32Array(inputs.partial_hash)}`);
+  lines.push(`full_data_length = ${inputs.full_data_length}`);
+  lines.push(`base64_decode_offset = ${inputs.base64_decode_offset}`);
+  lines.push(`redc_params_limbs = ${toDecimalArray(inputs.redc_params_limbs)}`);
+  lines.push(`signature_limbs = ${toDecimalArray(inputs.signature_limbs)}`);
+  lines.push('');
+  lines.push('# BoundedVec tables (must be last in TOML)');
+  lines.push('[domain]');
+  lines.push(`storage = ${toHexArray(inputs.domain.storage)}`);
+  lines.push(`len = ${inputs.domain.len}`);
+  lines.push('');
+  lines.push('[partial_data]');
+  lines.push(`storage = ${toHexArray(inputs.partial_data.storage)}`);
+  lines.push(`len = ${inputs.partial_data.len}`);
+
+  return lines.join('\n') + '\n';
 }

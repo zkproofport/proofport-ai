@@ -110,7 +110,7 @@ proofport-ai/
 │   ├── sdk/                      # @zkproofport-ai/sdk (npm)
 │   └── mcp/                      # @zkproofport-ai/mcp (npm)
 ├── aws/
-│   ├── enclave-server.py         # Python TEE prover (Nitro Enclave)
+│   ├── enclave-server.ts         # TypeScript TEE prover (Nitro Enclave)
 │   ├── Dockerfile.enclave        # Enclave image
 │   ├── deploy-blue-green.sh      # Zero-downtime deployment
 │   ├── boot-active-slot.sh       # Systemd boot script
@@ -277,7 +277,7 @@ Agent Card at `/.well-known/agent.json` provides ERC-8004 on-chain identity and 
 | `disabled` | Standard Linux, no TEE, plaintext allowed |
 | `nitro` | AWS Nitro Enclave, hardware attestation, E2E encryption enforced |
 
-The enclave runs `aws/enclave-server.py` which executes `bb prove` with `--oracle_hash keccak` (required for Solidity verifier compatibility). NSM attestation binds the proof hash and TEE public key to the enclave measurement (PCR0/PCR1/PCR2).
+The enclave runs `aws/enclave-server.ts` (compiled to `dist/aws/enclave-server.js`) which executes `bb prove` with `--oracle_hash keccak` (required for Solidity verifier compatibility). NSM attestation binds the proof hash and TEE public key to the enclave measurement (PCR0/PCR1/PCR2).
 
 **Attestation validation chain:** AWS Nitro Root CA → Regional → Zonal → Instance → Leaf certificate, verified with COSE ES384 signature.
 

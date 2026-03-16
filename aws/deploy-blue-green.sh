@@ -2,8 +2,8 @@
 # deploy-blue-green.sh — Zero-downtime blue-green deployment for proofport-ai
 #
 # Slot layout:
-#   blue  — app:4002, sign-page:3200, container: proofport-ai-blue
-#   green — app:4003, sign-page:3201, container: proofport-ai-green
+#   blue  — app:4002, container: proofport-ai-blue
+#   green — app:4003, container: proofport-ai-green
 #
 # State file: /opt/proofport-ai/active-slot ("blue" or "green")
 # Default (file missing): "blue" → first deploy targets green
@@ -37,16 +37,12 @@ case "$CURRENT_SLOT" in
   blue)
     NEW_SLOT=green
     NEW_APP_PORT=4003
-    NEW_SIGN_PORT=3201
     OLD_APP_PORT=4002
-    OLD_SIGN_PORT=3200
     ;;
   green)
     NEW_SLOT=blue
     NEW_APP_PORT=4002
-    NEW_SIGN_PORT=3200
     OLD_APP_PORT=4003
-    OLD_SIGN_PORT=3201
     ;;
   *)
     die "Unexpected slot value in $STATE_FILE: '$CURRENT_SLOT'"
@@ -56,8 +52,8 @@ esac
 NEW_CONTAINER="proofport-ai-${NEW_SLOT}"
 OLD_CONTAINER="proofport-ai-${CURRENT_SLOT}"
 
-log "Current slot: ${CURRENT_SLOT} (app:${OLD_APP_PORT}, sign:${OLD_SIGN_PORT})"
-log "Target slot:  ${NEW_SLOT}     (app:${NEW_APP_PORT}, sign:${NEW_SIGN_PORT})"
+log "Current slot: ${CURRENT_SLOT} (app:${OLD_APP_PORT})"
+log "Target slot:  ${NEW_SLOT}     (app:${NEW_APP_PORT})"
 
 # ---------------------------------------------------------------------------
 # Load env vars
@@ -121,7 +117,7 @@ docker rm -f "$NEW_CONTAINER" 2>/dev/null || true
 # ---------------------------------------------------------------------------
 # Start new container
 # ---------------------------------------------------------------------------
-log "Starting container $NEW_CONTAINER on app:${NEW_APP_PORT} sign:${NEW_SIGN_PORT}..."
+log "Starting container $NEW_CONTAINER on app:${NEW_APP_PORT}..."
 
 docker run -d \
   --name "$NEW_CONTAINER" \
@@ -137,7 +133,7 @@ docker run -d \
   -v /opt/proofport-ai/circuits:/app/circuits \
   -v /opt/proofport-ai/logs:/app/logs \
   "$AI_IMAGE" \
-  sh -c "HOSTNAME=0.0.0.0 PORT=${NEW_SIGN_PORT} node /app/sign-page/server.js & PORT=${NEW_APP_PORT} node dist/index.js"
+  sh -c "PORT=${NEW_APP_PORT} node dist/index.js"
 
 # ---------------------------------------------------------------------------
 # Health check — new container must pass before traffic switches
@@ -152,12 +148,9 @@ for ((i=1; i<=MAX_RETRIES; i++)); do
   app_status=$(curl -s -o /dev/null -w "%{http_code}" \
     "http://localhost:${NEW_APP_PORT}/health" 2>/dev/null || echo "000")
 
-  sign_status=$(curl -s -o /dev/null -w "%{http_code}" \
-    "http://localhost:${NEW_SIGN_PORT}/" 2>/dev/null || echo "000")
+  log "Health check ${i}/${MAX_RETRIES} — app:${app_status}"
 
-  log "Health check ${i}/${MAX_RETRIES} — app:${app_status} sign:${sign_status}"
-
-  if [[ "$app_status" == "200" && "$sign_status" != "000" ]]; then
+  if [[ "$app_status" == "200" ]]; then
     healthy=true
     break
   fi
@@ -190,10 +183,10 @@ fi
 export CADDY_DOMAIN
 
 # ---------------------------------------------------------------------------
-# Generate Caddyfile with updated port numbers
+# Generate Caddyfile with updated port number
 # ---------------------------------------------------------------------------
 CADDYFILE=/etc/caddy/Caddyfile
-log "Generating new Caddyfile (app:${NEW_APP_PORT}, sign:${NEW_SIGN_PORT})..."
+log "Generating new Caddyfile (app:${NEW_APP_PORT})..."
 
 cat > "$CADDYFILE" <<CADDYFILE_EOF
 # Caddyfile — Caddy reverse proxy for proofport-ai on EC2
@@ -208,13 +201,10 @@ cat > "$CADDYFILE" <<CADDYFILE_EOF
 #
 # Active slot: ${NEW_SLOT}
 # Routing:
-#   /sign/*   → sign-page Next.js (port ${NEW_SIGN_PORT})  — wallet signing UI
-#   /_next/*  → sign-page Next.js (port ${NEW_SIGN_PORT})  — static assets (optimization)
 #   /*        → proofport-ai Node.js (port ${NEW_APP_PORT}) — MCP/A2A/REST API
 #
 # Ports:
 #   ${NEW_APP_PORT} — Main app: MCP, A2A, REST API, health check, payment endpoints
-#   ${NEW_SIGN_PORT} — sign-page: Next.js static signing UI (/sign/*, /pay/*)
 
 {
   # Admin API on loopback only (for health checks and config reload)
@@ -264,48 +254,7 @@ cat > "$CADDYFILE" <<CADDYFILE_EOF
   tls internal
 
   # ---------------------------------------------------------------------------
-  # sign-page routing — Next.js wallet signing UI
-  #
-  # Routes:
-  #   /sign/:requestId   — attestation signing page (EIP-712 typed data)
-  #   /pay/:requestId    — x402 payment signing page (EIP-3009 transfer auth)
-  #   /s/:requestId      — short alias for /sign/:requestId
-  # ---------------------------------------------------------------------------
-  handle /sign/* {
-    reverse_proxy localhost:${NEW_SIGN_PORT} {
-      header_up X-Real-IP {remote_host}
-      header_up X-Forwarded-For {remote_host}
-      header_up X-Forwarded-Proto {scheme}
-    }
-  }
-
-  handle /pay/* {
-    reverse_proxy localhost:${NEW_SIGN_PORT} {
-      header_up X-Real-IP {remote_host}
-      header_up X-Forwarded-For {remote_host}
-      header_up X-Forwarded-Proto {scheme}
-    }
-  }
-
-  handle /s/* {
-    reverse_proxy localhost:${NEW_SIGN_PORT} {
-      header_up X-Real-IP {remote_host}
-      header_up X-Forwarded-For {remote_host}
-      header_up X-Forwarded-Proto {scheme}
-    }
-  }
-
-  # Next.js static assets — direct to sign-page (avoids Express proxy hop)
-  handle /_next/* {
-    reverse_proxy localhost:${NEW_SIGN_PORT} {
-      header_up X-Real-IP {remote_host}
-      header_up X-Forwarded-For {remote_host}
-      header_up X-Forwarded-Proto {scheme}
-    }
-  }
-
-  # ---------------------------------------------------------------------------
-  # Default — all other traffic goes to the main app (MCP/A2A/REST)
+  # Default — all traffic goes to the main app (MCP/A2A/REST)
   #
   # Includes:
   #   /mcp                  — MCP StreamableHTTP endpoint
@@ -339,38 +288,6 @@ cat > "$CADDYFILE" <<CADDYFILE_EOF
 
 # HTTP listener — kept for local health checks (curl http://localhost/health)
 :80 {
-  handle /sign/* {
-    reverse_proxy localhost:${NEW_SIGN_PORT} {
-      header_up X-Real-IP {remote_host}
-      header_up X-Forwarded-For {remote_host}
-      header_up X-Forwarded-Proto {scheme}
-    }
-  }
-
-  handle /pay/* {
-    reverse_proxy localhost:${NEW_SIGN_PORT} {
-      header_up X-Real-IP {remote_host}
-      header_up X-Forwarded-For {remote_host}
-      header_up X-Forwarded-Proto {scheme}
-    }
-  }
-
-  handle /s/* {
-    reverse_proxy localhost:${NEW_SIGN_PORT} {
-      header_up X-Real-IP {remote_host}
-      header_up X-Forwarded-For {remote_host}
-      header_up X-Forwarded-Proto {scheme}
-    }
-  }
-
-  handle /_next/* {
-    reverse_proxy localhost:${NEW_SIGN_PORT} {
-      header_up X-Real-IP {remote_host}
-      header_up X-Forwarded-For {remote_host}
-      header_up X-Forwarded-Proto {scheme}
-    }
-  }
-
   handle {
     reverse_proxy localhost:${NEW_APP_PORT} {
       header_up X-Real-IP {remote_host}
@@ -405,7 +322,7 @@ if ! caddy reload --config "$CADDYFILE" --adapter caddyfile; then
   exit 1
 fi
 
-log "Caddy reloaded — traffic is now routed to $NEW_SLOT (app:${NEW_APP_PORT}, sign:${NEW_SIGN_PORT})"
+log "Caddy reloaded — traffic is now routed to $NEW_SLOT (app:${NEW_APP_PORT})"
 
 # ---------------------------------------------------------------------------
 # Drain in-flight requests on old slot
@@ -470,7 +387,6 @@ echo "============================================================"
 echo "  Blue-green deployment complete"
 echo "  Active slot : ${NEW_SLOT}"
 echo "  App port    : ${NEW_APP_PORT}  (MCP / A2A / REST)"
-echo "  Sign port   : ${NEW_SIGN_PORT}  (Next.js signing UI)"
 echo "  Container   : ${NEW_CONTAINER}"
 echo "  Image       : ${AI_IMAGE}"
 echo "============================================================"

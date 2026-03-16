@@ -26,7 +26,7 @@
 #   4. Start services: systemctl start proofport-ai proofport-ai-enclave vsock-bridge
 #
 # Architecture:
-#   Parent instance: Docker (Node.js app:4002 + sign-page:3200) + Redis:6379 + Caddy:443/80
+#   Parent instance: Docker (Node.js app:4002) + Redis:6379 + Caddy:443/80
 #   Nitro Enclave:   Prover (bb + nargo + circuits) via vsock CID 16, port 5000
 #   vsock-bridge:    TCP:15000 ↔ vsock CID:5000 (Docker container can't use vsock directly)
 #   Cloudflare:      DNS + SSL proxy (Full mode, self-signed origin cert via Caddy)
@@ -211,7 +211,6 @@ PAYMENT_PROOF_PRICE=$0.10
 
 # A2A / Signing
 A2A_BASE_URL=REPLACE_ME
-SIGN_PAGE_URL=REPLACE_ME
 SIGNING_TTL_SECONDS=300
 
 # WalletConnect

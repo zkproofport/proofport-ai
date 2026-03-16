@@ -20,7 +20,7 @@ describe('teeKeyExchange', () => {
   describe('encrypt/decrypt roundtrip', () => {
     it('should encrypt and decrypt successfully', () => {
       const { publicKeyHex, privateKey } = generateTestKeyPair();
-      const plaintext = JSON.stringify({ circuitId: 'coinbase_attestation', proverToml: 'signal_hash = [0xab]' });
+      const plaintext = JSON.stringify({ circuitId: 'coinbase_attestation', inputs: { signal_hash: '0xab' } });
 
       const envelope = encryptForTee(plaintext, publicKeyHex);
       const decrypted = decryptFromTee(envelope, privateKey);

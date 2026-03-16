@@ -27,7 +27,7 @@ export class EnclaveClient implements TeeProvider {
     }
   }
 
-  async prove(circuitId: string, inputs: string[], requestId: string, proverToml?: string): Promise<VsockResponse> {
+  async prove(circuitId: string, inputs: Record<string, any>, requestId: string): Promise<VsockResponse> {
     if (this.mode === 'local') {
       return this.simulateLocalProof(circuitId, inputs, requestId);
     }
@@ -36,7 +36,6 @@ export class EnclaveClient implements TeeProvider {
       type: 'prove',
       circuitId,
       inputs,
-      proverToml,
       requestId,
     };
 
@@ -267,7 +266,7 @@ export class EnclaveClient implements TeeProvider {
 
   private async simulateLocalProof(
     circuitId: string,
-    inputs: string[],
+    inputs: Record<string, any>,
     requestId: string
   ): Promise<VsockResponse> {
     // Simulate proof generation delay
@@ -278,7 +277,7 @@ export class EnclaveClient implements TeeProvider {
       type: 'proof',
       requestId,
       proof: `0x${Buffer.from(`mock-proof-${circuitId}-${Date.now()}`).toString('hex')}`,
-      publicInputs: inputs.slice(0, 3).map((input) => `0x${parseInt(input, 10).toString(16)}`),
+      publicInputs: Object.values(inputs).slice(0, 3).map((v) => `0x${String(v).slice(0, 8)}`),
     };
   }
 }

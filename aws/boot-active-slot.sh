@@ -11,9 +11,9 @@ SLOT=$(cat "${STATE_FILE}" 2>/dev/null | tr -d '[:space:]' || echo "blue")
 CONTAINER="proofport-ai-${SLOT}"
 
 if [[ "${SLOT}" == "blue" ]]; then
-  APP_PORT=4002; SIGN_PORT=3200
+  APP_PORT=4002
 else
-  APP_PORT=4003; SIGN_PORT=3201
+  APP_PORT=4003
 fi
 
 # Load image reference from .env
@@ -25,7 +25,7 @@ if [[ -z "${AI_IMAGE:-}" ]]; then
   exit 1
 fi
 
-echo "Booting slot ${SLOT} (app=${APP_PORT}, sign=${SIGN_PORT})"
+echo "Booting slot ${SLOT} (app=${APP_PORT})"
 echo "Image: ${AI_IMAGE}"
 
 # ECR login + pull
@@ -50,6 +50,6 @@ docker run -d \
   -v /opt/proofport-ai/circuits:/app/circuits \
   -v /opt/proofport-ai/logs:/app/logs \
   "${AI_IMAGE}" \
-  sh -c "HOSTNAME=0.0.0.0 PORT=${SIGN_PORT} node /app/sign-page/server.js & PORT=${APP_PORT} node dist/index.js"
+  sh -c "PORT=${APP_PORT} node dist/index.js"
 
-echo "Container '${CONTAINER}' started (app=${APP_PORT}, sign=${SIGN_PORT})"
+echo "Container '${CONTAINER}' started (app=${APP_PORT})"

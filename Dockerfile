@@ -35,19 +35,6 @@ COPY src/ ./src/
 
 RUN npm run build
 
-# Stage 2.5: Sign Page Build (native arch)
-FROM node:20-alpine AS sign-page-builder
-RUN apk add --no-cache python3 make g++
-WORKDIR /app
-COPY sign-page/package*.json ./
-RUN npm ci
-COPY sign-page/ .
-ARG NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID
-ARG NEXT_PUBLIC_API_BASE_URL
-ENV NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=$NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID
-ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
-RUN npm run build
-
 # Stage 3: Production Runtime (native arch)
 FROM ubuntu:24.04
 
@@ -89,7 +76,7 @@ COPY --from=builder /app/dist ./dist
 # Copy public static assets (agent icon, etc.)
 COPY public/ ./public/
 
-# Copy AWS enclave build files (Dockerfile.enclave, enclave-server.py, vsock-bridge.py, systemd/)
+# Copy AWS enclave build files (Dockerfile.enclave, enclave-server.ts, vsock-bridge.py, systemd/)
 # These are extracted by deploy-ai-aws.yml during EC2 deployment.
 COPY aws/ ./aws/
 
@@ -100,16 +87,12 @@ COPY aws/ ./aws/
 # into the EIF (Enclave Image File) with all dependencies resolved offline.
 COPY circuits/ /app/circuits/
 
-# Copy sign-page standalone build
-COPY --from=sign-page-builder /app/.next/standalone /app/sign-page
-COPY --from=sign-page-builder /app/.next/static /app/sign-page/.next/static
-
 # Environment variables
 ENV NODE_ENV=production
 ENV BB_PATH=/usr/local/bin/bb-wrapper
 ENV NARGO_PATH=/usr/local/bin/nargo
 ENV CIRCUITS_DIR=/app/circuits
 
-EXPOSE 4002 3200
+EXPOSE 4002
 
-CMD ["sh", "-c", "HOSTNAME=0.0.0.0 PORT=3200 node /app/sign-page/server.js & node dist/index.js"]
+CMD ["node", "dist/index.js"]

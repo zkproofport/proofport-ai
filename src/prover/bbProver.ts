@@ -2,8 +2,8 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import type { CircuitParams } from '../input/inputBuilder.js';
-import { toProverToml } from './tomlBuilder.js';
+import { toProverToml, toOidcProverToml } from './tomlBuilder.js';
+import type { CircuitParams, OidcCircuitInputs } from './tomlBuilder.js';
 import { createWorkDir, cleanupWorkDir } from '../circuit/artifactManager.js';
 import { createLogger } from '../logger.js';
 
@@ -33,9 +33,13 @@ export class BbProver {
     }
   ) {}
 
-  async prove(circuitId: string, params: CircuitParams): Promise<BbProveResult>;
-  async prove(circuitId: string, params: CircuitParams, proverTomlOverride: string): Promise<BbProveResult>;
-  async prove(circuitId: string, params: CircuitParams, proverTomlOverride?: string): Promise<BbProveResult> {
+  /**
+   * Generate a ZK proof for the given circuit.
+   *
+   * @param circuitId - Canonical circuit ID
+   * @param inputs - Structured circuit inputs (CircuitParams for coinbase, OidcCircuitInputs for OIDC).
+   */
+  async prove(circuitId: string, inputs: Record<string, any>): Promise<BbProveResult> {
     const packageName = CIRCUIT_PACKAGES[circuitId];
     if (!packageName) {
       throw new Error(`Unknown circuit ID: ${circuitId}`);
@@ -45,11 +49,16 @@ export class BbProver {
     const workDir = await createWorkDir(this.config.circuitsDir, circuitId);
 
     try {
-      // 2. Write Prover.toml to workDir
-      const proverTomlContent = proverTomlOverride ?? toProverToml(
-        circuitId as 'coinbase_attestation' | 'coinbase_country_attestation',
-        params
-      );
+      // 2. Build Prover.toml based on circuit type
+      let proverTomlContent: string;
+      if (circuitId === 'oidc_domain_attestation') {
+        proverTomlContent = toOidcProverToml(inputs as OidcCircuitInputs);
+      } else {
+        proverTomlContent = toProverToml(
+          circuitId as 'coinbase_attestation' | 'coinbase_country_attestation',
+          inputs as CircuitParams
+        );
+      }
       await fs.writeFile(path.join(workDir, 'Prover.toml'), proverTomlContent);
 
       // 3. Run nargo execute witness

@@ -40,8 +40,7 @@ export interface EnclaveImageConfig {
 export interface VsockRequest {
   type: 'prove' | 'health' | 'getPublicKey';
   circuitId?: string;
-  inputs?: string[]; // DEPRECATED: kept for compatibility
-  proverToml?: string; // Prover.toml content for bb CLI path
+  inputs?: Record<string, any>; // Structured circuit inputs (coinbase: CircuitParams-like, OIDC: OidcCircuitInputs)
   encryptedPayload?: EncryptedEnvelope; // E2E encrypted payload for TEE
   requestId: string;
 }
@@ -90,7 +89,7 @@ export interface AttestationDocument {
  */
 export interface TeeProvider {
   readonly mode: TeeMode;
-  prove(circuitId: string, inputs: string[], requestId: string, proverToml?: string): Promise<VsockResponse>;
+  prove(circuitId: string, inputs: Record<string, any>, requestId: string): Promise<VsockResponse>;
   proveEncrypted(encryptedPayload: EncryptedEnvelope, requestId: string): Promise<VsockResponse>;
   healthCheck(): Promise<boolean>;
   getAttestation(): Promise<AttestationDocument | null>;

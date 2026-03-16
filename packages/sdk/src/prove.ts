@@ -5,27 +5,24 @@ import type { EncryptedEnvelope } from './tee.js';
  * Submit proof generation with x402 payment headers.
  * POST /api/v1/prove with X-Payment-TX and X-Payment-Nonce headers.
  *
- * Supports two modes:
- * - `inputs`: client-computed ProveInputs (server builds proverToml)
- * - `proverToml`: pre-built Prover.toml string (server passes directly to prover)
+ * The `inputs` field accepts either:
+ * - `ProveInputs` (EAS coinbase path)
+ * - `OidcCircuitInputs` (OIDC path — structured inputs, server builds Prover.toml)
  */
 export async function submitProof(
   config: ClientConfig,
   request: {
     circuit: CircuitName;
-    inputs?: ProveInputs;
-    proverToml?: string;
+    inputs?: ProveInputs | Record<string, unknown>;
     paymentTxHash: string;
     paymentNonce: string;
   },
 ): Promise<ProveResponse> {
   const url = `${config.baseUrl}/api/v1/prove`;
-  const body: Record<string, unknown> = { circuit: request.circuit };
-  if (request.proverToml) {
-    body.prover_toml = request.proverToml;
-  } else {
-    body.inputs = request.inputs;
-  }
+  const body: Record<string, unknown> = {
+    circuit: request.circuit,
+    inputs: request.inputs,
+  };
   const response = await fetch(url, {
     method: 'POST',
     headers: {

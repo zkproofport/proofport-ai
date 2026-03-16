@@ -5,7 +5,6 @@ import {
   requestChallenge,
   prepareInputs,
   prepareOidcInputs,
-  buildOidcProverToml,
   makePayment,
   submitProof,
   verifyProof,
@@ -177,8 +176,7 @@ RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and 
             return errorResult('jwt is required for oidc_domain circuit');
           }
           const oidcInputs = await prepareOidcInputs({ jwt: params.jwt, scope });
-          const proverToml = buildOidcProverToml(oidcInputs);
-          return jsonResult({ ...oidcInputs, prover_toml: proverToml });
+          return jsonResult(oidcInputs);
         }
 
         // Coinbase path: EAS attestation
@@ -246,7 +244,7 @@ RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and 
   // ─── submit_proof ───────────────────────────────────────────────────
   server.tool(
     'submit_proof',
-    `Step 4 of the step-by-step flow: Submit prepared inputs with x402 payment headers to generate the ZK proof. The TEE server verifies payment on-chain, runs the Noir circuit, and returns the UltraHonk proof. This step may take 30-90 seconds. For oidc_domain circuit, pass the full result from prepare_inputs (which includes prover_toml).`,
+    `Step 4 of the step-by-step flow: Submit prepared inputs with x402 payment headers to generate the ZK proof. The TEE server verifies payment on-chain, runs the Noir circuit, and returns the UltraHonk proof. This step may take 30-90 seconds. The TEE server builds Prover.toml from these inputs.`,
     {
       circuit: z
         .enum(['coinbase_kyc', 'coinbase_country', 'oidc_domain'])
@@ -254,7 +252,7 @@ RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and 
       inputs: z
         .union([z.string(), z.record(z.unknown())])
         .describe(
-          'Full ProveInputs object from prepare_inputs. Accepts a JSON string or a structured object. For oidc_domain, this should include the prover_toml field.',
+          'Full ProveInputs object from prepare_inputs. Accepts a JSON string or a structured object.',
         ),
       payment_tx_hash: z
         .string()
@@ -270,12 +268,13 @@ RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and 
             ? JSON.parse(params.inputs)
             : params.inputs;
 
-        // If inputs contain prover_toml (OIDC path), send it separately
-        const proverToml = (inputs as Record<string, unknown>).prover_toml as string | undefined;
+        const requestBody: Record<string, unknown> = {
+          circuit: params.circuit,
+          inputs,
+        };
 
         const result = await submitProof(config, {
-          circuit: params.circuit,
-          ...(proverToml ? { proverToml } : { inputs }),
+          ...requestBody,
           paymentTxHash: params.payment_tx_hash,
           paymentNonce: params.payment_nonce,
         });
