@@ -268,13 +268,9 @@ RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and 
             ? JSON.parse(params.inputs)
             : params.inputs;
 
-        const requestBody: Record<string, unknown> = {
+        const result = await submitProof(config, {
           circuit: params.circuit,
           inputs,
-        };
-
-        const result = await submitProof(config, {
-          ...requestBody,
           paymentTxHash: params.payment_tx_hash,
           paymentNonce: params.payment_nonce,
         });
@@ -331,8 +327,6 @@ RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and 
 
     const data = {
       baseUrl: config.baseUrl,
-      easRpcUrl: config.easRpcUrl ?? null,
-      easGraphqlUrl: config.easGraphqlUrl ?? null,
       attestationWalletAddress: attestationAddress,
       paymentWalletAddress: paymentAddress,
       supportedCircuits: CIRCUITS,

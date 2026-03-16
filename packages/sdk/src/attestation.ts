@@ -271,8 +271,9 @@ export async function fetchAttestation(
   circuitId: CircuitId,
   recipientAddress: string,
 ): Promise<AttestationData> {
-  const easGraphqlUrl = config.easGraphqlUrl || DEFAULT_EAS_GRAPHQL;
-  const easRpcUrl = config.easRpcUrl || DEFAULT_EAS_RPC;
+  // EAS attestations are ALWAYS on Base Mainnet — never configurable
+  const easGraphqlUrl = DEFAULT_EAS_GRAPHQL;
+  const easRpcUrl = DEFAULT_EAS_RPC;
 
   // Step 1: Query EAS
   const attestation = await fetchAttestationFromEAS(

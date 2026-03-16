@@ -42,8 +42,6 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
 
     config = createConfig({
       baseUrl: BASE_URL,
-      easRpcUrl: 'https://sepolia.base.org',
-      easGraphqlUrl: 'https://base-sepolia.easscan.org/graphql',
     });
 
     attestationSigner = fromPrivateKey(ATTESTATION_KEY);

@@ -138,12 +138,7 @@ The CLI outputs a JSON object with these key fields:
   "attestation": {
     "verification": { "valid": true, "... TEE attestation details" }
   },
-  "timing": { "totalMs": 42150, "proofMs": 38200, "paymentMs": 3100 },
-  "verification": {
-    "verifierAddress": "0x1234...abcd",
-    "chainId": 84532,
-    "rpcUrl": "https://sepolia.base.org"
-  }
+  "timing": { "totalMs": 42150, "proofMs": 38200, "paymentMs": 3100 }
 }
 ```
 
@@ -151,10 +146,9 @@ The CLI outputs a JSON object with these key fields:
 |-------|-------------|
 | `proof` | The ZK proof bytes (hex). Pass to `verify_proof` or on-chain verifier |
 | `publicInputs` | Public inputs for the proof (hex) |
-| `paymentTxHash` | USDC payment transaction hash. Check on [BaseScan](https://sepolia.basescan.org) |
+| `paymentTxHash` | USDC payment transaction hash. Check on [BaseScan](https://basescan.org) |
 | `attestation.verification` | TEE attestation validity — confirms proof was generated inside a Nitro Enclave |
 | `timing` | Performance metrics (total, proof generation, payment) |
-| `verification` | On-chain verifier contract address, chain ID, and RPC URL for independent verification |
 
 #### CLI Options
 
@@ -292,9 +286,6 @@ Verify a ZK proof on-chain against the deployed Solidity verifier contract. Pass
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `result` | object | Yes | Full result object from `generate_proof` — pass it directly |
-| `result.proof` | string | Yes | `0x`-prefixed proof hex |
-| `result.publicInputs` | string | Yes | `0x`-prefixed public inputs hex |
-| `result.verification` | object | Yes | Contains `verifierAddress`, `chainId`, `rpcUrl` |
 
 ### Step-by-Step Flow
 
@@ -331,14 +322,7 @@ Request a 402 payment challenge from the server.
 
 Send USDC payment via the x402 facilitator. Uses the payment wallet (or attestation wallet as fallback).
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `nonce` | string | Yes | Payment nonce from `request_challenge` response |
-| `recipient` | string | Yes | Payment recipient address from `request_challenge` response |
-| `amount` | number | Yes | Amount in USDC base units (e.g., `100000` = $0.10) |
-| `asset` | string | Yes | USDC contract address for the target network |
-| `network` | `"base-sepolia"` \| `"base"` | Yes | Target network |
-| `instruction` | string | Yes | Human-readable payment instruction from `request_challenge` response |
+All parameters are automatically provided by the `request_challenge` response. Pass them as-is.
 
 **Returns:** Transaction hash of the USDC payment.
 
@@ -473,7 +457,7 @@ The payment wallet does not have enough USDC on Base. You need at least $0.10 pe
 
 ### `Transaction failed` from x402 facilitator
 
-The EIP-3009 domain name differs by network — Base Mainnet uses `"USD Coin"` while Base Sepolia uses `"USDC"`. The SDK handles this automatically. If you see this error, ensure you're using the latest version:
+The SDK handles EIP-3009 domain names automatically. If you see this error, ensure you're using the latest version:
 
 ```bash
 npx -y @zkproofport-ai/mcp@latest

@@ -21,8 +21,6 @@ if (!attestationKey && !paymentKeyEnv) {
 
 const config = createConfig({
   ...(process.env.PROOFPORT_URL && { baseUrl: process.env.PROOFPORT_URL }),
-  ...(process.env.EAS_RPC_URL && { easRpcUrl: process.env.EAS_RPC_URL }),
-  ...(process.env.EAS_GRAPHQL_URL && { easGraphqlUrl: process.env.EAS_GRAPHQL_URL }),
 });
 
 // ─── Attestation signer (for Coinbase circuits — EAS attestation is tied to this address)

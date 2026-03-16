@@ -25,10 +25,6 @@ export const CIRCUIT_ID_MAP: Record<CircuitId, CircuitName> = {
 export interface ClientConfig {
   /** proofport-ai server URL (e.g. https://stg-ai.zkproofport.app) */
   baseUrl: string;
-  /** Base Mainnet RPC for EAS attestation fetching */
-  easRpcUrl?: string;
-  /** EAS GraphQL endpoint */
-  easGraphqlUrl?: string;
   /** x402 facilitator URL for payment settlement */
   facilitatorUrl?: string;
   /** Optional headers for facilitator auth (e.g., CDP Bearer token) */

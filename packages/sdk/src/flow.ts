@@ -138,7 +138,7 @@ export async function generateProof(
     // OIDC plaintext path: send structured inputs (server never sees JWT)
     proveResponse = await submitProof(config, {
       circuit: params.circuit,
-      inputs: oidcInputs!,
+      inputs: oidcInputs! as unknown as Record<string, unknown>,
       paymentTxHash,
       paymentNonce: challenge.nonce,
     });

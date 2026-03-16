@@ -45,7 +45,6 @@ let mockServer: {
 
 const testConfig = {
   baseUrl: 'https://test.example.com',
-  easRpcUrl: 'https://mainnet.base.org',
 };
 
 const mockSigner = {
@@ -498,7 +497,6 @@ describe('proofport://config resource', () => {
 
     const data = JSON.parse(result.contents[0].text);
     expect(data.baseUrl).toBe(testConfig.baseUrl);
-    expect(data.easRpcUrl).toBe(testConfig.easRpcUrl);
     expect(data.attestationWalletAddress).toBe('0xMockAttestationAddress');
     expect(data.paymentWalletAddress).toBe('0xMockPaymentAddress');
     expect(data.supportedCircuits).toBeDefined();

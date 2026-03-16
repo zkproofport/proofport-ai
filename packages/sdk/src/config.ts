@@ -19,8 +19,6 @@ import type { ClientConfig } from './types.js';
 export function createConfig(overrides?: Partial<ClientConfig>): ClientConfig {
   return {
     baseUrl: 'https://ai.zkproofport.app',
-    easRpcUrl: 'https://mainnet.base.org',
-    easGraphqlUrl: 'https://base.easscan.org/graphql',
     ...overrides,
   };
 }

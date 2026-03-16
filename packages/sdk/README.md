@@ -104,7 +104,7 @@ const paymentSigner = fromExternalWallet({
   },
   sendTransaction: async (tx) => {
     const result = await cdp.evm.sendTransaction({
-      address: account.address!, transaction: tx, network: 'base-sepolia',
+      address: account.address!, transaction: tx, network: 'base',
     });
     return { hash: result.transactionHash, wait: async () => ({ status: 1 }) };
   },
@@ -152,13 +152,6 @@ import { createConfig } from '@zkproofport-ai/sdk';
 // Mainnet (default) — production use
 const config = createConfig();
 
-// Custom server or RPC endpoints
-const config = createConfig({
-  baseUrl: 'https://ai.zkproofport.app',
-  easRpcUrl: 'https://mainnet.base.org',
-  easGraphqlUrl: 'https://base.easscan.org/graphql',
-});
-
 // Custom x402 facilitator (e.g., for CDP with JWT auth)
 const config = createConfig({
   facilitatorUrl: 'https://facilitator.example.com',
@@ -173,8 +166,6 @@ const config = createConfig({
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `baseUrl` | string | `https://ai.zkproofport.app` | proofport-ai server URL |
-| `easRpcUrl` | string | `https://mainnet.base.org` | Base Mainnet RPC for EAS attestation queries |
-| `easGraphqlUrl` | string | `https://base.easscan.org/graphql` | EAS GraphQL endpoint for attestation schema queries |
 | `facilitatorUrl` | string | `https://x402.dexter.cash` | x402 payment facilitator URL |
 | `facilitatorHeaders` | object | `{}` | Optional auth headers for custom facilitator (e.g., CDP with JWT) |
 
@@ -391,8 +382,6 @@ type CircuitId = 'coinbase_attestation' | 'coinbase_country_attestation' | 'oidc
 ```typescript
 interface ClientConfig {
   baseUrl: string;
-  easRpcUrl?: string;
-  easGraphqlUrl?: string;
   facilitatorUrl?: string;           // x402 facilitator URL (default: https://x402.dexter.cash)
   facilitatorHeaders?: Record<string, string>; // Auth headers for custom facilitator
 }
