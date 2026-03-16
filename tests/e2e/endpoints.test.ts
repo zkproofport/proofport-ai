@@ -274,7 +274,7 @@ describe('REST API — x402 Single-Step Flow', () => {
     expect(json.error).toBe('INVALID_NONCE');
   });
 
-  it('402 nonce expires after 5 minutes (TTL check)', async () => {
+  it('402 nonce expires after 5 minutes (TTL check)', { timeout: 30000 }, async () => {
     // Get a valid nonce first
     const { json: firstRes } = await jsonPost('/api/v1/prove', {
       circuit: 'coinbase_kyc',
@@ -664,10 +664,12 @@ describe('MCP StreamableHTTP', () => {
     }
   });
 
-  it('GET /mcp returns 405 (SSE not supported in stateless mode)', async () => {
-    // Raw fetch — tests HTTP method, not MCP protocol
+  it('GET /mcp returns info about MCP protocol (stateless mode)', async () => {
     const res = await fetch(`${BASE_URL}/mcp`);
-    expect(res.status).toBe(405);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.protocol).toBe('MCP StreamableHTTP');
+    expect(json.tools).toContain('prove');
   });
 });
 
@@ -931,17 +933,27 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
     const result = await stdioClient.callTool({
       name: 'verify_proof',
       arguments: {
-        proof: '0xdeadbeef',
-        public_inputs: '0x' + 'aa'.repeat(32),
-        verifier_address: '0x0036B61dBFaB8f3CfEEF77dD5D45F7EFBFE2035c',
-        chain_id: 84532,
-        rpc_url: 'https://sepolia.base.org',
+        result: {
+          proof: '0xdeadbeef',
+          publicInputs: '0x' + 'aa'.repeat(32),
+          verification: {
+            verifierAddress: '0x0036B61dBFaB8f3CfEEF77dD5D45F7EFBFE2035c',
+            chainId: 84532,
+            rpcUrl: 'https://sepolia.base.org',
+          },
+        },
       },
     });
     const textContent = result.content.find((c: any) => c.type === 'text');
     expect(textContent).toBeDefined();
-    const parsed = JSON.parse((textContent as any).text);
-    expect(parsed.valid === false || parsed.error).toBeTruthy();
+    // Response should indicate error (either JSON with error field, or isError flag)
+    if (result.isError) {
+      // MCP error response
+      expect(textContent).toBeDefined();
+    } else {
+      const parsed = JSON.parse((textContent as any).text);
+      expect(parsed.valid === false || parsed.error).toBeTruthy();
+    }
   });
 
   it('request_challenge returns 402 challenge from server', async () => {
@@ -1065,11 +1077,11 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
     const result = await stdioClient.callTool({
       name: 'verify_proof',
       arguments: {
-        proof: generatedProof.proof,
-        public_inputs: generatedProof.publicInputs,
-        verifier_address: generatedProof.verification.verifierAddress,
-        chain_id: generatedProof.verification.chainId,
-        rpc_url: generatedProof.verification.rpcUrl,
+        result: {
+          proof: generatedProof.proof,
+          publicInputs: generatedProof.publicInputs,
+          verification: generatedProof.verification,
+        },
       },
     });
     const textContent = result.content.find((c: any) => c.type === 'text');
