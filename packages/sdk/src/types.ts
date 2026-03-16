@@ -94,14 +94,10 @@ export interface ProveInputs {
   is_included?: boolean;
 }
 
-export interface OidcProveInputs {
-  jwt: string | undefined;
-  scope_string: string;
-}
-
 export interface ProveRequest {
   circuit: CircuitName;
-  inputs?: ProveInputs | OidcProveInputs;
+  inputs?: ProveInputs;
+  prover_toml?: string;
   encrypted_payload?: EncryptedProveRequest['encrypted_payload'];
 }
 

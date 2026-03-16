@@ -2,7 +2,6 @@ import { ethers } from 'ethers';
 import type {
   ClientConfig,
   CircuitId,
-  OidcProveInputs,
   ProofParams,
   ProofResult,
   StepResult,
@@ -11,6 +10,7 @@ import type {
 import { CIRCUIT_NAME_MAP } from './types.js';
 import { requestChallenge } from './session.js';
 import { prepareInputs, computeSignalHash } from './inputs.js';
+import { prepareOidcInputs, buildOidcProverToml } from './oidc-inputs.js';
 import { makePayment } from './payment.js';
 import { submitProof, submitEncryptedProof } from './prove.js';
 import type { ProofportSigner } from './signer.js';
@@ -81,9 +81,17 @@ export async function generateProof(
     proverToml = buildProverToml(circuitId, easInputs);
     recordStep(2, 'Prepare Inputs', { inputFields: Object.keys(easInputs).length, tomlLength: proverToml.length }, t);
   } else {
-    // OIDC path: skip EAS attestation steps; server handles all input computation
+    // OIDC path: no EAS attestation, prepare inputs locally from JWT
     recordStep(1, 'Sign Signal Hash', { skipped: true, reason: 'oidc' }, Date.now());
-    recordStep(2, 'Prepare Inputs', { skipped: true, reason: 'oidc' }, Date.now());
+
+    // Step 2: Prepare OIDC inputs + build proverToml locally (JWT never leaves client)
+    let t2 = Date.now();
+    if (!params.jwt) {
+      throw new Error('jwt is required for OIDC circuits');
+    }
+    const oidcInputs = await prepareOidcInputs({ jwt: params.jwt, scope });
+    proverToml = buildOidcProverToml(oidcInputs);
+    recordStep(2, 'Prepare Inputs (OIDC)', { inputFields: Object.keys(oidcInputs).length, tomlLength: proverToml.length }, t2);
   }
 
   // Step 3: Request 402 challenge (without inputs — server only needs circuit)
@@ -115,17 +123,7 @@ export async function generateProof(
   t = Date.now();
   let proveResponse;
 
-  if (isOidc) {
-    // OIDC path: pass JWT and scope directly; server calls prepareOidcInputs internally
-    const oidcInputs: OidcProveInputs = { jwt: params.jwt, scope_string: scope };
-    proveResponse = await submitProof(config, {
-      circuit: params.circuit,
-      inputs: oidcInputs,
-      paymentTxHash,
-      paymentNonce: challenge.nonce,
-    });
-    recordStep(5, 'Generate Proof (OIDC)', proveResponse, t);
-  } else if (isE2E) {
+  if (isE2E) {
     // E2E path: encrypt inputs with TEE's attested public key
     const encryptedPayload = encryptForTee(
       JSON.stringify({ circuitId, proverToml }),
@@ -138,8 +136,17 @@ export async function generateProof(
       paymentNonce: challenge.nonce,
     });
     recordStep(5, 'Generate Proof (E2E Encrypted)', proveResponse, t);
+  } else if (isOidc) {
+    // OIDC plaintext path: send pre-built proverToml (server never sees JWT)
+    proveResponse = await submitProof(config, {
+      circuit: params.circuit,
+      proverToml: proverToml!,
+      paymentTxHash,
+      paymentNonce: challenge.nonce,
+    });
+    recordStep(5, 'Generate Proof (OIDC)', proveResponse, t);
   } else {
-    // Standard path: send plaintext inputs (TEE disabled / local dev)
+    // Coinbase plaintext path: send pre-computed inputs (TEE disabled / local dev)
     proveResponse = await submitProof(config, {
       circuit: params.circuit,
       inputs: easInputs!,

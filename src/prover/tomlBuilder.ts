@@ -1,6 +1,5 @@
 import { ethers } from 'ethers';
 import type { CircuitParams } from '../input/inputBuilder.js';
-import { buildOidcProverToml, type OidcCircuitInputs } from '../oidc/inputs.js';
 
 export type { CircuitParams };
 
@@ -75,14 +74,10 @@ function formatCountryList(countries: string[], maxEntries: number): string {
 }
 
 export function toProverToml(
-  circuitId: 'coinbase_attestation' | 'coinbase_country_attestation' | 'oidc_domain_attestation',
-  params: CircuitParams | OidcCircuitInputs
+  circuitId: 'coinbase_attestation' | 'coinbase_country_attestation',
+  params: CircuitParams
 ): string {
-  if (circuitId === 'oidc_domain_attestation') {
-    return buildOidcProverToml(params as unknown as OidcCircuitInputs);
-  }
-
-  const p = params as CircuitParams;
+  const p = params;
   const lines: string[] = [];
 
   lines.push(`signal_hash = ${bytesToHexArray(p.signalHash)}`);

@@ -4,6 +4,8 @@ import {
   generateProof,
   requestChallenge,
   prepareInputs,
+  prepareOidcInputs,
+  buildOidcProverToml,
   makePayment,
   submitProof,
   verifyProof,
@@ -165,10 +167,22 @@ RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and 
     },
     async (params) => {
       try {
-        const userAddress = await signer.getAddress();
         const circuitId = CIRCUIT_NAME_MAP[params.circuit];
         const scope = params.scope || 'proofport';
+        const isOidc = params.circuit === 'oidc_domain';
 
+        if (isOidc) {
+          // OIDC path: prepare inputs locally from JWT (no EAS attestation needed)
+          if (!params.jwt) {
+            return errorResult('jwt is required for oidc_domain circuit');
+          }
+          const oidcInputs = await prepareOidcInputs({ jwt: params.jwt, scope });
+          const proverToml = buildOidcProverToml(oidcInputs);
+          return jsonResult({ ...oidcInputs, prover_toml: proverToml });
+        }
+
+        // Coinbase path: EAS attestation
+        const userAddress = await signer.getAddress();
         const signalHash = computeSignalHash(
           userAddress,
           scope,
@@ -184,7 +198,6 @@ RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and 
           scope,
           countryList: params.country_list,
           isIncluded: params.is_included,
-          ...(params.circuit === 'oidc_domain' && { jwt: params.jwt }),
         });
 
         return jsonResult(inputs);
@@ -233,7 +246,7 @@ RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and 
   // ─── submit_proof ───────────────────────────────────────────────────
   server.tool(
     'submit_proof',
-    `Step 4 of the step-by-step flow: Submit prepared inputs with x402 payment headers to generate the ZK proof. The TEE server verifies payment on-chain, runs the Noir circuit, and returns the UltraHonk proof. This step may take 30-90 seconds.`,
+    `Step 4 of the step-by-step flow: Submit prepared inputs with x402 payment headers to generate the ZK proof. The TEE server verifies payment on-chain, runs the Noir circuit, and returns the UltraHonk proof. This step may take 30-90 seconds. For oidc_domain circuit, pass the full result from prepare_inputs (which includes prover_toml).`,
     {
       circuit: z
         .enum(['coinbase_kyc', 'coinbase_country', 'oidc_domain'])
@@ -241,7 +254,7 @@ RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and 
       inputs: z
         .union([z.string(), z.record(z.unknown())])
         .describe(
-          'Full ProveInputs object from prepare_inputs. Accepts a JSON string or a structured object.',
+          'Full ProveInputs object from prepare_inputs. Accepts a JSON string or a structured object. For oidc_domain, this should include the prover_toml field.',
         ),
       payment_tx_hash: z
         .string()
@@ -257,9 +270,12 @@ RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and 
             ? JSON.parse(params.inputs)
             : params.inputs;
 
+        // If inputs contain prover_toml (OIDC path), send it separately
+        const proverToml = (inputs as Record<string, unknown>).prover_toml as string | undefined;
+
         const result = await submitProof(config, {
           circuit: params.circuit,
-          inputs,
+          ...(proverToml ? { proverToml } : { inputs }),
           paymentTxHash: params.payment_tx_hash,
           paymentNonce: params.payment_nonce,
         });

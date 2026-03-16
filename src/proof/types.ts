@@ -41,15 +41,12 @@ export interface ProveRequestInputs {
   depth: number;
   country_list?: string[];   // for country circuit
   is_included?: boolean;     // for country circuit
-  // OIDC fields
-  jwt?: string;              // raw JWT token for oidc_domain_attestation
-  scope_string?: string;     // scope string (not hashed) for OIDC nullifier
-  domain?: string;           // domain to prove (auto-extracted from email if omitted)
 }
 
 export interface ProveRequest {
-  circuit: string;              // Required: "coinbase_kyc" or "coinbase_country"
-  inputs?: ProveRequestInputs;  // Required for plaintext flow; absent when encrypted_payload is used
+  circuit: string;              // Required: "coinbase_kyc", "coinbase_country", or "oidc_domain"
+  inputs?: ProveRequestInputs;  // Required for coinbase plaintext flow; absent when encrypted_payload or prover_toml is used
+  prover_toml?: string;         // Pre-built Prover.toml from client (OIDC path — server never sees JWT)
   encrypted_payload?: EncryptedEnvelope;  // E2E: encrypted { circuitId, proverToml } — server acts as blind relay
 }
 

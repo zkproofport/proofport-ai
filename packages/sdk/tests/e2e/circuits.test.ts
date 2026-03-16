@@ -66,8 +66,6 @@ describe('SDK E2E — All Circuits (local source)', () => {
 
     config = createConfig({
       baseUrl: BASE_URL,
-      easRpcUrl: 'https://sepolia.base.org',
-      easGraphqlUrl: 'https://base-sepolia.easscan.org/graphql',
     });
 
     attestationSigner = fromPrivateKey(ATTESTATION_KEY);

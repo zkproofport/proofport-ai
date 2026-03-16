@@ -7,7 +7,6 @@ export type {
   PaymentRequirements,
   ChallengeResponse,
   ProveInputs,
-  OidcProveInputs,
   ProveRequest,
   ProveResponse,
   VerifyResult,
@@ -48,6 +47,10 @@ export {
   computeScope,
   computeNullifier,
 } from './inputs.js';
+
+// OIDC input computation (client-side JWT parsing)
+export { prepareOidcInputs, buildOidcProverToml } from './oidc-inputs.js';
+export type { OidcCircuitInputs, PrepareOidcParams } from './oidc-inputs.js';
 
 // Signer abstraction
 export type { ProofportSigner } from './signer.js';
