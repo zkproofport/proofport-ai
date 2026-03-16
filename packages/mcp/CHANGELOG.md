@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.6](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.1.5...mcp-v0.1.6) (2026-03-16)
+
+
+### Refactoring
+
+* move OIDC input preparation to SDK, server as blind relay ([1376007](https://github.com/zkproofport/proofport-ai/commit/1376007a4879e79443e6444c968ddd61ae1fe4d1))
+
 ## [0.1.5](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.1.4...mcp-v0.1.5) (2026-03-16)
 
 

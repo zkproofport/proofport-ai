@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.6](https://github.com/zkproofport/proofport-ai/compare/server-v0.1.5...server-v0.1.6) (2026-03-16)
+
+
+### Bug Fixes
+
+* add SDK build stage to Dockerfile for oidc-inputs runtime dependency ([61cc489](https://github.com/zkproofport/proofport-ai/commit/61cc4894b52456001dfe2719236570ba0d4332fd))
+* inline OIDC input logic into server, remove SDK runtime dependency from Dockerfile ([aff2526](https://github.com/zkproofport/proofport-ai/commit/aff2526a1a71647696b97f2f5999510a87a43fae))
+
+
+### Refactoring
+
+* move OIDC input preparation to SDK, server as blind relay ([1376007](https://github.com/zkproofport/proofport-ai/commit/1376007a4879e79443e6444c968ddd61ae1fe4d1))
+
 ## [0.1.5](https://github.com/zkproofport/proofport-ai/compare/server-v0.1.4...server-v0.1.5) (2026-03-16)
 
 
