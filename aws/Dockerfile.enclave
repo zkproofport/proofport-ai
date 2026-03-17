@@ -83,8 +83,9 @@ COPY --from=builder /root/.bb-crs/ /root/.bb-crs/
 # the build context (circuits/) before running docker build.
 COPY circuits/ /app/circuits/
 
-# Copy noir_js packages (WASM-based, installed in deploy workflow build context)
-COPY node_modules/ /app/node_modules/
+# Install noir_js packages (WASM-based, can't be esbuild-bundled).
+# Installed here rather than in deploy workflow because EC2 host has no npm.
+RUN npm install --no-save @noir-lang/noir_js@1.0.0-beta.8 @noir-lang/acvm_js@1.0.0-beta.8
 ENV NODE_PATH=/app/node_modules
 
 # Copy pre-bundled enclave server
