@@ -25,11 +25,7 @@ def bridge(tcp_conn, addr):
     """Bridge a single TCP connection to a vsock connection."""
     vs = None
     try:
-        vs = socket.socket(AF_VSOCK, socket.SOCK_STREAM)
-        vs.settimeout(30)
-        vs.connect((VSOCK_CID, VSOCK_PORT))
-
-        # Read full request from TCP
+        # Step 1: Read full request from TCP client
         data = b''
         tcp_conn.settimeout(5)
         while True:
@@ -41,11 +37,22 @@ def bridge(tcp_conn, addr):
             except socket.timeout:
                 break
 
-        # Forward to vsock
+        if not data:
+            print(f'Host bridge: empty request from TCP {addr} (0 bytes)', file=sys.stderr, flush=True)
+            return
+
+        print(f'Host bridge: received {len(data)} bytes from TCP {addr}', file=sys.stderr, flush=True)
+
+        # Step 2: Connect to enclave vsock and forward request
+        vs = socket.socket(AF_VSOCK, socket.SOCK_STREAM)
+        vs.settimeout(120)
+        vs.connect((VSOCK_CID, VSOCK_PORT))
         vs.sendall(data)
         vs.shutdown(socket.SHUT_WR)
 
-        # Read response from vsock, send back to TCP
+        print(f'Host bridge: forwarded {len(data)} bytes to vsock CID:{VSOCK_CID}:{VSOCK_PORT}', file=sys.stderr, flush=True)
+
+        # Step 3: Read response from vsock, send back to TCP
         resp = b''
         while True:
             try:
@@ -56,9 +63,12 @@ def bridge(tcp_conn, addr):
             except socket.timeout:
                 break
 
-        tcp_conn.sendall(resp)
+        print(f'Host bridge: received {len(resp)} bytes from vsock, sending to TCP {addr}', file=sys.stderr, flush=True)
+
+        if resp:
+            tcp_conn.sendall(resp)
     except Exception as e:
-        print(f'Bridge error: {e}', file=sys.stderr, flush=True)
+        print(f'Host bridge error: {e}', file=sys.stderr, flush=True)
     finally:
         if vs:
             try:

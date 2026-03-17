@@ -21,15 +21,15 @@ NODE_PID=$!
 # Wait for Node.js server to be ready
 for i in $(seq 1 30); do
     if python3 -c "
-import socket
+import socket, sys
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.settimeout(1)
 try:
     s.connect(('127.0.0.1', 15000))
     s.close()
-    exit(0)
-except:
-    exit(1)
+    sys.exit(0)
+except Exception:
+    sys.exit(1)
 " 2>/dev/null; then
         echo "[entrypoint] Node.js server ready on TCP:15000" >&2
         break

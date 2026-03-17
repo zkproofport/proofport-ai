@@ -10,6 +10,10 @@ Python bridge accepts vsock connections from the host-side bridge.
 
 Flow: Host TCP:15000 → Host vsock-bridge → vsock CID:16:5000
       → [this bridge] → TCP localhost:15000 (Node.js)
+
+IMPORTANT: Data is read from vsock FIRST, then forwarded to TCP.
+This avoids race conditions where the vsock FIN arrives before
+the bridge can read the data.
 """
 import socket
 import threading
@@ -25,13 +29,11 @@ def bridge(vsock_conn):
     """Bridge a single vsock connection to the Node.js TCP server."""
     tcp = None
     try:
-        tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        tcp.settimeout(30)
-        tcp.connect(('127.0.0.1', NODE_TCP_PORT))
-
-        # Read full request from vsock
+        # Step 1: Read ALL data from vsock FIRST (before connecting to TCP).
+        # The host-side bridge sends data then shutdown(SHUT_WR), so we
+        # must read everything before the FIN closes the read side.
         data = b''
-        vsock_conn.settimeout(5)
+        vsock_conn.settimeout(10)
         while True:
             try:
                 chunk = vsock_conn.recv(65536)
@@ -41,11 +43,20 @@ def bridge(vsock_conn):
             except socket.timeout:
                 break
 
-        # Forward to Node.js
+        if not data:
+            print('Enclave bridge: empty request from vsock (0 bytes)', file=sys.stderr, flush=True)
+            return
+
+        print(f'Enclave bridge: received {len(data)} bytes from vsock', file=sys.stderr, flush=True)
+
+        # Step 2: Connect to Node.js and forward the request
+        tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        tcp.settimeout(120)
+        tcp.connect(('127.0.0.1', NODE_TCP_PORT))
         tcp.sendall(data)
         tcp.shutdown(socket.SHUT_WR)
 
-        # Read response from Node.js, send back to vsock
+        # Step 3: Read response from Node.js
         resp = b''
         while True:
             try:
@@ -56,7 +67,11 @@ def bridge(vsock_conn):
             except socket.timeout:
                 break
 
-        vsock_conn.sendall(resp)
+        print(f'Enclave bridge: sending {len(resp)} bytes back to vsock', file=sys.stderr, flush=True)
+
+        # Step 4: Send response back to vsock
+        if resp:
+            vsock_conn.sendall(resp)
     except Exception as e:
         print(f'Enclave bridge error: {e}', file=sys.stderr, flush=True)
     finally:
