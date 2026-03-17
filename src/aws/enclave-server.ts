@@ -124,7 +124,7 @@ async function getNsmAttestation(userData?: Buffer, publicKey?: Buffer): Promise
   }
 
   try {
-    const helperPath = path.join(__dirname, 'nsm-helper.py');
+    const helperPath = '/app/aws/nsm-helper.py';
     const args = ['--user-data', (userData || Buffer.alloc(0)).toString('hex')];
     if (publicKey && publicKey.length > 0) {
       args.push('--public-key', publicKey.toString('hex'));
@@ -683,7 +683,7 @@ function runTcpFallback(): void {
     action: 'enclave.server.starting', host: '127.0.0.1', port: TCP_FALLBACK_PORT,
   });
 
-  const server = net.createServer((socket) => {
+  const server = net.createServer({ allowHalfOpen: true }, (socket) => {
     const addr = `${socket.remoteAddress}:${socket.remotePort}`;
     handleConnection(socket, addr);
   });
