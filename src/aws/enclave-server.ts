@@ -203,13 +203,74 @@ interface ProofResult {
   };
 }
 
+/**
+ * Convert SDK ProveInputs (snake_case, hex strings) → CircuitParams (camelCase, byte arrays).
+ * The E2E encrypted flow sends ProveInputs directly from the SDK.
+ * The plaintext flow sends CircuitParams (already converted by AI server).
+ * This function detects which format and converts if needed.
+ */
+function normalizeInputs(circuitId: string, inputs: Record<string, any>): Record<string, any> {
+  // If inputs already have camelCase fields (CircuitParams from plaintext flow), pass through
+  if (inputs.signalHash !== undefined) {
+    return inputs;
+  }
+
+  // SDK ProveInputs format (snake_case) → convert to CircuitParams
+  if (inputs.signal_hash !== undefined) {
+    const hexToBytes = (hex: string): number[] => {
+      const clean = hex.startsWith('0x') ? hex.slice(2) : hex;
+      const bytes: number[] = [];
+      for (let i = 0; i < clean.length; i += 2) {
+        bytes.push(parseInt(clean.slice(i, i + 2), 16));
+      }
+      return bytes;
+    };
+
+    const rawTxBytes = hexToBytes(inputs.raw_transaction);
+
+    const converted: Record<string, any> = {
+      signalHash: hexToBytes(inputs.signal_hash),
+      merkleRoot: inputs.merkle_root,
+      scopeBytes: hexToBytes(inputs.scope_bytes),
+      nullifierBytes: hexToBytes(inputs.nullifier),
+      userAddress: inputs.user_address,
+      userSignature: inputs.signature,
+      userPubkeyX: inputs.user_pubkey_x,
+      userPubkeyY: inputs.user_pubkey_y,
+      rawTxBytes: Array.from(rawTxBytes),
+      txLength: inputs.tx_length,
+      attesterPubkeyX: inputs.coinbase_attester_pubkey_x,
+      attesterPubkeyY: inputs.coinbase_attester_pubkey_y,
+      merkleProof: inputs.merkle_proof,
+      merkleLeafIndex: inputs.leaf_index,
+      merkleDepth: inputs.depth,
+    };
+
+    if (circuitId === 'coinbase_country_attestation') {
+      converted.countryList = inputs.country_list;
+      converted.countryListLength = (inputs.country_list || []).length;
+      converted.isIncluded = inputs.is_included;
+    }
+
+    logInfo('Converted ProveInputs to CircuitParams', {
+      action: 'enclave.inputs.converted', format: 'sdk_prove_inputs',
+    });
+    return converted;
+  }
+
+  // Unknown format — pass through and let toProverToml handle the error
+  logError('Unknown input format', { action: 'enclave.inputs.unknown', keys: Object.keys(inputs) });
+  return inputs;
+}
+
 function buildProverToml(circuitId: string, inputs: Record<string, any>): string {
   if (circuitId === 'oidc_domain_attestation') {
     return toOidcProverToml(inputs as OidcCircuitInputs);
   }
+  const normalized = normalizeInputs(circuitId, inputs);
   return toProverToml(
     circuitId as 'coinbase_attestation' | 'coinbase_country_attestation',
-    inputs as CircuitParams
+    normalized as CircuitParams
   );
 }
 
