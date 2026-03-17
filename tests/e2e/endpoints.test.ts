@@ -18,6 +18,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { randomUUID } from 'crypto';
+import { execSync } from 'child_process';
 
 // SDK clients
 import { ClientFactory } from '@a2a-js/sdk/client';
@@ -1003,7 +1004,10 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
 
   // ─── Real Proof Generation via Local MCP (TEE_MODE=disabled, bb prove on host) ──
 
-  let generatedProof: { proof: string; publicInputs: string; verification?: { chainId: number; verifierAddress: string; rpcUrl: string } | null } | null = null;
+  type GeneratedProof = { proof: string; publicInputs: string; verification?: { chainId: number; verifierAddress: string; rpcUrl: string } | null };
+  let generatedProof: GeneratedProof | null = null;
+  let generatedCountryProof: GeneratedProof | null = null;
+  let generatedOidcProof: GeneratedProof | null = null;
 
   it('generate_proof produces a real ZK proof (coinbase_kyc)', { timeout: 120_000 }, async () => {
     const result = await stdioClient.callTool({
@@ -1096,6 +1100,199 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
     console.log('╠══════════════════════════════════════════════════════════════╣');
     console.log(`║ Result:         ${parsed.valid ? 'VALID' : 'INVALID'}       ║`);
     console.log(`║ Verifier:       0x0036B61dBFaB8f3CfEEF77dD5D45F7EFBFE2035c  ║`);
+    console.log(`║ Chain:          Base Sepolia (84532)                         ║`);
+    if (parsed.error) {
+      console.log(`║ Error:          ${parsed.error}`);
+    }
+    console.log('╚══════════════════════════════════════════════════════════════╝\n');
+  });
+
+  // ─── Coinbase Country Proof Generation + Verification ──────────────────────
+
+  it('generate_proof produces a real ZK proof (coinbase_country)', { timeout: 120_000 }, async () => {
+    const result = await stdioClient.callTool({
+      name: 'generate_proof',
+      arguments: {
+        circuit: 'coinbase_country',
+        scope: 'e2e-test-country',
+        country_list: ['US', 'KR'],
+        is_included: true,
+      },
+    });
+    const textContent = result.content.find((c: any) => c.type === 'text');
+    expect(textContent).toBeDefined();
+    const parsed = JSON.parse((textContent as any).text);
+
+    expect(parsed.error).toBeUndefined();
+    expect(parsed.proof).toBeDefined();
+    expect(parsed.proof).toMatch(/^0x/);
+    expect(parsed.publicInputs).toBeDefined();
+    expect(parsed.publicInputs).toMatch(/^0x/);
+    expect(parsed.paymentTxHash).toBeDefined();
+    expect(parsed.paymentTxHash).toMatch(/^0x/);
+
+    generatedCountryProof = { proof: parsed.proof, publicInputs: parsed.publicInputs, verification: parsed.verification };
+
+    console.log('\n╔══════════════════════════════════════════════════════════════╗');
+    console.log('║          ZK PROOF GENERATION REPORT (COUNTRY)              ║');
+    console.log('╠══════════════════════════════════════════════════════════════╣');
+    console.log(`║ Circuit:        coinbase_country (coinbase_country_attestation)`);
+    console.log(`║ Scope:          e2e-test-country                            ║`);
+    console.log(`║ Country List:   US, KR (isIncluded: true)                   ║`);
+    console.log('╠══════════════════════════════════════════════════════════════╣');
+    console.log(`║ x402 Payment TX:                                            ║`);
+    console.log(`║   ${parsed.paymentTxHash}`);
+    console.log(`║   https://sepolia.basescan.org/tx/${parsed.paymentTxHash}`);
+    console.log('╠══════════════════════════════════════════════════════════════╣');
+    console.log(`║ Proof (${parsed.proof.length} chars):                       ║`);
+    console.log(`║   ${parsed.proof.slice(0, 80)}...`);
+    console.log(`║ Public Inputs (${parsed.publicInputs.length} chars):        ║`);
+    console.log(`║   ${parsed.publicInputs.slice(0, 80)}...`);
+    if (parsed.attestation) {
+      console.log('╠══════════════════════════════════════════════════════════════╣');
+      console.log(`║ TEE Attestation: YES                                        ║`);
+    } else {
+      console.log(`║ TEE Attestation: No (TEE_MODE=disabled)                     ║`);
+    }
+    if (parsed.timing) {
+      console.log('╠══════════════════════════════════════════════════════════════╣');
+      console.log(`║ Timing:         ${parsed.timing.totalMs}ms total             ║`);
+    }
+    console.log('╚══════════════════════════════════════════════════════════════╝\n');
+  });
+
+  it('verify_proof confirms the country proof on-chain', { timeout: 30_000 }, async () => {
+    if (!generatedCountryProof) {
+      console.warn('Skipping verify_proof (country) — generate_proof did not produce a proof');
+      return;
+    }
+    if (!generatedCountryProof.verification) {
+      console.warn('Skipping verify_proof (country) — no verification info');
+      return;
+    }
+
+    const result = await stdioClient.callTool({
+      name: 'verify_proof',
+      arguments: {
+        result: {
+          proof: generatedCountryProof.proof,
+          publicInputs: generatedCountryProof.publicInputs,
+          verification: generatedCountryProof.verification,
+        },
+      },
+    });
+    const textContent = result.content.find((c: any) => c.type === 'text');
+    expect(textContent).toBeDefined();
+    const parsed = JSON.parse((textContent as any).text);
+
+    expect(parsed.valid).toBe(true);
+
+    console.log('╔══════════════════════════════════════════════════════════════╗');
+    console.log('║          ON-CHAIN VERIFICATION REPORT (COUNTRY)            ║');
+    console.log('╠══════════════════════════════════════════════════════════════╣');
+    console.log(`║ Result:         ${parsed.valid ? 'VALID' : 'INVALID'}       ║`);
+    console.log(`║ Verifier:       0xdEe363585926c3c28327Efd1eDd01cf4559738cf  ║`);
+    console.log(`║ Chain:          Base Sepolia (84532)                         ║`);
+    if (parsed.error) {
+      console.log(`║ Error:          ${parsed.error}`);
+    }
+    console.log('╚══════════════════════════════════════════════════════════════╝\n');
+  });
+
+  // ─── OIDC Domain Proof Generation + Verification ───────────────────────────
+
+  // Auto-generate OIDC JWT via gcloud CLI if not provided
+  function getOidcJwt(): string | undefined {
+    if (process.env.E2E_OIDC_JWT) return process.env.E2E_OIDC_JWT;
+    try {
+      return execSync('gcloud auth print-identity-token', { encoding: 'utf-8' }).trim();
+    } catch {
+      return undefined;
+    }
+  }
+  const OIDC_JWT = getOidcJwt();
+
+  it.skipIf(!OIDC_JWT)('generate_proof produces a real ZK proof (oidc_domain)', { timeout: 120_000 }, async () => {
+    const result = await stdioClient.callTool({
+      name: 'generate_proof',
+      arguments: {
+        circuit: 'oidc_domain',
+        scope: 'e2e-test-oidc',
+        jwt: OIDC_JWT!,
+      },
+    });
+    const textContent = result.content.find((c: any) => c.type === 'text');
+    expect(textContent).toBeDefined();
+    const parsed = JSON.parse((textContent as any).text);
+
+    expect(parsed.error).toBeUndefined();
+    expect(parsed.proof).toBeDefined();
+    expect(parsed.proof).toMatch(/^0x/);
+    expect(parsed.publicInputs).toBeDefined();
+    expect(parsed.publicInputs).toMatch(/^0x/);
+    expect(parsed.paymentTxHash).toBeDefined();
+    expect(parsed.paymentTxHash).toMatch(/^0x/);
+
+    generatedOidcProof = { proof: parsed.proof, publicInputs: parsed.publicInputs, verification: parsed.verification };
+
+    console.log('\n╔══════════════════════════════════════════════════════════════╗');
+    console.log('║          ZK PROOF GENERATION REPORT (OIDC)                 ║');
+    console.log('╠══════════════════════════════════════════════════════════════╣');
+    console.log(`║ Circuit:        oidc_domain (oidc_domain_attestation)       ║`);
+    console.log(`║ Scope:          e2e-test-oidc                               ║`);
+    console.log('╠══════════════════════════════════════════════════════════════╣');
+    console.log(`║ x402 Payment TX:                                            ║`);
+    console.log(`║   ${parsed.paymentTxHash}`);
+    console.log(`║   https://sepolia.basescan.org/tx/${parsed.paymentTxHash}`);
+    console.log('╠══════════════════════════════════════════════════════════════╣');
+    console.log(`║ Proof (${parsed.proof.length} chars):                       ║`);
+    console.log(`║   ${parsed.proof.slice(0, 80)}...`);
+    console.log(`║ Public Inputs (${parsed.publicInputs.length} chars):        ║`);
+    console.log(`║   ${parsed.publicInputs.slice(0, 80)}...`);
+    if (parsed.attestation) {
+      console.log('╠══════════════════════════════════════════════════════════════╣');
+      console.log(`║ TEE Attestation: YES                                        ║`);
+    } else {
+      console.log(`║ TEE Attestation: No (TEE_MODE=disabled)                     ║`);
+    }
+    if (parsed.timing) {
+      console.log('╠══════════════════════════════════════════════════════════════╣');
+      console.log(`║ Timing:         ${parsed.timing.totalMs}ms total             ║`);
+    }
+    console.log('╚══════════════════════════════════════════════════════════════╝\n');
+  });
+
+  it.skipIf(!OIDC_JWT)('verify_proof confirms the OIDC proof on-chain', { timeout: 30_000 }, async () => {
+    if (!generatedOidcProof) {
+      console.warn('Skipping verify_proof (OIDC) — generate_proof did not produce a proof');
+      return;
+    }
+    if (!generatedOidcProof.verification) {
+      console.warn('Skipping verify_proof (OIDC) — no verification info');
+      return;
+    }
+
+    const result = await stdioClient.callTool({
+      name: 'verify_proof',
+      arguments: {
+        result: {
+          proof: generatedOidcProof.proof,
+          publicInputs: generatedOidcProof.publicInputs,
+          verification: generatedOidcProof.verification,
+        },
+      },
+    });
+    const textContent = result.content.find((c: any) => c.type === 'text');
+    expect(textContent).toBeDefined();
+    const parsed = JSON.parse((textContent as any).text);
+
+    expect(parsed.valid).toBe(true);
+
+    console.log('╔══════════════════════════════════════════════════════════════╗');
+    console.log('║          ON-CHAIN VERIFICATION REPORT (OIDC)               ║');
+    console.log('╠══════════════════════════════════════════════════════════════╣');
+    console.log(`║ Result:         ${parsed.valid ? 'VALID' : 'INVALID'}       ║`);
+    console.log(`║ Verifier:       0x6C309e6F804E034068A55Bca58b91652621eCB07  ║`);
     console.log(`║ Chain:          Base Sepolia (84532)                         ║`);
     if (parsed.error) {
       console.log(`║ Error:          ${parsed.error}`);
