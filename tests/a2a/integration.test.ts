@@ -26,7 +26,6 @@ describe('A2A Integration Tests', () => {
       port: 3100,
       proverUrl: '',
       bbPath: 'bb',
-      nargoPath: 'nargo',
       circuitsDir: '/tmp/circuits',
       circuitsRepoUrl: 'https://github.com/example/circuits',
       redisUrl: 'redis://localhost:6379',
@@ -81,7 +80,7 @@ describe('A2A Integration Tests', () => {
     const requestHandler = new DefaultRequestHandler(agentCard, taskStore, executor);
 
     // Mount routes
-    app.get('/.well-known/agent-card.json', getAgentCardHandler(mockConfig));
+    app.get('/.well-known/agent-card.json', getAgentCardHandler(mockConfig, { value: null }));
     app.use('/a2a', jsonRpcHandler({ requestHandler, userBuilder: UserBuilder.noAuthentication }));
 
     // Add MCP route for coexistence test
@@ -102,7 +101,6 @@ describe('A2A Integration Tests', () => {
         url: 'https://test.example.com/a2a',
         version: '1.0.0',
         protocolVersion: '0.3.0',
-        preferredTransport: 'JSONRPC',
         provider: {
           organization: 'ZKProofport',
           url: 'https://zkproofport.app',

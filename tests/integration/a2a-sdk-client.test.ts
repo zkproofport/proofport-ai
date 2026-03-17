@@ -181,7 +181,6 @@ function makeTestConfig(overrides?: Partial<Config>): Config {
     websiteUrl: 'https://zkproofport.com',
     proverUrl: '',
     bbPath: '/usr/local/bin/bb',
-    nargoPath: '/usr/local/bin/nargo',
     circuitsDir: '/circuits',
     circuitsRepoUrl: 'https://example.com/circuits',
     redisUrl: 'redis://localhost:6379',
@@ -308,7 +307,6 @@ describe('A2A SDK Client Integration', () => {
       expect(agentCard).toBeDefined();
       expect(agentCard.name).toBe('proveragent.base.eth');
       expect(agentCard.protocolVersion).toBe('0.3.0');
-      expect(agentCard.preferredTransport).toBe('JSONRPC');
     });
 
     it('agent card contains correct skills', async () => {

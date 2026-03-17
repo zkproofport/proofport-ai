@@ -165,6 +165,7 @@ describe('ensureAgentRegistered', () => {
       expect(calledMetadata).toEqual({
         name: 'proveragent.base.eth',
         description: 'Autonomous ZK proof generation. ERC-8004 identity. x402 payments. Powered by ZKProofport',
+        agentType: 'service',
         agentUrl: validConfig.a2aBaseUrl,
         capabilities: [
           'proof_generation',
@@ -177,17 +178,36 @@ describe('ensureAgentRegistered', () => {
         protocols: ['mcp', 'a2a', 'x402'],
         circuits: ['coinbase_attestation', 'coinbase_country_attestation'],
         tags: ['ZK', 'Privacy', 'Proof', 'Coinbase', 'KYC', 'Attestation', 'x402', 'Identity', 'Country', 'Verification', 'Base', 'USDC', 'TEE', 'Noir', 'EAS', 'Zero-Knowledge'],
-        categories: ['privacy', 'security', 'verification', 'identity'],
         x402Support: true,
         type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
         image: 'https://ai.zkproofport.app/icon.png',
+        protocolVersions: ['0.3'],
+        securitySchemes: {
+          x402: { type: 'apiKey', in: 'header', name: 'X-402-Payment' },
+        },
+        security: [{ x402: [] }],
         services: [
-          { name: 'web', endpoint: 'https://zkproofport.com' },
-          { name: 'MCP', endpoint: 'https://ai.zkproofport.app/mcp', version: '2025-11-25', tools: ['prove', 'get_supported_circuits', 'get_guide'] },
-          { name: 'A2A', endpoint: 'https://ai.zkproofport.app/.well-known/agent-card.json', version: '0.3.0', skills: ['prove', 'get_supported_circuits', 'get_guide'] },
+          { name: 'web', endpoint: 'https://ai.zkproofport.app' },
+          { name: 'MCP', endpoint: 'https://ai.zkproofport.app/mcp', version: '2025-11-25', mcpTools: ['prove', 'get_supported_circuits', 'get_guide'] },
+          { name: 'A2A', endpoint: 'https://ai.zkproofport.app/.well-known/agent-card.json', version: '0.3.0', a2aSkills: ['prove', 'get_supported_circuits', 'get_guide'] },
+          { name: 'OASF', endpoint: 'https://ai.zkproofport.app', version: 'v0.8.0', skills: ['security_privacy/privacy_risk_assessment', 'security_privacy/threat_detection'], domains: ['technology/blockchain', 'technology/security', 'trust_and_safety/data_privacy'] },
+          { name: 'ENS', endpoint: 'proveragent.base.eth' },
+          { name: 'DID', endpoint: 'did:web:ai.zkproofport.app' },
+          { name: 'agentWallet', endpoint: 'eip155:84532:0x1234567890123456789012345678901234567890' },
+        ],
+        categories: ['privacy', 'security', 'verification', 'identity'],
+        domains: [
+          { name: 'technology/blockchain', id: 109 },
+          { name: 'technology/security', id: 107 },
+          { name: 'trust_and_safety/data_privacy', id: 404 },
+        ],
+        skills: [
+          { name: 'security_privacy/privacy_risk_assessment', id: 804 },
+          { name: 'security_privacy/threat_detection', id: 801 },
         ],
         registrations: [],
         supportedTrust: ['tee-attestation'],
+        active: true,
       });
     });
 

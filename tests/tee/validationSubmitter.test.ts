@@ -88,6 +88,12 @@ describe('ensureAgentValidated', () => {
     mockRegister.mockResolvedValue({ tokenId: 100n, transactionHash: '0xreghash', agentAddress: '0x5A3E649208Ae15ec52496c1Ae23b2Ff89Ac02f0c' });
     mockIsRegistered.mockResolvedValue(false);
     mockGetRegistration.mockResolvedValue(null);
+    mockTeeProvider.generateAttestation.mockResolvedValue({
+      document: 'base64doc',
+      mode: 'local',
+      proofHash: '0xhash',
+      timestamp: Date.now(),
+    });
   });
 
   describe('Skip conditions', () => {
@@ -164,7 +170,7 @@ describe('ensureAgentValidated', () => {
         1n,
         100,
         '0xresponsehash',
-        ethers.encodeBytes32String('tee-attestation'),
+        'tee-attestation',
         Date.now(),
       ]);
 
@@ -272,41 +278,46 @@ describe('ensureAgentValidated', () => {
       );
     });
 
-    it('returns early when generateAttestation returns null', async () => {
+    it('throws when generateAttestation returns null', async () => {
+      vi.useFakeTimers();
       mockGetIdentityRegistry.mockResolvedValue(validConfig.erc8004IdentityAddress);
       mockGetAgentValidations.mockResolvedValue([]);
-      mockTeeProvider.generateAttestation.mockResolvedValueOnce(null);
+      mockTeeProvider.generateAttestation.mockResolvedValue(null);
 
-      await ensureAgentValidated(validConfig, 1n, mockTeeProvider);
+      const expectation = expect(ensureAgentValidated(validConfig, 1n, mockTeeProvider)).rejects.toThrow('Failed to generate attestation');
+      // Advance timers to skip retry delays (3 retries × up to 30s)
+      await vi.runAllTimersAsync();
+      vi.useRealTimers();
 
+      await expectation;
       expect(mockValidationRequest).not.toHaveBeenCalled();
     });
   });
 
   describe('Error handling', () => {
-    it('returns gracefully on contract call failure', async () => {
+    it('throws on contract call failure', async () => {
       mockGetIdentityRegistry.mockRejectedValue(new Error('RPC error'));
 
-      await ensureAgentValidated(validConfig, 1n, mockTeeProvider);
+      await expect(ensureAgentValidated(validConfig, 1n, mockTeeProvider)).rejects.toThrow('RPC error');
 
       expect(mockValidationRequest).not.toHaveBeenCalled();
     });
 
-    it('returns gracefully on validation request failure', async () => {
+    it('throws on validation request failure', async () => {
       mockGetIdentityRegistry.mockResolvedValue(validConfig.erc8004IdentityAddress);
       mockGetAgentValidations.mockResolvedValue([]);
       mockValidationRequest.mockRejectedValue(new Error('Transaction failed'));
 
-      await ensureAgentValidated(validConfig, 1n, mockTeeProvider);
+      await expect(ensureAgentValidated(validConfig, 1n, mockTeeProvider)).rejects.toThrow('Transaction failed');
 
       expect(mockValidationResponse).not.toHaveBeenCalled();
     });
 
-    it('returns gracefully on non-Error exception', async () => {
+    it('throws on non-Error exception', async () => {
       mockGetIdentityRegistry.mockResolvedValue(validConfig.erc8004IdentityAddress);
       mockGetAgentValidations.mockRejectedValue('string error');
 
-      await ensureAgentValidated(validConfig, 1n, mockTeeProvider);
+      await expect(ensureAgentValidated(validConfig, 1n, mockTeeProvider)).rejects.toBe('string error');
 
       expect(mockValidationRequest).not.toHaveBeenCalled();
     });

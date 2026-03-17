@@ -106,7 +106,7 @@ describe('handleGetSupportedCircuits', () => {
     const result = handleGetSupportedCircuits({});
 
     expect(result.circuits).toHaveLength(Object.keys(CIRCUITS).length);
-    expect(result.circuits.length).toBe(2);
+    expect(result.circuits.length).toBe(3);
   });
 
   it('should include coinbase_attestation with correct metadata', () => {

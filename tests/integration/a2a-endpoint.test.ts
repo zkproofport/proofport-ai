@@ -174,7 +174,6 @@ describe('A2A Endpoint E2E', () => {
       websiteUrl: 'https://zkproofport.com',
       proverUrl: '',
       bbPath: '/usr/local/bin/bb',
-      nargoPath: '/usr/local/bin/nargo',
       circuitsDir: '/circuits',
       circuitsRepoUrl: 'https://example.com/circuits',
       redisUrl: 'redis://localhost:6379',
@@ -224,7 +223,6 @@ describe('A2A Endpoint E2E', () => {
       expect(response.status).toBe(200);
       expect(response.body).toMatchObject({
         protocolVersion: '0.3.0',
-        preferredTransport: 'JSONRPC',
         provider: {
           organization: 'ZKProofport',
           url: 'https://zkproofport.app',
@@ -439,7 +437,6 @@ describe('A2A Endpoint E2E', () => {
       const agentCardResponse = await request(app).get('/.well-known/agent-card.json');
       expect(agentCardResponse.status).toBe(200);
       expect(agentCardResponse.body.name).toBe('proveragent.base.eth');
-      expect(agentCardResponse.body.preferredTransport).toBe('JSONRPC');
 
       // Test A2A JSON-RPC (use tasks/get which is non-blocking)
       const a2aResponse = await request(app)
@@ -702,7 +699,6 @@ describe('A2A Endpoint E2E', () => {
       expect(card).toHaveProperty('description');
       expect(card).toHaveProperty('url');
       expect(card).toHaveProperty('protocolVersion', '0.3.0');
-      expect(card).toHaveProperty('preferredTransport', 'JSONRPC');
       expect(card).toHaveProperty('capabilities');
       expect(card).toHaveProperty('skills');
       expect(Array.isArray(card.skills)).toBe(true);

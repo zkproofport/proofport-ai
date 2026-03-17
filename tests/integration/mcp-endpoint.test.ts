@@ -119,7 +119,6 @@ vi.mock('../../src/config/index.js', () => ({
     nodeEnv: 'test',
     proverUrl: '',
     bbPath: '/usr/local/bin/bb',
-    nargoPath: '/usr/local/bin/nargo',
     circuitsDir: '/circuits',
     circuitsRepoUrl: 'https://example.com/circuits',
     redisUrl: 'redis://localhost:6379',
@@ -132,6 +131,7 @@ vi.mock('../../src/config/index.js', () => ({
     agentVersion: '1.0.0',
     paymentPayTo: '',
     paymentProofPrice: '$0.10',
+    x402FacilitatorUrl: 'https://x402.dexter.cash',
     teeMode: 'disabled',
     enclaveCid: undefined,
     enclavePort: 5000,
@@ -139,10 +139,15 @@ vi.mock('../../src/config/index.js', () => ({
     erc8004IdentityAddress: '',
     erc8004ReputationAddress: '',
     erc8004ValidationAddress: '',
+    agentTokenId: '',
     websiteUrl: 'https://zkproofport.com',
     openaiApiKey: '',
     geminiApiKey: '',
     phoenixCollectorEndpoint: '',
+    virtualsEnabled: false,
+    virtualsWalletPk: '',
+    virtualsEntityId: 0,
+    virtualsAgentWallet: '',
   })),
 }));
 
@@ -188,20 +193,6 @@ vi.mock('../../src/config/contracts.js', async () => {
 
 // ─── Test suite ───────────────────────────────────────────────────────────
 
-/**
- * Parse SSE response text to extract JSON-RPC message
- * MCP StreamableHTTP sends responses as Server-Sent Events
- */
-function parseSSEResponse(text: string): any {
-  const lines = text.split('\n');
-  for (const line of lines) {
-    if (line.startsWith('data: ')) {
-      return JSON.parse(line.substring(6));
-    }
-  }
-  return null;
-}
-
 describe('MCP Endpoint E2E', () => {
   let app: any;
 
@@ -212,19 +203,19 @@ describe('MCP Endpoint E2E', () => {
       websiteUrl: 'https://zkproofport.com',
       proverUrl: '',
       bbPath: '/usr/local/bin/bb',
-      nargoPath: '/usr/local/bin/nargo',
       circuitsDir: '/circuits',
       circuitsRepoUrl: 'https://example.com/circuits',
       redisUrl: 'redis://localhost:6379',
       baseRpcUrl: 'https://base-rpc.example.com',
       easGraphqlEndpoint: 'https://eas.example.com',
       chainRpcUrl: 'https://chain.example.com',
-        proverPrivateKey: '0x' + 'ab'.repeat(32),
+      proverPrivateKey: '0x' + 'ab'.repeat(32),
       paymentMode: 'disabled' as const,
       a2aBaseUrl: 'https://a2a.example.com',
       agentVersion: '1.0.0',
       paymentPayTo: '',
       paymentProofPrice: '$0.10',
+      x402FacilitatorUrl: 'https://x402.dexter.cash',
       teeMode: 'disabled' as const,
       enclaveCid: undefined,
       enclavePort: 5000,
@@ -232,9 +223,14 @@ describe('MCP Endpoint E2E', () => {
       erc8004IdentityAddress: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
       erc8004ReputationAddress: '0x8004B663056A597Dffe9eCcC1965A193B7388713',
       erc8004ValidationAddress: '',
+      agentTokenId: '',
       openaiApiKey: '',
       geminiApiKey: '',
       phoenixCollectorEndpoint: '',
+      virtualsEnabled: false,
+      virtualsWalletPk: '',
+      virtualsEntityId: 0,
+      virtualsAgentWallet: '',
     };
 
     const appBundle = createApp(testConfig);
@@ -261,9 +257,9 @@ describe('MCP Endpoint E2E', () => {
         });
 
       expect(response.status).toBe(200);
-      expect(response.headers['content-type']).toMatch(/text\/event-stream/);
+      expect(response.headers['content-type']).toMatch(/application\/json/);
 
-      const data = parseSSEResponse(response.text);
+      const data = response.body;
       expect(data).toMatchObject({
         jsonrpc: '2.0',
         id: 1,
@@ -291,7 +287,7 @@ describe('MCP Endpoint E2E', () => {
 
       expect(response.status).toBe(200);
 
-      const data = parseSSEResponse(response.text);
+      const data = response.body;
       expect(data).toMatchObject({
         jsonrpc: '2.0',
         id: 2,
@@ -349,7 +345,7 @@ describe('MCP Endpoint E2E', () => {
 
       expect(response.status).toBe(200);
 
-      const data = parseSSEResponse(response.text);
+      const data = response.body;
       expect(data).toMatchObject({
         jsonrpc: '2.0',
         error: {
@@ -375,7 +371,7 @@ describe('MCP Endpoint E2E', () => {
 
       expect(response.status).toBe(200);
 
-      const data = parseSSEResponse(response.text);
+      const data = response.body;
       expect(data).toMatchObject({
         jsonrpc: '2.0',
         id: 3,
@@ -413,7 +409,7 @@ describe('MCP Endpoint E2E', () => {
 
       expect(response.status).toBe(200);
 
-      const data = parseSSEResponse(response.text);
+      const data = response.body;
       expect(data).toMatchObject({
         jsonrpc: '2.0',
         id: 10,
@@ -466,7 +462,7 @@ describe('MCP Endpoint E2E', () => {
 
       expect(response.status).toBe(200);
 
-      const data = parseSSEResponse(response.text);
+      const data = response.body;
       expect(data).toMatchObject({
         jsonrpc: '2.0',
         id: 12,
@@ -504,7 +500,7 @@ describe('MCP Endpoint E2E', () => {
 
       expect(response.status).toBe(200);
 
-      const data = parseSSEResponse(response.text);
+      const data = response.body;
       expect(data).toMatchObject({
         jsonrpc: '2.0',
         id: 14,
@@ -527,12 +523,15 @@ describe('MCP Endpoint E2E', () => {
   });
 
   describe('GET /mcp', () => {
-    it('should return 405 for GET /mcp', async () => {
+    it('should return 200 with MCP info JSON for GET /mcp', async () => {
       const response = await request(app).get('/mcp');
 
-      expect(response.status).toBe(405);
+      expect(response.status).toBe(200);
+      expect(response.headers['content-type']).toMatch(/application\/json/);
       expect(response.body).toMatchObject({
-        error: expect.stringContaining('SSE not supported'),
+        name: 'proofport-ai',
+        version: expect.any(String),
+        protocol: 'MCP StreamableHTTP',
       });
     });
   });
@@ -586,7 +585,7 @@ describe('MCP Endpoint E2E', () => {
 
       expect(response.status).toBe(200);
 
-      const data = parseSSEResponse(response.text);
+      const data = response.body;
       expect(data).toMatchObject({
         jsonrpc: '2.0',
         id: 30,
@@ -611,7 +610,7 @@ describe('MCP Endpoint E2E', () => {
 
       expect(response.status).toBe(200);
 
-      const data = parseSSEResponse(response.text);
+      const data = response.body;
       expect(data).toMatchObject({ jsonrpc: '2.0', id: 31 });
       expect(data.result).toBeDefined();
       expect(data.result.messages).toBeInstanceOf(Array);
@@ -639,7 +638,7 @@ describe('MCP Endpoint E2E', () => {
 
       expect(response.status).toBe(200);
 
-      const data = parseSSEResponse(response.text);
+      const data = response.body;
       const tools: any[] = data.result.tools;
 
       // Every tool must have a valid inputSchema

@@ -13,7 +13,6 @@ describe('A2A Agent Card', () => {
       nodeEnv: 'development',
       proverUrl: 'http://localhost:4003',
       bbPath: 'bb',
-      nargoPath: 'nargo',
       circuitsDir: '/app/circuits',
       circuitsRepoUrl: 'https://raw.githubusercontent.com/zkproofport/circuits/main',
       redisUrl: 'redis://localhost:6379',
@@ -58,7 +57,6 @@ describe('A2A Agent Card', () => {
       expect(card).toHaveProperty('url');
       expect(card).toHaveProperty('version');
       expect(card).toHaveProperty('protocolVersion');
-      expect(card).toHaveProperty('preferredTransport');
       expect(card).toHaveProperty('provider');
       expect(card).toHaveProperty('capabilities');
       expect(card).toHaveProperty('skills');
@@ -70,13 +68,6 @@ describe('A2A Agent Card', () => {
       const card = buildAgentCard(mockConfig);
 
       expect(card.name).toBe('proveragent.base.eth');
-    });
-
-    it('should have preferredTransport set to JSONRPC', async () => {
-      const { buildAgentCard } = await import('../../src/a2a/agentCard');
-      const card = buildAgentCard(mockConfig);
-
-      expect(card.preferredTransport).toBe('JSONRPC');
     });
 
     it('should have provider with organization and url', async () => {
@@ -191,12 +182,13 @@ describe('A2A Agent Card', () => {
       expect(card.capabilities.stateTransitionHistory).toBe(true);
     });
 
-    it('should not have securitySchemes (removed in SDK migration)', async () => {
+    it('should have securitySchemes with x402 entry', async () => {
       const { buildAgentCard } = await import('../../src/a2a/agentCard');
       const card = buildAgentCard(mockConfig);
 
-      // securitySchemes was removed when migrating to @a2a-js/sdk AgentCard type
-      expect((card as any).securitySchemes).toBeUndefined();
+      // securitySchemes was added back in buildAgentCard output
+      expect((card as any).securitySchemes).toBeDefined();
+      expect((card as any).securitySchemes.x402).toBeDefined();
     });
 
     it('should use sepolia ERC-8004 address for development', async () => {
@@ -213,7 +205,7 @@ describe('A2A Agent Card', () => {
 
     it('should use mainnet ERC-8004 address for production', async () => {
       const { buildAgentCard } = await import('../../src/a2a/agentCard');
-      mockConfig.nodeEnv = 'production';
+      mockConfig.paymentMode = 'mainnet';
       const card = buildAgentCard(mockConfig);
 
       expect(card.identity.erc8004.contractAddress).toBe(ERC8004_ADDRESSES.mainnet.identity);
@@ -235,7 +227,7 @@ describe('A2A Agent Card', () => {
   describe('getAgentCardHandler', () => {
     it('should return an Express request handler', async () => {
       const { getAgentCardHandler } = await import('../../src/a2a/agentCard');
-      const handler = getAgentCardHandler(mockConfig);
+      const handler = getAgentCardHandler(mockConfig, { value: null });
 
       expect(handler).toBeDefined();
       expect(typeof handler).toBe('function');
@@ -243,7 +235,7 @@ describe('A2A Agent Card', () => {
 
     it('should set Content-Type to application/json', async () => {
       const { getAgentCardHandler } = await import('../../src/a2a/agentCard');
-      const handler = getAgentCardHandler(mockConfig);
+      const handler = getAgentCardHandler(mockConfig, { value: null });
 
       const mockReq = {};
       const mockRes = {
@@ -258,7 +250,7 @@ describe('A2A Agent Card', () => {
 
     it('should respond with the agent card JSON', async () => {
       const { getAgentCardHandler, buildAgentCard } = await import('../../src/a2a/agentCard');
-      const handler = getAgentCardHandler(mockConfig);
+      const handler = getAgentCardHandler(mockConfig, { value: null });
 
       const mockReq = {};
       const mockRes = {
@@ -274,7 +266,7 @@ describe('A2A Agent Card', () => {
 
     it('should produce valid JSON-serializable output', async () => {
       const { getAgentCardHandler } = await import('../../src/a2a/agentCard');
-      const handler = getAgentCardHandler(mockConfig);
+      const handler = getAgentCardHandler(mockConfig, { value: null });
 
       const mockReq = {};
       let capturedResponse: any;

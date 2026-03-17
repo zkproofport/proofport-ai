@@ -17,6 +17,7 @@ vi.mock('ethers', () => {
 
   const mockProvider = {
     getBlockNumber: vi.fn().mockResolvedValue(1000),
+    getTransactionCount: vi.fn().mockResolvedValue(0),
   };
 
   const mockWallet = {

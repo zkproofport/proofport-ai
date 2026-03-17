@@ -439,6 +439,7 @@ describe('ProofportExecutor', () => {
       expect(mockHandleGetSupportedCircuits).toHaveBeenCalledOnce();
       expect(mockHandleGetSupportedCircuits).toHaveBeenCalledWith(
         expect.objectContaining({ chainId: '84532' }),
+        'disabled',
       );
     });
 
