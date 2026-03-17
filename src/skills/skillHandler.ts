@@ -42,8 +42,6 @@ export interface SkillDeps {
   rpcUrls: string[];
   /** Path to bb binary */
   bbPath: string;
-  /** Path to nargo binary */
-  nargoPath: string;
   /** Path to compiled circuit artifacts directory */
   circuitsDir: string;
   /** RPC URL for on-chain verification (verifier contract calls) */

@@ -374,7 +374,6 @@ export class ProofportExecutor implements AgentExecutor {
       easGraphqlEndpoint: this.deps.config.easGraphqlEndpoint,
       rpcUrls: [this.deps.config.baseRpcUrl],
       bbPath: this.deps.config.bbPath,
-      nargoPath: this.deps.config.nargoPath,
       circuitsDir: this.deps.config.circuitsDir,
       chainRpcUrl: this.deps.config.chainRpcUrl,
       teeProvider: this.deps.teeProvider,

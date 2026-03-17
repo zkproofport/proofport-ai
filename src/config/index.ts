@@ -30,7 +30,7 @@ export function loadConfig() {
     nodeEnv: process.env.NODE_ENV || 'development',
     proverUrl: process.env.PROVER_URL || '',
     bbPath: process.env.BB_PATH || 'bb',
-    nargoPath: process.env.NARGO_PATH || 'nargo',
+    // nargoPath removed — witness generation now uses @noir-lang/noir_js instead of nargo CLI
     circuitsDir: process.env.CIRCUITS_DIR || '/app/circuits',
     circuitsRepoUrl: process.env.CIRCUITS_REPO_URL || 'https://raw.githubusercontent.com/zkproofport/circuits/main',
     redisUrl: getRequiredEnv('REDIS_URL'),

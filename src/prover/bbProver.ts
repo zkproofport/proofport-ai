@@ -2,20 +2,23 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { toProverToml, toOidcProverToml } from './tomlBuilder.js';
-import type { CircuitParams, OidcCircuitInputs } from './tomlBuilder.js';
-import { createWorkDir, cleanupWorkDir } from '../circuit/artifactManager.js';
+import * as os from 'node:os';
+import * as crypto from 'node:crypto';
+import { Noir } from '@noir-lang/noir_js';
+import type { CircuitParams } from '../input/inputBuilder.js';
+import type { OidcCircuitInputs } from './inputFormatter.js';
+import { formatCoinbaseInputs, formatOidcInputs } from './inputFormatter.js';
 import { createLogger } from '../logger.js';
 
 const log = createLogger('Prover');
 
 const execFileAsync = promisify(execFile);
 
-// Circuit ID to package name mapping
-const CIRCUIT_PACKAGES: Record<string, string> = {
-  coinbase_attestation: 'coinbase_attestation',
-  coinbase_country_attestation: 'coinbase_country_attestation',
-  oidc_domain_attestation: 'oidc_domain_attestation',
+// Circuit ID to metadata mapping (directory name uses hyphens, package name uses underscores)
+const CIRCUIT_META: Record<string, { dir: string; packageName: string }> = {
+  coinbase_attestation: { dir: 'coinbase-attestation', packageName: 'coinbase_attestation' },
+  coinbase_country_attestation: { dir: 'coinbase-country-attestation', packageName: 'coinbase_country_attestation' },
+  oidc_domain_attestation: { dir: 'oidc-domain-attestation', packageName: 'oidc_domain_attestation' },
 };
 
 export interface BbProveResult {
@@ -28,74 +31,85 @@ export class BbProver {
   constructor(
     private config: {
       bbPath: string;
-      nargoPath: string;
       circuitsDir: string;
     }
   ) {}
 
   /**
-   * Generate a ZK proof for the given circuit.
+   * Generate a ZK proof for the given circuit using noir_js for witness generation.
+   *
+   * Flow:
+   * 1. Load compiled circuit JSON
+   * 2. Format inputs as noir_js-compatible JS object
+   * 3. Execute circuit via noir_js to get compressed witness
+   * 4. Write witness to temp file
+   * 5. Run bb prove with the witness
+   * 6. Off-chain verify
+   * 7. Return proof + public inputs
    *
    * @param circuitId - Canonical circuit ID
    * @param inputs - Structured circuit inputs (CircuitParams for coinbase, OidcCircuitInputs for OIDC).
    */
   async prove(circuitId: string, inputs: Record<string, any>): Promise<BbProveResult> {
-    const packageName = CIRCUIT_PACKAGES[circuitId];
-    if (!packageName) {
+    const meta = CIRCUIT_META[circuitId];
+    if (!meta) {
       throw new Error(`Unknown circuit ID: ${circuitId}`);
     }
 
-    // 1. Create isolated temp working directory
-    const workDir = await createWorkDir(this.config.circuitsDir, circuitId);
+    // Create temp directory for proof artifacts
+    const workDir = path.join(os.tmpdir(), `proofport-${crypto.randomUUID()}`);
+    const proofDir = path.join(workDir, 'proof');
+    await fs.mkdir(proofDir, { recursive: true });
 
     try {
-      // 2. Build Prover.toml based on circuit type
-      let proverTomlContent: string;
+      // 1. Load compiled circuit JSON
+      const circuitJsonPath = path.join(this.config.circuitsDir, meta.dir, 'target', `${meta.packageName}.json`);
+      const circuitJson = JSON.parse(await fs.readFile(circuitJsonPath, 'utf-8'));
+
+      // 2. Build noir_js-compatible inputs
+      let noirInputs: Record<string, unknown>;
       if (circuitId === 'oidc_domain_attestation') {
-        proverTomlContent = toOidcProverToml(inputs as OidcCircuitInputs);
+        noirInputs = formatOidcInputs(inputs as OidcCircuitInputs);
       } else {
-        proverTomlContent = toProverToml(
+        noirInputs = formatCoinbaseInputs(
           circuitId as 'coinbase_attestation' | 'coinbase_country_attestation',
-          inputs as CircuitParams
+          inputs as CircuitParams,
         );
       }
-      await fs.writeFile(path.join(workDir, 'Prover.toml'), proverTomlContent);
 
-      // 3. Run nargo execute witness
+      // 3. Execute circuit via noir_js to generate witness
+      const noir = new Noir(circuitJson);
+      let witnessData: Uint8Array;
       try {
-        await execFileAsync(this.config.nargoPath, ['execute', 'witness'], {
-          cwd: workDir,
-          timeout: 120000,
-        });
+        const { witness } = await noir.execute(noirInputs as any);
+        witnessData = witness;
       } catch (error: any) {
-        const stderr = error.stderr || error.message || 'Unknown error';
-        throw new Error(`nargo execute failed: ${stderr}`);
+        throw new Error(`noir_js execute failed: ${error.message || error}`);
       }
 
-      // 4. Move witness file: target/witness.gz → target/proof/witness.gz
-      const witnessSource = path.join(workDir, 'target', 'witness.gz');
-      const witnessDest = path.join(workDir, 'target', 'proof', 'witness.gz');
-      await fs.rename(witnessSource, witnessDest);
+      // 4. Write compressed witness to temp file
+      const witnessPath = path.join(workDir, 'witness.gz');
+      await fs.writeFile(witnessPath, witnessData);
 
       // 5. Run bb prove
+      const vkPath = path.join(this.config.circuitsDir, meta.dir, 'target', 'vk', 'vk');
       try {
         await execFileAsync(
           this.config.bbPath,
           [
             'prove',
             '-b',
-            `target/${packageName}.json`,
+            circuitJsonPath,
             '-w',
-            'target/proof/witness.gz',
+            witnessPath,
             '-k',
-            'target/vk/vk',
+            vkPath,
             '-o',
-            'target/proof',
+            proofDir,
             '--oracle_hash',
             'keccak',
           ],
           {
-            cwd: workDir,
             timeout: 120000,
           }
         );
@@ -105,22 +119,19 @@ export class BbProver {
       }
 
       // 6. Off-chain verify before returning
-      const verifyProofPath = path.join(workDir, 'target', 'proof', 'proof');
-      const verifyPubInputsPath = path.join(workDir, 'target', 'proof', 'public_inputs');
-      const verifyVkPath = path.join(workDir, 'target', 'vk', 'vk');
-      const isValid = await this.verify(circuitId, verifyProofPath, verifyPubInputsPath, verifyVkPath);
+      const verifyProofPath = path.join(proofDir, 'proof');
+      const verifyPubInputsPath = path.join(proofDir, 'public_inputs');
+      const isValid = await this.verify(circuitId, verifyProofPath, verifyPubInputsPath, vkPath);
       if (!isValid) {
         throw new Error('Off-chain proof verification failed');
       }
 
       // 7. Read proof output
-      const proofPath = path.join(workDir, 'target', 'proof', 'proof');
-      const proofBytes = await fs.readFile(proofPath);
+      const proofBytes = await fs.readFile(verifyProofPath);
       const proof = '0x' + proofBytes.toString('hex');
 
       // 8. Read public inputs
-      const publicInputsPath = path.join(workDir, 'target', 'proof', 'public_inputs');
-      const publicInputsBytes = await fs.readFile(publicInputsPath);
+      const publicInputsBytes = await fs.readFile(verifyPubInputsPath);
       const publicInputs = '0x' + publicInputsBytes.toString('hex');
 
       // 9. Concatenate for on-chain submission
@@ -132,8 +143,12 @@ export class BbProver {
         proofWithInputs,
       };
     } finally {
-      // 10. Always clean up workDir
-      await cleanupWorkDir(workDir);
+      // Always clean up temp dir
+      try {
+        await fs.rm(workDir, { recursive: true, force: true });
+      } catch {
+        // Ignore cleanup errors
+      }
     }
   }
 

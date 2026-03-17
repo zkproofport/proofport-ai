@@ -1,15 +1,15 @@
 # Multi-stage Dockerfile for AWS Nitro Enclave
-# Builds a minimal image with bb, nargo, circuit artifacts, and vsock server
+# Builds a minimal image with bb, noir_js, circuit artifacts, and vsock server
 #
 # LOCKED VERSIONS (do NOT change):
-#   bb:    v1.0.0-nightly.20250723
-#   nargo: 1.0.0-beta.8
+#   bb:       v1.0.0-nightly.20250723
+#   noir_js:  1.0.0-beta.8
 #
 # Build:   docker build -f Dockerfile.enclave -t proofport-ai-enclave .
 # Convert: nitro-cli build-enclave --docker-uri proofport-ai-enclave:latest --output-file enclave.eif
 
 # ─────────────────────────────────────────────────────────────
-# Stage 1: Download and verify bb + nargo binaries
+# Stage 1: Download and verify bb binary
 # Ubuntu 24.04 required: bb needs glibc >= 2.38 (Ubuntu 24.04 ships 2.39)
 # ─────────────────────────────────────────────────────────────
 FROM ubuntu:24.04 AS builder
@@ -31,14 +31,6 @@ RUN curl -fsSL \
     && tar -xzf barretenberg-amd64-linux.tar.gz \
     && chmod +x ./bb \
     && ./bb --version
-
-# Download nargo (x86_64-linux)
-RUN curl -fsSL \
-    "https://github.com/noir-lang/noir/releases/download/v1.0.0-beta.8/nargo-x86_64-unknown-linux-gnu.tar.gz" \
-    -o nargo-x86_64-unknown-linux-gnu.tar.gz \
-    && tar -xzf nargo-x86_64-unknown-linux-gnu.tar.gz \
-    && chmod +x ./nargo \
-    && ./nargo --version
 
 # Pre-download SRS (BN254 CRS) — bb needs this for proving.
 # Enclave has NO network, so SRS must be baked into the image.
@@ -79,22 +71,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copy binaries from builder stage
+# Copy bb binary from builder stage
 COPY --from=builder /downloads/bb    /usr/local/bin/bb
-COPY --from=builder /downloads/nargo /usr/local/bin/nargo
 
 # Copy pre-downloaded SRS data (bb looks in ~/.bb-crs/)
 COPY --from=builder /root/.bb-crs/ /root/.bb-crs/
 
-# Copy circuit artifacts
+# Copy circuit artifacts (compiled JSON + VK only, no source code)
 # These must be present before running nitro-cli build-enclave.
-# The build-enclave.sh script copies them from the parent repo into
-# the build context (aws/circuits/) before running docker build.
+# The deploy workflow copies them from the parent repo into
+# the build context (circuits/) before running docker build.
 COPY circuits/ /app/circuits/
 
-# Copy pre-bundled enclave server (single file, no node_modules needed)
+# Copy noir_js packages (WASM-based, installed in deploy workflow build context)
+COPY node_modules/ /app/node_modules/
+ENV NODE_PATH=/app/node_modules
+
+# Copy pre-bundled enclave server
 # Built by esbuild in the deploy workflow: bundles dist/aws/enclave-server.js
 # with all dependencies (ethers, tomlBuilder, etc.) into one file.
+# noir_js/acvm_js are external (WASM) and resolved via NODE_PATH above.
 COPY enclave-server.bundle.js /app/enclave-server.bundle.js
 
 # Copy NSM attestation helper (Python, uses only stdlib)

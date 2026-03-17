@@ -45,6 +45,27 @@ echo ""
 echo "[OK] A2A_BASE_URL=http://${HOST_IP}:4002"
 echo "[OK] NEXT_PUBLIC_API_BASE_URL=http://${HOST_IP}:4002"
 
+# Copy compiled circuit artifacts from parent repo
+echo ""
+echo "[*] Copying circuit artifacts from parent repo..."
+PARENT_CIRCUITS="$(dirname "$AI_DIR")/circuits"
+if [ -d "$PARENT_CIRCUITS" ]; then
+  for circuit in coinbase-attestation coinbase-country-attestation oidc-domain-attestation; do
+    TARGET="$AI_DIR/circuits/${circuit}/target"
+    VK_TARGET="$TARGET/vk"
+    SRC="$PARENT_CIRCUITS/${circuit}/target"
+    if [ -d "$SRC" ]; then
+      mkdir -p "$VK_TARGET"
+      cp "$SRC/"*.json "$TARGET/" 2>/dev/null && echo "  [OK] ${circuit}: circuit JSON" || echo "  [!] ${circuit}: no JSON found in $SRC"
+      [ -f "$SRC/vk/vk" ] && cp "$SRC/vk/vk" "$VK_TARGET/" && echo "  [OK] ${circuit}: vk" || echo "  [!] ${circuit}: no vk found"
+    else
+      echo "  [!] ${circuit}: source not found at $SRC (skipping)"
+    fi
+  done
+else
+  echo "  [!] Parent circuits repo not found at $PARENT_CIRCUITS (skipping artifact copy)"
+fi
+
 # Build and start
 echo ""
 echo "[*] Building and starting services..."

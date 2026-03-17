@@ -153,7 +153,6 @@ async function generateProofFromInputs(
   } else {
     const bbProver = new BbProver({
       bbPath: config.bbPath,
-      nargoPath: config.nargoPath,
       circuitsDir: config.circuitsDir,
     });
     const bbResult = await bbProver.prove(circuitId, proverInputs);

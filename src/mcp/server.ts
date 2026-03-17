@@ -23,7 +23,6 @@ export interface McpServerDeps {
   easGraphqlEndpoint?: string;
   rpcUrls?: string[];
   bbPath?: string;
-  nargoPath?: string;
   circuitsDir?: string;
   chainRpcUrl?: string;
   teeMode?: string;
@@ -37,7 +36,6 @@ function buildSkillDeps(deps: McpServerDeps, config: ReturnType<typeof loadConfi
     easGraphqlEndpoint: deps.easGraphqlEndpoint || config.easGraphqlEndpoint,
     rpcUrls: deps.rpcUrls || [config.baseRpcUrl],
     bbPath: deps.bbPath || config.bbPath,
-    nargoPath: deps.nargoPath || config.nargoPath,
     circuitsDir: deps.circuitsDir || config.circuitsDir,
     chainRpcUrl: deps.chainRpcUrl || config.chainRpcUrl,
     rateLimiter: deps.rateLimiter,

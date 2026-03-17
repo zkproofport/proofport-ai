@@ -26,7 +26,6 @@ services:
     environment:
       REDIS_URL: redis://redis:6379
       BB_PATH: /usr/local/bin/bb-wrapper
-      NARGO_PATH: /usr/local/bin/nargo
       CIRCUITS_DIR: /app/circuits
       A2A_BASE_URL: http://${HOST_IP:-localhost}:4002
     depends_on:

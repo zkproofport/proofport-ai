@@ -4,7 +4,7 @@
  *
  * Listens on AF_VSOCK port 5000 (production) or TCP port 15000 (fallback).
  * Accepts JSON requests from the parent EC2 instance, executes ZK proof
- * operations using bb CLI and nargo.
+ * operations using bb CLI and noir_js.
  *
  * Request/Response protocol matches EnclaveClient.ts (src/tee/enclaveClient.ts):
  *   VsockRequest  = { type, circuitId?, inputs?, requestId, encryptedPayload? }
@@ -23,14 +23,15 @@ import * as net from 'node:net';
 import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
-import * as os from 'node:os';
 import * as crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
-// Import toml builders (resolved at runtime from compiled JS)
-import { toProverToml, toOidcProverToml } from '../prover/tomlBuilder.js';
-import type { CircuitParams, OidcCircuitInputs } from '../prover/tomlBuilder.js';
+// noir_js for witness generation
+import { Noir } from '@noir-lang/noir_js';
+import { formatCoinbaseInputs, formatOidcInputs } from '../prover/inputFormatter.js';
+import type { OidcCircuitInputs } from '../prover/inputFormatter.js';
+import type { CircuitParams } from '../input/inputBuilder.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -196,7 +197,7 @@ interface ProofResult {
   publicInputs: string[];
   attestationDocument?: string;
   timing: {
-    nargoMs: number;
+    witnessMs: number;
     bbMs: number;
     nsmMs: number;
     totalMs: number;
@@ -209,7 +210,7 @@ interface ProofResult {
  * The plaintext flow sends CircuitParams (already converted by AI server).
  * This function detects which format and converts if needed.
  */
-function normalizeInputs(circuitId: string, inputs: Record<string, any>): Record<string, any> {
+function normalizeToCircuitParams(circuitId: string, inputs: Record<string, any>): Record<string, any> {
   // If inputs already have camelCase fields (CircuitParams from plaintext flow), pass through
   if (inputs.signalHash !== undefined) {
     return inputs;
@@ -258,20 +259,9 @@ function normalizeInputs(circuitId: string, inputs: Record<string, any>): Record
     return converted;
   }
 
-  // Unknown format — pass through and let toProverToml handle the error
+  // Unknown format — pass through and let formatCoinbaseInputs handle the error
   logError('Unknown input format', { action: 'enclave.inputs.unknown', keys: Object.keys(inputs) });
   return inputs;
-}
-
-function buildProverToml(circuitId: string, inputs: Record<string, any>): string {
-  if (circuitId === 'oidc_domain_attestation') {
-    return toOidcProverToml(inputs as OidcCircuitInputs);
-  }
-  const normalized = normalizeInputs(circuitId, inputs);
-  return toProverToml(
-    circuitId as 'coinbase_attestation' | 'coinbase_country_attestation',
-    normalized as CircuitParams
-  );
 }
 
 async function generateProof(
@@ -279,6 +269,12 @@ async function generateProof(
   inputs: Record<string, any>,
   requestId: string,
 ): Promise<ProofResult> {
+  const meta = CIRCUITS[circuitId];
+  if (!meta) {
+    throw new Error(
+      `Unknown circuitId '${circuitId}'. Supported: ${Object.keys(CIRCUITS).join(', ')}`
+    );
+  }
   const paths = getCircuitPaths(circuitId);
 
   // Verify circuit artifacts exist
@@ -290,73 +286,55 @@ async function generateProof(
 
   // Create temp working directory
   const workdir = await fsp.mkdtemp(path.join(CIRCUIT_BASE_DIR, `proof-${requestId}-`));
+  const proofDir = path.join(workdir, 'proof');
+  await fsp.mkdir(proofDir, { recursive: true });
 
   try {
     const tStart = Date.now();
     logInfo('Proof generation started', { action: 'enclave.prove.started', requestId, circuitId });
 
-    // Step 1: Write Prover.toml
-    const proverTomlContent = buildProverToml(circuitId, inputs);
-    logInfo('Prover.toml written from inputs', {
-      action: 'enclave.toml.written', requestId, source: 'inputs',
-    });
-    await fsp.writeFile(path.join(workdir, 'Prover.toml'), proverTomlContent);
+    // Step 1: Load compiled circuit JSON
+    const circuitJsonPath = path.join(CIRCUIT_BASE_DIR, meta.dir, 'target', meta.bytecode);
+    const circuitJson = JSON.parse(await fsp.readFile(circuitJsonPath, 'utf-8'));
+    logInfo('Circuit JSON loaded', { action: 'enclave.circuit.loaded', requestId, path: circuitJsonPath });
 
-    // Step 2: Copy Nargo.toml, src/, target/ from circuit dir
-    const nargoTomlSrc = path.join(paths.dir, 'Nargo.toml');
-    const srcDirSrc = path.join(paths.dir, 'src');
-    const targetDirSrc = path.join(paths.dir, 'target');
-
-    if (fs.existsSync(nargoTomlSrc)) {
-      await fsp.copyFile(nargoTomlSrc, path.join(workdir, 'Nargo.toml'));
-    }
-    if (fs.existsSync(srcDirSrc)) {
-      await fsp.cp(srcDirSrc, path.join(workdir, 'src'), { recursive: true });
-    }
-    if (fs.existsSync(targetDirSrc)) {
-      await fsp.cp(targetDirSrc, path.join(workdir, 'target'), { recursive: true });
+    // Step 2: Format inputs for noir_js
+    let noirInputs: Record<string, unknown>;
+    if (circuitId === 'oidc_domain_attestation') {
+      noirInputs = formatOidcInputs(inputs as OidcCircuitInputs);
+    } else {
+      const normalized = normalizeToCircuitParams(circuitId, inputs);
+      noirInputs = formatCoinbaseInputs(
+        circuitId as 'coinbase_attestation' | 'coinbase_country_attestation',
+        normalized as CircuitParams,
+      );
     }
 
-    // Step 3: Run nargo execute
-    const nargoCmd = ['execute', '--program-dir', workdir];
-    logInfo('nargo execute started', { action: 'enclave.nargo.started', requestId, cmd: `nargo ${nargoCmd.join(' ')}` });
-
+    // Step 3: Execute circuit via noir_js to generate witness
+    const noir = new Noir(circuitJson);
+    let witnessData: Uint8Array;
     try {
-      const { stdout } = await execFileAsync('nargo', nargoCmd, {
-        cwd: workdir,
-        timeout: PROVE_TIMEOUT_MS,
-      });
-      logInfo('nargo execute succeeded', { action: 'enclave.nargo.succeeded', requestId, stdout });
-    } catch (err: any) {
-      logError('nargo execute failed', {
-        action: 'enclave.nargo.failed', requestId,
-        returncode: err.code, stdout: err.stdout, stderr: err.stderr,
-      });
-      throw new Error(`nargo execute failed (exit ${err.code}): ${err.stderr}`);
+      const { witness } = await noir.execute(noirInputs as any);
+      witnessData = witness;
+    } catch (error: any) {
+      throw new Error(`noir_js execute failed: ${error.message || error}`);
     }
 
-    const tNargo = Date.now();
+    const tWitness = Date.now();
+    logInfo('noir_js witness generated', {
+      action: 'enclave.witness.generated', requestId, witnessBytes: witnessData.length,
+    });
 
-    // Locate witness file
-    const circuitName = circuitId;
-    let witnessPath = path.join(workdir, 'target', `${circuitName}.gz`);
-    if (!fs.existsSync(witnessPath)) {
-      const altWitness = path.join(workdir, 'target', 'witness.gz');
-      if (fs.existsSync(altWitness)) {
-        witnessPath = altWitness;
-      } else {
-        throw new Error(`Witness file not found after nargo execute. Expected: ${witnessPath}`);
-      }
-    }
-    logInfo('Witness file located', { action: 'enclave.witness.located', requestId, path: witnessPath });
+    // Step 4: Write witness to temp file
+    const witnessPath = path.join(workdir, 'witness.gz');
+    await fsp.writeFile(witnessPath, witnessData);
 
-    // Step 4: Run bb prove
-    const proofOutput = path.join(workdir, 'proof');
+    // Step 5: Run bb prove
     const bbCmd = [
       'prove',
       '-b', paths.bytecode,
       '-w', witnessPath,
-      '-o', proofOutput,
+      '-o', proofDir,
       '-k', paths.vk,
       '--oracle_hash', 'keccak',
     ];
@@ -378,16 +356,8 @@ async function generateProof(
 
     const tBb = Date.now();
 
-    // Step 5: Read proof bytes
-    let proofFile = proofOutput;
-    try {
-      const stat = await fsp.stat(proofOutput);
-      if (stat.isDirectory()) {
-        proofFile = path.join(proofOutput, 'proof');
-      }
-    } catch {
-      // proofOutput is a file, not a directory
-    }
+    // Step 6: Read proof bytes
+    const proofFile = path.join(proofDir, 'proof');
     if (!fs.existsSync(proofFile)) {
       throw new Error(`bb prove did not produce output at ${proofFile}`);
     }
@@ -396,9 +366,9 @@ async function generateProof(
     const proofHex = '0x' + proofBytes.toString('hex');
     logInfo('Proof read', { action: 'enclave.proof.read', requestId, proofBytes: proofBytes.length });
 
-    // Step 6: Read public inputs
+    // Step 7: Read public inputs
     const publicInputs: string[] = [];
-    const publicInputsPath = path.join(proofOutput, 'public_inputs');
+    const publicInputsPath = path.join(proofDir, 'public_inputs');
     if (fs.existsSync(publicInputsPath)) {
       const piBytes = await fsp.readFile(publicInputsPath);
       publicInputs.push('0x' + piBytes.toString('hex'));
@@ -407,7 +377,7 @@ async function generateProof(
       logInfo('No public_inputs file — returning empty publicInputs array', { action: 'enclave.inputs.empty', requestId });
     }
 
-    // Step 7: NSM attestation
+    // Step 8: NSM attestation
     let attestationB64: string | undefined;
     const proofHash = crypto.createHash('sha256').update(proofBytes).digest();
     const nsmDoc = await getNsmAttestation(proofHash);
@@ -426,8 +396,8 @@ async function generateProof(
       proof: proofHex,
       publicInputs,
       timing: {
-        nargoMs: tNargo - tStart,
-        bbMs: tBb - tNargo,
+        witnessMs: tWitness - tStart,
+        bbMs: tBb - tWitness,
         nsmMs: tNsm - tBb,
         totalMs: tNsm - tStart,
       },
