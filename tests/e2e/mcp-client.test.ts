@@ -14,6 +14,7 @@
  * Run: npx vitest run --project e2e tests/e2e/mcp-client.test.ts
  */
 
+import { execSync } from 'child_process';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -21,7 +22,16 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:4002';
 const ATTESTATION_KEY = process.env.ATTESTATION_KEY;
 const PAYER_KEY = process.env.E2E_PAYER_WALLET_KEY;
-const OIDC_JWT = process.env.E2E_OIDC_JWT;
+
+function getOidcJwt(): string | undefined {
+  if (process.env.E2E_OIDC_JWT) return process.env.E2E_OIDC_JWT;
+  try {
+    return execSync('gcloud auth print-identity-token', { encoding: 'utf-8' }).trim();
+  } catch {
+    return undefined;
+  }
+}
+const OIDC_JWT = getOidcJwt();
 
 describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
   let client: Client;
@@ -38,7 +48,7 @@ describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
     // Spawn MCP server from npm package
     transport = new StdioClientTransport({
       command: 'npx',
-      args: ['-y', '@zkproofport-ai/mcp'],
+      args: ['zkproofport-mcp'],
       env: {
         ...process.env,
         PROOFPORT_URL: BASE_URL,

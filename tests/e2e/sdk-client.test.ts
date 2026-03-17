@@ -14,6 +14,7 @@
  * Run: npx vitest run --project e2e tests/e2e/sdk-client.test.ts
  */
 
+import { execSync } from 'child_process';
 import { describe, it, expect, beforeAll } from 'vitest';
 import {
   createConfig,
@@ -29,7 +30,16 @@ import {
 const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:4002';
 const ATTESTATION_KEY = process.env.ATTESTATION_KEY;
 const PAYER_KEY = process.env.E2E_PAYER_WALLET_KEY;
-const OIDC_JWT = process.env.E2E_OIDC_JWT;
+
+function getOidcJwt(): string | undefined {
+  if (process.env.E2E_OIDC_JWT) return process.env.E2E_OIDC_JWT;
+  try {
+    return execSync('gcloud auth print-identity-token', { encoding: 'utf-8' }).trim();
+  } catch {
+    return undefined;
+  }
+}
+const OIDC_JWT = getOidcJwt();
 
 describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
   let config: ClientConfig;

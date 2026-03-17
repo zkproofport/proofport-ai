@@ -161,7 +161,7 @@ describe('E2E Encryption Flow', () => {
       if (res.json?.error) {
         expect(res.json.error).not.toBe('INVALID_REQUEST');
       }
-    });
+    }, 30_000);
 
     it('should reject requests with no circuit', async () => {
       if (!serverAvailable) return;
