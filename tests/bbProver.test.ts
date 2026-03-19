@@ -34,6 +34,11 @@ vi.mock('../src/prover/inputFormatter.js', () => ({
   formatOidcInputs: vi.fn().mockReturnValue({ mock: 'oidc_inputs' }),
 }));
 
+// Mock oidcProver
+vi.mock('../src/prover/oidcProver.js', () => ({
+  prepareOidcCircuitInputs: vi.fn().mockReturnValue({ mock: 'oidc_circuit_inputs' }),
+}));
+
 import * as fs from 'node:fs/promises';
 import { Noir } from '@noir-lang/noir_js';
 import * as inputFormatter from '../src/prover/inputFormatter.js';
@@ -129,11 +134,13 @@ describe('BbProver', () => {
       );
     });
 
-    it('formats OIDC inputs via inputFormatter for oidc_domain_attestation', async () => {
-      const oidcInputs = { mock: 'oidc' };
-      await prover.prove('oidc_domain_attestation', oidcInputs);
+    it('formats OIDC inputs via oidcProver + inputFormatter for oidc_domain_attestation', async () => {
+      const oidcPayload = { jwt: 'test', jwks: { keys: [] }, scope: 'test', provider: 'google' };
+      await prover.prove('oidc_domain_attestation', oidcPayload);
 
-      expect(inputFormatter.formatOidcInputs).toHaveBeenCalledWith(oidcInputs);
+      const { prepareOidcCircuitInputs } = await import('../src/prover/oidcProver.js');
+      expect(prepareOidcCircuitInputs).toHaveBeenCalledWith(oidcPayload);
+      expect(inputFormatter.formatOidcInputs).toHaveBeenCalledWith({ mock: 'oidc_circuit_inputs' });
       expect(inputFormatter.formatCoinbaseInputs).not.toHaveBeenCalled();
     });
 

@@ -10,7 +10,8 @@ import type {
 import { CIRCUIT_NAME_MAP } from './types.js';
 import { requestChallenge } from './session.js';
 import { prepareInputs, computeSignalHash } from './inputs.js';
-import { prepareOidcInputs } from './oidc-inputs.js';
+import { prepareOidcPayload } from './oidc-inputs.js';
+import type { OidcProvePayload } from './oidc-inputs.js';
 import { makePayment } from './payment.js';
 import { submitProof, submitEncryptedProof } from './prove.js';
 import type { ProofportSigner } from './signer.js';
@@ -56,7 +57,7 @@ export async function generateProof(
 
   // Steps 1-2: EAS attestation path (skipped for OIDC circuits)
   let easInputs: Awaited<ReturnType<typeof prepareInputs>> | undefined;
-  let oidcInputs: Awaited<ReturnType<typeof prepareOidcInputs>> | undefined;
+  let oidcPayload: OidcProvePayload | undefined;
 
   if (!isOidc) {
     // Step 1: Sign signal hash
@@ -82,13 +83,13 @@ export async function generateProof(
     // OIDC path: no EAS attestation, prepare inputs locally from JWT (JWT never leaves client)
     recordStep(1, 'Sign Signal Hash', { skipped: true, reason: 'oidc' }, Date.now());
 
-    // Step 2: Prepare OIDC inputs locally
+    // Step 2: Prepare OIDC payload (fetch JWKS, send raw JWT to TEE for validation)
     const t2 = Date.now();
     if (!params.jwt) {
       throw new Error('jwt is required for OIDC circuits');
     }
-    oidcInputs = await prepareOidcInputs({ jwt: params.jwt, scope, provider: params.provider });
-    recordStep(2, 'Prepare Inputs (OIDC)', { inputFields: Object.keys(oidcInputs).length }, t2);
+    oidcPayload = await prepareOidcPayload({ jwt: params.jwt, scope, provider: params.provider });
+    recordStep(2, 'Prepare Inputs (OIDC)', { payloadFields: Object.keys(oidcPayload).length }, t2);
   }
 
   // Step 3: Request 402 challenge (without inputs — server only needs circuit)
@@ -122,7 +123,7 @@ export async function generateProof(
 
   if (isE2E) {
     // E2E path: encrypt structured inputs with TEE's attested public key
-    const inputsToEncrypt = isOidc ? oidcInputs : easInputs;
+    const inputsToEncrypt = isOidc ? oidcPayload : easInputs;
     const encryptedPayload = encryptForTee(
       JSON.stringify({ circuitId, inputs: inputsToEncrypt }),
       challenge.teePublicKey!.publicKey,
@@ -135,10 +136,10 @@ export async function generateProof(
     });
     recordStep(5, 'Generate Proof (E2E Encrypted)', proveResponse, t);
   } else if (isOidc) {
-    // OIDC plaintext path: send structured inputs (server never sees JWT)
+    // OIDC plaintext path: send payload (JWT + JWKS) — server relays to prover, prover validates + builds inputs
     proveResponse = await submitProof(config, {
       circuit: params.circuit,
-      inputs: oidcInputs! as unknown as Record<string, unknown>,
+      inputs: oidcPayload! as unknown as Record<string, unknown>,
       paymentTxHash,
       paymentNonce: challenge.nonce,
     });

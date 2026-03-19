@@ -301,7 +301,10 @@ async function generateProof(
     // Step 2: Format inputs for noir_js
     let noirInputs: Record<string, unknown>;
     if (circuitId === 'oidc_domain_attestation') {
-      noirInputs = formatOidcInputs(inputs as OidcCircuitInputs);
+      // OIDC: inputs is OidcProvePayload { jwt, jwks, scope, provider } — validate + build circuit inputs
+      const { prepareOidcCircuitInputs } = await import('../prover/oidcProver.js');
+      const oidcInputs = prepareOidcCircuitInputs(inputs as any);
+      noirInputs = formatOidcInputs(oidcInputs);
     } else {
       const normalized = normalizeToCircuitParams(circuitId, inputs);
       noirInputs = formatCoinbaseInputs(

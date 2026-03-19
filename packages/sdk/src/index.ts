@@ -48,9 +48,9 @@ export {
   computeNullifier,
 } from './inputs.js';
 
-// OIDC input computation (client-side JWT parsing)
-export { prepareOidcInputs } from './oidc-inputs.js';
-export type { OidcCircuitInputs, PrepareOidcParams } from './oidc-inputs.js';
+// OIDC: SDK fetches JWKS, TEE validates JWT + builds circuit inputs
+export { prepareOidcInputs, prepareOidcPayload } from './oidc-inputs.js';
+export type { OidcCircuitInputs, OidcProvePayload, PrepareOidcParams } from './oidc-inputs.js';
 
 // Signer abstraction
 export type { ProofportSigner } from './signer.js';

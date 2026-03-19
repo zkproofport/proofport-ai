@@ -69,7 +69,10 @@ export class BbProver {
       // 2. Build noir_js-compatible inputs
       let noirInputs: Record<string, unknown>;
       if (circuitId === 'oidc_domain_attestation') {
-        noirInputs = formatOidcInputs(inputs as OidcCircuitInputs);
+        // OIDC: inputs is OidcProvePayload { jwt, jwks, scope, provider } — validate + build circuit inputs
+        const { prepareOidcCircuitInputs } = await import('./oidcProver.js');
+        const oidcInputs = prepareOidcCircuitInputs(inputs as any);
+        noirInputs = formatOidcInputs(oidcInputs);
       } else {
         noirInputs = formatCoinbaseInputs(
           circuitId as 'coinbase_attestation' | 'coinbase_country_attestation',

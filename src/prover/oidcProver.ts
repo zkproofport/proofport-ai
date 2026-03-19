@@ -1,57 +1,40 @@
 /**
- * OIDC Domain Attestation — Input builder.
+ * oidcProver.ts — JWT validation + circuit input preparation for OIDC proofs.
  *
- * Takes a raw JWT token + scope string, and produces all circuit inputs
- * needed for the oidc_domain_attestation circuit.
+ * Runs inside TEE (enclave-server) or bbProver (local mode).
+ * Receives raw JWT + pre-fetched JWKS from SDK (TEE has no network access).
  *
- * Steps:
- * 1. Decode JWT header → kid, iss
- * 2. Fetch JWKS via OIDC Discovery → find matching RSA public key
- * 3. Compute RSA limbs (modulus, redc_params, signature) — 18 × 120-bit
- * 4. Compute partial SHA-256 (precompute up to "email" key)
- * 5. Extract email → derive domain
- * 6. Compute scope = keccak256(scope_string)
- * 7. Compute nullifier = keccak256(keccak256(email) ++ scope)
+ * Responsibilities:
+ * 1. Parse and validate JWT (RS256, claims)
+ * 2. Provider-specific validation (Google: email_verified + hd, Microsoft: xms_edov + tid)
+ * 3. Compute RSA limbs, partial SHA-256, domain, scope, nullifier
+ * 4. Return OidcCircuitInputs ready for formatOidcInputs → noir_js
  */
 
 import { ethers } from 'ethers';
+import type { OidcCircuitInputs } from './inputFormatter.js';
 
 // ─── Circuit constants (must match main.nr) ─────────────────────────────
 
 export const OIDC_MAX_PARTIAL_DATA_LENGTH = 768;
 export const OIDC_MAX_DOMAIN_LENGTH = 64;
-export const OIDC_MAX_EMAIL_LENGTH = 128;
 
 // ─── Types ──────────────────────────────────────────────────────────────
 
-export interface OidcCircuitInputs {
-  // Public inputs
-  pubkey_modulus_limbs: string[];   // 18 × u128 decimal strings
-  domain: { storage: number[]; len: number };
-  scope: number[];                  // 32 bytes
-  nullifier: number[];              // 32 bytes
-  provider: number;              // 0=Google, 1=Microsoft
-
-  // Private inputs
-  partial_data: { storage: number[]; len: number };
-  partial_hash: number[];           // 8 × u32
-  full_data_length: number;
-  base64_decode_offset: number;
-  redc_params_limbs: string[];      // 18 × u128 decimal strings
-  signature_limbs: string[];        // 18 × u128 decimal strings
+export interface OidcProvePayload {
+  jwt: string;
+  jwks: { keys: JWK[] };
+  scope: string;
+  provider?: 'google' | 'microsoft';
+  domain?: string;
 }
 
-export interface PrepareOidcParams {
-  /** Raw JWT string (header.payload.signature) */
-  jwt: string;
-  /** Scope string for nullifier (e.g. "openstoa:topic:test") */
-  scope: string;
-  /** Domain to prove. If omitted, auto-extracted from email claim. */
-  domain?: string;
-  /** Override JWKS URL instead of using OIDC Discovery */
-  jwksUrl?: string;
-  /** OIDC provider: 'google' (default) or 'microsoft' */
-  provider?: 'google' | 'microsoft';
+interface JWK {
+  kid: string;
+  kty: string;
+  n: string;
+  e: string;
+  [key: string]: unknown;
 }
 
 // ─── BigInt helpers ─────────────────────────────────────────────────────
@@ -151,87 +134,23 @@ function generatePartialSHA256(
   return { partialHash: H, remainingData: data.slice(blockIndex * blockSize) };
 }
 
-// ─── JWKS fetching ──────────────────────────────────────────────────────
-
-interface JWK {
-  kid: string;
-  kty: string;
-  n: string;
-  e: string;
-  [key: string]: unknown;
-}
-
-async function fetchJwksUrl(issuer: string): Promise<string> {
-  const discoveryUrl = issuer.endsWith('/')
-    ? `${issuer}.well-known/openid-configuration`
-    : `${issuer}/.well-known/openid-configuration`;
-  const resp = await fetch(discoveryUrl);
-  if (!resp.ok) {
-    throw new Error(`OIDC Discovery failed for ${discoveryUrl}: ${resp.status}`);
-  }
-  const config = await resp.json() as { jwks_uri: string };
-  if (!config.jwks_uri) {
-    throw new Error(`No jwks_uri in OIDC Discovery response from ${discoveryUrl}`);
-  }
-  return config.jwks_uri;
-}
-
-async function fetchMatchingKey(jwksUrl: string, kid: string): Promise<JWK> {
-  const resp = await fetch(jwksUrl);
-  if (!resp.ok) {
-    throw new Error(`JWKS fetch failed: ${resp.status}`);
-  }
-  const jwks = await resp.json() as { keys: JWK[] };
-  const key = jwks.keys.find(k => k.kid === kid);
-  if (!key) {
-    throw new Error(`No JWKS key matching kid="${kid}". Available: ${jwks.keys.map(k => k.kid).join(', ')}`);
-  }
-  if (key.kty !== 'RSA') {
-    throw new Error(`Expected RSA key, got ${key.kty}`);
-  }
-  return key;
-}
-
-/**
- * Fetch full JWKS keyset from OIDC Discovery for a given JWT.
- * SDK fetches this because TEE has no network access.
- */
-async function fetchJwksForJwt(jwt: string, jwksUrlOverride?: string): Promise<{ keys: JWK[] }> {
-  const [headerB64] = jwt.split('.');
-  if (!headerB64) throw new Error('Invalid JWT format');
-  const header = JSON.parse(new TextDecoder().decode(base64urlToBytes(headerB64)));
-  if (!header.kid) throw new Error('JWT header missing kid');
-
-  // Decode payload to get issuer
-  const payloadB64 = jwt.split('.')[1];
-  if (!payloadB64) throw new Error('Invalid JWT format');
-  const payload = JSON.parse(new TextDecoder().decode(base64urlToBytes(payloadB64)));
-
-  const jwksUrl = jwksUrlOverride || await fetchJwksUrl(payload.iss);
-  const resp = await fetch(jwksUrl);
-  if (!resp.ok) throw new Error(`JWKS fetch failed: ${resp.status}`);
-  return resp.json() as Promise<{ keys: JWK[] }>;
-}
-
-// ─── Keccak-256 helpers ─────────────────────────────────────────────────
+// ─── Keccak-256 ─────────────────────────────────────────────────────────
 
 function keccak256Bytes(data: Uint8Array): Uint8Array {
   return ethers.getBytes(ethers.keccak256(data));
 }
 
-// ─── Main export ────────────────────────────────────────────────────────
+// ─── Main: validate JWT + build circuit inputs ──────────────────────────
 
 /**
- * Prepare all circuit inputs for oidc_domain_attestation from a raw JWT.
+ * Validate JWT claims and prepare circuit inputs for oidc_domain_attestation.
  *
- * @param params.jwt - Raw JWT string from OIDC provider (e.g. Google id_token)
- * @param params.scope - Scope string for nullifier derivation
- * @param params.domain - Domain to prove (auto-extracted from email if omitted)
- * @param params.jwksUrl - Override JWKS URL (skips OIDC Discovery)
+ * Called inside TEE (enclave) or bbProver (local).
+ * JWKS is pre-fetched by SDK and passed in (TEE has no network access).
  */
-export async function prepareOidcInputs(params: PrepareOidcParams): Promise<OidcCircuitInputs> {
-  const { jwt, scope } = params;
-  const providerValue = params.provider === 'microsoft' ? 1 : 0;
+export function prepareOidcCircuitInputs(payload: OidcProvePayload): OidcCircuitInputs {
+  const { jwt, jwks, scope } = payload;
+  const providerValue = payload.provider === 'microsoft' ? 1 : 0;
 
   // 1. Decode JWT
   const [headerB64, payloadB64, signatureB64url] = jwt.split('.');
@@ -240,7 +159,7 @@ export async function prepareOidcInputs(params: PrepareOidcParams): Promise<Oidc
   }
 
   const header = JSON.parse(new TextDecoder().decode(base64urlToBytes(headerB64)));
-  const payload = JSON.parse(new TextDecoder().decode(base64urlToBytes(payloadB64)));
+  const jwtPayload = JSON.parse(new TextDecoder().decode(base64urlToBytes(payloadB64)));
 
   if (header.alg !== 'RS256') {
     throw new Error(`Unsupported JWT algorithm: ${header.alg}. Only RS256 is supported.`);
@@ -248,42 +167,48 @@ export async function prepareOidcInputs(params: PrepareOidcParams): Promise<Oidc
   if (!header.kid) {
     throw new Error('JWT header missing kid');
   }
-  if (!payload.email) {
+  if (!jwtPayload.email) {
     throw new Error('JWT payload missing email claim');
   }
-  if (params.provider === 'microsoft') {
-    if (!payload.xms_edov) {
+
+  // 2. Provider-specific claim validation
+  if (payload.provider === 'microsoft') {
+    if (!jwtPayload.xms_edov) {
       throw new Error('Microsoft JWT xms_edov is not true (email domain ownership not verified)');
     }
-    if (!payload.tid) {
+    if (!jwtPayload.tid) {
       throw new Error('Microsoft JWT missing tid claim (not an organizational account)');
     }
-  } else if (params.provider === 'google') {
-    if (!payload.email_verified) {
+  } else if (payload.provider === 'google') {
+    if (!jwtPayload.email_verified) {
       throw new Error('JWT email_verified is not true');
     }
-    if (!payload.hd) {
+    if (!jwtPayload.hd) {
       throw new Error('Google JWT missing hd claim (not a Google Workspace account)');
     }
   } else {
-    // Generic provider (no provider specified) — standard email_verified check only
-    if (!payload.email_verified) {
+    if (!jwtPayload.email_verified) {
       throw new Error('JWT email_verified is not true');
     }
   }
 
-  const email = payload.email as string;
+  const email = jwtPayload.email as string;
   const atIndex = email.indexOf('@');
   if (atIndex === -1) {
     throw new Error(`Invalid email format: ${email}`);
   }
-  const domain = params.domain || email.substring(atIndex + 1);
+  const domain = payload.domain || email.substring(atIndex + 1);
 
-  // 2. Fetch JWKS and find matching key
-  const jwksUrl = params.jwksUrl || await fetchJwksUrl(payload.iss);
-  const jwk = await fetchMatchingKey(jwksUrl, header.kid);
+  // 3. Find matching JWKS key
+  const jwk = jwks.keys.find(k => k.kid === header.kid);
+  if (!jwk) {
+    throw new Error(`No JWKS key matching kid="${header.kid}". Available: ${jwks.keys.map(k => k.kid).join(', ')}`);
+  }
+  if (jwk.kty !== 'RSA') {
+    throw new Error(`Expected RSA key, got ${jwk.kty}`);
+  }
 
-  // 3. Compute RSA limbs
+  // 4. Compute RSA limbs
   const signedData = new TextEncoder().encode(`${headerB64}.${payloadB64}`);
   const signatureBytes = base64urlToBytes(signatureB64url);
   const signatureBigInt = bytesToBigInt(signatureBytes);
@@ -295,16 +220,13 @@ export async function prepareOidcInputs(params: PrepareOidcParams): Promise<Oidc
   const redcLimbs = splitBigIntToChunks(redcParam, 120, 18).map(v => v.toString());
   const sigLimbs = splitBigIntToChunks(signatureBigInt, 120, 18).map(v => v.toString());
 
-  // 4. Partial SHA-256 (precompute up to "email" key)
+  // 5. Partial SHA-256
   const payloadJson = new TextDecoder().decode(base64urlToBytes(payloadB64));
   const emailKeyIndex = payloadJson.indexOf('"email"');
   if (emailKeyIndex === -1) {
     throw new Error('Could not find "email" key in JWT payload');
   }
 
-  // Align to the base64 group boundary that contains the email key start.
-  // Base64 maps 3 decoded bytes → 4 base64 chars. Floor to group start ensures
-  // the full "email" key is included in partial_data after base64 decoding.
   const emailKeyIndexB64 = Math.floor(emailKeyIndex / 3) * 4;
   const sliceStart = headerB64.length + 1 + emailKeyIndexB64;
 
@@ -324,7 +246,7 @@ export async function prepareOidcInputs(params: PrepareOidcParams): Promise<Oidc
   const payloadBytesInShaPrecompute = shaCutoffIndex - (headerB64.length + 1);
   const base64DecodeOffset = (4 - (payloadBytesInShaPrecompute % 4)) % 4;
 
-  // 5. Domain BoundedVec
+  // 6. Domain BoundedVec
   const domainBytes = new TextEncoder().encode(domain);
   if (domainBytes.length > OIDC_MAX_DOMAIN_LENGTH) {
     throw new Error(`Domain "${domain}" exceeds max length ${OIDC_MAX_DOMAIN_LENGTH}`);
@@ -332,10 +254,10 @@ export async function prepareOidcInputs(params: PrepareOidcParams): Promise<Oidc
   const domainStorage = new Uint8Array(OIDC_MAX_DOMAIN_LENGTH);
   domainStorage.set(domainBytes);
 
-  // 6. Scope = keccak256(scope_string)
+  // 7. Scope = keccak256(scope_string)
   const scopeBytes = keccak256Bytes(new TextEncoder().encode(scope));
 
-  // 7. Nullifier = keccak256(keccak256(email) ++ scope)
+  // 8. Nullifier = keccak256(keccak256(email) ++ scope)
   const emailBytes = new TextEncoder().encode(email);
   const emailHash = keccak256Bytes(emailBytes);
   const preimage = new Uint8Array(64);
@@ -357,28 +279,3 @@ export async function prepareOidcInputs(params: PrepareOidcParams): Promise<Oidc
     signature_limbs: sigLimbs,
   };
 }
-
-// ─── OIDC Payload (SDK → Server → TEE) ──────────────────────────────────
-
-export interface OidcProvePayload {
-  jwt: string;
-  jwks: { keys: { kid: string; kty: string; n: string; e: string; [key: string]: unknown }[] };
-  scope: string;
-  provider?: 'google' | 'microsoft';
-}
-
-/**
- * Prepare OIDC payload for server submission.
- * SDK fetches JWKS (TEE has no network access) and sends raw JWT + JWKS to server.
- * TEE performs JWT validation, claim checks, and circuit input preparation.
- */
-export async function prepareOidcPayload(params: PrepareOidcParams): Promise<OidcProvePayload> {
-  const jwks = await fetchJwksForJwt(params.jwt, params.jwksUrl);
-  return {
-    jwt: params.jwt,
-    jwks,
-    scope: params.scope,
-    provider: params.provider,
-  };
-}
-

@@ -4,7 +4,7 @@ import {
   generateProof,
   requestChallenge,
   prepareInputs,
-  prepareOidcInputs,
+  prepareOidcPayload,
   makePayment,
   submitProof,
   verifyProof,
@@ -183,8 +183,8 @@ RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and 
           if (!params.jwt) {
             return errorResult('jwt is required for oidc_domain circuit');
           }
-          const oidcInputs = await prepareOidcInputs({ jwt: params.jwt, scope, provider: params.provider });
-          return jsonResult(oidcInputs);
+          const oidcPayload = await prepareOidcPayload({ jwt: params.jwt, scope, provider: params.provider });
+          return jsonResult(oidcPayload);
         }
 
         // Coinbase path: EAS attestation
