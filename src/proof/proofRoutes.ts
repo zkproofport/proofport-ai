@@ -71,10 +71,10 @@ async function generateProofFromInputs(
   const inputBuildStart = Date.now();
 
   if (isOidc) {
-    // OIDC: pass OidcCircuitInputs directly — TEE/bbProver calls toOidcProverToml()
-    const oidc = inputs as import('./types.js').OidcProveInputs;
-    if (!oidc.pubkey_modulus_limbs || !oidc.scope || !oidc.nullifier) {
-      res.status(400).json({ error: 'INVALID_REQUEST', message: 'Missing required OIDC fields: pubkey_modulus_limbs, scope, nullifier' });
+    // OIDC: pass OidcProvePayload { jwt, jwks, scope, provider } — TEE/bbProver validates JWT + builds circuit inputs
+    const oidc = inputs as { jwt?: string; jwks?: unknown; scope?: string };
+    if (!oidc.jwt || !oidc.jwks || !oidc.scope) {
+      res.status(400).json({ error: 'INVALID_REQUEST', message: 'Missing required OIDC fields: jwt, jwks, scope' });
       return;
     }
     proverInputs = inputs;
