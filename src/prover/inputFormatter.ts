@@ -15,6 +15,7 @@ export interface OidcCircuitInputs {
   domain: { storage: number[]; len: number };
   scope: number[];                  // 32 bytes
   nullifier: number[];              // 32 bytes
+  provider: number;              // 0=Google, 1=Microsoft
 
   // Private inputs
   partial_data: { storage: number[]; len: number };
@@ -156,6 +157,7 @@ export function formatOidcInputs(inputs: OidcCircuitInputs): Record<string, unkn
   };
   result.scope = toHexArray(inputs.scope);
   result.nullifier = toHexArray(inputs.nullifier);
+  result.provider = inputs.provider.toString();
 
   // Private inputs
   result.partial_data = {

@@ -349,6 +349,8 @@ const result = await generateProof(config, signers, {
 
 Proves email domain affiliation using an OIDC JWT token (e.g., Google, Microsoft). No EAS attestation or Coinbase account required — only a payment wallet and a JWT `id_token`.
 
+#### Google Workspace
+
 ```typescript
 import { createConfig, generateProof, fromPrivateKey } from '@zkproofport-ai/sdk';
 
@@ -360,7 +362,27 @@ const result = await generateProof(
   { attestation: paymentSigner }, // OIDC skips attestation; payment signer is used for x402 payment only
   {
     circuit: 'oidc_domain',
-    jwt: idToken, // JWT id_token from Google/Microsoft OAuth
+    jwt: googleIdToken, // JWT id_token from Google OAuth
+    scope: 'myapp:verify-domain',
+  },
+);
+```
+
+#### Microsoft 365
+
+```typescript
+import { createConfig, generateProof, fromPrivateKey } from '@zkproofport-ai/sdk';
+
+const config = createConfig();
+const paymentSigner = fromPrivateKey(process.env.PAYMENT_KEY);
+
+const result = await generateProof(
+  config,
+  { attestation: paymentSigner },
+  {
+    circuit: 'oidc_domain',
+    jwt: microsoftIdToken, // JWT id_token from Microsoft OAuth
+    provider: 'microsoft',
     scope: 'myapp:verify-domain',
   },
 );
@@ -428,6 +450,7 @@ interface ProofParams {
   countryList?: string[]; // for coinbase_country only
   isIncluded?: boolean; // for coinbase_country only
   jwt?: string; // JWT id_token for OIDC circuits (required for oidc_domain)
+  provider?: 'google' | 'microsoft'; // OIDC provider (default: 'google')
 }
 ```
 

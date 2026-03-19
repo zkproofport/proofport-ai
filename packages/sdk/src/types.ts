@@ -170,6 +170,8 @@ export interface ProofParams {
   isIncluded?: boolean;
   /** JWT token for OIDC circuit (oidc_domain) */
   jwt?: string;
+  /** OIDC provider: 'google' (default) or 'microsoft' for Microsoft 365 */
+  provider?: 'google' | 'microsoft';
 }
 
 export interface ProofResult {

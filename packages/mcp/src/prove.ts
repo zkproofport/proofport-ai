@@ -19,6 +19,7 @@ let scope = 'proofport';
 let countries: string[] | undefined;
 let included: boolean | undefined;
 let jwt: string | undefined;
+let provider: string | undefined;
 
 let i = 0;
 // Check if first arg is positional (not a flag)
@@ -38,6 +39,8 @@ for (; i < args.length; i++) {
     included = args[++i].toLowerCase() === 'true';
   } else if (args[i] === '--jwt' && args[i + 1]) {
     jwt = args[++i];
+  } else if (args[i] === '--provider' && args[i + 1]) {
+    provider = args[++i];
   }
 }
 
@@ -177,6 +180,7 @@ const toolArgs: Record<string, unknown> = { circuit, scope };
 if (countries !== undefined) toolArgs.country_list = countries;
 if (included !== undefined) toolArgs.is_included = included;
 if (jwt !== undefined) toolArgs.jwt = jwt;
+if (provider !== undefined) toolArgs.provider = provider;
 
 // ─── Start MCP server and call generate_proof ──────────────────────────
 log(`[zkproofport-prove] Circuit: ${circuit}`);

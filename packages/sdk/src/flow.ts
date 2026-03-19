@@ -87,7 +87,7 @@ export async function generateProof(
     if (!params.jwt) {
       throw new Error('jwt is required for OIDC circuits');
     }
-    oidcInputs = await prepareOidcInputs({ jwt: params.jwt, scope });
+    oidcInputs = await prepareOidcInputs({ jwt: params.jwt, scope, provider: params.provider });
     recordStep(2, 'Prepare Inputs (OIDC)', { inputFields: Object.keys(oidcInputs).length }, t2);
   }
 

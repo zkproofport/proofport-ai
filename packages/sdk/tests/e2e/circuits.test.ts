@@ -124,6 +124,7 @@ describe('SDK E2E — All Circuits (local source)', () => {
         circuit: 'oidc_domain',
         scope: 'e2e-test:sdk-oidc-domain',
         jwt: OIDC_JWT,
+        provider: 'google',
       },
     );
 

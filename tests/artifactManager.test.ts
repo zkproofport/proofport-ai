@@ -133,7 +133,7 @@ describe('artifactManager', () => {
       expect(mockFetch).toHaveBeenCalled();
     });
 
-    it('skips download if artifacts exist', async () => {
+    it('skips re-download if artifacts exist and hashes match', async () => {
       // Pre-create all artifacts (JSON + VK for all 3 circuits)
       const circuit1Dir = path.join(circuitsDir, 'coinbase-attestation', 'target');
       const circuit2Dir = path.join(circuitsDir, 'coinbase-country-attestation', 'target');
@@ -143,23 +143,39 @@ describe('artifactManager', () => {
       await fs.mkdir(path.join(circuit2Dir, 'vk'), { recursive: true });
       await fs.mkdir(path.join(circuit3Dir, 'vk'), { recursive: true });
 
-      await fs.writeFile(path.join(circuit1Dir, 'coinbase_attestation.json'), '{}');
-      await fs.writeFile(path.join(circuit1Dir, 'vk', 'vk'), '');
-      await fs.writeFile(path.join(circuit2Dir, 'coinbase_country_attestation.json'), '{}');
-      await fs.writeFile(path.join(circuit2Dir, 'vk', 'vk'), '');
-      await fs.writeFile(path.join(circuit3Dir, 'oidc_domain_attestation.json'), '{}');
-      await fs.writeFile(path.join(circuit3Dir, 'vk', 'vk'), '');
+      const jsonContent = '{}';
+      const vkContent = '';
+
+      await fs.writeFile(path.join(circuit1Dir, 'coinbase_attestation.json'), jsonContent);
+      await fs.writeFile(path.join(circuit1Dir, 'vk', 'vk'), vkContent);
+      await fs.writeFile(path.join(circuit2Dir, 'coinbase_country_attestation.json'), jsonContent);
+      await fs.writeFile(path.join(circuit2Dir, 'vk', 'vk'), vkContent);
+      await fs.writeFile(path.join(circuit3Dir, 'oidc_domain_attestation.json'), jsonContent);
+      await fs.writeFile(path.join(circuit3Dir, 'vk', 'vk'), vkContent);
+
+      // Write matching hash metadata
+      const crypto = await import('node:crypto');
+      const jsonHash = crypto.createHash('sha256').update(jsonContent).digest('hex');
+      const vkHash = crypto.createHash('sha256').update(vkContent).digest('hex');
+      const meta: Record<string, { jsonHash: string; vkHash: string; downloadedAt: string }> = {};
+      for (const id of ['coinbase_attestation', 'coinbase_country_attestation', 'oidc_domain_attestation']) {
+        meta[id] = { jsonHash, vkHash, downloadedAt: new Date().toISOString() };
+      }
+      await fs.writeFile(path.join(circuitsDir, 'artifacts-meta.json'), JSON.stringify(meta));
 
       const mockFetch = vi.mocked(global.fetch);
+      // Remote hash check returns same content → hashes match → no re-download
       mockFetch.mockResolvedValue({
         ok: true,
-        text: async () => '{}',
+        text: async () => jsonContent,
         arrayBuffer: async () => new ArrayBuffer(0),
       } as Response);
 
       await ensureArtifacts(circuitsDir, repoBaseUrl);
 
-      expect(mockFetch).not.toHaveBeenCalled();
+      // fetch is called for hash checks (3 circuits × 1 JSON check each), but NOT for re-download
+      // Total calls should be 3 (hash checks only), not 6+ (which would include downloads)
+      expect(mockFetch).toHaveBeenCalledTimes(3);
     });
   });
 

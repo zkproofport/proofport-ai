@@ -67,6 +67,10 @@ RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and 
         .string()
         .optional()
         .describe('OIDC JWT token (id_token) for oidc_domain circuit'),
+      provider: z
+        .enum(['google', 'microsoft'])
+        .optional()
+        .describe('OIDC provider. "google" (default) for Google Workspace, "microsoft" for Microsoft 365.'),
     },
     async (params) => {
       try {
@@ -78,7 +82,7 @@ RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and 
             scope: params.scope,
             countryList: params.country_list,
             isIncluded: params.is_included,
-            ...(params.circuit === 'oidc_domain' && { jwt: params.jwt }),
+            ...(params.circuit === 'oidc_domain' && { jwt: params.jwt, provider: params.provider }),
           },
           {
             onStep: (step) => {
@@ -163,6 +167,10 @@ RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and 
         .string()
         .optional()
         .describe('OIDC JWT token (id_token) for oidc_domain circuit'),
+      provider: z
+        .enum(['google', 'microsoft'])
+        .optional()
+        .describe('OIDC provider. "google" (default) for Google Workspace, "microsoft" for Microsoft 365.'),
     },
     async (params) => {
       try {
@@ -175,7 +183,7 @@ RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and 
           if (!params.jwt) {
             return errorResult('jwt is required for oidc_domain circuit');
           }
-          const oidcInputs = await prepareOidcInputs({ jwt: params.jwt, scope });
+          const oidcInputs = await prepareOidcInputs({ jwt: params.jwt, scope, provider: params.provider });
           return jsonResult(oidcInputs);
         }
 

@@ -18,7 +18,7 @@ import { ethers } from 'ethers';
 
 // ─── Circuit constants (must match main.nr) ─────────────────────────────
 
-export const OIDC_MAX_PARTIAL_DATA_LENGTH = 640;
+export const OIDC_MAX_PARTIAL_DATA_LENGTH = 768;
 export const OIDC_MAX_DOMAIN_LENGTH = 64;
 export const OIDC_MAX_EMAIL_LENGTH = 128;
 
@@ -30,6 +30,7 @@ export interface OidcCircuitInputs {
   domain: { storage: number[]; len: number };
   scope: number[];                  // 32 bytes
   nullifier: number[];              // 32 bytes
+  provider: number;              // 0=Google, 1=Microsoft
 
   // Private inputs
   partial_data: { storage: number[]; len: number };
@@ -49,6 +50,8 @@ export interface PrepareOidcParams {
   domain?: string;
   /** Override JWKS URL instead of using OIDC Discovery */
   jwksUrl?: string;
+  /** OIDC provider: 'google' (default) or 'microsoft' */
+  provider?: 'google' | 'microsoft';
 }
 
 // ─── BigInt helpers ─────────────────────────────────────────────────────
@@ -207,6 +210,7 @@ function keccak256Bytes(data: Uint8Array): Uint8Array {
  */
 export async function prepareOidcInputs(params: PrepareOidcParams): Promise<OidcCircuitInputs> {
   const { jwt, scope } = params;
+  const providerValue = params.provider === 'microsoft' ? 1 : 0;
 
   // 1. Decode JWT
   const [headerB64, payloadB64, signatureB64url] = jwt.split('.');
@@ -226,8 +230,17 @@ export async function prepareOidcInputs(params: PrepareOidcParams): Promise<Oidc
   if (!payload.email) {
     throw new Error('JWT payload missing email claim');
   }
-  if (!payload.email_verified) {
-    throw new Error('JWT email_verified is not true');
+  if (params.provider === 'microsoft') {
+    if (!payload.xms_edov) {
+      throw new Error('Microsoft JWT xms_edov is not true (email domain ownership not verified)');
+    }
+    if (!payload.tid) {
+      throw new Error('Microsoft JWT missing tid claim (not an organizational account)');
+    }
+  } else {
+    if (!payload.email_verified) {
+      throw new Error('JWT email_verified is not true');
+    }
   }
 
   const email = payload.email as string;
@@ -306,6 +319,7 @@ export async function prepareOidcInputs(params: PrepareOidcParams): Promise<Oidc
     domain: { storage: Array.from(domainStorage), len: domainBytes.length },
     scope: Array.from(scopeBytes),
     nullifier: Array.from(nullifierBytes),
+    provider: providerValue,
     partial_data: { storage: Array.from(partialDataPadded), len: remainingData.length },
     partial_hash: Array.from(partialHash),
     full_data_length: signedData.length,

@@ -371,21 +371,33 @@ Required additional parameters:
 
 ### OIDC Domain (`oidc_domain`)
 
-Proves email domain affiliation using an OIDC JWT id_token — without revealing the full email address. No Coinbase account or on-chain attestation needed. Works with any OIDC-compatible identity provider (e.g., Google).
+Proves email domain affiliation using an OIDC JWT id_token — without revealing the full email address. No Coinbase account or on-chain attestation needed. Supports Google Workspace and Microsoft 365.
 
 ```
 "Generate an oidc_domain proof with scope 'myapp:verify-domain'"
 ```
 
-Required additional parameter:
-- `jwt` — JWT id_token from your OIDC provider's authorization flow (e.g., Google id_token)
+Required additional parameters:
+- `jwt` — JWT id_token from your OIDC provider's authorization flow
+- `provider` — (optional) `"google"` (default) or `"microsoft"`
 
-**Using the `generate_proof` MCP tool:**
+**Google Workspace example:**
 
 ```json
 {
   "circuit": "oidc_domain",
   "jwt": "<google-id-token>",
+  "scope": "myapp:verify-domain"
+}
+```
+
+**Microsoft 365 example:**
+
+```json
+{
+  "circuit": "oidc_domain",
+  "jwt": "<microsoft-id-token>",
+  "provider": "microsoft",
   "scope": "myapp:verify-domain"
 }
 ```
