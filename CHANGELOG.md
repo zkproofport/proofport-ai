@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.1.8](https://github.com/zkproofport/proofport-ai/compare/server-v0.1.7...server-v0.1.8) (2026-03-22)
+
+
+### Features
+
+* add device flow login to prove CLI (--login-google, --login-google-workspace, --login-microsoft-365) ([bf637e0](https://github.com/zkproofport/proofport-ai/commit/bf637e083550bee8709351bbf889eb67bf8ea2a9))
+* add Google Workspace & Microsoft 365 provider support ([e3e4985](https://github.com/zkproofport/proofport-ai/commit/e3e4985e227b261d1ab40ac5905fdaf6091cf5c5))
+* **e2e:** add coinbase_country and oidc_domain proof generation tests ([d055ec4](https://github.com/zkproofport/proofport-ai/commit/d055ec4bb6c0200c403b60c79f2eae343e6214e6))
+
+
+### Bug Fixes
+
+* add --restart unless-stopped to app container docker run ([cc4fbc4](https://github.com/zkproofport/proofport-ai/commit/cc4fbc4b329e073a68ce2f70514d753e068074fb))
+* add ProveInputs→CircuitParams conversion in enclave server ([3dffd6a](https://github.com/zkproofport/proofport-ai/commit/3dffd6a5c0531de0ebfa298f65af79c7f556046d))
+* add vsock-to-TCP bridge inside enclave for Node.js server ([b1f207c](https://github.com/zkproofport/proofport-ai/commit/b1f207c22ee97986b135e32a756f7ee9b5958147))
+* bring up loopback interface in enclave entrypoint ([420e4da](https://github.com/zkproofport/proofport-ai/commit/420e4da8d9aacb4100eaf157576a615a6cf4fe69))
+* **e2e:** add gcloud OIDC fallback and increase test timeout ([5772087](https://github.com/zkproofport/proofport-ai/commit/57720875f042bb7140f3974ec3b0608b73062e89))
+* enable allowHalfOpen on enclave TCP server and fix NSM helper path ([e36887d](https://github.com/zkproofport/proofport-ai/commit/e36887dded45426826fd288a151bfe50280eb296))
+* fix vsock bridge data race and entrypoint health check bug ([1267b4d](https://github.com/zkproofport/proofport-ai/commit/1267b4df6ede98ce43ef652a7c038254b8a4ffff))
+* install cbor2 in enclave for NSM attestation helper ([9d65231](https://github.com/zkproofport/proofport-ai/commit/9d65231ef79d20423e1fefa08a4d8e001b7b1242))
+* install noir_js inside Dockerfile.enclave (EC2 has no npm) ([1c12eb5](https://github.com/zkproofport/proofport-ai/commit/1c12eb5c3d5961ba57bff5a0de5dc94cbe4f69fa))
+* update all failing unit tests to match current source behavior ([064f364](https://github.com/zkproofport/proofport-ai/commit/064f36442791680e2ab30b1262818d72f8be6fbf))
+* update E2E tests for correct MCP tool schemas and timeout ([e8cf343](https://github.com/zkproofport/proofport-ai/commit/e8cf34361a9d99b2d2fdd056aeb17de9ae473dde))
+* update proofRoutes OIDC validation for new payload format, rebuild SDK/MCP dist ([f934194](https://github.com/zkproofport/proofport-ai/commit/f9341943df79a5a8a7e5ff82a0c5d5811dd9ebc4))
+
+
+### Refactoring
+
+* move JWT validation to TEE, SDK sends raw JWT + JWKS payload ([5ce0e7b](https://github.com/zkproofport/proofport-ai/commit/5ce0e7b2a344a3a6517fe0e9e192d48527c86539))
+* replace nargo execute with noir_js for witness generation ([c5ca5bb](https://github.com/zkproofport/proofport-ai/commit/c5ca5bb9b5b2f0545b3fe29abe94e1cacfc65dc7))
+
 ## [0.1.7](https://github.com/zkproofport/proofport-ai/compare/server-v0.1.6...server-v0.1.7) (2026-03-16)
 
 

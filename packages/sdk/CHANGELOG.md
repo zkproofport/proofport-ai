@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.6](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.1.5...sdk-v0.1.6) (2026-03-22)
+
+
+### Features
+
+* add Google Workspace & Microsoft 365 provider support ([e3e4985](https://github.com/zkproofport/proofport-ai/commit/e3e4985e227b261d1ab40ac5905fdaf6091cf5c5))
+
+
+### Refactoring
+
+* move JWT validation to TEE, SDK sends raw JWT + JWKS payload ([5ce0e7b](https://github.com/zkproofport/proofport-ai/commit/5ce0e7b2a344a3a6517fe0e9e192d48527c86539))
+
 ## [0.1.5](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.1.4...sdk-v0.1.5) (2026-03-16)
 
 
