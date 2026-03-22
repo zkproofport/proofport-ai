@@ -38,6 +38,7 @@ docker rm -f "${CONTAINER}" 2>/dev/null || true
 # Start container
 docker run -d \
   --name "${CONTAINER}" \
+  --restart unless-stopped \
   --network host \
   --device /dev/vsock \
   --security-opt seccomp=unconfined \

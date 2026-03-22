@@ -121,6 +121,7 @@ log "Starting container $NEW_CONTAINER on app:${NEW_APP_PORT}..."
 
 docker run -d \
   --name "$NEW_CONTAINER" \
+  --restart unless-stopped \
   --network host \
   --device /dev/vsock \
   --security-opt seccomp=unconfined \
