@@ -41,8 +41,8 @@ No configuration needed. The MCP server handles encryption transparently.
 
 **For OIDC circuits (`oidc_domain`):**
 
-1. **OIDC identity provider account** — Any OIDC-compatible provider (e.g., Google account). No Coinbase account or on-chain attestation needed.
-2. **JWT id_token** — Obtain an `id_token` from your OIDC provider's authorization flow. Pass it as the `jwt` parameter.
+1. **OIDC identity provider account** — Google, Google Workspace, or Microsoft 365 account. No Coinbase account or on-chain attestation needed.
+2. **JWT id_token** — Either use `--login-google` / `--login-google-workspace` / `--login-microsoft-365` for automatic device flow login, or pass a pre-obtained `id_token` via `--jwt`.
 3. **USDC balance on Base** — At least $0.10 per proof. Payment is gasless (EIP-3009 signature, facilitator pays gas).
 4. **Payment wallet private key** (required) — The private key of the wallet with USDC balance. Set as `PAYMENT_KEY` (or `ATTESTATION_KEY` as fallback).
 
@@ -120,6 +120,15 @@ zkproofport-prove coinbase_country --countries US,KR --included true
 # OIDC domain proof (prove email domain affiliation using Google id_token)
 zkproofport-prove oidc_domain --jwt <google-id-token> --scope my-app
 
+# Google login (any Google account — device flow, no JWT needed)
+zkproofport-prove --login-google --scope my-app
+
+# Google Workspace login (proves organization membership)
+zkproofport-prove --login-google-workspace --scope my-app
+
+# Microsoft 365 login (proves organization membership)
+zkproofport-prove --login-microsoft-365 --scope my-app
+
 # Silent mode — capture result as variable
 PROOF_RESULT=$(zkproofport-prove coinbase_kyc --scope my-app --silent)
 ```
@@ -156,9 +165,13 @@ The CLI outputs a JSON object with these key fields:
 |--------|---------|-------------|
 | `[circuit]` | `coinbase_kyc` | Circuit to use: `coinbase_kyc`, `coinbase_country`, or `oidc_domain` |
 | `--scope <scope>` | `proofport` | Scope string for nullifier derivation |
-| `--jwt <token>` | -- | JWT id_token (required for `oidc_domain`) |
+| `--jwt <token>` | -- | JWT id_token (required for `oidc_domain` unless using `--login-*`) |
+| `--login-google` | -- | Login with any Google account via device flow (auto-obtains JWT) |
+| `--login-google-workspace` | -- | Login with Google Workspace account via device flow (proves org membership) |
+| `--login-microsoft-365` | -- | Login with Microsoft 365 account via device flow (proves org membership) |
 | `--countries <codes>` | -- | Comma-separated ISO codes (required for `coinbase_country`) |
 | `--included <true\|false>` | -- | Inclusion or exclusion proof (required for `coinbase_country`) |
+| `--provider <provider>` | -- | OIDC provider: `google` or `microsoft` (used with `--jwt`) |
 | `--silent` | -- | Suppress all logs, output only raw proof JSON to stdout |
 
 #### Silent Mode
@@ -371,7 +384,30 @@ Required additional parameters:
 
 ### OIDC Domain (`oidc_domain`)
 
-Proves email domain affiliation using an OIDC JWT id_token — without revealing the full email address. No Coinbase account or on-chain attestation needed. Supports Google Workspace and Microsoft 365.
+Proves email domain affiliation using an OIDC JWT id_token — without revealing the full email address. No Coinbase account or on-chain attestation needed. Supports Google, Google Workspace, and Microsoft 365.
+
+#### Device Flow Login (Recommended for CLI)
+
+The easiest way to generate OIDC proofs — no need to manually obtain a JWT:
+
+```bash
+# Any Google account (proves email domain, e.g., gmail.com)
+zkproofport-prove --login-google --scope my-app
+
+# Google Workspace (proves organization membership, e.g., company.com)
+zkproofport-prove --login-google-workspace --scope my-app
+
+# Microsoft 365 (proves organization membership, e.g., company.onmicrosoft.com)
+zkproofport-prove --login-microsoft-365 --scope my-app
+```
+
+The CLI opens a device flow: visit a URL, enter a code, sign in with your account. The JWT is obtained automatically and used for proof generation.
+
+> **Note:** `--login-*` and `--jwt` are mutually exclusive. Only one `--login-*` flag can be used at a time.
+
+#### Manual JWT (MCP / Programmatic)
+
+For MCP tool calls or programmatic usage, pass a pre-obtained JWT:
 
 ```
 "Generate an oidc_domain proof with scope 'myapp:verify-domain'"
