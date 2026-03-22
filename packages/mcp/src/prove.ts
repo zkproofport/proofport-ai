@@ -10,6 +10,167 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const serverPath = join(__dirname, 'index.js');
 
+// ─── Device Code Flow helpers ─────────────────────────────────────────
+
+// ZKProofport's own OAuth credentials — customers do NOT configure these
+const GOOGLE_CLIENT_ID = '995938448974-5k6078o9ie7q5ecimc67apd6e4ktumrt.apps.googleusercontent.com';
+const GOOGLE_CLIENT_SECRET = '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';
+const MICROSOFT_CLIENT_ID = 'cd5404cc-d313-431c-8112-725e629dad28';
+const MICROSOFT_TENANT = 'organizations'; // allows any org account
+
+interface DeviceFlowResult {
+  idToken: string;
+}
+
+async function googleDeviceFlow(): Promise<DeviceFlowResult> {
+  // 1. Request device code
+  const codeRes = await fetch('https://oauth2.googleapis.com/device/code', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: 'openid email profile',
+    }),
+  });
+  if (!codeRes.ok) {
+    const err = await codeRes.text();
+    throw new Error(`Google device code request failed: ${err}`);
+  }
+  const codeData = await codeRes.json() as {
+    device_code: string;
+    user_code: string;
+    verification_url: string;
+    expires_in: number;
+    interval: number;
+  };
+
+  console.error('');
+  console.error(`  Open: ${codeData.verification_url}`);
+  console.error(`  Code: ${codeData.user_code}`);
+  console.error('');
+  console.error('  Waiting for authorization...');
+
+  // 2. Poll for token
+  const deadline = Date.now() + 5 * 60 * 1000; // 5 minute timeout
+  let interval = (codeData.interval || 5) * 1000;
+
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, interval));
+
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: GOOGLE_CLIENT_ID,
+        client_secret: GOOGLE_CLIENT_SECRET,
+        device_code: codeData.device_code,
+        grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+      }),
+    });
+
+    const tokenData = await tokenRes.json() as any;
+
+    if (tokenRes.ok && tokenData.id_token) {
+      console.error('  Authorization successful!');
+      return { idToken: tokenData.id_token };
+    }
+
+    const error = tokenData.error;
+    if (error === 'authorization_pending') continue;
+    if (error === 'slow_down') {
+      interval += 5000;
+      continue;
+    }
+    if (error === 'access_denied') {
+      throw new Error('User denied the authorization request');
+    }
+    if (error === 'expired_token') {
+      throw new Error('Device code expired. Please try again.');
+    }
+    // Unknown error
+    throw new Error(`Google token polling failed: ${JSON.stringify(tokenData)}`);
+  }
+
+  throw new Error('Device code flow timed out after 5 minutes');
+}
+
+async function microsoftDeviceFlow(): Promise<DeviceFlowResult> {
+  // 1. Request device code
+  const codeRes = await fetch(
+    `https://login.microsoftonline.com/${MICROSOFT_TENANT}/oauth2/v2.0/devicecode`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: MICROSOFT_CLIENT_ID,
+        scope: 'openid email profile',
+      }),
+    },
+  );
+  if (!codeRes.ok) {
+    const err = await codeRes.text();
+    throw new Error(`Microsoft device code request failed: ${err}`);
+  }
+  const codeData = await codeRes.json() as {
+    device_code: string;
+    user_code: string;
+    verification_uri: string;
+    expires_in: number;
+    interval: number;
+    message: string;
+  };
+
+  console.error('');
+  console.error(`  Open: ${codeData.verification_uri}`);
+  console.error(`  Code: ${codeData.user_code}`);
+  console.error('');
+  console.error('  Waiting for authorization...');
+
+  // 2. Poll for token
+  const deadline = Date.now() + 5 * 60 * 1000;
+  let interval = (codeData.interval || 5) * 1000;
+
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, interval));
+
+    const tokenRes = await fetch(
+      `https://login.microsoftonline.com/${MICROSOFT_TENANT}/oauth2/v2.0/token`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: MICROSOFT_CLIENT_ID,
+          device_code: codeData.device_code,
+          grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+        }),
+      },
+    );
+
+    const tokenData = await tokenRes.json() as any;
+
+    if (tokenRes.ok && tokenData.id_token) {
+      console.error('  Authorization successful!');
+      return { idToken: tokenData.id_token };
+    }
+
+    const error = tokenData.error;
+    if (error === 'authorization_pending') continue;
+    if (error === 'slow_down') {
+      interval += 5000;
+      continue;
+    }
+    if (error === 'authorization_declined') {
+      throw new Error('User declined the authorization request');
+    }
+    if (error === 'expired_token') {
+      throw new Error('Device code expired. Please try again.');
+    }
+    throw new Error(`Microsoft token polling failed: ${JSON.stringify(tokenData)}`);
+  }
+
+  throw new Error('Device code flow timed out after 5 minutes');
+}
+
 // ─── Parse CLI arguments (before validation, so --silent works early) ──
 const args = process.argv.slice(2);
 
@@ -20,6 +181,9 @@ let countries: string[] | undefined;
 let included: boolean | undefined;
 let jwt: string | undefined;
 let provider: string | undefined;
+let loginGoogle = false;
+let loginGoogleWorkspace = false;
+let loginMicrosoft365 = false;
 
 let i = 0;
 // Check if first arg is positional (not a flag)
@@ -41,6 +205,12 @@ for (; i < args.length; i++) {
     jwt = args[++i];
   } else if (args[i] === '--provider' && args[i + 1]) {
     provider = args[++i];
+  } else if (args[i] === '--login-google') {
+    loginGoogle = true;
+  } else if (args[i] === '--login-google-workspace') {
+    loginGoogleWorkspace = true;
+  } else if (args[i] === '--login-microsoft-365') {
+    loginMicrosoft365 = true;
   }
 }
 
@@ -54,7 +224,8 @@ const isOidc = circuit === 'oidc_domain';
 const attestationKey = process.env.ATTESTATION_KEY;
 const paymentKey = process.env.PAYMENT_KEY;
 
-if (isOidc) {
+const hasLoginFlag = loginGoogle || loginGoogleWorkspace || loginMicrosoft365;
+if (isOidc || hasLoginFlag) {
   // OIDC circuits: only need a payment wallet (no EAS attestation)
   if (!paymentKey) {
     if (silent) {
@@ -71,6 +242,9 @@ if (isOidc) {
       console.error('  --jwt <token>              OIDC JWT id_token (required)');
       console.error('  --scope <scope>            Scope for nullifier (default: "proofport")');
       console.error('  --silent                   Suppress all logs; output raw proof JSON only');
+      console.error('  --login-google             Login with Google account (device flow)');
+      console.error('  --login-google-workspace   Login with Google Workspace (device flow)');
+      console.error('  --login-microsoft-365      Login with Microsoft 365 (device flow)');
       console.error('');
       console.error('How to obtain a JWT id_token (Google OAuth):');
       console.error('  1. Register OAuth app at https://console.cloud.google.com/apis/credentials');
@@ -116,6 +290,9 @@ if (isOidc) {
       console.error('  --countries <codes>         Comma-separated ISO codes (for coinbase_country)');
       console.error('  --included <true|false>     Inclusion proof (for coinbase_country)');
       console.error('  --silent                    Suppress all logs; output raw proof JSON only');
+      console.error('  --login-google             Login with Google account (device flow)');
+      console.error('  --login-google-workspace   Login with Google Workspace (device flow)');
+      console.error('  --login-microsoft-365      Login with Microsoft 365 (device flow)');
       console.error('');
       console.error('Circuits:');
       console.error('  coinbase_kyc       Prove Coinbase KYC verification (requires ATTESTATION_KEY)');
@@ -163,13 +340,57 @@ if (circuit === 'coinbase_country') {
 }
 
 // ─── Validate OIDC-specific args ─────────────────────────────────────
-if (isOidc) {
+if (isOidc && !hasLoginFlag) {
   if (!jwt) {
     if (silent) {
       console.error(JSON.stringify({ error: '--jwt <token> is required for oidc_domain circuit' }));
     } else {
       console.error('Error: --jwt <token> is required for oidc_domain circuit');
       console.error('Obtain a JWT id_token via Google OAuth (see usage above)');
+    }
+    process.exit(1);
+  }
+}
+
+// ─── Mutual exclusivity: --login-* vs --jwt ──────────────────────────
+const loginFlags = [loginGoogle, loginGoogleWorkspace, loginMicrosoft365].filter(Boolean);
+if (loginFlags.length > 1) {
+  console.error('Error: Only one --login-* flag can be specified at a time');
+  process.exit(1);
+}
+if (loginFlags.length === 1 && jwt) {
+  console.error('Error: --login-* and --jwt are mutually exclusive');
+  process.exit(1);
+}
+
+// ─── Device flow login ───────────────────────────────────────────────
+if (loginGoogle || loginGoogleWorkspace || loginMicrosoft365) {
+  // Device flow implies oidc_domain circuit
+  circuit = 'oidc_domain';
+
+  try {
+    if (loginGoogle) {
+      log('[zkproofport-prove] Starting Google device flow login...');
+      const result = await googleDeviceFlow();
+      jwt = result.idToken;
+      // --login-google: no provider (generic Google account)
+    } else if (loginGoogleWorkspace) {
+      log('[zkproofport-prove] Starting Google Workspace device flow login...');
+      const result = await googleDeviceFlow();
+      jwt = result.idToken;
+      provider = 'google';
+    } else if (loginMicrosoft365) {
+      log('[zkproofport-prove] Starting Microsoft 365 device flow login...');
+      const result = await microsoftDeviceFlow();
+      jwt = result.idToken;
+      provider = 'microsoft';
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (silent) {
+      console.error(JSON.stringify({ error: message }));
+    } else {
+      console.error(`[zkproofport-prove] Login failed: ${message}`);
     }
     process.exit(1);
   }
@@ -187,13 +408,13 @@ log(`[zkproofport-prove] Circuit: ${circuit}`);
 log(`[zkproofport-prove] Scope: ${scope}`);
 if (countries) log(`[zkproofport-prove] Countries: ${countries.join(', ')}`);
 if (included !== undefined) log(`[zkproofport-prove] Included: ${included}`);
-if (jwt) log(`[zkproofport-prove] JWT: ${jwt.slice(0, 20)}...`);
+if (jwt) log(`[zkproofport-prove] JWT: ${jwt}`);
 log('[zkproofport-prove] Starting MCP server...');
 
 // For OIDC: pass PAYMENT_KEY as ATTESTATION_KEY to MCP server (attestation signer
 // is unused for OIDC, but the server needs at least one key for type compatibility)
 const serverEnv: Record<string, string> = { ...process.env as Record<string, string> };
-if (isOidc && !attestationKey && paymentKey) {
+if ((isOidc || hasLoginFlag) && !attestationKey && paymentKey) {
   serverEnv.ATTESTATION_KEY = paymentKey;
   serverEnv.PAYMENT_KEY = paymentKey;
 }
