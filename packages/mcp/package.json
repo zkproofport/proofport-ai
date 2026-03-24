@@ -16,15 +16,15 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "@zkproofport-ai/sdk": "*",
+    "@zkproofport-ai/sdk": "^0.2.4",
     "zod": "^3.23.0"
   },
   "files": [
     "dist"
   ],
   "devDependencies": {
-    "typescript": "^5.7.0",
     "tsx": "^4.0.0",
+    "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   },
   "optionalDependencies": {
