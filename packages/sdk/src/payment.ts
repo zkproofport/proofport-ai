@@ -130,9 +130,15 @@ export async function makePayment(
   }
 
   const settleResult = (await settleResponse.json()) as any;
+
+  // Check for error reason FIRST — facilitator may return a dummy txHash alongside an error
+  if (settleResult.errorReason) {
+    throw new Error(`x402 settle failed: ${settleResult.errorReason}`);
+  }
+
   const txHash = settleResult.txHash || settleResult.transaction?.hash || settleResult.transaction;
   if (!txHash) {
-    throw new Error(`x402 settle failed: ${settleResult.errorReason || 'no transaction hash'}`);
+    throw new Error(`x402 settle failed: no transaction hash`);
   }
 
   return txHash;
