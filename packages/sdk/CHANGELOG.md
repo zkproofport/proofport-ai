@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.5](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.2.4...sdk-v0.2.5) (2026-03-24)
+
+
+### Bug Fixes
+
+* bump MCP dependency to @zkproofport-ai/sdk@0.2.4 ([c2ae9a7](https://github.com/zkproofport/proofport-ai/commit/c2ae9a729ca2d95a1368c03369945dd88b4b85be))
+* **mcp:** update sdk dependency to 0.2.4 for multi-circuit extract ([34969fd](https://github.com/zkproofport/proofport-ai/commit/34969fd65705727b20608bc79ed67c021a4aa4a2))
+
 ## [0.2.4](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.2.3...sdk-v0.2.4) (2026-03-24)
 
 
