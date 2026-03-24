@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.4](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.2.3...sdk-v0.2.4) (2026-03-24)
+
+
+### Bug Fixes
+
+* OIDC E2E test — remove provider for personal Gmail, add setup.ts symlink ([8245f7d](https://github.com/zkproofport/proofport-ai/commit/8245f7de75e4cb615809e70124b64265696cc1c9))
+
 ## [0.2.3](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.2.2...sdk-v0.2.3) (2026-03-24)
 
 
