@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.3](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.2.2...sdk-v0.2.3) (2026-03-24)
+
+
+### Features
+
+* multi-circuit extract functions, remove debug logs, fix errorReason check ([e4202bc](https://github.com/zkproofport/proofport-ai/commit/e4202bc2719b4b24a60be6b25281d081212e1be6))
+
+
+### Bug Fixes
+
+* check errorReason before txHash in x402 settle response ([4d3f796](https://github.com/zkproofport/proofport-ai/commit/4d3f7962ccc4076981f972085a1868d516d94640))
+
 ## [0.2.2](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.2.1...sdk-v0.2.2) (2026-03-24)
 
 
