@@ -119,9 +119,9 @@ describe('extractNullifierFromPublicInputs', () => {
     );
   });
 
-  it('returns null for too-short hex string (fewer than 147 fields)', () => {
-    // 146 fields
-    const shortHex = '0x' + '00'.repeat(32 * 146);
+  it('returns null for too-short hex string (fewer than 128 fields)', () => {
+    // 50 fields — too short for any circuit's nullifier
+    const shortHex = '0x' + '00'.repeat(32 * 50);
     expect(extractNullifierFromPublicInputs(shortHex)).toBeNull();
   });
 
