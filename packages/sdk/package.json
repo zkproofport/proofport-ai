@@ -1,6 +1,6 @@
 {
   "name": "@zkproofport-ai/sdk",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Client SDK for ZKProofport proof generation",
   "type": "module",
   "main": "dist/index.js",

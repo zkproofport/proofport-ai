@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.2.1...sdk-v0.2.2) (2026-03-24)
+
+
+### Features
+
+* add extractDomainFromPublicInputs, extractNullifierFromPublicInputs ([2243fd6](https://github.com/zkproofport/proofport-ai/commit/2243fd6ca7473cb1268fb5edb5b5205a6da04398))
+
 ## [0.1.5](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.1.4...sdk-v0.1.5) (2026-03-16)
 
 
