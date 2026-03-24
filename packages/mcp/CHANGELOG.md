@@ -54,3 +54,4 @@
 ### Bug Fixes
 
 * **mcp:** rename to zkproofport-mcp, add PAYMENT_KEY support, fix default URL ([3da6d49](https://github.com/zkproofport/proofport-ai/commit/3da6d491ff96588f02675900f18ac9cd2998a83b))
+
