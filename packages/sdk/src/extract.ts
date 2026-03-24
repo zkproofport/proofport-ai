@@ -1,14 +1,48 @@
 /**
- * Extract structured data from oidc_domain_attestation proof publicInputs.
+ * Extract structured data from ZK proof publicInputs.
  *
- * Layout (148 fields, each 32 bytes):
+ * Supports all circuit types:
+ *
+ * coinbase_attestation (128 fields):
+ *   Index 0-31:   signal_hash (32 bytes)
+ *   Index 32-63:  merkle_root (32 bytes)
+ *   Index 64-95:  scope (32 bytes)
+ *   Index 96-127: nullifier (32 bytes)
+ *
+ * coinbase_country_attestation (150 fields):
+ *   Index 0-63:   attestation fields
+ *   Index 64-83:  country_list (20 bytes)
+ *   Index 84:     country_list_length
+ *   Index 85:     is_included
+ *   Index 86-117: scope (32 bytes)
+ *   Index 118-149: nullifier (32 bytes)
+ *
+ * oidc_domain_attestation (148 fields):
  *   Index 0-17:    pubkey_modulus_limbs (18 x u128)
- *   Index 18-81:   domain storage (BoundedVec<u8, 64> storage, 64 bytes)
- *   Index 82:      domain len (BoundedVec len field)
+ *   Index 18-81:   domain storage (BoundedVec<u8, 64>)
+ *   Index 82:      domain len
  *   Index 83-114:  scope (32 bytes)
  *   Index 115-146: nullifier (32 bytes)
  *   Index 147:     provider (u8)
  */
+
+// Circuit layouts
+const LAYOUTS = {
+  coinbase_attestation: { scope: [64, 95], nullifier: [96, 127] },
+  coinbase_country_attestation: { scope: [86, 117], nullifier: [118, 149] },
+  oidc_domain_attestation: { scope: [83, 114], nullifier: [115, 146], domainStorage: 18, domainLen: 82 },
+} as const;
+
+type CircuitType = keyof typeof LAYOUTS;
+
+/**
+ * Detect circuit type from field count.
+ */
+function detectCircuit(fieldCount: number): CircuitType {
+  if (fieldCount === 148) return 'oidc_domain_attestation';
+  if (fieldCount === 150) return 'coinbase_country_attestation';
+  return 'coinbase_attestation';
+}
 
 /**
  * Split a concatenated hex string into 32-byte (64 hex char) fields.
@@ -23,68 +57,79 @@ function splitFields(publicInputsHex: string): string[] {
 }
 
 /**
- * Extract domain from oidc_domain_attestation proof publicInputs.
- *
- * Noir BoundedVec<u8, 64> layout: storage[0..64] at field indices 18-81, len at field index 82.
- * Each field's lower byte is the ASCII character.
- *
- * @param publicInputs - Single hex string (0x prefixed) of concatenated public inputs
- * @returns The domain string, or null if extraction fails
+ * Extract 32 bytes from consecutive fields (each field = 1 byte in lower bits).
  */
-export function extractDomainFromPublicInputs(publicInputs: string): string | null {
+function extractBytes32(fields: string[], start: number, end: number): string {
+  const bytes: string[] = [];
+  for (let i = start; i <= end; i++) {
+    const byte = (BigInt(fields[i]) & 0xFFn).toString(16).padStart(2, '0');
+    bytes.push(byte);
+  }
+  return '0x' + bytes.join('');
+}
+
+/**
+ * Extract scope from proof publicInputs.
+ * Auto-detects circuit from field count.
+ *
+ * @param publicInputs - Single hex string of concatenated public inputs
+ * @param circuit - Optional circuit type override
+ * @returns The scope as a 0x-prefixed hex string, or null if extraction fails
+ */
+export function extractScopeFromPublicInputs(publicInputs: string, circuit?: string): string | null {
   try {
     const fields = splitFields(publicInputs);
-
-    // Need at least 83 fields (indices 0-82)
-    if (fields.length < 83) {
-      return null;
-    }
-
-    // Read domain length from field index 82
-    const domainLen = Number(BigInt(fields[82]));
-    if (domainLen <= 0 || domainLen > 64) {
-      return null;
-    }
-
-    // Read domain bytes from field indices 18..18+domainLen
-    const chars: string[] = [];
-    for (let i = 0; i < domainLen; i++) {
-      const byte = Number(BigInt(fields[18 + i]) & 0xFFn);
-      chars.push(String.fromCharCode(byte));
-    }
-
-    return chars.join('');
+    const ct = (circuit as CircuitType) || detectCircuit(fields.length);
+    const layout = LAYOUTS[ct] || LAYOUTS.coinbase_attestation;
+    const [start, end] = layout.scope;
+    if (fields.length <= end) return null;
+    return extractBytes32(fields, start, end);
   } catch {
     return null;
   }
 }
 
 /**
- * Extract nullifier from oidc_domain_attestation proof publicInputs.
+ * Extract nullifier from proof publicInputs.
+ * Auto-detects circuit from field count.
  *
- * Nullifier is stored at field indices 115-146 (32 bytes).
- * The result is a hex string representing the 32-byte nullifier.
- *
- * @param publicInputs - Single hex string (0x prefixed) of concatenated public inputs
+ * @param publicInputs - Single hex string of concatenated public inputs
+ * @param circuit - Optional circuit type override
  * @returns The nullifier as a 0x-prefixed hex string, or null if extraction fails
  */
-export function extractNullifierFromPublicInputs(publicInputs: string): string | null {
+export function extractNullifierFromPublicInputs(publicInputs: string, circuit?: string): string | null {
   try {
     const fields = splitFields(publicInputs);
+    const ct = (circuit as CircuitType) || detectCircuit(fields.length);
+    const layout = LAYOUTS[ct] || LAYOUTS.coinbase_attestation;
+    const [start, end] = layout.nullifier;
+    if (fields.length <= end) return null;
+    return extractBytes32(fields, start, end);
+  } catch {
+    return null;
+  }
+}
 
-    // Need at least 147 fields (indices 0-146)
-    if (fields.length < 147) {
-      return null;
+/**
+ * Extract domain from oidc_domain_attestation proof publicInputs.
+ *
+ * @param publicInputs - Single hex string of concatenated public inputs
+ * @returns The domain string, or null if not OIDC circuit or extraction fails
+ */
+export function extractDomainFromPublicInputs(publicInputs: string): string | null {
+  try {
+    const fields = splitFields(publicInputs);
+    if (fields.length < 83) return null;
+
+    const domainLen = Number(BigInt(fields[82]));
+    if (domainLen <= 0 || domainLen > 64) return null;
+
+    const chars: string[] = [];
+    for (let i = 0; i < domainLen; i++) {
+      const byte = Number(BigInt(fields[18 + i]) & 0xFFn);
+      chars.push(String.fromCharCode(byte));
     }
-
-    // Read nullifier bytes from field indices 115..147
-    const bytes: string[] = [];
-    for (let i = 115; i < 147; i++) {
-      const byte = (BigInt(fields[i]) & 0xFFn).toString(16).padStart(2, '0');
-      bytes.push(byte);
-    }
-
-    return '0x' + bytes.join('');
+    return chars.join('');
   } catch {
     return null;
   }

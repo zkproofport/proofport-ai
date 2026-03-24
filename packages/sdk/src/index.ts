@@ -63,6 +63,7 @@ export type { ExternalWallet } from './cdp.js';
 // Extraction helpers (parse publicInputs from proof results)
 export {
   extractDomainFromPublicInputs,
+  extractScopeFromPublicInputs,
   extractNullifierFromPublicInputs,
 } from './extract.js';
 
