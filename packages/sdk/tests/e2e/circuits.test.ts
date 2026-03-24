@@ -58,6 +58,14 @@ function getOidcJwt(): string | undefined {
   }
 }
 const OIDC_JWT = getOidcJwt();
+// Check if JWT has hd claim (Google Workspace) — personal Gmail won't work for oidc_domain
+const isWorkspaceJwt = (() => {
+  if (!OIDC_JWT) return false;
+  try {
+    const payload = JSON.parse(Buffer.from(OIDC_JWT.split('.')[1], 'base64').toString());
+    return !!payload.hd;
+  } catch { return false; }
+})();
 
 describe('SDK E2E — All Circuits (local source)', () => {
   let config: ClientConfig;
@@ -143,7 +151,8 @@ describe('SDK E2E — All Circuits (local source)', () => {
         circuit: 'oidc_domain',
         scope: 'e2e-test:sdk-oidc-domain',
         jwt: OIDC_JWT,
-        provider: 'google',
+        // No provider = personal Gmail OK (no hd claim required)
+        // Use provider: 'google' for Workspace, 'microsoft' for MS365
       },
     );
 
