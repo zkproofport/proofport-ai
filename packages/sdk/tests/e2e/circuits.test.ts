@@ -21,9 +21,13 @@ import {
   generateProof,
   verifyProof,
   fromPrivateKey,
+  extractScopeFromPublicInputs,
+  extractNullifierFromPublicInputs,
+  extractDomainFromPublicInputs,
   type ClientConfig,
   type ProofportSigner,
 } from '../../src/index.js';
+import { ethers } from 'ethers';
 
 // Load .env.test
 const envPath = resolve(__dirname, '../../../../.env.test');
@@ -89,6 +93,14 @@ describe('SDK E2E — All Circuits (local source)', () => {
     expect(result.paymentTxHash).toBeTruthy();
     expect(result.timing).toBeDefined();
 
+    // Extract scope and nullifier
+    const scope = extractScopeFromPublicInputs(result.publicInputs);
+    const expectedScope = ethers.keccak256(ethers.toUtf8Bytes('e2e-test:sdk-coinbase-kyc'));
+    expect(scope).toBe(expectedScope);
+    const nullifier = extractNullifierFromPublicInputs(result.publicInputs);
+    expect(nullifier).toBeTruthy();
+    expect(nullifier!.startsWith('0x')).toBe(true);
+
     // Verify on-chain
     const verified = await verifyProof(result);
     expect(verified.valid).toBe(true);
@@ -111,6 +123,13 @@ describe('SDK E2E — All Circuits (local source)', () => {
     expect(result.publicInputs).toBeTruthy();
     expect(result.paymentTxHash).toBeTruthy();
 
+    // Extract scope and nullifier
+    const scope = extractScopeFromPublicInputs(result.publicInputs);
+    const expectedScope = ethers.keccak256(ethers.toUtf8Bytes('e2e-test:sdk-coinbase-country'));
+    expect(scope).toBe(expectedScope);
+    const nullifier = extractNullifierFromPublicInputs(result.publicInputs);
+    expect(nullifier).toBeTruthy();
+
     // Verify on-chain
     const verified = await verifyProof(result);
     expect(verified.valid).toBe(true);
@@ -132,6 +151,17 @@ describe('SDK E2E — All Circuits (local source)', () => {
     expect(result.proof.startsWith('0x')).toBe(true);
     expect(result.publicInputs).toBeTruthy();
     expect(result.paymentTxHash).toBeTruthy();
+
+    // Extract scope, nullifier, and domain
+    const scope = extractScopeFromPublicInputs(result.publicInputs);
+    const expectedScope = ethers.keccak256(ethers.toUtf8Bytes('e2e-test:sdk-oidc-domain'));
+    expect(scope).toBe(expectedScope);
+    const nullifier = extractNullifierFromPublicInputs(result.publicInputs);
+    expect(nullifier).toBeTruthy();
+    const domain = extractDomainFromPublicInputs(result.publicInputs);
+    expect(domain).toBeTruthy();
+    expect(domain!.includes('.')).toBe(true); // valid domain format
+    console.log(`[E2E] OIDC domain extracted: ${domain}`);
 
     // Verify on-chain
     const verified = await verifyProof(result);
