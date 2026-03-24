@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.4](https://github.com/zkproofport/proofport-ai/compare/server-v0.2.3...server-v0.2.4) (2026-03-24)
+
+
+### Features
+
+* multi-circuit extract functions, remove debug logs, fix errorReason check ([2861589](https://github.com/zkproofport/proofport-ai/commit/2861589fcf42936240009bb7441fbe3c45c6d645))
+
+
+### Bug Fixes
+
+* OIDC E2E test — remove provider for personal Gmail, add setup.ts symlink ([8245f7d](https://github.com/zkproofport/proofport-ai/commit/8245f7de75e4cb615809e70124b64265696cc1c9))
+
 ## [0.2.3](https://github.com/zkproofport/proofport-ai/compare/server-v0.2.2...server-v0.2.3) (2026-03-24)
 
 
