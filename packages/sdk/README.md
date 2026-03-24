@@ -390,6 +390,52 @@ const result = await generateProof(
 
 > **Note:** For OIDC circuits, the `attestation` signer field is only used as a payment fallback. Pass your payment wallet — no EAS-attested wallet needed.
 
+## Extracting Data from Proofs
+
+For OIDC domain proofs, use helper functions to extract the domain and nullifier from public inputs:
+
+```typescript
+import { generateProof, createConfig, fromPrivateKey, extractDomainFromPublicInputs, extractNullifierFromPublicInputs } from '@zkproofport-ai/sdk';
+
+const config = createConfig();
+const paymentSigner = fromPrivateKey(process.env.PAYMENT_KEY);
+
+const result = await generateProof(
+  config,
+  { attestation: paymentSigner },
+  {
+    circuit: 'oidc_domain',
+    jwt: googleIdToken,
+    scope: 'myapp:verify-domain',
+  },
+);
+
+// Extract domain and nullifier from proof
+const domain = extractDomainFromPublicInputs(result.publicInputs);
+const nullifier = extractNullifierFromPublicInputs(result.publicInputs);
+
+console.log('Verified domain:', domain);
+console.log('Nullifier:', nullifier);
+```
+
+**Public Input Layout (oidc_domain_attestation):**
+
+The proof contains 148 public input fields (32 bytes each):
+
+| Fields | Description |
+|--------|-------------|
+| 0-17 | RSA pubkey modulus limbs (18 x u128) |
+| 18-81 | Domain storage (BoundedVec<u8, 64>) |
+| 82 | Domain length |
+| 83-114 | Scope (32 bytes) |
+| 115-146 | Nullifier (32 bytes) |
+| 147 | Provider identifier (u8) |
+
+**Functions:**
+
+- `extractDomainFromPublicInputs(publicInputs: string): string | null` — Extracts the email domain (e.g., "google.com") from public inputs. Returns null if extraction fails.
+- `extractNullifierFromPublicInputs(publicInputs: string): string | null` — Extracts the 32-byte nullifier as a 0x-prefixed hex string. Returns null if extraction fails.
+
 ## Types Reference
 
 **Circuit Types:**

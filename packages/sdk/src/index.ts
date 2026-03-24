@@ -60,6 +60,12 @@ export { EthersWalletSigner, fromEthersWallet, fromPrivateKey } from './signer.j
 export { CdpWalletSigner, fromExternalWallet } from './cdp.js';
 export type { ExternalWallet } from './cdp.js';
 
+// Extraction helpers (parse publicInputs from proof results)
+export {
+  extractDomainFromPublicInputs,
+  extractNullifierFromPublicInputs,
+} from './extract.js';
+
 // Attestation (customer-facing helpers)
 export {
   fetchAttestation,
