@@ -251,12 +251,12 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
         return;
       }
 
-      // Check header PRESENCE (not value) — SDK sends X-Payment-TX: '' when payment disabled
+      // Check nonce header presence to distinguish first request (402) from retry (proof submission)
       const paymentTxHeader = (req.headers['x-payment-tx'] as string) ?? '';
       const paymentNonceHeader = (req.headers['x-payment-nonce'] as string) ?? '';
-      const hasPaymentHeader = 'x-payment-tx' in req.headers;
+      const hasNonceHeader = !!paymentNonceHeader;
 
-      if (!hasPaymentHeader) {
+      if (!hasNonceHeader) {
         // No payment header — return 402 challenge.
         // Always generate a real nonce (even when disabled) for replay protection.
         const nonce = ethers.hexlify(ethers.randomBytes(32));

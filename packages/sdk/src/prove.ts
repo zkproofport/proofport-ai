@@ -14,6 +14,7 @@ export async function submitProof(
   request: {
     circuit: CircuitName;
     inputs?: ProveInputs | Record<string, unknown>;
+    nonce?: string;
   },
 ): Promise<ProveResponse> {
   const url = `${config.baseUrl}/api/v1/prove`;
@@ -21,11 +22,15 @@ export async function submitProof(
     circuit: request.circuit,
     inputs: request.inputs,
   };
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (request.nonce) {
+    headers['X-Payment-Nonce'] = request.nonce;
+  }
   const response = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers,
     body: JSON.stringify(body),
   });
 
@@ -46,14 +51,19 @@ export async function submitEncryptedProof(
   request: {
     circuit: CircuitName;
     encryptedPayload: EncryptedEnvelope;
+    nonce?: string;
   },
 ): Promise<ProveResponse> {
   const url = `${config.baseUrl}/api/v1/prove`;
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (request.nonce) {
+    headers['X-Payment-Nonce'] = request.nonce;
+  }
   const response = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers,
     body: JSON.stringify({
       circuit: request.circuit,
       encrypted_payload: request.encryptedPayload,

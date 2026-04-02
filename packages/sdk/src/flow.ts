@@ -109,6 +109,7 @@ export async function generateProof(
     proveResponse = await submitEncryptedProof(config, {
       circuit: params.circuit,
       encryptedPayload,
+      nonce: challenge.nonce,
     });
     recordStep(4, 'Generate Proof (E2E Encrypted)', proveResponse, t);
   } else if (isOidc) {
@@ -116,6 +117,7 @@ export async function generateProof(
     proveResponse = await submitProof(config, {
       circuit: params.circuit,
       inputs: oidcPayload! as unknown as Record<string, unknown>,
+      nonce: challenge.nonce,
     });
     recordStep(4, 'Generate Proof (OIDC)', proveResponse, t);
   } else {
@@ -123,6 +125,7 @@ export async function generateProof(
     proveResponse = await submitProof(config, {
       circuit: params.circuit,
       inputs: easInputs!,
+      nonce: challenge.nonce,
     });
     recordStep(4, 'Generate Proof', proveResponse, t);
   }
