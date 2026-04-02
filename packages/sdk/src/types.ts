@@ -25,44 +25,14 @@ export const CIRCUIT_ID_MAP: Record<CircuitId, CircuitName> = {
 export interface ClientConfig {
   /** proofport-ai server URL (e.g. https://stg-ai.zkproofport.app) */
   baseUrl: string;
-  /** x402 facilitator URL for payment settlement */
-  facilitatorUrl?: string;
-  /** Optional headers for facilitator auth (e.g., CDP Bearer token) */
-  facilitatorHeaders?: Record<string, string>;
 }
 
-// ─── Payment ────────────────────────────────────────────────────────────
-
-export interface PaymentInfo {
-  nonce: string;
-  recipient: string;
-  amount: number;
-  asset: string;
-  network: string;
-  instruction: string;
-}
-
-// ─── x402 Challenge (402 response from POST /prove) ─────────────────────
-
-export interface PaymentRequirements {
-  scheme: string;
-  network: string;
-  maxAmountRequired: string;
-  resource: string;
-  description: string;
-  mimeType: string;
-  payTo: string;
-  extra: { name: string; version: string; nonce: string };
-}
+// ─── Challenge (response from POST /prove) ──────────────────────────────
 
 export interface ChallengeResponse {
   error: string;
   message: string;
   nonce: string;
-  /** false when server PAYMENT_MODE=disabled — skip payment step entirely */
-  requiresPayment?: boolean;
-  payment: PaymentRequirements;
-  facilitatorUrl?: string;
   teePublicKey?: {
     publicKey: string;
     keyId: string;
@@ -126,7 +96,6 @@ export interface ProveResponse {
   } | null;
   timing: {
     totalMs: number;
-    paymentVerifyMs?: number;
     inputBuildMs?: number;
     proveMs?: number;
   };
@@ -180,7 +149,6 @@ export interface ProofResult {
   proof: string;
   publicInputs: string;
   proofWithInputs: string;
-  paymentTxHash: string;
   attestation: ProveResponse['attestation'];
   timing: ProveResponse['timing'];
   verification: ProveResponse['verification'];

@@ -5,17 +5,15 @@ import type {
   ProofParams,
   ProofResult,
   StepResult,
-  PaymentInfo,
 } from './types.js';
 import { CIRCUIT_NAME_MAP } from './types.js';
 import { requestChallenge } from './session.js';
 import { prepareInputs, computeSignalHash } from './inputs.js';
 import { prepareOidcPayload } from './oidc-inputs.js';
 import type { OidcProvePayload } from './oidc-inputs.js';
-import { makePayment } from './payment.js';
 import { submitProof, submitEncryptedProof } from './prove.js';
 import type { ProofportSigner } from './signer.js';
-import { CIRCUITS, USDC_ADDRESSES } from './constants.js';
+import { CIRCUITS } from './constants.js';
 import { encryptForTee } from './tee.js';
 
 export interface FlowCallbacks {
@@ -23,28 +21,27 @@ export interface FlowCallbacks {
 }
 
 /**
- * Generate a ZK proof end-to-end using x402 single-step flow.
+ * Generate a ZK proof end-to-end.
  *
  * Automatically detects E2E encryption: if the server returns a TEE public key
- * in the 402 challenge response (TEE mode = nitro), inputs are encrypted with
+ * in the challenge response (TEE mode = nitro), inputs are encrypted with
  * the TEE's attested X25519 public key. Otherwise (TEE disabled), inputs are
  * sent in plaintext.
  *
- * @param config - Server URL and RPC endpoints
- * @param signers - ProofportSigner for attestation (required) and payment (optional, defaults to attestation)
+ * @param config - Server URL
+ * @param signers - ProofportSigner for attestation (required)
  * @param params - Circuit name, scope, and optional country params
  * @param callbacks - Optional callbacks for step progress
- * @returns ProofResult with proof, publicInputs, payment info
+ * @returns ProofResult with proof, publicInputs, and attestation info
  */
 export async function generateProof(
   config: ClientConfig,
-  signers: { attestation: ProofportSigner; payment?: ProofportSigner },
+  signers: { attestation: ProofportSigner },
   params: ProofParams,
   callbacks?: FlowCallbacks,
 ): Promise<ProofResult> {
   const circuitId: CircuitId = CIRCUIT_NAME_MAP[params.circuit];
   const scope = params.scope || 'proofport';
-  const paymentSigner = signers.payment || signers.attestation;
   const isOidc = CIRCUITS[circuitId]?.inputType === 'oidc';
 
   const steps: StepResult[] = [];
@@ -92,37 +89,13 @@ export async function generateProof(
     recordStep(2, 'Prepare Inputs (OIDC)', { payloadFields: Object.keys(oidcPayload).length }, t2);
   }
 
-  // Step 3: Request 402 challenge (without inputs — server only needs circuit)
+  // Step 3: Request challenge (server returns nonce + TEE key if available)
   let t = Date.now();
   const challenge = await requestChallenge(config, params.circuit);
   const isE2E = !!challenge.teePublicKey;
   recordStep(3, 'Request Challenge', { nonce: challenge.nonce, e2e: isE2E, keyId: challenge.teePublicKey?.keyId ?? null }, t);
 
-  // Step 4: Make payment (skip if server has payment disabled)
-  t = Date.now();
-  let paymentTxHash = '';
-  if (challenge.requiresPayment === false) {
-    recordStep(4, 'Make Payment', { skipped: true, reason: 'payment_disabled' }, t);
-  } else {
-    const network = challenge.payment.network as string;
-    const paymentInfo: PaymentInfo = {
-      nonce: challenge.nonce,
-      recipient: challenge.payment.payTo,
-      amount: parseInt(challenge.payment.maxAmountRequired),
-      asset: USDC_ADDRESSES[network as keyof typeof USDC_ADDRESSES],
-      network: challenge.payment.network,
-      instruction: challenge.payment.description,
-    };
-    paymentTxHash = await makePayment(
-      paymentSigner,
-      paymentInfo,
-      config.facilitatorUrl || challenge.facilitatorUrl,
-      config.facilitatorHeaders,
-    );
-    recordStep(4, 'Make Payment', { txHash: paymentTxHash }, t);
-  }
-
-  // Step 5: Submit proof (encrypted or plaintext based on TEE availability)
+  // Step 4: Submit proof (encrypted or plaintext based on TEE availability)
   t = Date.now();
   let proveResponse;
 
@@ -136,35 +109,28 @@ export async function generateProof(
     proveResponse = await submitEncryptedProof(config, {
       circuit: params.circuit,
       encryptedPayload,
-      paymentTxHash,
-      paymentNonce: challenge.nonce,
     });
-    recordStep(5, 'Generate Proof (E2E Encrypted)', proveResponse, t);
+    recordStep(4, 'Generate Proof (E2E Encrypted)', proveResponse, t);
   } else if (isOidc) {
     // OIDC plaintext path: send payload (JWT + JWKS) — server relays to prover, prover validates + builds inputs
     proveResponse = await submitProof(config, {
       circuit: params.circuit,
       inputs: oidcPayload! as unknown as Record<string, unknown>,
-      paymentTxHash,
-      paymentNonce: challenge.nonce,
     });
-    recordStep(5, 'Generate Proof (OIDC)', proveResponse, t);
+    recordStep(4, 'Generate Proof (OIDC)', proveResponse, t);
   } else {
     // Coinbase plaintext path: send pre-computed inputs (TEE disabled / local dev)
     proveResponse = await submitProof(config, {
       circuit: params.circuit,
       inputs: easInputs!,
-      paymentTxHash,
-      paymentNonce: challenge.nonce,
     });
-    recordStep(5, 'Generate Proof', proveResponse, t);
+    recordStep(4, 'Generate Proof', proveResponse, t);
   }
 
   return {
     proof: proveResponse.proof,
     publicInputs: proveResponse.publicInputs,
     proofWithInputs: proveResponse.proofWithInputs,
-    paymentTxHash,
     attestation: proveResponse.attestation,
     timing: proveResponse.timing,
     verification: proveResponse.verification,

@@ -5,7 +5,6 @@ import {
   requestChallenge,
   prepareInputs,
   prepareOidcPayload,
-  makePayment,
   submitProof,
   verifyProof,
   computeSignalHash,
@@ -14,7 +13,6 @@ import {
   CIRCUIT_NAME_MAP,
   type ProofportSigner,
   type ClientConfig,
-  type PaymentInfo,
 } from '@zkproofport-ai/sdk';
 
 function errorResult(message: string) {
@@ -34,19 +32,18 @@ export function registerTools(
   server: McpServer,
   config: ClientConfig,
   signer: ProofportSigner,
-  paymentSigner?: ProofportSigner,
 ): void {
   // ─── generate_proof ─────────────────────────────────────────────────
   server.tool(
     'generate_proof',
-    `All-in-one ZK proof generation using x402 payment flow. Handles: prepare inputs, request 402 challenge, make USDC payment via x402 facilitator, and submit proof in a single call. Use this when you want the simplest path to a proof. For fine-grained control over each step, use prepare_inputs, request_challenge, make_payment, and submit_proof individually.
+    `All-in-one ZK proof generation. Handles: prepare inputs, request challenge, and submit proof in a single call. Use this when you want the simplest path to a proof. For fine-grained control over each step, use prepare_inputs, request_challenge, and submit_proof individually.
 
 CIRCUITS:
   - "coinbase_kyc": Proves the user passed Coinbase KYC verification.
   - "coinbase_country": Proves the user's country of residence is (or is not) in a given list. Requires country_list and is_included.
   - "oidc_domain": Proves the user authenticated via OIDC and their email belongs to a specific domain. Requires jwt and scope.
 
-RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and timing information. Use verify_proof separately to verify on-chain.`,
+RETURNS: Full ProofResult with proof bytes, public inputs, and timing information. Use verify_proof separately to verify on-chain.`,
     {
       circuit: z
         .enum(['coinbase_kyc', 'coinbase_country', 'oidc_domain'])
@@ -76,7 +73,7 @@ RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and 
       try {
         const result = await generateProof(
           config,
-          { attestation: signer, payment: paymentSigner },
+          { attestation: signer },
           {
             circuit: params.circuit,
             scope: params.scope,
@@ -119,7 +116,7 @@ RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and 
   // ─── request_challenge ──────────────────────────────────────────────
   server.tool(
     'request_challenge',
-    `Step 2 of the step-by-step flow (after prepare_inputs): Request a 402 payment challenge. Sends circuit + inputs to POST /api/v1/prove without payment headers. Server returns 402 with payment nonce and requirements. You MUST call prepare_inputs first to get the inputs parameter.`,
+    `Step 2 of the step-by-step flow (after prepare_inputs): Request a challenge from the server. Sends circuit + inputs to POST /api/v1/prove. Server returns nonce and TEE key information. You MUST call prepare_inputs first to get the inputs parameter.`,
     {
       circuit: z
         .enum(['coinbase_kyc', 'coinbase_country', 'oidc_domain'])
@@ -213,46 +210,10 @@ RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and 
     },
   );
 
-  // ─── make_payment ───────────────────────────────────────────────────
-  server.tool(
-    'make_payment',
-    `Step 3 of the step-by-step flow: Send USDC payment via x402 facilitator. Uses the payment wallet (or attestation wallet as fallback) to sign EIP-3009 TransferWithAuthorization settled via the x402 facilitator. Returns the transaction hash. Use the nonce, payTo, and maxAmountRequired from the request_challenge response.`,
-    {
-      nonce: z.string().describe('Payment nonce from the session response'),
-      recipient: z.string().describe('Payment recipient address from the session response'),
-      amount: z.number().describe('Payment amount in USDC base units (e.g. 100000 = $0.10)'),
-      asset: z.string().describe('USDC contract address for the target network'),
-      network: z
-        .enum(['base-sepolia', 'base'])
-        .describe('Target network for payment'),
-      instruction: z.string().describe('Human-readable payment instruction from the session response'),
-    },
-    async (params) => {
-      try {
-        const payer = paymentSigner || signer;
-
-        const paymentInfo: PaymentInfo = {
-          nonce: params.nonce,
-          recipient: params.recipient,
-          amount: params.amount,
-          asset: params.asset,
-          network: params.network,
-          instruction: params.instruction,
-        };
-
-        const txHash = await makePayment(payer, paymentInfo);
-
-        return jsonResult({ tx_hash: txHash });
-      } catch (error) {
-        return errorResult(error instanceof Error ? error.message : String(error));
-      }
-    },
-  );
-
   // ─── submit_proof ───────────────────────────────────────────────────
   server.tool(
     'submit_proof',
-    `Step 4 of the step-by-step flow: Submit prepared inputs with x402 payment headers to generate the ZK proof. The TEE server verifies payment on-chain, runs the Noir circuit, and returns the UltraHonk proof. This step may take 30-90 seconds. The TEE server builds Prover.toml from these inputs.`,
+    `Step 3 of the step-by-step flow: Submit prepared inputs to generate the ZK proof. The TEE server runs the Noir circuit and returns the UltraHonk proof. This step may take 30-90 seconds. The TEE server builds Prover.toml from these inputs.`,
     {
       circuit: z
         .enum(['coinbase_kyc', 'coinbase_country', 'oidc_domain'])
@@ -262,12 +223,6 @@ RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and 
         .describe(
           'Full ProveInputs object from prepare_inputs. Accepts a JSON string or a structured object.',
         ),
-      payment_tx_hash: z
-        .string()
-        .describe('0x-prefixed transaction hash of the USDC payment from make_payment'),
-      payment_nonce: z
-        .string()
-        .describe('0x-prefixed nonce from the request_challenge response'),
     },
     async (params) => {
       try {
@@ -279,8 +234,6 @@ RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and 
         const result = await submitProof(config, {
           circuit: params.circuit,
           inputs,
-          paymentTxHash: params.payment_tx_hash,
-          paymentNonce: params.payment_nonce,
         });
 
         return jsonResult(result);
@@ -293,7 +246,7 @@ RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and 
   // ─── verify_proof ──────────────────────────────────────────────────────
   server.tool(
     'verify_proof',
-    `Step 5 (optional): Verify a ZK proof on-chain against the deployed verifier contract. Pass the full generate_proof result object directly — verification info (verifierAddress, chainId, rpcUrl) is extracted automatically. Returns { valid: true } if the proof is valid.`,
+    `Step 4 (optional): Verify a ZK proof on-chain against the deployed verifier contract. Pass the full generate_proof result object directly — verification info (verifierAddress, chainId, rpcUrl) is extracted automatically. Returns { valid: true } if the proof is valid.`,
     {
       result: z
         .object({
@@ -329,14 +282,10 @@ RETURNS: Full ProofResult with proof bytes, public inputs, payment tx hash, and 
   // ─── proofport://config resource ────────────────────────────────────
   server.resource('config', 'proofport://config', async () => {
     const attestationAddress = await signer.getAddress();
-    const paymentAddress = paymentSigner
-      ? await paymentSigner.getAddress()
-      : attestationAddress;
 
     const data = {
       baseUrl: config.baseUrl,
       attestationWalletAddress: attestationAddress,
-      paymentWalletAddress: paymentAddress,
       supportedCircuits: CIRCUITS,
     };
 

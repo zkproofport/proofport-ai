@@ -2,8 +2,8 @@ import type { ClientConfig, CircuitName, ProveInputs, ProveResponse } from './ty
 import type { EncryptedEnvelope } from './tee.js';
 
 /**
- * Submit proof generation with x402 payment headers.
- * POST /api/v1/prove with X-Payment-TX and X-Payment-Nonce headers.
+ * Submit proof generation request.
+ * POST /api/v1/prove
  *
  * The `inputs` field accepts either:
  * - `ProveInputs` (EAS coinbase path)
@@ -14,8 +14,6 @@ export async function submitProof(
   request: {
     circuit: CircuitName;
     inputs?: ProveInputs | Record<string, unknown>;
-    paymentTxHash: string;
-    paymentNonce: string;
   },
 ): Promise<ProveResponse> {
   const url = `${config.baseUrl}/api/v1/prove`;
@@ -27,8 +25,6 @@ export async function submitProof(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-Payment-TX': request.paymentTxHash,
-      'X-Payment-Nonce': request.paymentNonce,
     },
     body: JSON.stringify(body),
   });
@@ -50,8 +46,6 @@ export async function submitEncryptedProof(
   request: {
     circuit: CircuitName;
     encryptedPayload: EncryptedEnvelope;
-    paymentTxHash: string;
-    paymentNonce: string;
   },
 ): Promise<ProveResponse> {
   const url = `${config.baseUrl}/api/v1/prove`;
@@ -59,8 +53,6 @@ export async function submitEncryptedProof(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-Payment-TX': request.paymentTxHash,
-      'X-Payment-Nonce': request.paymentNonce,
     },
     body: JSON.stringify({
       circuit: request.circuit,
@@ -72,7 +64,7 @@ export async function submitEncryptedProof(
     const error = await response.json().catch(() => ({ message: `HTTP ${response.status}` }));
 
     if (response.status === 409) {
-      throw new Error('TEE key rotated. Retry with a new 402 challenge to get the updated key.');
+      throw new Error('TEE key rotated. Retry with a new challenge to get the updated key.');
     }
 
     throw new Error(`Proof generation failed: ${JSON.stringify(error)}`);

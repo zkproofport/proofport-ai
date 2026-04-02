@@ -1,8 +1,8 @@
 import type { ClientConfig, CircuitName, ChallengeResponse, ProveInputs } from './types.js';
 
 /**
- * Request a 402 payment challenge from the server.
- * POST /api/v1/prove without payment headers → 402 with nonce + payment info.
+ * Request a challenge from the server.
+ * POST /api/v1/prove without proof headers → server returns nonce + TEE key info.
  */
 export async function requestChallenge(
   config: ClientConfig,

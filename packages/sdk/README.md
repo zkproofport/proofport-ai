@@ -342,23 +342,8 @@ interface ProofportSigner {
 // Create signer from ethers private key
 function fromPrivateKey(key: string, provider?: ethers.Provider): ProofportSigner;
 
-// Create signer from any external wallet (CDP, WalletConnect, Privy, etc.)
-class CdpWalletSigner implements ProofportSigner {
-  constructor(wallet: {
-    getAddress(): string | Promise<string>;
-    signMessage(message: Uint8Array | string): Promise<string>;
-    signTypedData(domain: Record<string, unknown>, types: Record<string, Array<{ name: string; type: string }>>, message: Record<string, unknown>): Promise<string>;
-    sendTransaction?(tx: { to: string; data: string; value?: bigint }): Promise<{ hash: string; wait(): Promise<{ status: number | null }> }>;
-  });
-}
-
-// Wrap external wallet (WalletConnect, MetaMask, Privy, etc.)
-function fromExternalWallet(wallet: {
-  getAddress(): string | Promise<string>;
-  signMessage(message: Uint8Array): Promise<string>;
-  signTypedData(domain: any, types: any, message: any): Promise<string>;
-  sendTransaction?(tx: any): Promise<{ hash: string; wait(): Promise<any> }>;
-}): ProofportSigner;
+// Create signer from ethers Wallet
+function fromSigner(signer: ethers.Signer): ProofportSigner;
 ```
 
 **Proof Parameters:**
@@ -393,7 +378,7 @@ interface ProofResult {
   } | null;
   timing: {
     totalMs: number;
-    paymentVerifyMs?: number;
+
     inputBuildMs?: number;
     proveMs?: number;
   };

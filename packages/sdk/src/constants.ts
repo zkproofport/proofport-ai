@@ -31,11 +31,6 @@ export const AUTHORIZED_SIGNERS = [
   '0x44ace9abb148e8412ac4492e9a1ae6bd88226803',
 ];
 
-export const USDC_ADDRESSES = {
-  'base-sepolia': '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-  'base': '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-} as const;
-
 export const DEFAULT_EAS_GRAPHQL = 'https://base.easscan.org/graphql';
 export const DEFAULT_EAS_RPC = 'https://mainnet.base.org';
 

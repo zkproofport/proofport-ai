@@ -3,8 +3,6 @@ export type {
   ClientConfig,
   CircuitName,
   CircuitId,
-  PaymentInfo,
-  PaymentRequirements,
   ChallengeResponse,
   ProveInputs,
   ProveRequest,
@@ -24,7 +22,6 @@ export {
   CIRCUITS,
   COINBASE_ATTESTER_CONTRACT,
   AUTHORIZED_SIGNERS,
-  USDC_ADDRESSES,
 } from './constants.js';
 
 // Configuration
@@ -36,7 +33,6 @@ export type { FlowCallbacks } from './flow.js';
 
 // Individual steps (for step-by-step usage)
 export { requestChallenge, createSession } from './session.js';
-export { makePayment } from './payment.js';
 export { submitProof, submitEncryptedProof } from './prove.js';
 export { verifyProof } from './verify.js';
 
@@ -55,10 +51,6 @@ export type { OidcCircuitInputs, OidcProvePayload, PrepareOidcParams } from './o
 // Signer abstraction
 export type { ProofportSigner } from './signer.js';
 export { EthersWalletSigner, fromEthersWallet, fromPrivateKey } from './signer.js';
-
-// CDP (Coinbase Developer Platform) signer
-export { CdpWalletSigner, fromExternalWallet } from './cdp.js';
-export type { ExternalWallet } from './cdp.js';
 
 // Extraction helpers (parse publicInputs from proof results)
 export {
