@@ -226,7 +226,7 @@ const result = await generateProof(config, signers, {
 
 ### OIDC Domain
 
-Proves email domain affiliation using an OIDC JWT token (e.g., Google, Microsoft). No EAS attestation or Coinbase account required — only a payment wallet and a JWT `id_token`.
+Proves email domain affiliation using an OIDC JWT token (e.g., Google, Microsoft). No EAS attestation, Coinbase account, or wallet required — only a JWT `id_token`.
 
 #### Google Workspace
 

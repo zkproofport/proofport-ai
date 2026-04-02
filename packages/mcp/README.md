@@ -139,7 +139,7 @@ Use `--silent` to suppress all log output and print only the raw proof JSON to s
 PROOF_RESULT=$(zkproofport-prove coinbase_kyc --scope my-app --silent)
 ```
 
-Without `--silent`, the CLI prints progress logs (payment, proof generation steps) to stderr and the full proof JSON to stdout. With `--silent`, only the proof JSON is written to stdout — no logs.
+Without `--silent`, the CLI prints progress logs (proof generation steps) to stderr and the full proof JSON to stdout. With `--silent`, only the proof JSON is written to stdout — no logs.
 
 ---
 
@@ -221,7 +221,7 @@ Add to your MCP configuration file (`.cursor/mcp.json`, `~/.codeium/windsurf/mcp
 
 ### Simple Flow (Recommended)
 
-Use `generate_proof` for the simplest path — it handles input preparation, payment, and proof generation in a single call.
+Use `generate_proof` for the simplest path — it handles input preparation and proof generation in a single call.
 
 #### `generate_proof`
 

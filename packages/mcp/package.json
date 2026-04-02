@@ -1,6 +1,6 @@
 {
   "name": "@zkproofport-ai/mcp",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Local MCP server for ZK proof generation via ZKProofport. Runs locally, calls remote TEE server for proof generation.",
   "type": "module",
   "main": "dist/index.js",
@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "@zkproofport-ai/sdk": "^0.2.4",
+    "@zkproofport-ai/sdk": "^0.2.6",
     "zod": "^3.23.0"
   },
   "files": [
