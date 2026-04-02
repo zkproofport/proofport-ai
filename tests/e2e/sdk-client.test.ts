@@ -74,15 +74,19 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
   describe('requestChallenge', () => {
     it('should return 402 challenge for coinbase_kyc', async () => {
       const challenge = await requestChallenge(config, 'coinbase_kyc');
-      expect(challenge.nonce).toBeTruthy();
       expect(challenge.payment).toBeDefined();
-      expect(challenge.payment.payTo).toBeTruthy();
+      if (challenge.requiresPayment !== false) {
+        expect(challenge.nonce).toBeTruthy();
+        expect(challenge.payment.payTo).toBeTruthy();
+      }
     });
 
     it('should return 402 challenge for oidc_domain', async () => {
       const challenge = await requestChallenge(config, 'oidc_domain');
-      expect(challenge.nonce).toBeTruthy();
       expect(challenge.payment).toBeDefined();
+      if (challenge.requiresPayment !== false) {
+        expect(challenge.nonce).toBeTruthy();
+      }
     });
   });
 
@@ -97,7 +101,7 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
       expect(result.proof).toBeTruthy();
       expect(result.proof.startsWith('0x')).toBe(true);
       expect(result.publicInputs).toBeTruthy();
-      expect(result.paymentTxHash).toBeTruthy();
+      expect(result.paymentTxHash).toBeDefined();
       expect(result.timing).toBeDefined();
       expect(result.verification).toBeDefined();
     }, 120_000);
@@ -116,7 +120,7 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
 
       expect(result.proof).toBeTruthy();
       expect(result.publicInputs).toBeTruthy();
-      expect(result.paymentTxHash).toBeTruthy();
+      expect(result.paymentTxHash).toBeDefined();
     }, 120_000);
 
     it.skipIf(!OIDC_JWT)('oidc_domain: full E2E proof generation', async () => {

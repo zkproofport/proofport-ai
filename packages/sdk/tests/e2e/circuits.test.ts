@@ -98,7 +98,7 @@ describe('SDK E2E — All Circuits (local source)', () => {
     expect(result.proof).toBeTruthy();
     expect(result.proof.startsWith('0x')).toBe(true);
     expect(result.publicInputs).toBeTruthy();
-    expect(result.paymentTxHash).toBeTruthy();
+    expect(result.paymentTxHash).toBeDefined();
     expect(result.timing).toBeDefined();
 
     // Extract scope and nullifier
@@ -129,7 +129,7 @@ describe('SDK E2E — All Circuits (local source)', () => {
     expect(result.proof).toBeTruthy();
     expect(result.proof.startsWith('0x')).toBe(true);
     expect(result.publicInputs).toBeTruthy();
-    expect(result.paymentTxHash).toBeTruthy();
+    expect(result.paymentTxHash).toBeDefined();
 
     // Extract scope and nullifier
     const scope = extractScopeFromPublicInputs(result.publicInputs);
@@ -159,7 +159,7 @@ describe('SDK E2E — All Circuits (local source)', () => {
     expect(result.proof).toBeTruthy();
     expect(result.proof.startsWith('0x')).toBe(true);
     expect(result.publicInputs).toBeTruthy();
-    expect(result.paymentTxHash).toBeTruthy();
+    expect(result.paymentTxHash).toBeDefined();
 
     // Extract scope, nullifier, and domain
     const scope = extractScopeFromPublicInputs(result.publicInputs);

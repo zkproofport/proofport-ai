@@ -98,24 +98,29 @@ export async function generateProof(
   const isE2E = !!challenge.teePublicKey;
   recordStep(3, 'Request Challenge', { nonce: challenge.nonce, e2e: isE2E, keyId: challenge.teePublicKey?.keyId ?? null }, t);
 
-  // Step 4: Make payment
+  // Step 4: Make payment (skip if server has payment disabled)
   t = Date.now();
-  const network = challenge.payment.network as string;
-  const paymentInfo: PaymentInfo = {
-    nonce: challenge.nonce,
-    recipient: challenge.payment.payTo,
-    amount: parseInt(challenge.payment.maxAmountRequired),
-    asset: USDC_ADDRESSES[network as keyof typeof USDC_ADDRESSES],
-    network: challenge.payment.network,
-    instruction: challenge.payment.description,
-  };
-  const paymentTxHash = await makePayment(
-    paymentSigner,
-    paymentInfo,
-    config.facilitatorUrl || challenge.facilitatorUrl,
-    config.facilitatorHeaders,
-  );
-  recordStep(4, 'Make Payment', { txHash: paymentTxHash }, t);
+  let paymentTxHash = '';
+  if (challenge.requiresPayment === false) {
+    recordStep(4, 'Make Payment', { skipped: true, reason: 'payment_disabled' }, t);
+  } else {
+    const network = challenge.payment.network as string;
+    const paymentInfo: PaymentInfo = {
+      nonce: challenge.nonce,
+      recipient: challenge.payment.payTo,
+      amount: parseInt(challenge.payment.maxAmountRequired),
+      asset: USDC_ADDRESSES[network as keyof typeof USDC_ADDRESSES],
+      network: challenge.payment.network,
+      instruction: challenge.payment.description,
+    };
+    paymentTxHash = await makePayment(
+      paymentSigner,
+      paymentInfo,
+      config.facilitatorUrl || challenge.facilitatorUrl,
+      config.facilitatorHeaders,
+    );
+    recordStep(4, 'Make Payment', { txHash: paymentTxHash }, t);
+  }
 
   // Step 5: Submit proof (encrypted or plaintext based on TEE availability)
   t = Date.now();

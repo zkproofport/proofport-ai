@@ -255,9 +255,38 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
       const paymentTxHeader = (req.headers['x-payment-tx'] as string) || '';
       const paymentNonceHeader = (req.headers['x-payment-nonce'] as string) || '';
 
-      if (!paymentTxHeader && config.paymentMode !== 'disabled') {
-        // No payment yet — return 402 with payment requirements
+      if (!paymentTxHeader) {
+        // No payment header — return 402 challenge
         const nonce = ethers.hexlify(ethers.randomBytes(32));
+
+        if (config.paymentMode === 'disabled' && !body.inputs) {
+          // Payment disabled but no inputs yet — return 402 with requiresPayment: false
+          // SDK sees 402, skips payment step, retries with inputs directly
+          res.status(402).json({
+            error: 'PAYMENT_REQUIRED',
+            message: 'Payment disabled — retry with inputs',
+            nonce: '',
+            requiresPayment: false,
+            payment: {
+              scheme: 'exact',
+              network,
+              maxAmountRequired: '0',
+              resource: `${config.a2aBaseUrl}/api/v1/prove`,
+              description: 'Payment disabled',
+              mimeType: 'application/json',
+              payTo: '',
+              asset: usdcAddress,
+              extra: { name: 'USDC', version: '2', nonce: '' },
+            },
+            facilitatorUrl: null,
+            teePublicKey: null,
+          });
+          return;
+        }
+
+        if (config.paymentMode === 'disabled') {
+          // disabled + inputs already present → fall through to proof generation
+        } else {
 
         // Store nonce in Redis with 5-min TTL (replay protection)
         await deps.redis.set(`x402:nonce:${nonce}`, circuitId, 'EX', 300);
@@ -305,7 +334,8 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
           teePublicKey,
         });
         return;
-      }
+        } // close else (paymentMode !== 'disabled')
+      } // close if (!paymentTxHeader)
 
       // Payment disabled — skip all payment validation
       let paymentVerifyMs = 0;

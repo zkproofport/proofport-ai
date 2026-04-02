@@ -59,6 +59,8 @@ export interface ChallengeResponse {
   error: string;
   message: string;
   nonce: string;
+  /** false when server PAYMENT_MODE=disabled — skip payment step entirely */
+  requiresPayment?: boolean;
   payment: PaymentRequirements;
   facilitatorUrl?: string;
   teePublicKey?: {

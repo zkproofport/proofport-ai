@@ -1030,7 +1030,7 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
     expect(parsed.publicInputs).toBeDefined();
     expect(parsed.publicInputs).toMatch(/^0x/);
     expect(parsed.paymentTxHash).toBeDefined();
-    expect(parsed.paymentTxHash).toMatch(/^0x/);
+    if (parsed.paymentTxHash) expect(parsed.paymentTxHash).toMatch(/^0x/);
 
     generatedProof = { proof: parsed.proof, publicInputs: parsed.publicInputs, verification: parsed.verification };
 
@@ -1129,7 +1129,7 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
     expect(parsed.publicInputs).toBeDefined();
     expect(parsed.publicInputs).toMatch(/^0x/);
     expect(parsed.paymentTxHash).toBeDefined();
-    expect(parsed.paymentTxHash).toMatch(/^0x/);
+    if (parsed.paymentTxHash) expect(parsed.paymentTxHash).toMatch(/^0x/);
 
     generatedCountryProof = { proof: parsed.proof, publicInputs: parsed.publicInputs, verification: parsed.verification };
 
@@ -1231,7 +1231,7 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
     expect(parsed.publicInputs).toBeDefined();
     expect(parsed.publicInputs).toMatch(/^0x/);
     expect(parsed.paymentTxHash).toBeDefined();
-    expect(parsed.paymentTxHash).toMatch(/^0x/);
+    if (parsed.paymentTxHash) expect(parsed.paymentTxHash).toMatch(/^0x/);
 
     generatedOidcProof = { proof: parsed.proof, publicInputs: parsed.publicInputs, verification: parsed.verification };
 

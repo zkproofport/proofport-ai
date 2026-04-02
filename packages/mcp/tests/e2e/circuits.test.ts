@@ -108,7 +108,7 @@ describe('MCP E2E — All Circuits (local source)', () => {
     expect(data.proof).toBeTruthy();
     expect(data.proof.startsWith('0x')).toBe(true);
     expect(data.publicInputs).toBeTruthy();
-    expect(data.paymentTxHash).toBeTruthy();
+    expect(data.paymentTxHash).toBeDefined();
   }, 120_000);
 
   it('generate_proof coinbase_country: should generate proof end-to-end', async () => {
