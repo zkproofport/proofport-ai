@@ -213,7 +213,7 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
   const router = Router();
   const { config } = deps;
 
-  const isTestnet = config.paymentMode === 'testnet';
+  const isTestnet = config.paymentMode === 'testnet' || config.chainRpcUrl.includes('sepolia');
   const network: 'base-sepolia' | 'base' = isTestnet ? 'base-sepolia' : 'base';
   const usdcAddress = isTestnet
     ? '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
