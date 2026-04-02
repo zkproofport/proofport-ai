@@ -1,26 +1,9 @@
-# Stage 1: bb Binary Extractor (amd64 only)
-FROM --platform=linux/amd64 ubuntu:24.04 AS bb-extractor
-
-RUN apt-get update && \
-    apt-get install -y curl && \
-    rm -rf /var/lib/apt/lists/*
-
-# Download and extract bb binary (locked version: v1.0.0-nightly.20250723)
-RUN mkdir -p /opt/bb && \
-    curl -L "https://github.com/AztecProtocol/aztec-packages/releases/download/v1.0.0-nightly.20250723/barretenberg-amd64-linux.tar.gz" \
-    -o /tmp/bb.tar.gz && \
-    tar -xzf /tmp/bb.tar.gz -C /opt/bb && \
-    rm /tmp/bb.tar.gz
-
-# Copy x86_64 shared libraries needed by bb
-RUN mkdir -p /opt/x86-libs && \
-    cp /lib64/ld-linux-x86-64.so.2 /opt/x86-libs/ && \
-    cp /lib/x86_64-linux-gnu/libc.so.6 /opt/x86-libs/ && \
-    cp /lib/x86_64-linux-gnu/libm.so.6 /opt/x86-libs/ && \
-    cp /lib/x86_64-linux-gnu/libstdc++.so.6 /opt/x86-libs/ && \
-    cp /lib/x86_64-linux-gnu/libgcc_s.so.1 /opt/x86-libs/ && \
-    cp /lib/x86_64-linux-gnu/libpthread.so.0 /opt/x86-libs/ || true && \
-    cp /lib/x86_64-linux-gnu/libdl.so.2 /opt/x86-libs/ || true
+# Stage 1: bb Binary Source
+# Reuse bb binary from the last successful image in Artifact Registry.
+# The GitHub nightly release (v1.0.0-nightly.20250723) was deleted — downloading
+# from GitHub is no longer possible. The binary and its x86-64 libs are already
+# baked into the existing staging-latest image.
+FROM --platform=linux/amd64 us-central1-docker.pkg.dev/zkproofport/proofport/proofport-ai:staging-latest AS bb-extractor
 
 # Stage 2: TypeScript Build (native arch)
 FROM node:20-slim AS builder
