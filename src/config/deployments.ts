@@ -171,13 +171,10 @@ async function fetchVerifierFromBroadcast(
  * @param paymentMode - 'testnet' | 'mainnet' | 'disabled'
  * @returns true if any address was updated
  */
-export async function syncDeployments(paymentMode: string): Promise<boolean> {
-  if (paymentMode === 'disabled') {
-    log.info('Payment disabled, skipping deployment sync');
-    return false;
-  }
-
-  const isProduction = paymentMode === 'mainnet';
+export async function syncDeployments(paymentMode: string, chainRpcUrl?: string): Promise<boolean> {
+  // Determine chain: prefer explicit RPC URL detection, fall back to paymentMode
+  const isTestnetRpc = chainRpcUrl?.includes('sepolia') ?? false;
+  const isProduction = paymentMode === 'mainnet' && !isTestnetRpc;
   const chainId = isProduction ? 8453 : 84532;
   const chainIdStr = String(chainId);
   let updated = false;
