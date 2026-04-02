@@ -18,7 +18,7 @@ export const FALLBACK_VERIFIERS: Record<string, Record<string, string>> = {
   '84532': {
     coinbase_attestation: '0x0036B61dBFaB8f3CfEEF77dD5D45F7EFBFE2035c',
     coinbase_country_attestation: '0xdEe363585926c3c28327Efd1eDd01cf4559738cf',
-    oidc_domain_attestation: '0x6C309e6F804E034068A55Bca58b91652621eCB07',
+    oidc_domain_attestation: '0x27aFDEa349f247CF698F97FdFAb59E1BF8bD0550',
   },
 };
 
