@@ -251,54 +251,28 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
         return;
       }
 
-      // Check for payment in header (skip if payment disabled)
-      const paymentTxHeader = (req.headers['x-payment-tx'] as string) || '';
-      const paymentNonceHeader = (req.headers['x-payment-nonce'] as string) || '';
+      // Check header PRESENCE (not value) — SDK sends X-Payment-TX: '' when payment disabled
+      const paymentTxHeader = (req.headers['x-payment-tx'] as string) ?? '';
+      const paymentNonceHeader = (req.headers['x-payment-nonce'] as string) ?? '';
+      const hasPaymentHeader = 'x-payment-tx' in req.headers;
 
-      if (!paymentTxHeader) {
-        // No payment header — return 402 challenge
+      if (!hasPaymentHeader) {
+        // No payment header — return 402 challenge.
+        // Always generate a real nonce (even when disabled) for replay protection.
         const nonce = ethers.hexlify(ethers.randomBytes(32));
-
-        if (config.paymentMode === 'disabled' && !body.inputs) {
-          // Payment disabled but no inputs yet — return 402 with requiresPayment: false
-          // SDK sees 402, skips payment step, retries with inputs directly
-          res.status(402).json({
-            error: 'PAYMENT_REQUIRED',
-            message: 'Payment disabled — retry with inputs',
-            nonce: '',
-            requiresPayment: false,
-            payment: {
-              scheme: 'exact',
-              network,
-              maxAmountRequired: '0',
-              resource: `${config.a2aBaseUrl}/api/v1/prove`,
-              description: 'Payment disabled',
-              mimeType: 'application/json',
-              payTo: '',
-              asset: usdcAddress,
-              extra: { name: 'USDC', version: '2', nonce: '' },
-            },
-            facilitatorUrl: null,
-            teePublicKey: null,
-          });
-          return;
-        }
-
-        if (config.paymentMode === 'disabled') {
-          // disabled + inputs already present → fall through to proof generation
-        } else {
 
         // Store nonce in Redis with 5-min TTL (replay protection)
         await deps.redis.set(`x402:nonce:${nonce}`, circuitId, 'EX', 300);
 
+        const isDisabled = config.paymentMode === 'disabled';
         const paymentRequirements = {
           scheme: 'exact',
           network,
-          maxAmountRequired: String(paymentAmount),
+          maxAmountRequired: isDisabled ? '0' : String(paymentAmount),
           resource: `${config.a2aBaseUrl}/api/v1/prove`,
-          description: `ZK proof generation fee (${priceStr} USDC)`,
+          description: isDisabled ? 'Payment disabled — free proof generation' : `ZK proof generation fee (${priceStr} USDC)`,
           mimeType: 'application/json',
-          payTo: config.paymentPayTo,
+          payTo: isDisabled ? '' : config.paymentPayTo,
           asset: usdcAddress,
           extra: {
             name: network === 'base-sepolia' ? 'USDC' : 'USD Coin',
@@ -327,59 +301,55 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
         res.setHeader('PAYMENT-REQUIRED', Buffer.from(JSON.stringify(paymentRequirements)).toString('base64'));
         res.status(402).json({
           error: 'PAYMENT_REQUIRED',
-          message: 'Send payment and retry with X-Payment-TX and X-Payment-Nonce headers',
+          message: isDisabled
+            ? 'Payment disabled — send nonce back with X-Payment-Nonce to proceed'
+            : 'Send payment and retry with X-Payment-TX and X-Payment-Nonce headers',
           nonce,
+          requiresPayment: !isDisabled,
           payment: paymentRequirements,
-          facilitatorUrl: config.x402FacilitatorUrl,
+          facilitatorUrl: isDisabled ? null : config.x402FacilitatorUrl,
           teePublicKey,
         });
         return;
-        } // close else (paymentMode !== 'disabled')
-      } // close if (!paymentTxHeader)
+      }
 
-      // Payment disabled — skip all payment validation
+      // Payment headers present — validate nonce (always, for replay protection)
+      log.info({ action: 'prove.x402.start', circuit: circuitId, paymentMode: config.paymentMode }, 'x402 proof request');
+
       let paymentVerifyMs = 0;
-      if (config.paymentMode === 'disabled') {
-        log.info({ action: 'prove.payment_skipped', circuit: circuitId }, 'Payment disabled, skipping');
 
-        if (!body.inputs) {
-          res.status(400).json({ error: 'INVALID_REQUEST', message: 'Missing inputs' });
-          return;
-        }
-      } else {
-        // Has payment header — validate nonce first (replay protection is independent of encryption)
-        log.info({ action: 'prove.x402.start', circuit: circuitId }, 'x402 proof request');
+      if (!paymentNonceHeader) {
+        res.status(400).json({ error: 'MISSING_NONCE', message: 'X-Payment-Nonce header required with X-Payment-TX' });
+        return;
+      }
 
-        if (!paymentNonceHeader) {
-          res.status(400).json({ error: 'MISSING_NONCE', message: 'X-Payment-Nonce header required with X-Payment-TX' });
-          return;
-        }
+      // Atomically read and consume nonce (GETDEL prevents TOCTOU race)
+      const storedCircuit = await deps.redis.getdel(`x402:nonce:${paymentNonceHeader}`);
+      if (!storedCircuit) {
+        res.status(400).json({ error: 'INVALID_NONCE', message: 'Nonce not found or expired. Request a new 402 challenge.' });
+        return;
+      }
 
-        // Atomically read and consume nonce (GETDEL prevents TOCTOU race)
-        const storedCircuit = await deps.redis.getdel(`x402:nonce:${paymentNonceHeader}`);
-        if (!storedCircuit) {
-          res.status(400).json({ error: 'INVALID_NONCE', message: 'Nonce not found or expired. Request a new 402 challenge.' });
-          return;
-        }
+      // Verify nonce was issued for the same circuit
+      if (storedCircuit !== circuitId) {
+        res.status(400).json({ error: 'NONCE_CIRCUIT_MISMATCH', message: `Nonce was issued for ${storedCircuit}, not ${circuitId}` });
+        return;
+      }
 
-        // Verify nonce was issued for the same circuit
-        if (storedCircuit !== circuitId) {
-          res.status(400).json({ error: 'NONCE_CIRCUIT_MISMATCH', message: `Nonce was issued for ${storedCircuit}, not ${circuitId}` });
-          return;
-        }
+      // For plaintext flow, inputs are required
+      if (!body.encrypted_payload && !body.inputs) {
+        res.status(400).json({ error: 'INVALID_REQUEST', message: 'Missing inputs (or use encrypted_payload for E2E flow)' });
+        return;
+      }
 
-        // For plaintext flow, inputs are required (only checked when payment header present)
-        if (!body.encrypted_payload && !body.inputs) {
-          res.status(400).json({ error: 'INVALID_REQUEST', message: 'Missing inputs (or use encrypted_payload for E2E flow)' });
-          return;
-        }
+      // In nitro mode, require E2E encryption — plaintext inputs are rejected
+      if (config.teeMode === 'nitro' && !body.encrypted_payload) {
+        res.status(400).json({ error: 'PLAINTEXT_REJECTED', message: 'TEE mode requires E2E encrypted payload. Fetch TEE public key from 402 response and encrypt inputs before submitting.' });
+        return;
+      }
 
-        // In nitro mode, require E2E encryption — plaintext inputs are rejected
-        if (config.teeMode === 'nitro' && !body.encrypted_payload) {
-          res.status(400).json({ error: 'PLAINTEXT_REJECTED', message: 'TEE mode requires E2E encrypted payload. Fetch TEE public key from 402 response and encrypt inputs before submitting.' });
-          return;
-        }
-
+      // On-chain payment verification (skip when payment disabled)
+      if (config.paymentMode !== 'disabled') {
         const paymentStart = Date.now();
         const paymentResult = await verifyPaymentOnChain({
           txHash: paymentTxHeader,
@@ -402,6 +372,8 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
         }
 
         log.info({ action: 'prove.x402.payment_verified', txHash: paymentTxHeader, paymentVerifyMs }, 'x402 payment verified');
+      } else {
+        log.info({ action: 'prove.payment_skipped', circuit: circuitId }, 'Payment disabled, skipping on-chain verification');
       }
 
       const requestId = `x402-${ethers.hexlify(ethers.randomBytes(8)).slice(2)}`;
