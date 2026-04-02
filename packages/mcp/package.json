@@ -1,6 +1,6 @@
 {
   "name": "@zkproofport-ai/mcp",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Local MCP server for ZK proof generation via ZKProofport. Runs locally, calls remote TEE server for proof generation.",
   "type": "module",
   "main": "dist/index.js",
@@ -27,9 +27,7 @@
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   },
-  "optionalDependencies": {
-    "@coinbase/cdp-sdk": "^1.44.1"
-  },
+
   "engines": {
     "node": ">=18"
   },
