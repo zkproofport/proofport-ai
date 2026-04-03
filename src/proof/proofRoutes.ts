@@ -187,9 +187,20 @@ async function generateProofFromInputs(
     }
   }
 
+  // Derive proofType from circuit + provider
+  let proofType: string = ctx.circuitId === 'coinbase_attestation' ? 'kyc'
+    : ctx.circuitId === 'coinbase_country_attestation' ? 'country'
+    : 'google_login';
+  if (ctx.circuitId === 'oidc_domain_attestation') {
+    const oidcInputs = ctx.inputs as { provider?: string };
+    if (oidcInputs.provider === 'google') proofType = 'google_workspace';
+    else if (oidcInputs.provider === 'microsoft') proofType = 'microsoft_365';
+  }
+
   // Build response
   const response: ProveResponse = {
     circuit: ctx.circuitId,
+    proofType,
     proof,
     publicInputs,
     proofWithInputs,

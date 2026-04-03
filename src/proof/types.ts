@@ -64,6 +64,7 @@ export interface ProveRequest {
 
 export interface ProveResponse {
   circuit: string;            // circuit ID (e.g. "coinbase_attestation", "oidc_domain_attestation")
+  proofType: string;          // semantic type (e.g. "kyc", "country", "google", "google_workspace", "microsoft_365")
   proof: string;              // "0x..." raw proof
   publicInputs: string;      // "0x..." concatenated bytes32
   proofWithInputs: string;   // "0x..." for on-chain verify
