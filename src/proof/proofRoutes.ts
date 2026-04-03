@@ -189,6 +189,7 @@ async function generateProofFromInputs(
 
   // Build response
   const response: ProveResponse = {
+    circuit: ctx.circuitId,
     proof,
     publicInputs,
     proofWithInputs,
