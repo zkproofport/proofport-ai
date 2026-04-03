@@ -250,6 +250,8 @@ RETURNS: Full ProofResult with proof bytes, public inputs, and timing informatio
     {
       result: z
         .object({
+          circuit: z.string().describe('Circuit name (e.g. coinbase_attestation)'),
+          proofType: z.string().describe('Proof type identifier'),
           proof: z.string().describe('0x-prefixed proof hex bytes'),
           publicInputs: z.string().describe('0x-prefixed concatenated public inputs hex'),
           verification: z.object({
@@ -264,6 +266,8 @@ RETURNS: Full ProofResult with proof bytes, public inputs, and timing informatio
     async (params) => {
       try {
         const verification = await verifyProof({
+          circuit: params.result.circuit,
+          proofType: params.result.proofType,
           proof: params.result.proof,
           publicInputs: params.result.publicInputs,
           proofWithInputs: '',
