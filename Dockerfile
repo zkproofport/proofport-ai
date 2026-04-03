@@ -3,7 +3,7 @@
 # The GitHub nightly release (v1.0.0-nightly.20250723) was deleted — downloading
 # from GitHub is no longer possible. The binary and its x86-64 libs are already
 # baked into the existing staging-latest image.
-FROM --platform=linux/amd64 us-central1-docker.pkg.dev/zkproofport/proofport/proofport-ai:staging-latest AS bb-extractor
+FROM --platform=linux/amd64 006600133037.dkr.ecr.ap-northeast-2.amazonaws.com/proofport-ai:bb-base AS bb-extractor
 
 # Stage 2: TypeScript Build (native arch)
 FROM node:20-slim AS builder
