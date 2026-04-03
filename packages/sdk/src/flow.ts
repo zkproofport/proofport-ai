@@ -131,6 +131,8 @@ export async function generateProof(
   }
 
   return {
+    circuit: proveResponse.circuit,
+    proofType: proveResponse.proofType,
     proof: proveResponse.proof,
     publicInputs: proveResponse.publicInputs,
     proofWithInputs: proveResponse.proofWithInputs,

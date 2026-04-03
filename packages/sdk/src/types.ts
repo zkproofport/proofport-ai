@@ -81,6 +81,8 @@ export interface EncryptedProveRequest {
 }
 
 export interface ProveResponse {
+  circuit: string;
+  proofType: string;
   proof: string;
   publicInputs: string;
   proofWithInputs: string;
@@ -146,6 +148,8 @@ export interface ProofParams {
 }
 
 export interface ProofResult {
+  circuit: string;
+  proofType: string;
   proof: string;
   publicInputs: string;
   proofWithInputs: string;
