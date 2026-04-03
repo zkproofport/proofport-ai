@@ -444,7 +444,13 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
         const e2eChainId = isTestnet ? 84532 : 8453;
         const e2eVerifierAddress = getVerifierAddress(circuitId, String(e2eChainId)) || null;
 
+        const e2eProofType: string = circuitId === 'coinbase_attestation' ? 'kyc'
+          : circuitId === 'coinbase_country_attestation' ? 'country'
+          : 'google_login';
+
         const response: ProveResponse = {
+          circuit: circuitId,
+          proofType: e2eProofType,
           proof,
           publicInputs,
           proofWithInputs,
