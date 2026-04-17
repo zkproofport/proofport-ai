@@ -463,7 +463,7 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
           verification: e2eVerifierAddress ? {
             chainId: e2eChainId,
             verifierAddress: e2eVerifierAddress,
-            rpcUrl: isTestnet ? config.chainRpcUrl : config.ethereumRpcUrl,
+            rpcUrl: config.ethereumRpcUrl || config.chainRpcUrl,
           } : null,
         };
 

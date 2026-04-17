@@ -245,8 +245,8 @@ describe('Dual-Chain Identity & Verification', () => {
   it('MCP discovery uses Ethereum chain verifier addresses', async () => {
     const { json } = await jsonGet('/.well-known/mcp.json');
     const description = JSON.stringify(json);
-    // Should reference Ethereum (Mainnet or Sepolia), not Base
-    expect(description).toMatch(/Ethereum/i);
+    // Should reference Ethereum chain ID (1 or 11155111), not Base (8453 or 84532)
+    expect(description).toMatch(/chainId=(1|11155111)/);
   });
 
   it('get_supported_circuits returns Ethereum chain verifiers by default', async () => {
