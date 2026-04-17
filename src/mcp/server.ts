@@ -1,6 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { loadConfig } from '../config/index.js';
+import { loadConfig, getChainId, isProductionChain } from '../config/index.js';
 import {
   handleGetSupportedCircuits,
   type SkillDeps,
@@ -54,9 +54,9 @@ function buildSkillDeps(deps: McpServerDeps, config: ReturnType<typeof loadConfi
  *                 inside each tool handler (required for testing without env vars).
  */
 export function createMcpServer(deps: McpServerDeps = {}, config?: ReturnType<typeof loadConfig>): McpServer {
-  const isProduction = deps?.paymentMode === 'mainnet';
-  const chainName = isProduction ? 'Base Mainnet' : 'Base Sepolia';
-  const chainId = isProduction ? 8453 : 84532;
+  const resolvedConfig = config || loadConfig();
+  const chainId = getChainId(resolvedConfig);
+  const chainName = isProductionChain(resolvedConfig) ? 'Ethereum Mainnet' : 'Base Sepolia';
   const chainVerifiers = getChainVerifiers(String(chainId));
   const kycVerifier = chainVerifiers['coinbase_attestation'] ?? '(address not yet loaded)';
   const countryVerifier = chainVerifiers['coinbase_country_attestation'] ?? '(address not yet loaded)';

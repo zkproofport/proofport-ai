@@ -60,6 +60,10 @@ export function loadConfig() {
     erc8004ValidationAddress: process.env.ERC8004_VALIDATION_ADDRESS || '',
     agentTokenId: process.env.AGENT_TOKEN_ID || '',
 
+    // Ethereum mainnet (required for production — dual-chain agent identity)
+    ethereumRpcUrl: process.env.ETHEREUM_RPC_URL || '',
+    agentTokenIdEthereum: process.env.AGENT_TOKEN_ID_ETHEREUM || '',
+
     // Chat / LLM (optional)
     openaiApiKey: process.env.OPENAI_API_KEY || '',
     geminiApiKey: process.env.GEMINI_API_KEY || '',
@@ -76,3 +80,88 @@ export function loadConfig() {
 }
 
 export type Config = ReturnType<typeof loadConfig>;
+
+/** Chain registration config for ERC-8004 dual identity */
+export interface ChainIdentity {
+  chainId: number;
+  chainName: string;
+  agentName: string;
+  rpcUrl: string;
+  identityAddress: string;
+  cachedTokenId: string;
+}
+
+/** Whether the environment is testnet (Base Sepolia) */
+export function isTestnet(config: Config): boolean {
+  return config.chainRpcUrl.includes('sepolia');
+}
+
+/**
+ * Primary chain ID for verification and agent identity.
+ * Production: Ethereum mainnet (1). Testnet: Ethereum Sepolia (11155111).
+ */
+export function getChainId(config: Config): number {
+  return isTestnet(config) ? 11155111 : 1;
+}
+
+/**
+ * Payment chain ID (x402/USDC).
+ * Production: Base mainnet (8453). Testnet: Base Sepolia (84532).
+ */
+export function getPaymentChainId(config: Config): number {
+  return isTestnet(config) ? 84532 : 8453;
+}
+
+export function isProductionChain(config: Config): boolean {
+  return !isTestnet(config);
+}
+
+/**
+ * Build chain identity configs for ERC-8004 registration.
+ * Production: Ethereum mainnet (primary) + Base mainnet (both always registered).
+ * Testnet: Base Sepolia only.
+ */
+export function getChainIdentities(config: Config): ChainIdentity[] {
+  const identityAddress = config.erc8004IdentityAddress;
+
+  if (isTestnet(config)) {
+    return [
+      {
+        chainId: 11155111,
+        chainName: 'Ethereum Sepolia',
+        agentName: 'proveragent.sepolia',
+        rpcUrl: config.ethereumRpcUrl,
+        identityAddress,
+        cachedTokenId: config.agentTokenIdEthereum,
+      },
+      {
+        chainId: 84532,
+        chainName: 'Base Sepolia',
+        agentName: 'proveragent.base.sepolia',
+        rpcUrl: config.chainRpcUrl,
+        identityAddress,
+        cachedTokenId: config.agentTokenId,
+      },
+    ];
+  }
+
+  // Production: both Ethereum mainnet and Base mainnet
+  return [
+    {
+      chainId: 1,
+      chainName: 'Ethereum Mainnet',
+      agentName: 'proveragent.eth',
+      rpcUrl: config.ethereumRpcUrl,
+      identityAddress,
+      cachedTokenId: config.agentTokenIdEthereum,
+    },
+    {
+      chainId: 8453,
+      chainName: 'Base Mainnet',
+      agentName: 'proveragent.base.eth',
+      rpcUrl: config.chainRpcUrl,
+      identityAddress,
+      cachedTokenId: config.agentTokenId,
+    },
+  ];
+}

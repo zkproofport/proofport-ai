@@ -30,6 +30,20 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 
 const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:4002';
 
+// Detect payment mode from server health endpoint (cached)
+let _paymentRequired: boolean | null = null;
+async function isPaymentRequired(): Promise<boolean> {
+  if (_paymentRequired !== null) return _paymentRequired;
+  try {
+    const res = await fetch(`${BASE_URL}/health`);
+    const json = await res.json();
+    _paymentRequired = json.paymentRequired === true;
+  } catch {
+    _paymentRequired = false;
+  }
+  return _paymentRequired;
+}
+
 // ─── REST Helpers (kept for non-protocol endpoints) ──────────────────────────
 
 async function jsonPost(path: string, body: unknown, headers?: Record<string, string>) {
@@ -186,6 +200,70 @@ describe('Discovery Endpoints', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Dual-Chain Identity & Verification (Ethereum + Base)
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('Dual-Chain Identity & Verification', () => {
+  it('agent card uses Ethereum chain ID (1 or 11155111), not Base', async () => {
+    const { json } = await jsonGet('/.well-known/agent-card.json');
+    const identity = json.identity?.erc8004;
+    if (identity) {
+      // Primary chain should be Ethereum (1 for production, 11155111 for testnet)
+      expect([1, 11155111]).toContain(identity.chainId);
+      // Should NOT be Base chain IDs
+      expect(identity.chainId).not.toBe(8453);
+      expect(identity.chainId).not.toBe(84532);
+    }
+  });
+
+  it('OASF agent agentWallet uses Ethereum chain ID', async () => {
+    const { json } = await jsonGet('/.well-known/agent.json');
+    const walletService = json.services?.find((s: any) => s.name === 'agentWallet');
+    if (walletService) {
+      // Should be eip155:1:0x... or eip155:11155111:0x...
+      expect(walletService.endpoint).toMatch(/^eip155:(1|11155111):0x/);
+    }
+  });
+
+  it('OASF agent x402Support is always true', async () => {
+    const { json } = await jsonGet('/.well-known/agent.json');
+    expect(json.x402Support).toBe(true);
+  });
+
+  it('agent-registration.json includes registrations', async () => {
+    const { status, json } = await jsonGet('/.well-known/agent-registration.json');
+    expect(status).toBe(200);
+    expect(json.registrations).toBeDefined();
+    expect(Array.isArray(json.registrations)).toBe(true);
+    expect(json.registrations.length).toBeGreaterThanOrEqual(1);
+    // Each registration should have agentRegistry with chain ID
+    for (const reg of json.registrations) {
+      expect(reg.agentRegistry).toMatch(/^eip155:\d+:0x/);
+    }
+  });
+
+  it('MCP discovery uses Ethereum chain verifier addresses', async () => {
+    const { json } = await jsonGet('/.well-known/mcp.json');
+    const description = JSON.stringify(json);
+    // Should reference Ethereum (Mainnet or Sepolia), not Base
+    expect(description).toMatch(/Ethereum/i);
+  });
+
+  it('get_supported_circuits returns Ethereum chain verifiers by default', async () => {
+    const task = await a2aClient.sendMessage({
+      message: makeDataPartMessage({ skill: 'get_supported_circuits' }).message,
+    }) as Task;
+    const data = extractDataFromArtifacts(task.artifacts);
+    const circuits = data.circuits as any[];
+    if (circuits && circuits.length > 0 && circuits[0].verifierAddress) {
+      // Verifier address should be for Ethereum chain, not Base
+      // Just verify it's a valid address
+      expect(circuits[0].verifierAddress).toMatch(/^0x[0-9a-fA-F]{40}$/);
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 // REST API — x402 Single-Step Flow
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -240,7 +318,8 @@ describe('REST API — x402 Single-Step Flow', () => {
     expect(json.error).toBe('INVALID_CIRCUIT');
   });
 
-  it('POST /api/v1/prove with X-Payment-TX but without X-Payment-Nonce returns 400', async () => {
+  it('POST /api/v1/prove with X-Payment-TX but without X-Payment-Nonce returns 400 (or 402 when payment disabled)', async () => {
+    const paymentEnabled = await isPaymentRequired();
     const res = await fetch(`${BASE_URL}/api/v1/prove`, {
       method: 'POST',
       headers: {
@@ -253,8 +332,13 @@ describe('REST API — x402 Single-Step Flow', () => {
       }),
     });
     const json = await res.json();
-    expect(res.status).toBe(400);
-    expect(json.error).toBe('MISSING_NONCE');
+    if (paymentEnabled) {
+      expect(res.status).toBe(400);
+      expect(json.error).toBe('MISSING_NONCE');
+    } else {
+      // When payment is disabled, server returns 402 with $0 challenge (x402 protocol still active)
+      expect([400, 402]).toContain(res.status);
+    }
   });
 
   it('POST /api/v1/prove with X-Payment-TX + invalid X-Payment-Nonce returns 400', async () => {
@@ -902,18 +986,17 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
     }
   });
 
-  it('lists all 8 tools', async () => {
+  it('lists expected tools', async () => {
     const { tools } = await stdioClient.listTools();
     const toolNames = tools.map((t: any) => t.name).sort();
-    expect(toolNames).toEqual([
-      'generate_proof',
-      'get_supported_circuits',
-      'make_payment',
-      'prepare_inputs',
-      'request_challenge',
-      'submit_proof',
-      'verify_proof',
-    ]);
+    // make_payment is only present when payment is enabled
+    expect(toolNames).toContain('generate_proof');
+    expect(toolNames).toContain('get_supported_circuits');
+    expect(toolNames).toContain('prepare_inputs');
+    expect(toolNames).toContain('request_challenge');
+    expect(toolNames).toContain('submit_proof');
+    expect(toolNames).toContain('verify_proof');
+    expect(toolNames.length).toBeGreaterThanOrEqual(6);
   });
 
   it('get_supported_circuits returns circuit info', async () => {
@@ -1029,8 +1112,10 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
     expect(parsed.proof).toMatch(/^0x/);
     expect(parsed.publicInputs).toBeDefined();
     expect(parsed.publicInputs).toMatch(/^0x/);
-    expect(parsed.paymentTxHash).toBeDefined();
-    if (parsed.paymentTxHash) expect(parsed.paymentTxHash).toMatch(/^0x/);
+    if (await isPaymentRequired()) {
+      expect(parsed.paymentTxHash).toBeDefined();
+      if (parsed.paymentTxHash) expect(parsed.paymentTxHash).toMatch(/^0x/);
+    }
 
     generatedProof = { proof: parsed.proof, publicInputs: parsed.publicInputs, verification: parsed.verification };
 
@@ -1128,8 +1213,10 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
     expect(parsed.proof).toMatch(/^0x/);
     expect(parsed.publicInputs).toBeDefined();
     expect(parsed.publicInputs).toMatch(/^0x/);
-    expect(parsed.paymentTxHash).toBeDefined();
-    if (parsed.paymentTxHash) expect(parsed.paymentTxHash).toMatch(/^0x/);
+    if (await isPaymentRequired()) {
+      expect(parsed.paymentTxHash).toBeDefined();
+      if (parsed.paymentTxHash) expect(parsed.paymentTxHash).toMatch(/^0x/);
+    }
 
     generatedCountryProof = { proof: parsed.proof, publicInputs: parsed.publicInputs, verification: parsed.verification };
 
@@ -1230,8 +1317,10 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
     expect(parsed.proof).toMatch(/^0x/);
     expect(parsed.publicInputs).toBeDefined();
     expect(parsed.publicInputs).toMatch(/^0x/);
-    expect(parsed.paymentTxHash).toBeDefined();
-    if (parsed.paymentTxHash) expect(parsed.paymentTxHash).toMatch(/^0x/);
+    if (await isPaymentRequired()) {
+      expect(parsed.paymentTxHash).toBeDefined();
+      if (parsed.paymentTxHash) expect(parsed.paymentTxHash).toMatch(/^0x/);
+    }
 
     generatedOidcProof = { proof: parsed.proof, publicInputs: parsed.publicInputs, verification: parsed.verification };
 

@@ -100,7 +100,8 @@ describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
       expect(data.proof).toBeTruthy();
       expect(data.proof.startsWith('0x')).toBe(true);
       expect(data.publicInputs).toBeTruthy();
-      expect(data.paymentTxHash).toBeTruthy();
+      // paymentTxHash only present when payment is required (not in free tier)
+      if (data.paymentTxHash) expect(data.paymentTxHash).toMatch(/^0x/);
     }, 120_000);
 
     it('coinbase_country: full E2E proof generation', async () => {

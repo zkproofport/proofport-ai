@@ -56,10 +56,11 @@ declare global {
  * - NEVER blocks requests — verification failure logs a warning but continues
  */
 export function createAgentAuthMiddleware(config: Config) {
-  const identityAddress = config.paymentMode === 'mainnet'
-    ? ERC8004_ADDRESSES.mainnet.identity
-    : ERC8004_ADDRESSES.sepolia.identity;
-  const rpcUrl = config.chainRpcUrl;
+  const isTestnet = config.chainRpcUrl.includes('sepolia');
+  const identityAddress = isTestnet
+    ? ERC8004_ADDRESSES.sepolia.identity
+    : ERC8004_ADDRESSES.mainnet.identity;
+  const rpcUrl = isTestnet ? config.chainRpcUrl : (config.ethereumRpcUrl || config.chainRpcUrl);
 
   // Cache verified agents (address → tokenId) for 5 minutes
   const verifiedCache = new Map<string, { tokenId: bigint; expiry: number }>();

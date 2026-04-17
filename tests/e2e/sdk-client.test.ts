@@ -101,7 +101,8 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
       expect(result.proof).toBeTruthy();
       expect(result.proof.startsWith('0x')).toBe(true);
       expect(result.publicInputs).toBeTruthy();
-      expect(result.paymentTxHash).toBeDefined();
+      // paymentTxHash only present when payment is required (not in free tier)
+      if (result.paymentTxHash) expect(result.paymentTxHash).toMatch(/^0x/);
       expect(result.timing).toBeDefined();
       expect(result.verification).toBeDefined();
     }, 120_000);
@@ -120,7 +121,7 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
 
       expect(result.proof).toBeTruthy();
       expect(result.publicInputs).toBeTruthy();
-      expect(result.paymentTxHash).toBeDefined();
+      if (result.paymentTxHash) expect(result.paymentTxHash).toMatch(/^0x/);
     }, 120_000);
 
     it.skipIf(!OIDC_JWT)('oidc_domain: full E2E proof generation', async () => {

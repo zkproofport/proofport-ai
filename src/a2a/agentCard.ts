@@ -1,11 +1,11 @@
-import type { Config } from '../config/index.js';
+import { type Config, getChainId, isProductionChain } from '../config/index.js';
 import type { Request, Response } from 'express';
 import type { AgentCard as SDKAgentCard } from '@a2a-js/sdk';
 import { ERC8004_ADDRESSES } from '../config/contracts.js';
 import { getChainVerifiers } from '../config/deployments.js';
 import { ethers } from 'ethers';
 
-export type TokenIdRef = { value: bigint | null | undefined };
+export type TokenIdRef = { chains: Map<number, bigint> };
 
 export type AgentCard = SDKAgentCard & {
   protocolVersions?: string[];
@@ -39,12 +39,12 @@ export type AgentCard = SDKAgentCard & {
  * @returns Agent Card JSON object
  */
 export function buildAgentCard(config: Config, tokenId?: bigint | null): AgentCard {
-  // Determine chain based on payment mode
-  const isProduction = config.paymentMode === 'mainnet';
+  // Determine chain from RPC URL, independent of payment mode
+  const isProduction = isProductionChain(config);
   const erc8004Identity = isProduction
     ? ERC8004_ADDRESSES.mainnet.identity
     : ERC8004_ADDRESSES.sepolia.identity;
-  const chainId = isProduction ? 8453 : 84532; // Base Mainnet : Base Sepolia
+  const chainId = getChainId(config);
   const chainName = isProduction ? 'Base Mainnet' : 'Base Sepolia';
   const chainVerifiers = getChainVerifiers(String(chainId));
   const kycVerifier = chainVerifiers['coinbase_attestation'] ?? '(address not yet loaded)';
@@ -176,9 +176,8 @@ ON-CHAIN VERIFICATION:
  * @returns MCP discovery JSON object
  */
 export function buildMcpDiscovery(config: Config) {
-  const isProduction = config.paymentMode === 'mainnet';
-  const chainId = isProduction ? 8453 : 84532;
-  const chainName = isProduction ? 'Base Mainnet' : 'Base Sepolia';
+  const chainId = getChainId(config);
+  const chainName = isProductionChain(config) ? 'Ethereum Mainnet' : 'Base Sepolia';
   const chainVerifiers = getChainVerifiers(String(chainId));
   const kycVerifier = chainVerifiers['coinbase_attestation'] ?? '(address not yet loaded)';
   const countryVerifier = chainVerifiers['coinbase_country_attestation'] ?? '(address not yet loaded)';
@@ -255,7 +254,7 @@ export function buildMcpDiscovery(config: Config) {
       coinbase_country: `${config.a2aBaseUrl}/api/v1/guide/coinbase_country`,
     },
     'x-x402': {
-      paymentRequired: config.paymentMode !== 'disabled',
+      paymentRequired: config.paymentMode !== 'disabled',  // whether payment is actually charged
       baseUrl: config.a2aBaseUrl,
       documentation: 'https://docs.zkproofport.app',
     },
@@ -278,7 +277,8 @@ export function buildMcpDiscovery(config: Config) {
  * @returns OASF agent JSON object
  */
 export function buildOasfAgent(config: Config, tokenId?: bigint | null) {
-  const isProduction = config.paymentMode === 'mainnet';
+  const isProduction = isProductionChain(config);
+  const chainId = getChainId(config);
   const erc8004Identity = isProduction
     ? ERC8004_ADDRESSES.mainnet.identity
     : ERC8004_ADDRESSES.sepolia.identity;
@@ -335,7 +335,7 @@ export function buildOasfAgent(config: Config, tokenId?: bigint | null) {
       },
       {
         name: 'agentWallet',
-        endpoint: `eip155:${isProduction ? '8453' : '84532'}:${new ethers.Wallet(config.proverPrivateKey).address}`,
+        endpoint: `eip155:${chainId}:${new ethers.Wallet(config.proverPrivateKey).address}`,
       },
     ],
     guides: {
@@ -343,14 +343,14 @@ export function buildOasfAgent(config: Config, tokenId?: bigint | null) {
       coinbase_kyc: `${config.a2aBaseUrl}/api/v1/guide/coinbase_kyc`,
       coinbase_country: `${config.a2aBaseUrl}/api/v1/guide/coinbase_country`,
     },
-    x402Support: config.paymentMode !== 'disabled',
+    x402Support: true,  // always supports x402 protocol (price may be $0 when disabled)
     active: true,
     registrations: [
       ...(tokenId !== null && tokenId !== undefined
         ? [
             {
               agentId: Number(tokenId),
-              agentRegistry: `eip155:${isProduction ? '8453' : '84532'}:${erc8004Identity}`,
+              agentRegistry: `eip155:${chainId}:${erc8004Identity}`,
             },
           ]
         : []),
@@ -380,7 +380,8 @@ export function buildOasfAgent(config: Config, tokenId?: bigint | null) {
  */
 export function getAgentCardHandler(config: Config, tokenIdRef: TokenIdRef): (req: Request, res: Response) => void | Promise<void> {
   return (_req: Request, res: Response) => {
-    const agentCard = buildAgentCard(config, tokenIdRef.value);
+    const primaryTokenId = tokenIdRef.chains.get(getChainId(config)) ?? null;
+    const agentCard = buildAgentCard(config, primaryTokenId);
     res.setHeader('Content-Type', 'application/json');
     res.json(agentCard);
   };
@@ -414,7 +415,8 @@ export function getMcpDiscoveryHandler(config: Config): (req: Request, res: Resp
  */
 export function getOasfAgentHandler(config: Config, tokenIdRef: TokenIdRef): (req: Request, res: Response) => void | Promise<void> {
   return (_req: Request, res: Response) => {
-    const oasfAgent = buildOasfAgent(config, tokenIdRef.value);
+    const primaryTokenId = tokenIdRef.chains.get(getChainId(config)) ?? null;
+    const oasfAgent = buildOasfAgent(config, primaryTokenId);
     res.setHeader('Content-Type', 'application/json');
     res.json(oasfAgent);
   };
@@ -425,23 +427,27 @@ export function getOasfAgentHandler(config: Config, tokenIdRef: TokenIdRef): (re
  * Provides bidirectional link between domain and on-chain identity (Rule 4)
  */
 export function getAgentRegistrationHandler(config: Config, tokenIdRef: TokenIdRef): (req: Request, res: Response) => void {
-  const isProduction = config.paymentMode === 'mainnet';
-  const erc8004Identity = isProduction
+  const identityAddress = isProductionChain(config)
     ? ERC8004_ADDRESSES.mainnet.identity
     : ERC8004_ADDRESSES.sepolia.identity;
-  const chainId = isProduction ? 8453 : 84532;
 
   return (_req: Request, res: Response) => {
-    const tokenId = tokenIdRef.value;
+    const registrations: { agentId: number | null; agentRegistry: string }[] = [];
+    for (const [chainId, tokenId] of tokenIdRef.chains) {
+      registrations.push({
+        agentId: Number(tokenId),
+        agentRegistry: `eip155:${chainId}:${identityAddress}`,
+      });
+    }
+    if (registrations.length === 0) {
+      const primaryChainId = getChainId(config);
+      registrations.push({
+        agentId: null,
+        agentRegistry: `eip155:${primaryChainId}:${identityAddress}`,
+      });
+    }
     res.setHeader('Content-Type', 'application/json');
-    res.json({
-      registrations: [
-        {
-          agentId: tokenId !== null && tokenId !== undefined ? Number(tokenId) : null,
-          agentRegistry: `eip155:${chainId}:${erc8004Identity}`,
-        },
-      ],
-    });
+    res.json({ registrations });
   };
 }
 
@@ -465,7 +471,7 @@ export function getDidHandler(config: Config): (req: Request, res: Response) => 
         id: `did:web:${hostname}#key-1`,
         type: 'EcdsaSecp256k1RecoveryMethod2020',
         controller: `did:web:${hostname}`,
-        blockchainAccountId: `eip155:${config.paymentMode === 'mainnet' ? '8453' : '84532'}:${agentAddress}`,
+        blockchainAccountId: `eip155:${getChainId(config)}:${agentAddress}`,
       }],
       service: [{
         id: `did:web:${hostname}#agent`,

@@ -40,12 +40,11 @@ import { MultiLLMProvider } from './chat/multiProvider.js';
 import { syncDeployments } from './config/deployments.js';
 import { startAcpSeller } from './virtuals/acpSeller.js';
 
-function createApp(config: Config, agentTokenId?: bigint | null) {
+function createApp(config: Config) {
   // Validate payment config at startup
   validatePaymentConfig(config);
 
-  const initialTokenId = config.agentTokenId ? BigInt(config.agentTokenId) : (agentTokenId ?? null);
-  const tokenIdRef: TokenIdRef = { value: initialTokenId };
+  const tokenIdRef: TokenIdRef = { chains: new Map() };
 
   const app = express();
 
@@ -158,7 +157,7 @@ function createApp(config: Config, agentTokenId?: bigint | null) {
 
   // A2A SDK setup
   const executor = new ProofportExecutor({ taskStore, config, teeProvider, llmProvider });
-  const agentCard = buildAgentCard(config, agentTokenId);
+  const agentCard = buildAgentCard(config);
   const requestHandler = new DefaultRequestHandler(agentCard, taskStore, executor);
 
   // Single POST /a2a handles all A2A v0.3 JSON-RPC methods
@@ -235,7 +234,7 @@ async function startServer() {
     const earlyTeeProvider = createTeeProvider({ ...teeConfig, mode: resolvedTeeMode });
 
     // Create app without tokenId (registration runs in background after server starts)
-    const { app, teeProvider, cleanupWorker, tokenIdRef } = createApp(config, null);
+    const { app, teeProvider, cleanupWorker, tokenIdRef } = createApp(config);
 
     app.listen(config.port, () => {
       log.info({ action: 'server.started', port: config.port }, 'proofport-ai server listening');
@@ -254,11 +253,14 @@ async function startServer() {
       });
 
       // Register agent on ERC-8004 in background (non-blocking, does not delay server startup)
+      // Supports dual-chain registration (Base + Ethereum mainnet)
       ensureAgentRegistered(config, earlyTeeProvider)
-        .then(tokenId => {
-          if (tokenId !== null) {
-            tokenIdRef.value = tokenId;
-            log.info({ action: 'identity.tokenId.updated', tokenId: tokenId.toString() }, 'Discovery endpoints updated with tokenId');
+        .then(results => {
+          if (results.size > 0) {
+            for (const [chainId, tokenId] of results) {
+              tokenIdRef.chains.set(chainId, tokenId);
+            }
+            log.info({ action: 'identity.tokenIds.updated', chains: [...results.entries()].map(([c, t]) => `${c}:${t}`) }, 'Discovery endpoints updated with tokenIds');
           }
         })
         .catch(err => {

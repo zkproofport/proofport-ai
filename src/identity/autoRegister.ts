@@ -1,12 +1,13 @@
 /**
- * Auto-registration on ERC-8004 Identity contract at server startup
+ * Auto-registration on ERC-8004 Identity contract at server startup.
+ * Supports dual-chain registration (Base + Ethereum mainnet).
  */
 
 import { AgentRegistration, parseMetadataUri } from './register.js';
-import type { Config } from '../config/index.js';
+import type { Config, ChainIdentity } from '../config/index.js';
+import { getChainIdentities } from '../config/index.js';
 import type { AgentMetadata } from './types.js';
 import type { TeeProvider } from '../tee/types.js';
-import { ensureAgentValidated } from '../tee/validationSubmitter.js';
 import { createLogger } from '../logger.js';
 
 const log = createLogger('AutoRegister');
@@ -21,341 +22,241 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   ]);
 }
 
+/** Build agent metadata for a specific chain */
+function buildAgentMetadata(
+  config: Config,
+  chain: ChainIdentity,
+  agentAddress: string,
+  tokenId?: bigint,
+): AgentMetadata {
+  return {
+    name: chain.agentName,
+    description: 'Autonomous ZK proof generation. ERC-8004 identity. x402 payments. Powered by ZKProofport',
+    agentType: 'service',
+    agentUrl: config.a2aBaseUrl,
+    capabilities: [
+      'proof_generation',
+      'proof_verification',
+      'coinbase_kyc',
+      'coinbase_country',
+      'streaming',
+      'x402_payment',
+    ],
+    protocols: ['mcp', 'a2a', 'x402'],
+    circuits: ['coinbase_attestation', 'coinbase_country_attestation'],
+    tags: ['ZK', 'Privacy', 'Proof', 'Coinbase', 'KYC', 'Attestation', 'x402', 'Identity', 'Country', 'Verification', 'Base', 'USDC', 'TEE', 'Noir', 'EAS', 'Zero-Knowledge'],
+    ...(config.teeMode !== 'disabled' && { tee: config.teeMode }),
+    x402Support: true,
+    type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
+    image: `${config.a2aBaseUrl}/icon.png`,
+    protocolVersions: ['0.3'],
+    securitySchemes: {
+      x402: { type: 'apiKey', in: 'header', name: 'X-402-Payment' },
+    },
+    security: [{ x402: [] }],
+    services: [
+      { name: 'web', endpoint: config.a2aBaseUrl },
+      { name: 'MCP', endpoint: `${config.a2aBaseUrl}/mcp`, version: '2025-11-25', mcpTools: ['prove', 'get_supported_circuits', 'get_guide'] },
+      { name: 'A2A', endpoint: `${config.a2aBaseUrl}/.well-known/agent-card.json`, version: '0.3.0', a2aSkills: ['prove', 'get_supported_circuits', 'get_guide'] },
+      { name: 'OASF', endpoint: `${config.a2aBaseUrl}`, version: 'v0.8.0', skills: ['security_privacy/privacy_risk_assessment', 'security_privacy/threat_detection'], domains: ['technology/blockchain', 'technology/security', 'trust_and_safety/data_privacy'] },
+      { name: 'ENS', endpoint: chain.agentName },
+      { name: 'DID', endpoint: `did:web:${new URL(config.a2aBaseUrl).hostname}` },
+      { name: 'agentWallet', endpoint: `eip155:${chain.chainId}:${agentAddress}` },
+    ],
+    categories: ['privacy', 'security', 'verification', 'identity'],
+    domains: [
+      { name: 'technology/blockchain', id: 109 },
+      { name: 'technology/security', id: 107 },
+      { name: 'trust_and_safety/data_privacy', id: 404 },
+    ],
+    skills: [
+      { name: 'security_privacy/privacy_risk_assessment', id: 804 },
+      { name: 'security_privacy/threat_detection', id: 801 },
+    ],
+    registrations: tokenId !== undefined ? [
+      {
+        agentRegistry: `eip155:${chain.chainId}:${chain.identityAddress}`,
+        agentId: Number(tokenId),
+      },
+    ] : [],
+    supportedTrust: ['tee-attestation'],
+    active: true,
+  };
+}
+
+/** Check if on-chain metadata needs updating */
+function needsMetadataUpdate(currentMetadata: any, config: Config, chain: ChainIdentity): boolean {
+  if (!currentMetadata) return true;
+
+  return (
+    currentMetadata.name !== chain.agentName ||
+    currentMetadata.image !== `${config.a2aBaseUrl}/icon.png` ||
+    currentMetadata.agentUrl !== config.a2aBaseUrl ||
+    currentMetadata.x402Support !== true ||
+    !currentMetadata.services || currentMetadata.services.length === 0 ||
+    !currentMetadata.type ||
+    !currentMetadata.supportedTrust || currentMetadata.supportedTrust.length === 0 ||
+    !currentMetadata.tags || currentMetadata.tags.length === 0 ||
+    !currentMetadata.categories || currentMetadata.categories.length === 0 ||
+    !currentMetadata.domains || currentMetadata.domains.length === 0 ||
+    !currentMetadata.domains?.some((d: any) => typeof d === 'object' && d.id) ||
+    !currentMetadata.skills || currentMetadata.skills.length === 0 ||
+    !currentMetadata.skills?.some((s: any) => typeof s === 'object' && s.id) ||
+    !currentMetadata.registrations || currentMetadata.registrations.length === 0 ||
+    !currentMetadata.agentType ||
+    !currentMetadata.active ||
+    (currentMetadata.services && currentMetadata.services.some(
+      (s: { name: string; endpoint: string }) => s.name === 'A2A' && !s.endpoint.includes('.well-known/agent-card.json')
+    )) ||
+    (currentMetadata.registrations && currentMetadata.registrations.length > 0 &&
+      typeof currentMetadata.registrations[0].agentId === 'string'
+    ) ||
+    (currentMetadata.services && currentMetadata.services.some(
+      (s: { name: string; endpoint: string }) => s.name === 'web' && s.endpoint !== config.a2aBaseUrl
+    )) ||
+    (currentMetadata.services && currentMetadata.services.some(
+      (s: { name: string; endpoint: string }) => s.name === 'OASF' && s.endpoint !== config.a2aBaseUrl
+    )) ||
+    (currentMetadata.services && !currentMetadata.services.some(
+      (s: { name: string }) => s.name === 'OASF'
+    )) ||
+    (currentMetadata.services && currentMetadata.services.some(
+      (s: { name: string; tools?: string[]; mcpTools?: string[] }) => s.name === 'MCP' && s.tools && !s.mcpTools
+    )) ||
+    (currentMetadata.services && currentMetadata.services.some(
+      (s: { name: string; endpoint: string }) => s.name === 'MCP' && s.endpoint.includes('.well-known/mcp.json')
+    )) ||
+    !currentMetadata.securitySchemes ||
+    !currentMetadata.protocolVersions
+  );
+}
+
 /**
- * Ensure agent is registered on ERC-8004 Identity contract
- *
- * This function is called during server startup after circuit artifacts are ready.
- * It performs the following:
- * 1. Checks if ERC-8004 is configured (both addresses present)
- * 2. Checks if agent is already registered
- * 3. If not registered, registers the agent with metadata
- * 4. Returns tokenId if registered (null if feature disabled or registration failed)
- *
- * IMPORTANT: Does NOT crash the server if registration fails — logs error and returns null
+ * Register or update agent on a single chain's ERC-8004 Identity contract.
+ * Returns tokenId if registered, null if failed.
  */
-export async function ensureAgentRegistered(config: Config, teeProvider?: TeeProvider): Promise<bigint | null> {
-  // Check if ERC-8004 is configured (both addresses required)
-  if (!config.erc8004IdentityAddress || !config.erc8004ReputationAddress) {
-    log.info({ action: 'identity.not_configured' }, 'ERC-8004 not configured — identity registration disabled');
-    return null;
-  }
+async function registerOnChain(
+  config: Config,
+  chain: ChainIdentity,
+): Promise<bigint | null> {
+  const chainLabel = `${chain.chainName} (${chain.chainId})`;
 
   try {
-    log.info({ action: 'identity.step.creating_registration' }, 'Creating AgentRegistration instance');
+    log.info({ action: 'identity.chain.start', chain: chainLabel }, `Starting registration on ${chainLabel}`);
+
     const registration = new AgentRegistration({
-      identityContractAddress: config.erc8004IdentityAddress,
+      identityContractAddress: chain.identityAddress,
       reputationContractAddress: config.erc8004ReputationAddress,
-      chainRpcUrl: config.chainRpcUrl,
+      chainRpcUrl: chain.rpcUrl,
       privateKey: config.proverPrivateKey,
     });
 
-    // Check if already registered
-    log.info({ action: 'identity.step.checking_registered' }, 'Checking if agent is already registered (RPC call)');
-    const isRegistered = await withTimeout(registration.isRegistered(), 30000, 'isRegistered');
-    log.info({ action: 'identity.step.checked_registered', isRegistered }, 'isRegistered check complete');
+    const isRegistered = await withTimeout(registration.isRegistered(), 30000, `isRegistered:${chain.chainId}`);
+    log.info({ action: 'identity.chain.checked', chain: chainLabel, isRegistered }, `isRegistered on ${chainLabel}`);
 
     if (isRegistered) {
-      // Use known tokenId from env var to skip slow RPC token scan (25K+ tokens on mainnet)
       let info: Awaited<ReturnType<typeof registration.getRegistration>>;
-      if (config.agentTokenId) {
-        const knownTokenId = BigInt(config.agentTokenId);
-        log.info({ action: 'identity.step.using_known_token', tokenId: knownTokenId.toString() }, 'Using AGENT_TOKEN_ID from env');
-        const metadataUri = await withTimeout(registration.getTokenMetadata(knownTokenId), 30000, 'getTokenMetadata');
+      if (chain.cachedTokenId) {
+        const knownTokenId = BigInt(chain.cachedTokenId);
+        log.info({ action: 'identity.chain.using_cached', chain: chainLabel, tokenId: knownTokenId.toString() }, `Using cached tokenId on ${chainLabel}`);
+        const metadataUri = await withTimeout(registration.getTokenMetadata(knownTokenId), 30000, `getTokenMetadata:${chain.chainId}`);
         info = { tokenId: knownTokenId, owner: registration.agentAddress, metadataUri, isRegistered: true };
       } else {
-        log.info({ action: 'identity.step.getting_registration' }, 'Getting registration info (RPC call)');
-        info = await withTimeout(registration.getRegistration(), 120000, 'getRegistration');
+        log.info({ action: 'identity.chain.scanning', chain: chainLabel }, `Scanning for tokenId on ${chainLabel}`);
+        info = await withTimeout(registration.getRegistration(), 120000, `getRegistration:${chain.chainId}`);
       }
-      log.info({ action: 'identity.step.got_registration', hasInfo: !!info, tokenId: info?.tokenId?.toString() }, 'getRegistration complete');
 
       if (info) {
-        log.info({ action: 'identity.registration.already_registered', tokenId: info.tokenId.toString() }, 'Agent already registered on ERC-8004 Identity contract');
+        log.info({ action: 'identity.chain.found', chain: chainLabel, tokenId: info.tokenId.toString() }, `Found existing registration on ${chainLabel}`);
 
-        // Check if metadata needs updating (e.g., agentUrl changed from localhost to production)
+        // Check and update metadata if needed
         try {
           const currentMetadata = info.metadataUri ? parseMetadataUri(info.metadataUri) : null;
-          const expectedName = 'proveragent.base.eth';
-          const expectedImage = `${config.a2aBaseUrl}/icon.png`;
-          const onchainActive = await withTimeout(registration.getOnchainMetadata(info.tokenId, 'active'), 30000, 'getOnchainActive');
-          log.info({
-            action: 'identity.metadata.diagnostic',
-            hasMetadata: !!currentMetadata,
-            oasfEndpoint: currentMetadata?.services?.find((s: any) => s.name === 'OASF')?.endpoint,
-            expectedBaseUrl: config.a2aBaseUrl,
-            servicesCount: currentMetadata?.services?.length,
-            onchainActive,
-          }, 'Metadata check diagnostic');
-          const offchainNeedsUpdate = !currentMetadata || (
-            currentMetadata.name !== expectedName ||
-            currentMetadata.image !== expectedImage ||
-            currentMetadata.agentUrl !== config.a2aBaseUrl ||
-            currentMetadata.x402Support !== (config.paymentMode !== 'disabled') ||
-            !currentMetadata.services ||
-            currentMetadata.services.length === 0 ||
-            !currentMetadata.type ||
-            !currentMetadata.supportedTrust ||
-            currentMetadata.supportedTrust.length === 0 ||
-            !currentMetadata.tags ||
-            currentMetadata.tags.length === 0 ||
-            !currentMetadata.categories ||
-            currentMetadata.categories.length === 0 ||
-            !currentMetadata.domains ||
-            currentMetadata.domains.length === 0 ||
-            // Detect outdated OASF domain values (must be objects with { name, id })
-            !currentMetadata.domains?.some((d: any) => typeof d === 'object' && d.id) ||
-            !currentMetadata.skills ||
-            currentMetadata.skills.length === 0 ||
-            // Detect outdated OASF skill values (must be objects with { name, id })
-            !currentMetadata.skills?.some((s: any) => typeof s === 'object' && s.id) ||
-            !currentMetadata.registrations ||
-            currentMetadata.registrations.length === 0 ||
-            !currentMetadata.agentType ||
-            !currentMetadata.active ||
-            // Detect A2A endpoint not using discovery URL (should be /.well-known/agent-card.json per IA024)
-            (currentMetadata.services && currentMetadata.services.some(
-              (s: { name: string; endpoint: string }) => s.name === 'A2A' && !s.endpoint.includes('.well-known/agent-card.json')
-            )) ||
-            // Detect registrations agentId type mismatch (string -> number)
-            (currentMetadata.registrations && currentMetadata.registrations.length > 0 &&
-              typeof currentMetadata.registrations[0].agentId === 'string'
-            ) ||
-            // Detect web service endpoint pointing to wrong URL
-            (currentMetadata.services && currentMetadata.services.some(
-              (s: { name: string; endpoint: string }) => s.name === 'web' && s.endpoint !== config.a2aBaseUrl
-            )) ||
-            // Detect missing or incorrect OASF service entry
-            (currentMetadata.services && currentMetadata.services.some(
-              (s: { name: string; endpoint: string }) => s.name === 'OASF' && s.endpoint !== config.a2aBaseUrl
-            )) ||
-            (currentMetadata.services && !currentMetadata.services.some(
-              (s: { name: string }) => s.name === 'OASF'
-            )) ||
-            // Detect old MCP field name (tools -> mcpTools per best practices)
-            (currentMetadata.services && currentMetadata.services.some(
-              (s: { name: string; tools?: string[]; mcpTools?: string[] }) => s.name === 'MCP' && s.tools && !s.mcpTools
-            )) ||
-            // Detect MCP endpoint pointing to static JSON instead of actual MCP server
-            (currentMetadata.services && currentMetadata.services.some(
-              (s: { name: string; endpoint: string }) => s.name === 'MCP' && s.endpoint.includes('.well-known/mcp.json')
-            )) ||
-            // Detect missing securitySchemes (required for A2A spec compliance)
-            !currentMetadata.securitySchemes ||
-            // Detect missing protocolVersions array
-            !currentMetadata.protocolVersions
-          );
+          const onchainActive = await withTimeout(registration.getOnchainMetadata(info.tokenId, 'active'), 30000, `getOnchainActive:${chain.chainId}`);
+          const offchainNeedsUpdate = needsMetadataUpdate(currentMetadata, config, chain);
           const activeNeedsUpdate = onchainActive !== 'true';
-          const needsUpdate = offchainNeedsUpdate || activeNeedsUpdate;
-          if (needsUpdate) {
-              log.info({ action: 'identity.metadata.needs_update' }, 'Agent metadata needs updating on-chain');
 
-              if (offchainNeedsUpdate) {
-              if (!currentMetadata) {
-                log.info({ action: 'identity.metadata.not_found' }, 'No on-chain metadata found — will set full metadata');
-              } else {
-                if (currentMetadata.name !== expectedName) {
-                  log.info({ action: 'identity.metadata.name_mismatch', onChain: currentMetadata.name, expected: expectedName }, 'Metadata name mismatch');
-                }
-                if (currentMetadata.image !== expectedImage) {
-                  log.info({ action: 'identity.metadata.image_mismatch', onChain: currentMetadata.image || 'none', expected: expectedImage }, 'Metadata image mismatch');
-                }
-                if (currentMetadata.agentUrl !== config.a2aBaseUrl) {
-                  log.info({ action: 'identity.metadata.url_mismatch', onChain: currentMetadata.agentUrl, current: config.a2aBaseUrl }, 'Metadata URL mismatch');
-                }
-                if (currentMetadata.x402Support !== (config.paymentMode !== 'disabled')) {
-                  log.info({ action: 'identity.metadata.x402_mismatch', onChain: currentMetadata.x402Support, current: config.paymentMode !== 'disabled' }, 'Metadata x402Support mismatch');
-                }
-                if (!currentMetadata.services || currentMetadata.services.length === 0) {
-                  log.info({ action: 'identity.metadata.services_missing' }, 'Metadata services array missing or empty');
-                }
-                if (!currentMetadata.registrations || currentMetadata.registrations.length === 0) {
-                  log.info({ action: 'identity.metadata.registrations_empty' }, 'Metadata registrations array missing or empty');
-                }
-                if (!currentMetadata.type) {
-                  log.info({ action: 'identity.metadata.type_missing' }, 'Metadata type field missing');
-                }
-                if (!currentMetadata.supportedTrust || currentMetadata.supportedTrust.length === 0) {
-                  log.info({ action: 'identity.metadata.trust_missing' }, 'Metadata supportedTrust field missing');
-                }
-              }
+          if (offchainNeedsUpdate) {
+            log.info({ action: 'identity.chain.updating_metadata', chain: chainLabel }, `Updating metadata on ${chainLabel}`);
+            const metadata = buildAgentMetadata(config, chain, registration.agentAddress, info.tokenId);
+            const txHash = await withTimeout(registration.updateMetadata(info.tokenId, metadata), 120000, `updateMetadata:${chain.chainId}`);
+            log.info({ action: 'identity.chain.metadata_updated', chain: chainLabel, txHash }, `Metadata updated on ${chainLabel}`);
 
-              const metadata: AgentMetadata = {
-                name: 'proveragent.base.eth',
-                description: 'Autonomous ZK proof generation. ERC-8004 identity. x402 payments. Powered by ZKProofport',
-                agentType: 'service',
-                agentUrl: config.a2aBaseUrl,
-                capabilities: [
-                  'proof_generation',
-                  'proof_verification',
-                  'coinbase_kyc',
-                  'coinbase_country',
-                  'streaming',
-                  'x402_payment',
-                ],
-                protocols: ['mcp', 'a2a', 'x402'],
-                circuits: ['coinbase_attestation', 'coinbase_country_attestation'],
-                tags: ['ZK', 'Privacy', 'Proof', 'Coinbase', 'KYC', 'Attestation', 'x402', 'Identity', 'Country', 'Verification', 'Base', 'USDC', 'TEE', 'Noir', 'EAS', 'Zero-Knowledge'],
-                ...(config.teeMode !== 'disabled' && { tee: config.teeMode }),
-                x402Support: config.paymentMode !== 'disabled',
-                type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
-                image: `${config.a2aBaseUrl}/icon.png`,
-                protocolVersions: ['0.3'],
-                securitySchemes: {
-                  x402: { type: 'apiKey', in: 'header', name: 'X-402-Payment' },
-                },
-                security: [{ x402: [] }],
-                services: [
-                  { name: 'web', endpoint: config.a2aBaseUrl },
-                  { name: 'MCP', endpoint: `${config.a2aBaseUrl}/mcp`, version: '2025-11-25', mcpTools: ['prove', 'get_supported_circuits', 'get_guide'] },
-                  { name: 'A2A', endpoint: `${config.a2aBaseUrl}/.well-known/agent-card.json`, version: '0.3.0', a2aSkills: ['prove', 'get_supported_circuits', 'get_guide'] },
-                  { name: 'OASF', endpoint: `${config.a2aBaseUrl}`, version: 'v0.8.0', skills: ['security_privacy/privacy_risk_assessment', 'security_privacy/threat_detection'], domains: ['technology/blockchain', 'technology/security', 'trust_and_safety/data_privacy'] },
-                  { name: 'ENS', endpoint: 'proveragent.base.eth' },
-                  { name: 'DID', endpoint: `did:web:${new URL(config.a2aBaseUrl).hostname}` },
-                  { name: 'agentWallet', endpoint: `eip155:${config.paymentMode === 'mainnet' ? '8453' : '84532'}:${registration.agentAddress}` },
-                ],
-                categories: ['privacy', 'security', 'verification', 'identity'],
-                domains: [
-                  { name: 'technology/blockchain', id: 109 },
-                  { name: 'technology/security', id: 107 },
-                  { name: 'trust_and_safety/data_privacy', id: 404 },
-                ],
-                skills: [
-                  { name: 'security_privacy/privacy_risk_assessment', id: 804 },
-                  { name: 'security_privacy/threat_detection', id: 801 },
-                ],
-                registrations: [
-                  {
-                    agentRegistry: `eip155:${config.paymentMode === 'mainnet' ? '8453' : '84532'}:${config.erc8004IdentityAddress}`,
-                    agentId: Number(info.tokenId),
-                  },
-                ],
-                supportedTrust: ['tee-attestation'],
-                active: true,
-              };
-
-              log.info({ action: 'identity.step.updating_metadata' }, 'Updating metadata on-chain (TX)');
-              const txHash = await withTimeout(registration.updateMetadata(info.tokenId, metadata), 120000, 'updateMetadata');
-              log.info({ action: 'identity.metadata.updated', txHash }, 'Metadata updated successfully');
-              // Verify tokenURI was actually updated after setAgentURI call
-              try {
-                const verifyUri = await withTimeout(registration.getTokenMetadata(info.tokenId), 30000, 'verifyTokenURI');
-                const verifyMeta = verifyUri ? parseMetadataUri(verifyUri) : null;
-                const verifyOasf = verifyMeta?.services?.find((s: any) => s.name === 'OASF')?.endpoint;
-                if (verifyOasf !== config.a2aBaseUrl) {
-                  log.warn({ action: 'identity.metadata.setAgentURI_ineffective', oasfAfterUpdate: verifyOasf, expected: config.a2aBaseUrl }, 'setAgentURI TX succeeded but tokenURI was not updated — contract may store agentURI separately from tokenURI');
-                }
-              } catch {
-                // Non-critical verification
+            // Verify tokenURI was updated
+            try {
+              const verifyUri = await withTimeout(registration.getTokenMetadata(info.tokenId), 30000, `verifyTokenURI:${chain.chainId}`);
+              const verifyMeta = verifyUri ? parseMetadataUri(verifyUri) : null;
+              const verifyOasf = verifyMeta?.services?.find((s: any) => s.name === 'OASF')?.endpoint;
+              if (verifyOasf !== config.a2aBaseUrl) {
+                log.warn({ action: 'identity.chain.uri_mismatch', chain: chainLabel, oasfAfterUpdate: verifyOasf, expected: config.a2aBaseUrl }, 'setAgentURI TX succeeded but tokenURI not updated');
               }
-              }
-
-              if (activeNeedsUpdate) {
-                log.info({ action: 'identity.metadata.active_mismatch', onchain: JSON.stringify(onchainActive) }, 'On-chain active flag is not "true" — updating');
-                const activeTxHash = await withTimeout(registration.setOnchainMetadata(info.tokenId, 'active', 'true'), 60000, 'setOnchainActive');
-                log.info({ action: 'identity.metadata.active_set', txHash: activeTxHash }, 'On-chain active flag set to true');
-              }
+            } catch {
+              // Non-critical verification
             }
-          } catch (error) {
-            log.error({ action: 'identity.metadata.update_failed', err: error instanceof Error ? error : new Error(String(error)) }, 'Failed to check/update metadata');
           }
 
-        // TEE self-validation disabled: 8004scan does not index on-chain ValidationRegistry.
-        // Re-enable when 8004scan activates validation indexing.
-        // if (teeProvider && teeProvider.mode !== 'disabled') {
-        //   log.info({ action: 'identity.step.tee_validation' }, 'Starting TEE validation');
-        //   try {
-        //     await withTimeout(ensureAgentValidated(config, info.tokenId, teeProvider), 60000, 'ensureAgentValidated');
-        //     log.info({ action: 'identity.step.tee_validation_done' }, 'TEE validation complete');
-        //   } catch (err) {
-        //     log.error({ action: 'tee.validation.startup_failed', err: err instanceof Error ? err : new Error(String(err)) }, 'TEE validation failed (timeout or error)');
-        //   }
-        // }
+          if (activeNeedsUpdate) {
+            log.info({ action: 'identity.chain.setting_active', chain: chainLabel }, `Setting active flag on ${chainLabel}`);
+            const activeTxHash = await withTimeout(registration.setOnchainMetadata(info.tokenId, 'active', 'true'), 60000, `setOnchainActive:${chain.chainId}`);
+            log.info({ action: 'identity.chain.active_set', chain: chainLabel, txHash: activeTxHash }, `Active flag set on ${chainLabel}`);
+          }
+        } catch (error) {
+          log.error({ action: 'identity.chain.update_failed', chain: chainLabel, err: error instanceof Error ? error : new Error(String(error)) }, `Metadata update failed on ${chainLabel}`);
+        }
 
         return info.tokenId;
       }
     }
 
-    // Build metadata
-    const metadata: AgentMetadata = {
-      name: 'proveragent.base.eth',
-      description: 'Autonomous ZK proof generation. ERC-8004 identity. x402 payments. Powered by ZKProofport',
-      agentType: 'service',
-      agentUrl: config.a2aBaseUrl,
-      capabilities: [
-        'proof_generation',
-        'proof_verification',
-        'coinbase_kyc',
-        'coinbase_country',
-        'streaming',
-        'x402_payment',
-      ],
-      protocols: ['mcp', 'a2a', 'x402'],
-      circuits: ['coinbase_attestation', 'coinbase_country_attestation'],
-      tags: ['ZK', 'Privacy', 'Proof', 'Coinbase', 'KYC', 'Attestation', 'x402', 'Identity', 'Country', 'Verification', 'Base', 'USDC', 'TEE', 'Noir', 'EAS', 'Zero-Knowledge'],
-      ...(config.teeMode !== 'disabled' && { tee: config.teeMode }),
-      x402Support: config.paymentMode !== 'disabled',
-      type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
-      image: `${config.a2aBaseUrl}/icon.png`,
-      protocolVersions: ['0.3'],
-      securitySchemes: {
-        x402: { type: 'apiKey', in: 'header', name: 'X-402-Payment' },
-      },
-      security: [{ x402: [] }],
-      services: [
-        { name: 'web', endpoint: config.a2aBaseUrl },
-        { name: 'MCP', endpoint: `${config.a2aBaseUrl}/mcp`, version: '2025-11-25', mcpTools: ['prove', 'get_supported_circuits', 'get_guide'] },
-        { name: 'A2A', endpoint: `${config.a2aBaseUrl}/.well-known/agent-card.json`, version: '0.3.0', a2aSkills: ['prove', 'get_supported_circuits', 'get_guide'] },
-        { name: 'OASF', endpoint: `${config.a2aBaseUrl}`, version: 'v0.8.0', skills: ['security_privacy/privacy_risk_assessment', 'security_privacy/threat_detection'], domains: ['technology/blockchain', 'technology/security', 'trust_and_safety/data_privacy'] },
-        { name: 'ENS', endpoint: 'proveragent.base.eth' },
-        { name: 'DID', endpoint: `did:web:${new URL(config.a2aBaseUrl).hostname}` },
-        { name: 'agentWallet', endpoint: `eip155:${config.paymentMode === 'mainnet' ? '8453' : '84532'}:${registration.agentAddress}` },
-      ],
-      categories: ['privacy', 'security', 'verification', 'identity'],
-      domains: [
-        { name: 'technology/blockchain', id: 109 },
-        { name: 'technology/security', id: 107 },
-        { name: 'trust_and_safety/data_privacy', id: 404 },
-      ],
-      skills: [
-        { name: 'security_privacy/privacy_risk_assessment', id: 804 },
-        { name: 'security_privacy/threat_detection', id: 801 },
-      ],
-      registrations: [],
-      supportedTrust: ['tee-attestation'],
-      active: true,
-    };
+    // New registration
+    log.info({ action: 'identity.chain.registering', chain: chainLabel }, `Registering new agent on ${chainLabel}`);
+    const metadata = buildAgentMetadata(config, chain, registration.agentAddress);
+    const result = await withTimeout(registration.register(metadata), 120000, `register:${chain.chainId}`);
+    log.info({ action: 'identity.chain.registered', chain: chainLabel, tokenId: result.tokenId.toString(), txHash: result.transactionHash }, `Agent registered on ${chainLabel}`);
 
-    // Register on-chain
-    log.info({ action: 'identity.registration.started' }, 'Registering agent on ERC-8004 Identity contract');
-    const result = await withTimeout(registration.register(metadata), 120000, 'register');
-
-    log.info(
-      { action: 'identity.registration.completed', tokenId: result.tokenId.toString(), agentAddress: result.agentAddress, transactionHash: result.transactionHash },
-      'Agent registered successfully',
-    );
-
-    // Set on-chain active flag after fresh registration
+    // Set active flag
     try {
-      const activeTxHash = await withTimeout(registration.setOnchainMetadata(result.tokenId, 'active', 'true'), 60000, 'setOnchainActive');
-      log.info({ action: 'identity.metadata.active_set', txHash: activeTxHash }, 'On-chain active flag set to true');
+      const activeTxHash = await withTimeout(registration.setOnchainMetadata(result.tokenId, 'active', 'true'), 60000, `setOnchainActive:${chain.chainId}`);
+      log.info({ action: 'identity.chain.active_set', chain: chainLabel, txHash: activeTxHash }, `Active flag set on ${chainLabel}`);
     } catch (err) {
-      log.warn({ action: 'identity.metadata.active_failed', err: err instanceof Error ? err : new Error(String(err)) }, 'Failed to set on-chain active flag (non-fatal)');
+      log.warn({ action: 'identity.chain.active_failed', chain: chainLabel, err: err instanceof Error ? err : new Error(String(err)) }, 'Failed to set active flag (non-fatal)');
     }
-
-    // TEE self-validation disabled: 8004scan does not index on-chain ValidationRegistry.
-    // Re-enable when 8004scan activates validation indexing.
-    // if (teeProvider && teeProvider.mode !== 'disabled') {
-    //   log.info({ action: 'identity.step.tee_validation' }, 'Starting TEE validation');
-    //   try {
-    //     await withTimeout(ensureAgentValidated(config, result.tokenId, teeProvider), 60000, 'ensureAgentValidated');
-    //     log.info({ action: 'identity.step.tee_validation_done' }, 'TEE validation complete');
-    //   } catch (err) {
-    //     log.error({ action: 'tee.validation.startup_failed', err: err instanceof Error ? err : new Error(String(err)) }, 'TEE validation failed (timeout or error)');
-    //   }
-    // }
 
     return result.tokenId;
   } catch (error) {
-    log.error({ action: 'identity.registration.failed', err: error instanceof Error ? error : new Error(String(error)) }, 'Failed to register agent on ERC-8004');
+    log.error({ action: 'identity.chain.failed', chain: chainLabel, err: error instanceof Error ? error : new Error(String(error)) }, `Registration failed on ${chainLabel}`);
     return null;
   }
+}
+
+/**
+ * Ensure agent is registered on all configured ERC-8004 Identity contracts.
+ *
+ * Registers on Base (primary chain) and optionally on Ethereum mainnet
+ * if ETHEREUM_RPC_URL is configured. Each chain gets its own agent identity
+ * with chain-specific metadata.
+ *
+ * Returns a Map of chainId -> tokenId for all successful registrations.
+ * Does NOT crash the server if any registration fails.
+ */
+export async function ensureAgentRegistered(config: Config, teeProvider?: TeeProvider): Promise<Map<number, bigint>> {
+  const results = new Map<number, bigint>();
+
+  if (!config.erc8004IdentityAddress || !config.erc8004ReputationAddress) {
+    log.info({ action: 'identity.not_configured' }, 'ERC-8004 not configured — identity registration disabled');
+    return results;
+  }
+
+  const chains = getChainIdentities(config);
+  log.info({ action: 'identity.chains', count: chains.length, chains: chains.map(c => `${c.agentName}@${c.chainId}`) }, `Registering on ${chains.length} chain(s)`);
+
+  for (const chain of chains) {
+    const tokenId = await registerOnChain(config, chain);
+    if (tokenId !== null) {
+      results.set(chain.chainId, tokenId);
+    }
+  }
+
+  log.info({ action: 'identity.complete', registered: results.size, chains: [...results.entries()].map(([c, t]) => `${c}:${t}`) }, 'Registration complete');
+  return results;
 }

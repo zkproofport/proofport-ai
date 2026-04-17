@@ -165,17 +165,9 @@ async function fetchVerifierFromBroadcast(
 // ── Public sync function ────────────────────────────────────────────────
 
 /**
- * Fetch latest verifier addresses from GitHub broadcast JSON.
- * Updates the in-memory cache. Call at server startup.
- *
- * @param paymentMode - 'testnet' | 'mainnet' | 'disabled'
- * @returns true if any address was updated
+ * Sync verifier addresses for a single chain from GitHub broadcast JSON.
  */
-export async function syncDeployments(paymentMode: string, chainRpcUrl?: string): Promise<boolean> {
-  // Determine chain: prefer explicit RPC URL detection, fall back to paymentMode
-  const isTestnetRpc = chainRpcUrl?.includes('sepolia') ?? false;
-  const isProduction = paymentMode === 'mainnet' && !isTestnetRpc;
-  const chainId = isProduction ? 8453 : 84532;
+async function syncChain(chainId: number, isProduction: boolean): Promise<boolean> {
   const chainIdStr = String(chainId);
   let updated = false;
 
@@ -208,4 +200,34 @@ export async function syncDeployments(paymentMode: string, chainRpcUrl?: string)
   );
 
   return updated;
+}
+
+/**
+ * Fetch latest verifier addresses from GitHub broadcast JSON.
+ * Updates the in-memory cache for all deployed chains. Call at server startup.
+ *
+ * Syncs: Ethereum mainnet (1), Base mainnet (8453), and Base Sepolia (84532) for testnet.
+ *
+ * @param paymentMode - 'testnet' | 'mainnet' | 'disabled'
+ * @returns true if any address was updated
+ */
+export async function syncDeployments(paymentMode: string, chainRpcUrl?: string): Promise<boolean> {
+  const isTestnetRpc = chainRpcUrl?.includes('sepolia') ?? false;
+  const isProduction = paymentMode === 'mainnet' || (paymentMode === 'disabled' && !isTestnetRpc);
+
+  if (isProduction) {
+    // Sync both Ethereum mainnet and Base mainnet
+    const [ethUpdated, baseUpdated] = await Promise.all([
+      syncChain(1, true),
+      syncChain(8453, true),
+    ]);
+    return ethUpdated || baseUpdated;
+  } else {
+    // Testnet: sync both Ethereum Sepolia and Base Sepolia
+    const [ethUpdated, baseUpdated] = await Promise.all([
+      syncChain(11155111, false),
+      syncChain(84532, false),
+    ]);
+    return ethUpdated || baseUpdated;
+  }
 }

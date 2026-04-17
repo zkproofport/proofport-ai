@@ -86,7 +86,7 @@ export function handleGetSupportedCircuits(
   params: GetSupportedCircuitsParams,
   paymentMode: 'disabled' | 'testnet' | 'mainnet' = 'testnet',
 ): GetSupportedCircuitsResult {
-  const defaultChainId = paymentMode === 'mainnet' ? '8453' : '84532';
+  const defaultChainId = paymentMode === 'testnet' ? '11155111' : '1';
   const chainId = params.chainId || defaultChainId;
   const chainVerifiers = getChainVerifiers(chainId);
 

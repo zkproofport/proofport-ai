@@ -441,7 +441,7 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
           }
         }
 
-        const e2eChainId = isTestnet ? 84532 : 8453;
+        const e2eChainId = isTestnet ? 11155111 : 1;
         const e2eVerifierAddress = getVerifierAddress(circuitId, String(e2eChainId)) || null;
 
         const e2eProofType: string = circuitId === 'coinbase_attestation' ? 'kyc'
@@ -463,7 +463,7 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
           verification: e2eVerifierAddress ? {
             chainId: e2eChainId,
             verifierAddress: e2eVerifierAddress,
-            rpcUrl: config.chainRpcUrl,
+            rpcUrl: isTestnet ? config.chainRpcUrl : config.ethereumRpcUrl,
           } : null,
         };
 
@@ -471,7 +471,7 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
         return;
       }
 
-      const chainId = isTestnet ? 84532 : 8453;
+      const chainId = isTestnet ? 11155111 : 1;
       const verifierAddress = getVerifierAddress(circuitId, String(chainId)) || null;
 
       // ── Plaintext flow: client provides structured inputs, server relays to TEE/bbProver ──

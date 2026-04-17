@@ -10,10 +10,20 @@ export const AUTHORIZED_SIGNERS = [
 export type CircuitId = 'coinbase_attestation' | 'coinbase_country_attestation' | 'oidc_domain_attestation';
 
 export const FALLBACK_VERIFIERS: Record<string, Record<string, string>> = {
+  '1': {
+    coinbase_attestation: '0xF3D5A09d2C85B28C52EF2905c1BE3a852b609D0C',
+    coinbase_country_attestation: '0x78792554E1582cB49D858eACb5C3607B42d28224',
+    oidc_domain_attestation: '0x440EaA25603eD5480caD0ee51d9808a1993eF267',
+  },
   '8453': {
     coinbase_attestation: '0xF7dED73E7a7fc8fb030c35c5A88D40ABe6865382',
     coinbase_country_attestation: '0xF3D5A09d2C85B28C52EF2905c1BE3a852b609D0C',
     oidc_domain_attestation: '0x9677ba46ad226ce8b3c4517d9c0143e4d458beae',
+  },
+  '11155111': {
+    coinbase_attestation: '0xCbC8E63fF92659E8B44cFF117D33005Bb669a018',
+    coinbase_country_attestation: '0x6646d970499BBeD728636823A5A7e551E811b414',
+    oidc_domain_attestation: '0x07121eb50b2Ebe1675E7Cb96c84B580A3fF6589e',
   },
   '84532': {
     coinbase_attestation: '0x0036B61dBFaB8f3CfEEF77dD5D45F7EFBFE2035c',
