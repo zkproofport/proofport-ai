@@ -1087,7 +1087,7 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
 
   // ─── Real Proof Generation via Local MCP (TEE_MODE=disabled, bb prove on host) ──
 
-  type GeneratedProof = { proof: string; publicInputs: string; verification?: { chainId: number; verifierAddress: string; rpcUrl: string } | null };
+  type GeneratedProof = { circuit?: string; proofType?: string; proof: string; publicInputs: string; verification?: { chainId: number; verifierAddress: string; rpcUrl: string } | null };
   let generatedProof: GeneratedProof | null = null;
   let generatedCountryProof: GeneratedProof | null = null;
   let generatedOidcProof: GeneratedProof | null = null;
@@ -1117,7 +1117,7 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
       if (parsed.paymentTxHash) expect(parsed.paymentTxHash).toMatch(/^0x/);
     }
 
-    generatedProof = { proof: parsed.proof, publicInputs: parsed.publicInputs, verification: parsed.verification };
+    generatedProof = { circuit: parsed.circuit, proofType: parsed.proofType, proof: parsed.proof, publicInputs: parsed.publicInputs, verification: parsed.verification };
 
     // ─── Report: Proof Generation ───
     console.log('\n╔══════════════════════════════════════════════════════════════╗');
@@ -1167,6 +1167,8 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
       name: 'verify_proof',
       arguments: {
         result: {
+          circuit: generatedProof.circuit || 'coinbase_attestation',
+          proofType: generatedProof.proofType || 'kyc',
           proof: generatedProof.proof,
           publicInputs: generatedProof.publicInputs,
           verification: generatedProof.verification,
@@ -1218,7 +1220,7 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
       if (parsed.paymentTxHash) expect(parsed.paymentTxHash).toMatch(/^0x/);
     }
 
-    generatedCountryProof = { proof: parsed.proof, publicInputs: parsed.publicInputs, verification: parsed.verification };
+    generatedCountryProof = { circuit: parsed.circuit, proofType: parsed.proofType, proof: parsed.proof, publicInputs: parsed.publicInputs, verification: parsed.verification };
 
     console.log('\n╔══════════════════════════════════════════════════════════════╗');
     console.log('║          ZK PROOF GENERATION REPORT (COUNTRY)              ║');
@@ -1262,6 +1264,8 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
       name: 'verify_proof',
       arguments: {
         result: {
+          circuit: generatedCountryProof.circuit || 'coinbase_country_attestation',
+          proofType: generatedCountryProof.proofType || 'country',
           proof: generatedCountryProof.proof,
           publicInputs: generatedCountryProof.publicInputs,
           verification: generatedCountryProof.verification,
@@ -1322,7 +1326,7 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
       if (parsed.paymentTxHash) expect(parsed.paymentTxHash).toMatch(/^0x/);
     }
 
-    generatedOidcProof = { proof: parsed.proof, publicInputs: parsed.publicInputs, verification: parsed.verification };
+    generatedOidcProof = { circuit: parsed.circuit, proofType: parsed.proofType, proof: parsed.proof, publicInputs: parsed.publicInputs, verification: parsed.verification };
 
     console.log('\n╔══════════════════════════════════════════════════════════════╗');
     console.log('║          ZK PROOF GENERATION REPORT (OIDC)                 ║');
@@ -1365,6 +1369,8 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
       name: 'verify_proof',
       arguments: {
         result: {
+          circuit: generatedOidcProof.circuit || 'oidc_domain_attestation',
+          proofType: generatedOidcProof.proofType || 'google_login',
           proof: generatedOidcProof.proof,
           publicInputs: generatedOidcProof.publicInputs,
           verification: generatedOidcProof.verification,
