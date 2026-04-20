@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.2.4](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.2.3...mcp-v0.2.4) (2026-04-20)
+
+
+### Features
+
+* add circuit/proofType to SDK ProveResponse and ProofResult types ([ef8d551](https://github.com/zkproofport/proofport-ai/commit/ef8d551cbaa78b0183bf7fc727dbb176e77d4320))
+* support PAYMENT_MODE=disabled with requiresPayment flag in SDK and tests ([62706fb](https://github.com/zkproofport/proofport-ai/commit/62706fb8a244867fd94b937d3011c832b472ba94))
+
+
+### Bug Fixes
+
+* add circuit and proofType fields to verify_proof tool params ([fdf2e93](https://github.com/zkproofport/proofport-ai/commit/fdf2e930552be8ec6a5bca80b7a4d88a92a424fb))
+* remove all payment/CDP code from SDK and MCP ([ee1c09d](https://github.com/zkproofport/proofport-ai/commit/ee1c09d23ac691f12f639ba5e9da9b44ebf52eb5))
+* remove PAYMENT_KEY requirement from MCP CLI ([eeb5792](https://github.com/zkproofport/proofport-ai/commit/eeb57921e039757f77eb5f98a3195d4814e2bb14))
+* use Artifact Registry image for bb binary (GitHub nightly release deleted) ([1ed4890](https://github.com/zkproofport/proofport-ai/commit/1ed4890c9fd5acfbaf53ce53aa9f286fa6aa2753))
+
 ## [0.2.3](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.2.2...mcp-v0.2.3) (2026-03-24)
 
 

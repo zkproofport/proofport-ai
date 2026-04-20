@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.2.6](https://github.com/zkproofport/proofport-ai/compare/server-v0.2.5...server-v0.2.6) (2026-04-20)
+
+
+### Features
+
+* add circuit field to proof response, update OIDC mainnet verifier fallback ([0f397c4](https://github.com/zkproofport/proofport-ai/commit/0f397c42ef09fc5ca88746ac5ec4b99bd85534f2))
+* add circuit/proofType to SDK ProveResponse and ProofResult types ([ef8d551](https://github.com/zkproofport/proofport-ai/commit/ef8d551cbaa78b0183bf7fc727dbb176e77d4320))
+* add proofType to proof response (google_login, kyc, country, google_workspace, microsoft_365) ([2fbd43f](https://github.com/zkproofport/proofport-ai/commit/2fbd43f45b2730d52e2b48881c0a0f16f742b36e))
+* dual-chain ERC-8004 identity (Ethereum + Base) with x402 always-on ([cb14e95](https://github.com/zkproofport/proofport-ai/commit/cb14e95ae1649f64da6b84cee5b1ace3b47e1309))
+* support PAYMENT_MODE=disabled with requiresPayment flag in SDK and tests ([62706fb](https://github.com/zkproofport/proofport-ai/commit/62706fb8a244867fd94b937d3011c832b472ba94))
+
+
+### Bug Fixes
+
+* add circuit and proofType fields to verify_proof tool params ([fdf2e93](https://github.com/zkproofport/proofport-ai/commit/fdf2e930552be8ec6a5bca80b7a4d88a92a424fb))
+* add circuit and proofType to E2E encrypted proof response ([590a5c9](https://github.com/zkproofport/proofport-ai/commit/590a5c90d5e721ca25e205f86ec41d0903e70af8))
+* always issue real nonce in 402 response regardless of payment mode ([a5aa1a8](https://github.com/zkproofport/proofport-ai/commit/a5aa1a8e175d1801682c2fc90d3bfa113c1b6f62))
+* derive isTestnet from chainRpcUrl when paymentMode=disabled ([125010f](https://github.com/zkproofport/proofport-ai/commit/125010f25bb4e3de824b391c9e16de998af37647))
+* explicit gas overrides for Ethereum mainnet TX + step logging ([6ff9b4f](https://github.com/zkproofport/proofport-ai/commit/6ff9b4f386a800329e29d0d7afe04e3e23239890))
+* remove all payment/CDP code from SDK and MCP ([ee1c09d](https://github.com/zkproofport/proofport-ai/commit/ee1c09d23ac691f12f639ba5e9da9b44ebf52eb5))
+* remove PAYMENT_KEY requirement from MCP CLI ([eeb5792](https://github.com/zkproofport/proofport-ai/commit/eeb57921e039757f77eb5f98a3195d4814e2bb14))
+* sync verifier addresses regardless of paymentMode using chainRpcUrl ([1f8fcad](https://github.com/zkproofport/proofport-ai/commit/1f8fcad3f5488065a826a71ae5b2e2add1ca23a3))
+* update oidc_domain_attestation fallback verifier address on sepolia ([884808e](https://github.com/zkproofport/proofport-ai/commit/884808edf367fec53904aa3960eb2b85c1cc7723))
+* update package-lock.json to sync with package.json ([1d49ffe](https://github.com/zkproofport/proofport-ai/commit/1d49ffe91a1d0fe8130291cd22e077bf24d9a2dc))
+* use Artifact Registry image for bb binary (GitHub nightly release deleted) ([1ed4890](https://github.com/zkproofport/proofport-ai/commit/1ed4890c9fd5acfbaf53ce53aa9f286fa6aa2753))
+* use ECR bb-base image instead of GCP Artifact Registry ([155e9dc](https://github.com/zkproofport/proofport-ai/commit/155e9dcfba33f7d0f600e85f23ed400af6bb7e36))
+* use X-Payment-Nonce (not X-Payment-TX) for challenge/retry detection ([593d9fe](https://github.com/zkproofport/proofport-ai/commit/593d9fe5ea852566a6824d75637b8d71c682713f))
+* verification rpcUrl uses ethereumRpcUrl for Ethereum chains ([43e4f87](https://github.com/zkproofport/proofport-ai/commit/43e4f8765516133e21894a49507f0bda2aca9f95))
+* verify_proof tests pass circuit/proofType fields + rpcUrl fix ([f353542](https://github.com/zkproofport/proofport-ai/commit/f35354268594c7893a622bc42d9fb52bf0494bad))
+
 ## [0.2.5](https://github.com/zkproofport/proofport-ai/compare/server-v0.2.4...server-v0.2.5) (2026-03-24)
 
 

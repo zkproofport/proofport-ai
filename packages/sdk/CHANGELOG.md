@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.2.6](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.2.5...sdk-v0.2.6) (2026-04-20)
+
+
+### Features
+
+* add circuit/proofType to SDK ProveResponse and ProofResult types ([ef8d551](https://github.com/zkproofport/proofport-ai/commit/ef8d551cbaa78b0183bf7fc727dbb176e77d4320))
+* support PAYMENT_MODE=disabled with requiresPayment flag in SDK and tests ([62706fb](https://github.com/zkproofport/proofport-ai/commit/62706fb8a244867fd94b937d3011c832b472ba94))
+
+
+### Bug Fixes
+
+* remove all payment/CDP code from SDK and MCP ([ee1c09d](https://github.com/zkproofport/proofport-ai/commit/ee1c09d23ac691f12f639ba5e9da9b44ebf52eb5))
+* use Artifact Registry image for bb binary (GitHub nightly release deleted) ([1ed4890](https://github.com/zkproofport/proofport-ai/commit/1ed4890c9fd5acfbaf53ce53aa9f286fa6aa2753))
+* use X-Payment-Nonce (not X-Payment-TX) for challenge/retry detection ([593d9fe](https://github.com/zkproofport/proofport-ai/commit/593d9fe5ea852566a6824d75637b8d71c682713f))
+
 ## [0.2.5](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.2.4...sdk-v0.2.5) (2026-03-24)
 
 
