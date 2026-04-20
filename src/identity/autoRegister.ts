@@ -22,6 +22,11 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   ]);
 }
 
+/** TX timeout: Ethereum mainnet needs longer due to higher gas and slower inclusion */
+function txTimeout(chainId: number): number {
+  return chainId === 8453 || chainId === 84532 ? 120000 : 300000;
+}
+
 /** Build agent metadata for a specific chain */
 function buildAgentMetadata(
   config: Config,
@@ -179,7 +184,7 @@ async function registerOnChain(
           if (offchainNeedsUpdate) {
             log.info({ action: 'identity.chain.updating_metadata', chain: chainLabel }, `Updating metadata on ${chainLabel}`);
             const metadata = buildAgentMetadata(config, chain, registration.agentAddress, info.tokenId);
-            const txHash = await withTimeout(registration.updateMetadata(info.tokenId, metadata), 120000, `updateMetadata:${chain.chainId}`);
+            const txHash = await withTimeout(registration.updateMetadata(info.tokenId, metadata), txTimeout(chain.chainId), `updateMetadata:${chain.chainId}`);
             log.info({ action: 'identity.chain.metadata_updated', chain: chainLabel, txHash }, `Metadata updated on ${chainLabel}`);
 
             // Verify tokenURI was updated
@@ -197,7 +202,7 @@ async function registerOnChain(
 
           if (activeNeedsUpdate) {
             log.info({ action: 'identity.chain.setting_active', chain: chainLabel }, `Setting active flag on ${chainLabel}`);
-            const activeTxHash = await withTimeout(registration.setOnchainMetadata(info.tokenId, 'active', 'true'), 60000, `setOnchainActive:${chain.chainId}`);
+            const activeTxHash = await withTimeout(registration.setOnchainMetadata(info.tokenId, 'active', 'true'), txTimeout(chain.chainId), `setOnchainActive:${chain.chainId}`);
             log.info({ action: 'identity.chain.active_set', chain: chainLabel, txHash: activeTxHash }, `Active flag set on ${chainLabel}`);
           }
         } catch (error) {
@@ -211,12 +216,12 @@ async function registerOnChain(
     // New registration
     log.info({ action: 'identity.chain.registering', chain: chainLabel }, `Registering new agent on ${chainLabel}`);
     const metadata = buildAgentMetadata(config, chain, registration.agentAddress);
-    const result = await withTimeout(registration.register(metadata), 120000, `register:${chain.chainId}`);
+    const result = await withTimeout(registration.register(metadata), txTimeout(chain.chainId), `register:${chain.chainId}`);
     log.info({ action: 'identity.chain.registered', chain: chainLabel, tokenId: result.tokenId.toString(), txHash: result.transactionHash }, `Agent registered on ${chainLabel}`);
 
     // Set active flag
     try {
-      const activeTxHash = await withTimeout(registration.setOnchainMetadata(result.tokenId, 'active', 'true'), 60000, `setOnchainActive:${chain.chainId}`);
+      const activeTxHash = await withTimeout(registration.setOnchainMetadata(result.tokenId, 'active', 'true'), txTimeout(chain.chainId), `setOnchainActive:${chain.chainId}`);
       log.info({ action: 'identity.chain.active_set', chain: chainLabel, txHash: activeTxHash }, `Active flag set on ${chainLabel}`);
     } catch (err) {
       log.warn({ action: 'identity.chain.active_failed', chain: chainLabel, err: err instanceof Error ? err : new Error(String(err)) }, 'Failed to set active flag (non-fatal)');

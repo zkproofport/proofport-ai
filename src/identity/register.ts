@@ -68,16 +68,53 @@ export class AgentRegistration {
   }
 
   /**
+   * Build gas overrides for the current chain.
+   * Ethereum mainnet needs explicit gasLimit to avoid slow eth_estimateGas on large calldata.
+   */
+  private async getGasOverrides(dataSize: number): Promise<Record<string, unknown>> {
+    const nonce = await this.getNextNonce();
+    const network = await this.provider.getNetwork();
+    const chainId = Number(network.chainId);
+
+    // Base chains: fast and cheap, let ethers auto-estimate
+    if (chainId === 8453 || chainId === 84532) {
+      return { nonce };
+    }
+
+    // Ethereum mainnet/sepolia: set explicit gas to avoid slow estimation
+    const feeData = await this.provider.getFeeData();
+    log.info({ action: 'identity.gas.feeData', chainId, maxFeePerGas: feeData.maxFeePerGas?.toString(), maxPriorityFeePerGas: feeData.maxPriorityFeePerGas?.toString(), gasPrice: feeData.gasPrice?.toString(), dataSize }, 'Fee data for TX');
+
+    // Estimate gasLimit: base cost (21K) + calldata (16 gas per non-zero byte) + execution (~160K)
+    const estimatedGas = 21000 + (dataSize * 16) + 2200000;
+
+    const overrides: Record<string, unknown> = { nonce, gasLimit: estimatedGas };
+
+    if (feeData.maxFeePerGas) {
+      // EIP-1559: boost priority fee by 20% for faster inclusion
+      const basePriority = feeData.maxPriorityFeePerGas ?? 1000000000n;
+      overrides.maxPriorityFeePerGas = basePriority * 120n / 100n;
+      overrides.maxFeePerGas = feeData.maxFeePerGas * 120n / 100n;
+    }
+
+    log.info({ action: 'identity.gas.overrides', chainId, gasLimit: estimatedGas, ...overrides }, 'Gas overrides for TX');
+    return overrides;
+  }
+
+  /**
    * Register agent on ERC-8004 Identity contract
    */
   async register(metadata: AgentMetadata): Promise<AgentRegistrationResult> {
     // Create metadata URI
     const metadataUri = createMetadataUri(metadata);
 
-    // Call contract.register
-    const tx = await this.contract.register(metadataUri, { nonce: await this.getNextNonce() });
+    log.info({ action: 'identity.register.step', step: 'gas_overrides', uriLength: metadataUri.length }, 'Building gas overrides');
+    const overrides = await this.getGasOverrides(metadataUri.length);
 
-    // Wait for transaction receipt
+    log.info({ action: 'identity.register.step', step: 'sending_tx' }, 'Sending register TX');
+    const tx = await this.contract.register(metadataUri, overrides);
+
+    log.info({ action: 'identity.register.step', step: 'waiting_receipt', txHash: tx.hash }, 'Waiting for TX receipt');
     const receipt = await tx.wait();
 
     // Extract tokenId from logs (Transfer event topic[3] or indexed tokenId)
@@ -239,7 +276,11 @@ export class AgentRegistration {
    * Value is encoded as UTF-8 bytes per ERC-8004 spec
    */
   async setOnchainMetadata(tokenId: bigint, key: string, value: string): Promise<string> {
-    const tx = await this.contract.setMetadata(tokenId, key, ethers.toUtf8Bytes(value), { nonce: await this.getNextNonce() });
+    const valueBytes = ethers.toUtf8Bytes(value);
+    const overrides = await this.getGasOverrides(value.length + 100);
+    log.info({ action: 'identity.setMetadata.sending', key, tokenId: tokenId.toString() }, `Sending setMetadata(${key})`);
+    const tx = await this.contract.setMetadata(tokenId, key, valueBytes, overrides);
+    log.info({ action: 'identity.setMetadata.waiting', txHash: tx.hash }, 'Waiting for setMetadata receipt');
     await tx.wait();
     return tx.hash;
   }
@@ -252,7 +293,10 @@ export class AgentRegistration {
    */
   async updateMetadata(tokenId: bigint, metadata: AgentMetadata): Promise<string> {
     const metadataUri = createMetadataUri(metadata);
-    const tx = await this.contract.setAgentURI(tokenId, metadataUri, { nonce: await this.getNextNonce() });
+    const overrides = await this.getGasOverrides(metadataUri.length);
+    log.info({ action: 'identity.updateMetadata.sending', tokenId: tokenId.toString(), uriLength: metadataUri.length }, 'Sending setAgentURI');
+    const tx = await this.contract.setAgentURI(tokenId, metadataUri, overrides);
+    log.info({ action: 'identity.updateMetadata.waiting', txHash: tx.hash }, 'Waiting for setAgentURI receipt');
     await tx.wait();
     return tx.hash;
   }
