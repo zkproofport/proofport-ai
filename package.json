@@ -1,6 +1,6 @@
 {
   "name": "proofport-ai",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Agent-native ZK proof infrastructure for ZKProofport",
   "license": "MIT",
   "main": "dist/index.js",

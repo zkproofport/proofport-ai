@@ -1,6 +1,6 @@
 {
   "name": "@zkproofport-ai/sdk",
-  "version": "0.2.10",
+  "version": "0.2.6",
   "description": "TypeScript SDK for AI agents to generate zero-knowledge proofs of identity (Coinbase KYC, Country, Google OIDC, Workspace, MS 365) via ZKProofport. x402 USDC payments on Base, ERC-8004 agent identity. Privacy-preserving authentication for autonomous agents.",
   "keywords": [
     "sdk",
