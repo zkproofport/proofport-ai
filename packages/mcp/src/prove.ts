@@ -13,8 +13,8 @@ const serverPath = join(__dirname, 'index.js');
 // ─── Device Code Flow helpers ─────────────────────────────────────────
 
 // ZKProofport's own OAuth credentials — customers do NOT configure these
-const GOOGLE_CLIENT_ID = '995938448974-5k6078o9ie7q5ecimc67apd6e4ktumrt.apps.googleusercontent.com';
-const GOOGLE_CLIENT_SECRET = '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';
+const GOOGLE_CLIENT_ID = '491923400813-pr17m6kpin2rsbbes18jpb60j1s3qmv4.apps.googleusercontent.com';
+const GOOGLE_CLIENT_SECRET = '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';
 const MICROSOFT_CLIENT_ID = 'cd5404cc-d313-431c-8112-725e629dad28';
 const MICROSOFT_TENANT = 'organizations'; // allows any org account
 
