@@ -104,9 +104,9 @@ cd /opt/setup
 sudo -u ec2-user git clone https://github.com/zkproofport/proofport-ai.git
 sudo -u ec2-user git -C proofport-ai checkout "$SHA"
 
-# Run ec2-setup.sh from inside aws/ so SCRIPT_DIR resolves to the directory
-# that holds its sibling files.
-cd aws
+# Run ec2-setup.sh from inside proofport-ai/aws/ so SCRIPT_DIR resolves to the
+# directory that holds its sibling files (Caddyfile, systemd/*.service, etc.)
+cd proofport-ai/aws
 bash ec2-setup.sh
 
 echo "[\$(date)] bootstrap finished OK"
