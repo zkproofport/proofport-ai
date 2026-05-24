@@ -32,7 +32,11 @@ export const AUTHORIZED_SIGNERS = [
 ];
 
 export const DEFAULT_EAS_GRAPHQL = 'https://base.easscan.org/graphql';
-export const DEFAULT_EAS_RPC = 'https://mainnet.base.org';
+// Use drpc.org instead of mainnet.base.org: the latter prunes transactions
+// older than ~30 days, so eth_getTransactionByHash returns null for any
+// attestation made earlier (mainnet.base.org returned null for txs from 2025).
+// drpc.org retains full history at no cost and no API key.
+export const DEFAULT_EAS_RPC = 'https://base.drpc.org';
 
 export const RAW_TX_PADDED_LENGTH = 300;
 export const MERKLE_PROOF_MAX_DEPTH = 8;
