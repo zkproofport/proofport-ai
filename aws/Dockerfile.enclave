@@ -9,28 +9,25 @@
 # Convert: nitro-cli build-enclave --docker-uri proofport-ai-enclave:latest --output-file enclave.eif
 
 # ─────────────────────────────────────────────────────────────
-# Stage 1: Download and verify bb binary
-# Ubuntu 24.04 required: bb needs glibc >= 2.38 (Ubuntu 24.04 ships 2.39)
+# Stage 1a: Pull bb binary from the official Aztec image on Docker Hub.
+# The GitHub release for v1.0.0-nightly.20250723 was deleted, but the
+# matching aztecprotocol/aztec image still ships the same bb binary.
+# ─────────────────────────────────────────────────────────────
+FROM --platform=linux/amd64 aztecprotocol/aztec:1.0.0-nightly.20250723-amd64 AS bb-source
+
+# ─────────────────────────────────────────────────────────────
+# Stage 1b: Pre-warm bb SRS cache on Ubuntu 24.04 (bb requires glibc >= 2.38)
 # ─────────────────────────────────────────────────────────────
 FROM ubuntu:24.04 AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    wget \
     jq \
     ca-certificates \
-    tar \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /downloads
-
-# Download bb (amd64-linux only — no arm64-linux build available)
-RUN curl -fsSL \
-    "https://github.com/AztecProtocol/aztec-packages/releases/download/v1.0.0-nightly.20250723/barretenberg-amd64-linux.tar.gz" \
-    -o barretenberg-amd64-linux.tar.gz \
-    && tar -xzf barretenberg-amd64-linux.tar.gz \
-    && chmod +x ./bb \
-    && ./bb --version
+# Copy bb binary from aztec image
+COPY --from=bb-source /usr/src/barretenberg/cpp/build/bin/bb /usr/local/bin/bb
+RUN chmod +x /usr/local/bin/bb && bb --version
 
 # Pre-download SRS (BN254 CRS) — bb needs this for proving.
 # Enclave has NO network, so SRS must be baked into the image.
@@ -40,9 +37,9 @@ RUN curl -fsSL \
 COPY circuits/coinbase-attestation/target/coinbase_attestation.json /tmp/circuits/
 COPY circuits/coinbase-country-attestation/target/coinbase_country_attestation.json /tmp/circuits/
 COPY circuits/oidc-domain-attestation/target/oidc_domain_attestation.json /tmp/circuits/
-RUN ./bb write_vk -b /tmp/circuits/coinbase_attestation.json -o /tmp/vk_dummy \
-    && ./bb write_vk -b /tmp/circuits/coinbase_country_attestation.json -o /tmp/vk_dummy2 \
-    && ./bb write_vk -b /tmp/circuits/oidc_domain_attestation.json -o /tmp/vk_dummy3 \
+RUN bb write_vk -b /tmp/circuits/coinbase_attestation.json -o /tmp/vk_dummy \
+    && bb write_vk -b /tmp/circuits/coinbase_country_attestation.json -o /tmp/vk_dummy2 \
+    && bb write_vk -b /tmp/circuits/oidc_domain_attestation.json -o /tmp/vk_dummy3 \
     && ls -la /root/.bb-crs/ \
     && du -sh /root/.bb-crs/ \
     && rm -rf /tmp/circuits /tmp/vk_dummy /tmp/vk_dummy2 /tmp/vk_dummy3
@@ -71,8 +68,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copy bb binary from builder stage
-COPY --from=builder /downloads/bb    /usr/local/bin/bb
+# Copy bb binary from builder stage (originally pulled from aztec image)
+COPY --from=builder /usr/local/bin/bb /usr/local/bin/bb
 
 # Copy pre-downloaded SRS data (bb looks in ~/.bb-crs/)
 COPY --from=builder /root/.bb-crs/ /root/.bb-crs/
