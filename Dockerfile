@@ -1,9 +1,19 @@
-# Stage 1: bb Binary Source
-# Reuse bb binary from the last successful image in Artifact Registry.
-# The GitHub nightly release (v1.0.0-nightly.20250723) was deleted — downloading
-# from GitHub is no longer possible. The binary and its x86-64 libs are already
-# baked into the existing staging-latest image.
-FROM --platform=linux/amd64 006600133037.dkr.ecr.ap-northeast-2.amazonaws.com/proofport-ai:bb-base AS bb-extractor
+# Stage 1: bb binary source — pulled from the official Aztec image on Docker Hub.
+# The GitHub release for v1.0.0-nightly.20250723 was deleted, but the matching
+# aztecprotocol/aztec image is still available and bundles the same bb binary.
+# We extract bb + its x86_64 runtime deps into /opt/{bb,x86-libs} so Stage 3
+# can copy them verbatim. No private registry dependency.
+FROM --platform=linux/amd64 aztecprotocol/aztec:1.0.0-nightly.20250723-amd64 AS bb-extractor
+
+RUN set -e; \
+    BB_PATH=$(find / -name bb -type f -executable 2>/dev/null | grep -v '^/proc/' | head -1); \
+    [ -n "$BB_PATH" ] || { echo "bb binary not found in aztec image" >&2; exit 1; }; \
+    echo "Found bb at: $BB_PATH"; \
+    mkdir -p /opt/bb /opt/x86-libs; \
+    cp "$BB_PATH" /opt/bb/bb; \
+    chmod +x /opt/bb/bb; \
+    ldd /opt/bb/bb | awk '/=>/{print $3}' | grep -v '^$' | xargs -I{} cp -L {} /opt/x86-libs/; \
+    cp /lib64/ld-linux-x86-64.so.2 /opt/x86-libs/
 
 # Stage 2: TypeScript Build (native arch)
 FROM node:20-slim AS builder
