@@ -21,6 +21,16 @@ die() {
   exit 1
 }
 
+# Stop and remove a docker container, but only if it exists. Real docker errors
+# (daemon down, permissions, etc.) propagate normally — no `|| true` masking.
+remove_container() {
+  local name=$1
+  if docker ps -a --format '{{.Names}}' | grep -q "^${name}$"; then
+    docker stop "$name" >/dev/null
+    docker rm -f "$name" >/dev/null
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # Slot resolution
 # ---------------------------------------------------------------------------
@@ -62,15 +72,24 @@ ENV_FILE=/opt/proofport-ai/.env
 
 [[ -f "$ENV_FILE" ]] || die "Env file not found: $ENV_FILE"
 
-# Extract only the vars we need without polluting the environment wholesale
+# Extract only the vars we need without polluting the environment wholesale.
+# All four are required — die immediately if any is missing.
 AI_IMAGE=$(grep '^AI_IMAGE=' "$ENV_FILE" | cut -d= -f2- | tr -d '"' | tr -d "'")
 DEPLOY_ENV=$(grep '^DEPLOY_ENV=' "$ENV_FILE" | cut -d= -f2- | tr -d '"' | tr -d "'")
+AWS_REGION=$(grep '^AWS_REGION=' "$ENV_FILE" | cut -d= -f2- | tr -d '"' | tr -d "'")
+ECR_REGISTRY=$(grep '^ECR_REGISTRY=' "$ENV_FILE" | cut -d= -f2- | tr -d '"' | tr -d "'")
 
-[[ -n "$AI_IMAGE" ]]   || die "AI_IMAGE not set in $ENV_FILE"
-[[ -n "$DEPLOY_ENV" ]] || die "DEPLOY_ENV not set in $ENV_FILE"
+[[ -n "$AI_IMAGE" ]]     || die "AI_IMAGE not set in $ENV_FILE"
+[[ -n "$DEPLOY_ENV" ]]   || die "DEPLOY_ENV not set in $ENV_FILE"
+[[ -n "$AWS_REGION" ]]   || die "AWS_REGION not set in $ENV_FILE"
+[[ -n "$ECR_REGISTRY" ]] || die "ECR_REGISTRY not set in $ENV_FILE"
+
+# Export for child processes (ecr-login.sh requires these).
+export AWS_REGION ECR_REGISTRY
 
 log "Image:       $AI_IMAGE"
 log "Deploy env:  $DEPLOY_ENV"
+log "AWS region:  $AWS_REGION"
 
 # ---------------------------------------------------------------------------
 # ECR login + pull
@@ -90,7 +109,7 @@ if docker ps --format '{{.Names}}' | grep -q '^proofport-redis$'; then
   log "Redis container already running"
 else
   log "Redis not running — starting..."
-  docker rm -f proofport-redis 2>/dev/null || true
+  remove_container proofport-redis
   docker run -d \
     --name proofport-redis \
     --restart unless-stopped \
@@ -111,8 +130,7 @@ fi
 # Remove stale container on new slot (if any)
 # ---------------------------------------------------------------------------
 log "Removing any stale container: $NEW_CONTAINER"
-docker stop "$NEW_CONTAINER" 2>/dev/null || true
-docker rm -f "$NEW_CONTAINER" 2>/dev/null || true
+remove_container "$NEW_CONTAINER"
 
 # ---------------------------------------------------------------------------
 # Start new container
@@ -127,7 +145,7 @@ docker run -d \
   --security-opt seccomp=unconfined \
   --env-file "$ENV_FILE" \
   --log-driver=awslogs \
-  --log-opt awslogs-region=${AWS_REGION:-ap-northeast-2} \
+  --log-opt awslogs-region=${AWS_REGION} \
   --log-opt "awslogs-group=/proofport-ai/${DEPLOY_ENV}" \
   --log-opt "awslogs-stream=proofport-ai-${NEW_SLOT}" \
   --log-opt awslogs-create-group=true \
@@ -146,23 +164,25 @@ RETRY_INTERVAL=5
 healthy=false
 
 for ((i=1; i<=MAX_RETRIES; i++)); do
-  app_status=$(curl -s -o /dev/null -w "%{http_code}" \
-    "http://localhost:${NEW_APP_PORT}/health" 2>/dev/null || echo "000")
-
-  log "Health check ${i}/${MAX_RETRIES} — app:${app_status}"
-
-  if [[ "$app_status" == "200" ]]; then
-    healthy=true
-    break
+  # During startup the port may not be listening yet. Treat curl connect/transfer
+  # failure as "not ready" explicitly rather than swallowing the exit via `|| echo`.
+  if app_status=$(curl -fsS -o /dev/null -w "%{http_code}" \
+        --connect-timeout 5 --max-time 10 \
+        "http://localhost:${NEW_APP_PORT}/health"); then
+    log "Health check ${i}/${MAX_RETRIES} — app:${app_status}"
+    if [[ "$app_status" == "200" ]]; then
+      healthy=true
+      break
+    fi
+  else
+    log "Health check ${i}/${MAX_RETRIES} — app:not_ready (curl exit $?)"
   fi
-
   sleep "$RETRY_INTERVAL"
 done
 
 if [[ "$healthy" != "true" ]]; then
   log "Health check failed after $((MAX_RETRIES * RETRY_INTERVAL))s — rolling back"
-  docker stop "$NEW_CONTAINER" 2>/dev/null || true
-  docker rm -f "$NEW_CONTAINER" 2>/dev/null || true
+  remove_container "$NEW_CONTAINER"
   log "Rollback complete — old container $OLD_CONTAINER is still running"
   exit 1
 fi
@@ -317,8 +337,7 @@ log "Reloading Caddy config..."
 
 if ! caddy reload --config "$CADDYFILE" --adapter caddyfile; then
   log "Caddy reload failed — rolling back"
-  docker stop "$NEW_CONTAINER" 2>/dev/null || true
-  docker rm -f "$NEW_CONTAINER" 2>/dev/null || true
+  remove_container "$NEW_CONTAINER"
   log "Rollback complete — old container $OLD_CONTAINER is still running"
   exit 1
 fi
@@ -340,7 +359,8 @@ if docker ps --format '{{.Names}}' | grep -q "^${OLD_CONTAINER}$"; then
   elapsed=0
 
   while (( elapsed < DRAIN_MAX )); do
-    conn_count=$(ss -tn state established "( sport = :${OLD_APP_PORT} )" 2>/dev/null | grep -c ESTAB || true)
+    # awk handles "no matches" cleanly (prints 0), so no `|| true` masking needed.
+    conn_count=$(ss -tn state established "( sport = :${OLD_APP_PORT} )" | awk '/ESTAB/{n++} END{print n+0}')
     if [[ "$conn_count" -eq 0 ]]; then
       log "No active connections on port ${OLD_APP_PORT} — drain complete"
       break
@@ -354,24 +374,23 @@ if docker ps --format '{{.Names}}' | grep -q "^${OLD_CONTAINER}$"; then
     log "Drain timeout reached (${DRAIN_MAX}s) — forcing old container stop"
   fi
 
-  # Stop and remove old container
+  # Stop and remove old container (outer if-block already confirmed it exists)
   log "Stopping old container: $OLD_CONTAINER"
-  docker stop "$OLD_CONTAINER" 2>/dev/null || true
-  docker rm -f "$OLD_CONTAINER" 2>/dev/null || true
+  docker stop "$OLD_CONTAINER" >/dev/null
+  docker rm -f "$OLD_CONTAINER" >/dev/null
   log "Old container $OLD_CONTAINER removed"
 else
   log "Old container $OLD_CONTAINER was not running — nothing to drain"
 fi
 
 # ---------------------------------------------------------------------------
-# Legacy cleanup — one-time migration from non-blue-green deployment
+# Legacy cleanup — one-time migration from non-blue-green deployment.
 # Removes the legacy "proofport-ai" container if it still exists.
-# Silently ignored if already gone.
 # ---------------------------------------------------------------------------
 if docker ps -a --format '{{.Names}}' | grep -q '^proofport-ai$'; then
   log "Removing legacy container: proofport-ai (one-time migration)"
-  docker stop proofport-ai 2>/dev/null || true
-  docker rm proofport-ai 2>/dev/null || true
+  docker stop proofport-ai >/dev/null
+  docker rm proofport-ai >/dev/null
 fi
 
 # ---------------------------------------------------------------------------

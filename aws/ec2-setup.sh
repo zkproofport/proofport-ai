@@ -37,9 +37,9 @@ set -euo pipefail
 # Configuration
 # ---------------------------------------------------------------------------
 APP_DIR="/opt/proofport-ai"
-# Override via env vars when running as user-data on a new account/region.
-ECR_REGION="${ECR_REGION:-ap-northeast-2}"
-ECR_ACCOUNT_ID="${ECR_ACCOUNT_ID:-006600133037}"
+# Required from caller (user-data exports these). Die immediately if missing.
+: "${ECR_REGION:?ECR_REGION env var required}"
+: "${ECR_ACCOUNT_ID:?ECR_ACCOUNT_ID env var required}"
 ECR_REGISTRY="${ECR_ACCOUNT_ID}.dkr.ecr.${ECR_REGION}.amazonaws.com"
 AI_IMAGE="${ECR_REGISTRY}/proofport-ai:latest"
 
@@ -119,7 +119,7 @@ dnf install -y aws-nitro-enclaves-cli aws-nitro-enclaves-cli-devel
 # Add ec2-user to ne group (required for nitro-cli)
 usermod -aG ne ec2-user
 
-log "Nitro CLI installed: $(nitro-cli --version 2>/dev/null || echo 'version check pending reboot')"
+log "Nitro CLI installed: $(nitro-cli --version)"
 
 # ---------------------------------------------------------------------------
 # 5. Configure Nitro Enclave allocator + hugepages
@@ -166,9 +166,14 @@ install -o root -g root -m 755 /tmp/caddy /usr/bin/caddy
 rm -f /tmp/caddy.tar.gz /tmp/caddy
 
 # User/group/dirs that the stock Caddy systemd unit expects.
-groupadd --system caddy 2>/dev/null || true
-useradd --system --gid caddy --create-home --home-dir /var/lib/caddy \
-  --shell /usr/sbin/nologin --comment "Caddy web server" caddy 2>/dev/null || true
+# Explicit existence checks — no `|| true` masking real errors.
+if ! getent group caddy >/dev/null; then
+  groupadd --system caddy
+fi
+if ! id -u caddy >/dev/null 2>&1; then
+  useradd --system --gid caddy --create-home --home-dir /var/lib/caddy \
+    --shell /usr/sbin/nologin --comment "Caddy web server" caddy
+fi
 mkdir -p /etc/caddy /var/lib/caddy /var/log/caddy
 chown -R caddy:caddy /var/lib/caddy /var/log/caddy
 
@@ -196,16 +201,17 @@ chown -R ec2-user:ec2-user "${APP_DIR}"
 # Redis data dir must be owned by redis user (UID 999) inside the container
 chown -R 999:999 "${APP_DIR}/redis-data"
 
-# Placeholder .env — deploy-ai-aws.yml overwrites this with real values.
-# If setting up manually, replace ALL placeholder values before starting services.
-cat > "${APP_DIR}/.env" <<'ENVEOF'
-# proofport-ai environment — REPLACE ALL PLACEHOLDER VALUES BEFORE USE
-# This file is overwritten by deploy-ai-aws.yml on each deployment.
-# Never commit this file to git.
+# Placeholder .env — deploy-ai-aws.yml overwrites this on each deployment.
+# AWS_REGION/ECR_REGISTRY/AI_IMAGE/DEPLOY_ENV are written with real values now
+# so ecr-login.sh + boot-active-slot.sh have what they need from the start.
+# Other values stay as REPLACE_ME until the first deploy fills them in.
+cat > "${APP_DIR}/.env" <<ENVEOF
+# proofport-ai environment — overwritten by deploy-ai-aws.yml on each deploy.
 
 # Server
 PORT=4002
 NODE_ENV=production
+DEPLOY_ENV=stg-ai
 
 # TEE — Nitro Enclave
 TEE_MODE=nitro
@@ -217,23 +223,28 @@ TEE_ATTESTATION=true
 # Redis (local container on EC2)
 REDIS_URL=redis://localhost:6379
 
-# Blockchain
+# AWS (set by ec2-setup from env vars at bootstrap time)
+AWS_REGION=${ECR_REGION}
+ECR_REGISTRY=${ECR_REGISTRY}
+AI_IMAGE=${AI_IMAGE}
+
+# Blockchain — REPLACE on deploy
 BASE_RPC_URL=REPLACE_ME
 EAS_GRAPHQL_ENDPOINT=https://base.easscan.org/graphql
 CHAIN_RPC_URL=REPLACE_ME
 PROVER_PRIVATE_KEY=REPLACE_ME
 
-# Payment
+# Payment — REPLACE on deploy
 PAYMENT_MODE=testnet
 PAYMENT_PAY_TO=REPLACE_ME
 X402_FACILITATOR_URL=https://x402.dexter.cash
-PAYMENT_PROOF_PRICE=$0.10
+PAYMENT_PROOF_PRICE=\$0.10
 
 # A2A / Signing
 A2A_BASE_URL=REPLACE_ME
 SIGNING_TTL_SECONDS=300
 
-# WalletConnect
+# WalletConnect — REPLACE on deploy
 WALLETCONNECT_PROJECT_ID=REPLACE_ME
 
 # Tool paths (set by Dockerfile — do not change)
@@ -241,18 +252,14 @@ BB_PATH=/usr/local/bin/bb-wrapper
 NARGO_PATH=/usr/local/bin/nargo
 CIRCUITS_DIR=/app/circuits
 
-# ERC-8004 Identity
+# ERC-8004 Identity — REPLACE on deploy
 ERC8004_IDENTITY_ADDRESS=REPLACE_ME
 ERC8004_REPUTATION_ADDRESS=REPLACE_ME
 ERC8004_VALIDATION_ADDRESS=REPLACE_ME
 
-# LLM keys
+# LLM keys — REPLACE on deploy
 OPENAI_API_KEY=REPLACE_ME
 GEMINI_API_KEY=REPLACE_ME
-
-# ECR image reference (read by systemd proofport-ai.service)
-ECR_REGISTRY=REPLACE_ME
-AI_IMAGE=REPLACE_ME
 ENVEOF
 
 chmod 600 "${APP_DIR}/.env"
@@ -265,20 +272,17 @@ echo "blue" | sudo tee /opt/proofport-ai/active-slot > /dev/null
 log "Blue-green active-slot initialized to 'blue'."
 
 # ---------------------------------------------------------------------------
-# 8. Configure ECR authentication
+# 8. Install ecr-login.sh from the repo (strict — requires AWS_REGION + ECR_REGISTRY)
 # ---------------------------------------------------------------------------
-log "Step 8/11: Configuring ECR authentication..."
+log "Step 8/11: Installing ecr-login.sh..."
 
-cat > /usr/local/bin/ecr-login.sh <<EOF
-#!/usr/bin/env bash
-set -euo pipefail
-aws ecr get-login-password --region ${ECR_REGION} | \\
-  docker login --username AWS --password-stdin ${ECR_REGISTRY}
-EOF
-chmod +x /usr/local/bin/ecr-login.sh
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+install -o root -g root -m 755 "${SCRIPT_DIR}/ecr-login.sh" /usr/local/bin/ecr-login.sh
 
-# Run initial ECR login (will fail gracefully if IAM role / creds not yet configured)
-/usr/local/bin/ecr-login.sh || log "WARNING: ECR login failed — ensure IAM role or AWS credentials are configured."
+# Initial ECR login (loads vars from .env we just wrote). If the IAM role or
+# .env is misconfigured this will fail — that surfaces the problem immediately
+# instead of letting deploys silently fail later.
+AWS_REGION="${ECR_REGION}" ECR_REGISTRY="${ECR_REGISTRY}" /usr/local/bin/ecr-login.sh
 
 # ---------------------------------------------------------------------------
 # 9. Install vsock-bridge (TCP-to-vsock proxy)
@@ -380,8 +384,9 @@ log "       sudo systemctl start proofport-ai-enclave"
 log "       sudo systemctl start vsock-bridge"
 log ""
 log "  Service status:"
-systemctl is-active proofport-ai-redis && log "    Redis:        running" || log "    Redis:        stopped"
-systemctl is-active proofport-ai       && log "    App:          running" || log "    App:          stopped"
-systemctl is-active caddy              && log "    Caddy:        running" || log "    Caddy:        stopped"
+svc_status() { if systemctl is-active --quiet "$1"; then echo running; else echo stopped; fi; }
+log "    Redis:        $(svc_status proofport-ai-redis)"
+log "    App:          $(svc_status proofport-ai)"
+log "    Caddy:        $(svc_status caddy)"
 systemctl is-active vsock-bridge       && log "    vsock-bridge: running" || log "    vsock-bridge: stopped"
 log ""
