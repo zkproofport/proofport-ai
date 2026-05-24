@@ -32,6 +32,13 @@ const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1000;
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
 
+// Public RPCs (e.g. base.org, base-sepolia) can take 5-30s to index a freshly
+// submitted attestation tx. Retry the "result is null" case separately with a
+// larger budget so generateProof doesn't fail immediately after the customer
+// submits their attestation transaction.
+const TX_INDEX_MAX_RETRIES = 15;
+const TX_INDEX_DELAY_MS = 2000;
+
 // ─── EAS GraphQL fetch ──────────────────────────────────────────────────
 
 /**
@@ -81,13 +88,18 @@ export async function fetchAttestationFromEAS(
 
 /**
  * Fetch raw transaction via eth_getTransactionByHash from an RPC endpoint.
- * Includes retry logic for 429/5xx responses with exponential backoff.
+ *
+ * Retry policy:
+ *   - HTTP 429/5xx, ECONNRESET, ETIMEDOUT: MAX_RETRIES (3) attempts, 1s base delay (transient network).
+ *   - data.result === null (tx not yet indexed): TX_INDEX_MAX_RETRIES (15) attempts, 2s delay.
+ *     Public RPCs (base.org, base-sepolia) need 5-30s to index a freshly submitted attestation tx.
  */
 export async function fetchRawTransaction(
   rpcUrl: string,
   txHash: string,
 ): Promise<string> {
   let lastError: Error | undefined;
+  let indexAttempts = 0;
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
@@ -118,7 +130,17 @@ export async function fetchRawTransaction(
       }
 
       if (!data.result) {
-        throw new Error(`Transaction ${txHash} not found`);
+        // Transaction not yet indexed — retry up to TX_INDEX_MAX_RETRIES times
+        // with a longer delay, since public RPCs can lag 5-30s behind the mempool.
+        if (indexAttempts < TX_INDEX_MAX_RETRIES) {
+          indexAttempts++;
+          await new Promise(r => setTimeout(r, TX_INDEX_DELAY_MS));
+          attempt--;  // do not consume an outer retry slot for indexing waits
+          continue;
+        }
+        throw new Error(
+          `Transaction ${txHash} not found after ${TX_INDEX_MAX_RETRIES} retries (${(TX_INDEX_MAX_RETRIES * TX_INDEX_DELAY_MS) / 1000}s)`,
+        );
       }
 
       return reconstructRawTransaction(data.result);
