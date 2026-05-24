@@ -59,7 +59,8 @@ err() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: $*" >&2; }
 # ---------------------------------------------------------------------------
 log "Step 1/11: Updating system packages..."
 dnf update -y
-dnf install -y \
+# --allowerasing: replace curl-minimal (default on AL2023) with full curl
+dnf install -y --allowerasing \
   curl \
   wget \
   git \
