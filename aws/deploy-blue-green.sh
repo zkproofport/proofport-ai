@@ -101,26 +101,15 @@ log "Pulling image: $AI_IMAGE"
 docker pull "$AI_IMAGE"
 
 # ---------------------------------------------------------------------------
-# Ensure Redis is running (required before app starts)
+# Verify Redis is running (managed by proofport-ai-redis.service, container
+# name proofport-ai-redis, bound to 127.0.0.1:6379). If systemd didn't start
+# it, die — this script does not own Redis lifecycle.
 # ---------------------------------------------------------------------------
-log "Checking Redis..."
+log "Checking Redis (managed by systemd: proofport-ai-redis.service)..."
+docker ps --format '{{.Names}}' | grep -q '^proofport-ai-redis$' \
+  || die "proofport-ai-redis container not running. Run: sudo systemctl start proofport-ai-redis"
 
-if docker ps --format '{{.Names}}' | grep -q '^proofport-redis$'; then
-  log "Redis container already running"
-else
-  log "Redis not running — starting..."
-  remove_container proofport-redis
-  docker run -d \
-    --name proofport-redis \
-    --restart unless-stopped \
-    -p 6379:6379 \
-    -v /opt/proofport-ai/redis-data:/data \
-    redis:7-alpine redis-server --appendonly yes
-  sleep 2
-fi
-
-# Verify Redis responds
-if docker exec proofport-redis redis-cli ping | grep -q PONG; then
+if docker exec proofport-ai-redis redis-cli ping | grep -q PONG; then
   log "Redis is healthy"
 else
   die "Redis health check failed"
