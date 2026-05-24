@@ -127,7 +127,7 @@ docker run -d \
   --security-opt seccomp=unconfined \
   --env-file "$ENV_FILE" \
   --log-driver=awslogs \
-  --log-opt awslogs-region=ap-northeast-2 \
+  --log-opt awslogs-region=${AWS_REGION:-ap-northeast-2} \
   --log-opt "awslogs-group=/proofport-ai/${DEPLOY_ENV}" \
   --log-opt "awslogs-stream=proofport-ai-${NEW_SLOT}" \
   --log-opt awslogs-create-group=true \

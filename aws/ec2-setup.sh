@@ -37,8 +37,9 @@ set -euo pipefail
 # Configuration
 # ---------------------------------------------------------------------------
 APP_DIR="/opt/proofport-ai"
-ECR_REGION="ap-northeast-2"
-ECR_ACCOUNT_ID="006600133037"
+# Override via env vars when running as user-data on a new account/region.
+ECR_REGION="${ECR_REGION:-ap-northeast-2}"
+ECR_ACCOUNT_ID="${ECR_ACCOUNT_ID:-006600133037}"
 ECR_REGISTRY="${ECR_ACCOUNT_ID}.dkr.ecr.${ECR_REGION}.amazonaws.com"
 AI_IMAGE="${ECR_REGISTRY}/proofport-ai:latest"
 
