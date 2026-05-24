@@ -100,10 +100,10 @@ dnf install -y --allowerasing git
 # Clone the repo pinned to the launch-time SHA. Full clone (not --depth=1)
 # because git server-side does not allow fetching arbitrary SHAs.
 mkdir -p /opt/setup
+chown ec2-user:ec2-user /opt/setup
 cd /opt/setup
-git clone https://github.com/zkproofport/proofport-ai.git
-cd proofport-ai
-git checkout "$SHA"
+sudo -u ec2-user git clone https://github.com/zkproofport/proofport-ai.git
+sudo -u ec2-user git -C proofport-ai checkout "$SHA"
 
 # Run ec2-setup.sh from inside aws/ so SCRIPT_DIR resolves to the directory
 # that holds its sibling files.
