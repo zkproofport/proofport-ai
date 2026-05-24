@@ -61,7 +61,7 @@ INSTANCE_PROFILE="proofport-ai-ec2"
 ROOT_VOL_GB="100"
 
 # ---------------------------------------------------------------------------
-# 1. Resolve commit SHA for aws/ec2-setup.sh (must be on origin/main)
+# 1. Resolve commit SHA on origin/main (pin user-data to this exact ref)
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR/.."
@@ -69,18 +69,18 @@ cd "$SCRIPT_DIR/.."
 git fetch origin main --quiet
 SHA="$(git rev-parse origin/main)"
 
-# Verify the script at this SHA contains the --allowerasing fix (sanity check that
-# we are pulling a known-good revision).
+# Sanity-check that the pinned ref includes the --allowerasing fix.
 REMOTE_URL="https://raw.githubusercontent.com/zkproofport/proofport-ai/${SHA}/aws/ec2-setup.sh"
 if ! curl -fsSL "$REMOTE_URL" | grep -q 'allowerasing'; then
   echo "ERROR: ${REMOTE_URL} does not contain --allowerasing fix. Aborting." >&2
   echo "       Push the fix to origin/main and retry." >&2
   exit 1
 fi
-echo "Pinned ec2-setup.sh SHA: $SHA"
+echo "Pinned to SHA: $SHA"
 
 # ---------------------------------------------------------------------------
-# 2. Build user-data — exports env + runs pinned ec2-setup.sh
+# 2. Build user-data — clones the repo at the pinned SHA so ec2-setup.sh has
+#    its sibling files (systemd/*.service, Caddyfile, vsock-bridge.py, etc.)
 # ---------------------------------------------------------------------------
 USER_DATA=$(cat <<EOF
 #!/bin/bash
@@ -94,9 +94,21 @@ exec > >(tee -a /var/log/proofport-ai-bootstrap/user-data.log) 2>&1
 echo "[\$(date)] proofport-ai bootstrap starting (env=$ENV, sha=$SHA)..."
 sleep 5  # let cloud-init network settle
 
-curl -fsSL -o /tmp/ec2-setup.sh "$REMOTE_URL"
-chmod +x /tmp/ec2-setup.sh
-bash /tmp/ec2-setup.sh
+# Install git (curl already preinstalled in AL2023 base image).
+dnf install -y --allowerasing git
+
+# Clone the repo pinned to the launch-time SHA. Full clone (not --depth=1)
+# because git server-side does not allow fetching arbitrary SHAs.
+mkdir -p /opt/setup
+cd /opt/setup
+git clone https://github.com/zkproofport/proofport-ai.git
+cd proofport-ai
+git checkout "$SHA"
+
+# Run ec2-setup.sh from inside aws/ so SCRIPT_DIR resolves to the directory
+# that holds its sibling files.
+cd aws
+bash ec2-setup.sh
 
 echo "[\$(date)] bootstrap finished OK"
 EOF

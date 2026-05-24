@@ -150,14 +150,32 @@ sysctl -p /etc/sysctl.d/99-nitro-hugepages.conf
 log "Nitro Enclave allocator configured and started."
 
 # ---------------------------------------------------------------------------
-# 6. Install Caddy (reverse proxy)
+# 6. Install Caddy (reverse proxy) — official binary release
 # ---------------------------------------------------------------------------
-log "Step 6/11: Installing Caddy..."
+# Why not dnf: the cloudsmith caddy/stable RPM repo does not publish
+# packages for the amzn/2023 distro slug (setup.rpm.sh succeeds but
+# `dnf install caddy` resolves to "No match"). Binary install has zero
+# repo dependency.
+log "Step 6/11: Installing Caddy (binary release)..."
 
-dnf install -y yum-utils
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/setup.rpm.sh' | bash
-dnf install -y caddy
+CADDY_VERSION="2.8.4"
+CADDY_URL="https://github.com/caddyserver/caddy/releases/download/v${CADDY_VERSION}/caddy_${CADDY_VERSION}_linux_amd64.tar.gz"
+curl -fsSL "$CADDY_URL" -o /tmp/caddy.tar.gz
+tar -xzf /tmp/caddy.tar.gz -C /tmp/ caddy
+install -o root -g root -m 755 /tmp/caddy /usr/bin/caddy
+rm -f /tmp/caddy.tar.gz /tmp/caddy
 
+# User/group/dirs that the stock Caddy systemd unit expects.
+groupadd --system caddy 2>/dev/null || true
+useradd --system --gid caddy --create-home --home-dir /var/lib/caddy \
+  --shell /usr/sbin/nologin --comment "Caddy web server" caddy 2>/dev/null || true
+mkdir -p /etc/caddy /var/lib/caddy /var/log/caddy
+chown -R caddy:caddy /var/lib/caddy /var/log/caddy
+
+# Install Caddy's stock systemd unit.
+curl -fsSL https://raw.githubusercontent.com/caddyserver/dist/master/init/caddy.service \
+  -o /etc/systemd/system/caddy.service
+systemctl daemon-reload
 systemctl enable caddy
 
 log "Caddy installed: $(caddy version)"
