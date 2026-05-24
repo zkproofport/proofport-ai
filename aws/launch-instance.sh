@@ -44,11 +44,10 @@ case "$ENV" in
     ;;
   production)
     KEY_NAME="proofport-ai-prod"
-    SG_ID=""  # create separately
+    SG_ID="sg-008fce9e70a571259"
     NAME_TAG="proofport-ai-production"
     EIP_NAME="proofport-ai-production"
     INSTANCE_TYPE="c6i.2xlarge"
-    [[ -z "$SG_ID" ]] && { echo "ERROR: production SG_ID not configured" >&2; exit 1; }
     ;;
   *)
     echo "ERROR: ENV must be staging or production" >&2
