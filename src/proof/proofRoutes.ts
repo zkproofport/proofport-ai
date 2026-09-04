@@ -48,9 +48,47 @@ interface ProveContext {
   paymentVerifyMs: number;
   startTime: number;
   requestId: string;
-  chainId: number;
-  verifierAddress: string | null;
-  chainRpcUrl: string;
+  verification: ProveResponse['verification'];
+}
+
+/**
+ * Choose the chain, the verifier deployed on it, and an RPC that serves THAT
+ * chain — as one set.
+ *
+ * These used to be picked separately, and the answer was a response no client
+ * could act on: chainId 11155111 with the Ethereum Sepolia verifier, and
+ * `rpcUrl` pointing at Base Sepolia. A client did as it was told, called the
+ * Ethereum address over the Base RPC, and hit a different contract that happens
+ * to sit at the same address — deterministic deployment gives one deployer the
+ * same address on every chain. It reverted with a custom error, and every
+ * on-chain verification in the E2E suite failed with "expected false to be
+ * true". Measured 2026-09-05: the same proof verifies `true` on Ethereum
+ * Sepolia with the Ethereum verifier, and `true` on Base Sepolia with the Base
+ * verifier. Only the mixed pair fails.
+ *
+ * `chainRpcUrl` is the Base RPC throughout this file — the payment verifier
+ * below reads it as 'base' / 'base-sepolia'. So Ethereum needs its own RPC, and
+ * when none is configured this returns the Base pairing rather than quietly
+ * lending Ethereum the Base URL.
+ */
+export function chooseVerificationTarget(
+  config: Config,
+  circuitId: CircuitId,
+  testnet: boolean,
+): ProveResponse['verification'] {
+  if (config.ethereumRpcUrl) {
+    const chainId = testnet ? 11155111 : 1;
+    const verifierAddress = getVerifierAddress(circuitId, String(chainId));
+    if (verifierAddress) {
+      return { chainId, verifierAddress, rpcUrl: config.ethereumRpcUrl };
+    }
+  }
+
+  const chainId = testnet ? 84532 : 8453;
+  const verifierAddress = getVerifierAddress(circuitId, String(chainId));
+  return verifierAddress
+    ? { chainId, verifierAddress, rpcUrl: config.chainRpcUrl }
+    : null;
 }
 
 /**
@@ -214,11 +252,7 @@ async function generateProofFromInputs(
       inputBuildMs,
       proveMs,
     },
-    verification: ctx.verifierAddress ? {
-      chainId: ctx.chainId,
-      verifierAddress: ctx.verifierAddress,
-      rpcUrl: ctx.chainRpcUrl,
-    } : null,
+    verification: ctx.verification,
   };
 
   res.json(response);
@@ -444,9 +478,6 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
           }
         }
 
-        const e2eChainId = isTestnet ? 11155111 : 1;
-        const e2eVerifierAddress = getVerifierAddress(circuitId, String(e2eChainId)) || null;
-
         const e2eProofType: string = circuitId === CIRCUIT_IDS.COINBASE_ATTESTATION ? 'kyc'
           : circuitId === CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION ? 'country'
           : 'google_login';
@@ -463,19 +494,12 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
             paymentVerifyMs,
             proveMs,
           },
-          verification: e2eVerifierAddress ? {
-            chainId: e2eChainId,
-            verifierAddress: e2eVerifierAddress,
-            rpcUrl: config.ethereumRpcUrl || config.chainRpcUrl,
-          } : null,
+          verification: chooseVerificationTarget(config, circuitId, isTestnet),
         };
 
         res.json(response);
         return;
       }
-
-      const chainId = isTestnet ? 11155111 : 1;
-      const verifierAddress = getVerifierAddress(circuitId, String(chainId)) || null;
 
       // ── Plaintext flow: client provides structured inputs, server relays to TEE/bbProver ──
       await generateProofFromInputs(
@@ -487,9 +511,7 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
           paymentVerifyMs,
           startTime,
           requestId,
-          chainId,
-          verifierAddress,
-          chainRpcUrl: config.chainRpcUrl,
+          verification: chooseVerificationTarget(config, circuitId, isTestnet),
         },
         deps,
         config,
