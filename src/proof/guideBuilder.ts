@@ -1,5 +1,6 @@
 import { createRequire } from 'module';
 import { CIRCUITS, type CircuitId } from '../config/circuits.js';
+import { CIRCUIT_IDS } from '../config/circuitIds.js';
 import { AUTHORIZED_SIGNERS, COINBASE_ATTESTER_CONTRACT } from '../config/contracts.js';
 import { getChainVerifiers } from '../config/deployments.js';
 import type { Config } from '../config/index.js';
@@ -31,8 +32,8 @@ function derivePaymentConstants(config: Config) {
 }
 
 function circuitAlias(circuitId: CircuitId): string {
-  if (circuitId === 'coinbase_attestation') return 'coinbase_kyc';
-  if (circuitId === 'oidc_domain_attestation') return 'oidc_domain';
+  if (circuitId === CIRCUIT_IDS.COINBASE_ATTESTATION) return 'coinbase_kyc';
+  if (circuitId === CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION) return 'oidc_domain';
   return 'coinbase_country';
 }
 
@@ -55,7 +56,7 @@ function buildConstants(
   const verifierAddr = chainVerifiers[circuitId] || 'NOT_DEPLOYED';
 
   // OIDC circuits have no EAS, no Coinbase contracts
-  if (circuitId === 'oidc_domain_attestation') {
+  if (circuitId === CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION) {
     return {
       contracts: {
         verifier_address: verifierAddr,
@@ -145,7 +146,7 @@ function buildConstants(
 }
 
 function buildFormulas(circuitId: CircuitId) {
-  if (circuitId === 'oidc_domain_attestation') {
+  if (circuitId === CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION) {
     return {
       scope: {
         description: 'Keccak-256 hash of the scope string. Used to partition nullifiers.',
@@ -210,7 +211,7 @@ function buildFormulas(circuitId: CircuitId) {
 
 
 function buildInputSchema(circuitId: CircuitId) {
-  if (circuitId === 'oidc_domain_attestation') {
+  if (circuitId === CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION) {
     return {
       note: 'OIDC circuit inputs are computed SERVER-SIDE from the JWT. The client only sends jwt and scope_string.',
       client_fields: [
@@ -360,7 +361,7 @@ function buildInputSchema(circuitId: CircuitId) {
     fields: baseFields,
   };
 
-  if (circuitId === 'coinbase_country_attestation') {
+  if (circuitId === CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION) {
     result.country_fields = [
       {
         name: 'country_list',
@@ -410,7 +411,7 @@ export function buildGuide(circuitId: CircuitId, config: Config): object {
   const { isTestnet, chainId, usdcAddress, paymentAmount } = derivePaymentConstants(config);
 
   // OIDC-specific guide
-  if (circuitId === 'oidc_domain_attestation') {
+  if (circuitId === CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION) {
     return {
       circuit_id: circuitId,
       display_name: circuit.displayName,

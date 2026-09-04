@@ -10,7 +10,13 @@ import type { EncryptedEnvelope, TeePublicKeyInfo } from './teeKeyExchange.js';
  * - local: Simulated TEE for development/testing (same prover, but with TEE interface)
  * - nitro: AWS Nitro Enclave (production)
  */
-export type TeeMode = 'auto' | 'disabled' | 'local' | 'nitro';
+// 'auto' was removed on 2026-09-04. It resolved by checking for /dev/nsm and
+// answered 'nitro' or 'local' — but nothing ever passed it: deploy-ai-aws.yml
+// sets TEE_MODE=nitro and deploy-ai.yml (Cloud Run) sets TEE_MODE=local, both
+// explicitly. A mode that guesses the deployment target, in a repo where the
+// deployment target is always known at deploy time, is a way to be wrong
+// quietly.
+export type TeeMode = 'disabled' | 'local' | 'nitro';
 export type ResolvedTeeMode = 'disabled' | 'local' | 'nitro';
 
 /**

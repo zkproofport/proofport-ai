@@ -3,8 +3,9 @@
  * Tests the full HTTP endpoint flow for Agent-to-Agent protocol
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import request from 'supertest';
+import type { Server } from 'http';
 import { createApp } from '../../src/index.js';
 import type { Config } from '../../src/config/index.js';
 
@@ -126,9 +127,10 @@ vi.mock('../../src/circuit/artifactManager.js', () => ({
   ensureArtifacts: vi.fn().mockResolvedValue(undefined),
 }));
 
-// Mock identity
+// Mock identity. ensureAgentRegistered resolves to Map<chainId, tokenId> — one
+// entry per chain it registered on.
 vi.mock('../../src/identity/autoRegister.js', () => ({
-  ensureAgentRegistered: vi.fn().mockResolvedValue(123456n),
+  ensureAgentRegistered: vi.fn().mockResolvedValue(new Map([[11155111, 123456n]])),
 }));
 
 vi.mock('../../src/identity/reputation.js', () => ({
@@ -160,14 +162,24 @@ vi.mock('../../src/config/contracts.js', async () => {
 
 // ─── Test suite ───────────────────────────────────────────────────────────
 
+/** Verification/identity chain for the testnet fixture below (Ethereum Sepolia). */
+const IDENTITY_CHAIN_ID = 11155111;
+
 describe('A2A Endpoint E2E', () => {
-  let app: any;
+  // ONE app on ONE listening server for the whole file.
+  //
+  // Passing a bare Express app to supertest makes it create, listen(0) and
+  // close a fresh ephemeral server for EVERY call — 50 of them here, in a
+  // project that runs files in parallel. That churn is what produced the
+  // intermittent `socket hang up` on GET /health. Handing supertest an already
+  // listening Server means it reuses the address and never creates or closes
+  // one, so there is a single listener for the file.
+  //
+  // Per-test isolation is the Redis reset in beforeEach; the app itself holds no
+  // mutable state beyond it.
+  let server: Server;
 
-  beforeEach(() => {
-    // Clear both Redis stores before each test to prevent cross-test interference
-    _redisStore.clear();
-    _redisListStore.clear();
-
+  beforeAll(async () => {
     const testConfig: Config = {
       port: 4002,
       nodeEnv: 'test',
@@ -179,7 +191,10 @@ describe('A2A Endpoint E2E', () => {
       redisUrl: 'redis://localhost:6379',
       baseRpcUrl: 'https://base-rpc.example.com',
       easGraphqlEndpoint: 'https://eas.example.com',
-      chainRpcUrl: 'https://chain.example.com',
+      // A sepolia RPC makes this a coherent testnet fixture: it is what selects
+      // the sepolia ERC-8004 registry named just below, and the identity chain
+      // that follows from it is Ethereum Sepolia (11155111).
+      chainRpcUrl: 'https://sepolia.base.org',
       proverPrivateKey: '0x' + 'ab'.repeat(32),
       paymentMode: 'disabled' as const,
       a2aBaseUrl: 'https://a2a.example.com',
@@ -198,13 +213,28 @@ describe('A2A Endpoint E2E', () => {
       phoenixCollectorEndpoint: '',
     };
 
-    const appBundle = createApp(testConfig, 123456n);
-    app = appBundle.app;
+    // createApp takes only the config; tokenIds arrive later on the returned
+    // TokenIdRef, which is how startServer() feeds them in after registration.
+    const appBundle = createApp(testConfig);
+    appBundle.tokenIdRef.chains.set(IDENTITY_CHAIN_ID, 123456n);
+    server = await new Promise<Server>((resolve) => {
+      const s = appBundle.app.listen(0, () => resolve(s));
+    });
+  });
+
+  afterAll(async () => {
+    if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  beforeEach(() => {
+    // Clear both Redis stores before each test to prevent cross-test interference
+    _redisStore.clear();
+    _redisListStore.clear();
   });
 
   describe('GET /.well-known/agent.json (A2A Agent Card)', () => {
     it('should return OASF agent descriptor at /.well-known/agent.json', async () => {
-      const response = await request(app).get('/.well-known/agent.json');
+      const response = await request(server).get('/.well-known/agent.json');
 
       expect(response.status).toBe(200);
       expect(response.headers['content-type']).toMatch(/application\/json/);
@@ -218,7 +248,7 @@ describe('A2A Endpoint E2E', () => {
     });
 
     it('should include ERC-8004 identity in agent card', async () => {
-      const response = await request(app).get('/.well-known/agent-card.json');
+      const response = await request(server).get('/.well-known/agent-card.json');
 
       expect(response.status).toBe(200);
       expect(response.body).toMatchObject({
@@ -241,7 +271,7 @@ describe('A2A Endpoint E2E', () => {
     });
 
     it('should list skills with tags and examples', async () => {
-      const response = await request(app).get('/.well-known/agent-card.json');
+      const response = await request(server).get('/.well-known/agent-card.json');
 
       expect(response.status).toBe(200);
       expect(response.body.skills).toEqual(
@@ -263,7 +293,7 @@ describe('A2A Endpoint E2E', () => {
     });
 
     it('should have all required OASF fields at /.well-known/oasf.json', async () => {
-      const response = await request(app).get('/.well-known/oasf.json');
+      const response = await request(server).get('/.well-known/oasf.json');
 
       expect(response.status).toBe(200);
       const agent = response.body;
@@ -281,7 +311,7 @@ describe('A2A Endpoint E2E', () => {
 
   describe('POST /a2a (JSON-RPC)', () => {
     it('should accept tasks/get for querying task status', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -305,7 +335,7 @@ describe('A2A Endpoint E2E', () => {
     });
 
     it('should return JSON-RPC error for invalid method', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -326,7 +356,7 @@ describe('A2A Endpoint E2E', () => {
     });
 
     it('should return JSON-RPC error for missing message param in message/send', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -347,7 +377,7 @@ describe('A2A Endpoint E2E', () => {
     });
 
     it('should return JSON-RPC error for invalid skill value in message', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -384,7 +414,7 @@ describe('A2A Endpoint E2E', () => {
     });
 
     it('should handle malformed JSON-RPC request', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/a2a')
         .send({
           // Missing jsonrpc field
@@ -407,7 +437,7 @@ describe('A2A Endpoint E2E', () => {
 
   describe('Status Endpoints', () => {
     it('GET /health should return healthy status', async () => {
-      const response = await request(app).get('/health');
+      const response = await request(server).get('/health');
 
       expect(response.status).toBe(200);
       expect(response.body).toMatchObject({
@@ -419,7 +449,7 @@ describe('A2A Endpoint E2E', () => {
     });
 
     it('GET /health returns JSON content-type', async () => {
-      const response = await request(app).get('/health');
+      const response = await request(server).get('/health');
       expect(response.status).toBe(200);
       expect(response.headers['content-type']).toMatch(/json/);
     });
@@ -428,18 +458,18 @@ describe('A2A Endpoint E2E', () => {
   describe('Route Coexistence', () => {
     it('A2A and MCP routes both respond correctly', async () => {
       // Test OASF agent descriptor at standard URL
-      const oasfResponse = await request(app).get('/.well-known/agent.json');
+      const oasfResponse = await request(server).get('/.well-known/agent.json');
       expect(oasfResponse.status).toBe(200);
       expect(oasfResponse.body.name).toBe('proveragent.base.eth');
       expect(oasfResponse.body.active).toBe(true);
 
       // Test A2A Agent Card at alias URL
-      const agentCardResponse = await request(app).get('/.well-known/agent-card.json');
+      const agentCardResponse = await request(server).get('/.well-known/agent-card.json');
       expect(agentCardResponse.status).toBe(200);
       expect(agentCardResponse.body.name).toBe('proveragent.base.eth');
 
       // Test A2A JSON-RPC (use tasks/get which is non-blocking)
-      const a2aResponse = await request(app)
+      const a2aResponse = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -451,7 +481,7 @@ describe('A2A Endpoint E2E', () => {
       expect(a2aResponse.body).toHaveProperty('error');
 
       // Test MCP JSON-RPC
-      const mcpResponse = await request(app)
+      const mcpResponse = await request(server)
         .post('/mcp')
         .set('Accept', 'application/json, text/event-stream')
         .send({
@@ -466,7 +496,7 @@ describe('A2A Endpoint E2E', () => {
 
   describe('A2A message/send Success Paths', () => {
     it('message/send with DataPart get_supported_circuits', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -515,7 +545,7 @@ describe('A2A Endpoint E2E', () => {
     });
 
     it('message/send with DataPart prove skill returns redirect to REST endpoint', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -555,7 +585,7 @@ describe('A2A Endpoint E2E', () => {
     });
 
     it('message/send with invalid skill returns failed task', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -590,7 +620,7 @@ describe('A2A Endpoint E2E', () => {
 
   describe('A2A Protocol Compliance (v0.3)', () => {
     it('tasks/cancel returns error for non-existent task', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -613,7 +643,7 @@ describe('A2A Endpoint E2E', () => {
     });
 
     it('tasks/resubscribe returns error for non-existent task', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -633,7 +663,7 @@ describe('A2A Endpoint E2E', () => {
 
     it('Task lifecycle states follow A2A spec', async () => {
       // Step 1: Create a task via message/send
-      const sendResponse = await request(app)
+      const sendResponse = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -663,7 +693,7 @@ describe('A2A Endpoint E2E', () => {
       expect(completedTask.id).toBeDefined();
 
       // Step 2: Query the task by ID using tasks/get
-      const getResponse = await request(app)
+      const getResponse = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -689,7 +719,7 @@ describe('A2A Endpoint E2E', () => {
     });
 
     it('Agent card has required A2A v0.3 fields', async () => {
-      const response = await request(app).get('/.well-known/agent-card.json');
+      const response = await request(server).get('/.well-known/agent-card.json');
 
       expect(response.status).toBe(200);
       const card = response.body;
@@ -712,7 +742,7 @@ describe('A2A Endpoint E2E', () => {
     });
 
     it('contextId flows through as session_id without causing errors', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -746,7 +776,7 @@ describe('A2A Endpoint E2E', () => {
 
   describe('ERC-8004 Identity', () => {
     it('Agent card includes ERC-8004 identity block', async () => {
-      const response = await request(app).get('/.well-known/agent-card.json');
+      const response = await request(server).get('/.well-known/agent-card.json');
 
       expect(response.status).toBe(200);
       const card = response.body;
@@ -764,7 +794,7 @@ describe('A2A Endpoint E2E', () => {
     });
 
     it('OASF agent descriptor has ERC-8004 registration fields', async () => {
-      const response = await request(app).get('/.well-known/oasf.json');
+      const response = await request(server).get('/.well-known/oasf.json');
 
       expect(response.status).toBe(200);
       const oasf = response.body;
@@ -781,7 +811,7 @@ describe('A2A Endpoint E2E', () => {
     });
 
     it('Agent card supportedTrust includes reputation (and tee-attestation when TEE enabled)', async () => {
-      const response = await request(app).get('/.well-known/oasf.json');
+      const response = await request(server).get('/.well-known/oasf.json');
 
       expect(response.status).toBe(200);
       const oasf = response.body;
@@ -796,7 +826,7 @@ describe('A2A Endpoint E2E', () => {
 
   describe('Text Inference Wiring (No LLM configured)', () => {
     it('TextPart message returns LLM configuration error when no LLM keys', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -823,7 +853,7 @@ describe('A2A Endpoint E2E', () => {
     });
 
     it('Empty text part returns error', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -849,7 +879,7 @@ describe('A2A Endpoint E2E', () => {
     });
 
     it('DataPart still works without LLM configuration', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -893,7 +923,7 @@ describe('A2A Endpoint E2E', () => {
 
   describe('Additional Edge Cases', () => {
     it('DataPart without skill field returns LLM configuration error', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -919,7 +949,7 @@ describe('A2A Endpoint E2E', () => {
     });
 
     it('tasks/cancel without id param returns error', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -933,7 +963,7 @@ describe('A2A Endpoint E2E', () => {
     });
 
     it('tasks/resubscribe without id param returns error or SSE', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -946,7 +976,7 @@ describe('A2A Endpoint E2E', () => {
     });
 
     it('tasks/get without id param returns error', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -960,7 +990,7 @@ describe('A2A Endpoint E2E', () => {
     });
 
     it('message/send with whitespace-only TextPart returns error', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -986,7 +1016,7 @@ describe('A2A Endpoint E2E', () => {
 
     it('tasks/cancel on completed task returns error', async () => {
       // First create and complete a task
-      const sendResponse = await request(app)
+      const sendResponse = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -1005,7 +1035,7 @@ describe('A2A Endpoint E2E', () => {
       const taskId = sendResponse.body.result.id;
 
       // Try to cancel the completed task
-      const cancelResponse = await request(app)
+      const cancelResponse = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -1020,7 +1050,7 @@ describe('A2A Endpoint E2E', () => {
 
     it('tasks/resubscribe on completed task succeeds', async () => {
       // First create and complete a task
-      const sendResponse = await request(app)
+      const sendResponse = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -1038,7 +1068,7 @@ describe('A2A Endpoint E2E', () => {
       const taskId = sendResponse.body.result.id;
 
       // Resubscribe to completed task — SDK may return SSE stream or task
-      const resubResponse = await request(app)
+      const resubResponse = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -1050,7 +1080,7 @@ describe('A2A Endpoint E2E', () => {
     });
 
     it('contextId from message is stored in task', async () => {
-      const sendResponse = await request(app)
+      const sendResponse = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -1070,7 +1100,7 @@ describe('A2A Endpoint E2E', () => {
       const taskId = sendResponse.body.result.id;
 
       // Fetch the task and verify contextId
-      const getResponse = await request(app)
+      const getResponse = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -1085,7 +1115,7 @@ describe('A2A Endpoint E2E', () => {
 
     it('tasks/get with historyLength=1 returns only last history entry', async () => {
       // Create a task that completes (will have at least 1 history entry from user message)
-      const sendResponse = await request(app)
+      const sendResponse = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -1102,7 +1132,7 @@ describe('A2A Endpoint E2E', () => {
         });
       const taskId = sendResponse.body.result.id;
 
-      const getResponse = await request(app)
+      const getResponse = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -1117,7 +1147,7 @@ describe('A2A Endpoint E2E', () => {
 
   describe('A2A message/stream (SSE)', () => {
     it('message/stream returns text/event-stream content type', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -1141,7 +1171,7 @@ describe('A2A Endpoint E2E', () => {
     }, 10000);
 
     it('message/stream SSE body contains task status events', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -1179,7 +1209,7 @@ describe('A2A Endpoint E2E', () => {
     }, 10000);
 
     it('message/stream with invalid skill returns SSE with failed status', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -1210,7 +1240,7 @@ describe('A2A Endpoint E2E', () => {
     });
 
     it('message/stream with missing message returns error or SSE', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -1226,7 +1256,7 @@ describe('A2A Endpoint E2E', () => {
 
   describe('CORS Headers', () => {
     it('/.well-known/agent.json returns CORS headers for configured origin', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .get('/.well-known/agent.json')
         .set('Origin', 'http://localhost:3000');
 
@@ -1237,7 +1267,7 @@ describe('A2A Endpoint E2E', () => {
     });
 
     it('OPTIONS /.well-known/agent.json returns 204 for preflight', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .options('/.well-known/agent.json')
         .set('Origin', 'http://localhost:3000')
         .set('Access-Control-Request-Method', 'GET');
@@ -1247,7 +1277,7 @@ describe('A2A Endpoint E2E', () => {
     });
 
     it('POST /a2a works with Origin header (browser access)', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/a2a')
         .set('Origin', 'http://localhost:3000')
         .send({

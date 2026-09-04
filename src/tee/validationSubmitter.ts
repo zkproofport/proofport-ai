@@ -16,6 +16,7 @@ import { ethers } from 'ethers';
 import type { Config } from '../config/index.js';
 import type { TeeProvider } from './types.js';
 import { AgentRegistration } from '../identity/register.js';
+import { CIRCUIT_IDS } from '../config/circuitIds.js';
 import { createLogger } from '../logger.js';
 
 const log = createLogger('TeeValidation');
@@ -131,7 +132,7 @@ async function doValidation(
         agentUrl: config.a2aBaseUrl,
         capabilities: ['proof_generation', 'proof_verification'],
         protocols: ['mcp', 'a2a'],
-        circuits: ['coinbase_attestation', 'coinbase_country_attestation'],
+        circuits: [CIRCUIT_IDS.COINBASE_ATTESTATION, CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION],
       });
       validationTokenId = result.tokenId;
       log.info(

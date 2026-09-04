@@ -8,6 +8,7 @@ import {
 import { getTaskOutcome } from '../skills/flowGuidance.js';
 import { buildGuide } from '../proof/guideBuilder.js';
 import { getChainVerifiers } from '../config/deployments.js';
+import { CIRCUIT_IDS } from '../config/circuitIds.js';
 import type { RateLimiter } from '../redis/rateLimiter.js';
 import type { ProofCache } from '../redis/proofCache.js';
 import type { RedisClient } from '../redis/client.js';
@@ -58,8 +59,8 @@ export function createMcpServer(deps: McpServerDeps = {}, config?: ReturnType<ty
   const chainId = getChainId(resolvedConfig);
   const chainName = isProductionChain(resolvedConfig) ? 'Ethereum Mainnet' : 'Base Sepolia';
   const chainVerifiers = getChainVerifiers(String(chainId));
-  const kycVerifier = chainVerifiers['coinbase_attestation'] ?? '(address not yet loaded)';
-  const countryVerifier = chainVerifiers['coinbase_country_attestation'] ?? '(address not yet loaded)';
+  const kycVerifier = chainVerifiers[CIRCUIT_IDS.COINBASE_ATTESTATION] ?? '(address not yet loaded)';
+  const countryVerifier = chainVerifiers[CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION] ?? '(address not yet loaded)';
 
   const server = new McpServer(
     {
@@ -201,10 +202,21 @@ Response fields:
 - chainId (string): Chain ID for verifier addresses`,
     async () => {
       const resolvedConfig = config || loadConfig();
-      const result = handleGetSupportedCircuits({}, deps?.paymentMode);
+      // Pass the verification chain explicitly, the same getChainId() value this
+      // tool's own description above was built from.
+      //
+      // This used to read `deps?.paymentMode`, the RAW dep — which createApp()
+      // never sets (src/index.ts calls createMcpServer({ rateLimiter, proofCache,
+      // redis, teeProvider }, config)). It therefore always fell through to
+      // handleGetSupportedCircuits' `paymentMode = 'testnet'` default and
+      // returned chainId 11155111 with Ethereum Sepolia verifier addresses on
+      // EVERY deployment, production included, contradicting the description
+      // text in the same tool. buildSkillDeps() resolves paymentMode properly
+      // for the other skills; this call site bypassed it.
+      const result = handleGetSupportedCircuits({ chainId: String(getChainId(resolvedConfig)) });
       const circuitAliasMap: Record<string, string> = {
-        coinbase_attestation: 'coinbase_kyc',
-        coinbase_country_attestation: 'coinbase_country',
+        [CIRCUIT_IDS.COINBASE_ATTESTATION]: 'coinbase_kyc',
+        [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: 'coinbase_country',
       };
       const resultWithGuideUrls = {
         ...result,
@@ -231,8 +243,8 @@ Response fields:
     async ({ circuit }) => {
       const resolvedConfig = config || loadConfig();
       const circuitIdMap: Record<string, string> = {
-        coinbase_kyc: 'coinbase_attestation',
-        coinbase_country: 'coinbase_country_attestation',
+        coinbase_kyc: CIRCUIT_IDS.COINBASE_ATTESTATION,
+        coinbase_country: CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION,
       };
       const circuitId = circuitIdMap[circuit] ?? circuit;
       const guide = buildGuide(circuitId as any, resolvedConfig);

@@ -14,7 +14,7 @@ export function getTeeConfig(): TeeConfig {
   const mode = (process.env.TEE_MODE || 'disabled') as TeeMode;
 
   // Validate mode
-  const validModes: TeeMode[] = ['auto', 'disabled', 'local', 'nitro'];
+  const validModes: TeeMode[] = ['disabled', 'local', 'nitro'];
   const teeMode = validModes.includes(mode) ? mode : 'disabled';
 
   const enclaveCid = process.env.ENCLAVE_CID ? parseInt(process.env.ENCLAVE_CID, 10) : undefined;

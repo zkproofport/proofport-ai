@@ -1,3 +1,13 @@
+import { CIRCUIT_IDS } from './circuitIds.js';
+import type { CircuitId } from './circuitIds.js';
+
+/**
+ * Re-exported so existing `import type { CircuitId } from './contracts.js'`
+ * call sites keep working. The type is defined in `./circuitIds.js`, which is
+ * where circuit identity lives.
+ */
+export type { CircuitId } from './circuitIds.js';
+
 export const COINBASE_ATTESTER_CONTRACT = '0x357458739F90461b99789350868CD7CF330Dd7EE';
 
 export const AUTHORIZED_SIGNERS = [
@@ -7,28 +17,34 @@ export const AUTHORIZED_SIGNERS = [
   '0x44ace9abb148e8412ac4492e9a1ae6bd88226803',
 ];
 
-export type CircuitId = 'coinbase_attestation' | 'coinbase_country_attestation' | 'oidc_domain_attestation';
-
-export const FALLBACK_VERIFIERS: Record<string, Record<string, string>> = {
+/**
+ * Verifier addresses to use before `syncDeployments()` fetches the live ones.
+ *
+ * Keyed by chain id, then by canonical circuit id. The inner record is
+ * `Record<CircuitId, string>`, so a chain missing a provable circuit — or
+ * carrying an id that is no longer canonical — is a compile error rather than a
+ * lookup that returns `undefined` at request time.
+ */
+export const FALLBACK_VERIFIERS: Record<string, Record<CircuitId, string>> = {
   '1': {
-    coinbase_attestation: '0xF3D5A09d2C85B28C52EF2905c1BE3a852b609D0C',
-    coinbase_country_attestation: '0x78792554E1582cB49D858eACb5C3607B42d28224',
-    oidc_domain_attestation: '0x440EaA25603eD5480caD0ee51d9808a1993eF267',
+    [CIRCUIT_IDS.COINBASE_ATTESTATION]: '0xF3D5A09d2C85B28C52EF2905c1BE3a852b609D0C',
+    [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: '0x78792554E1582cB49D858eACb5C3607B42d28224',
+    [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: '0x440EaA25603eD5480caD0ee51d9808a1993eF267',
   },
   '8453': {
-    coinbase_attestation: '0xF7dED73E7a7fc8fb030c35c5A88D40ABe6865382',
-    coinbase_country_attestation: '0xF3D5A09d2C85B28C52EF2905c1BE3a852b609D0C',
-    oidc_domain_attestation: '0x9677ba46ad226ce8b3c4517d9c0143e4d458beae',
+    [CIRCUIT_IDS.COINBASE_ATTESTATION]: '0xF7dED73E7a7fc8fb030c35c5A88D40ABe6865382',
+    [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: '0xF3D5A09d2C85B28C52EF2905c1BE3a852b609D0C',
+    [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: '0x9677ba46ad226ce8b3c4517d9c0143e4d458beae',
   },
   '11155111': {
-    coinbase_attestation: '0xCbC8E63fF92659E8B44cFF117D33005Bb669a018',
-    coinbase_country_attestation: '0x6646d970499BBeD728636823A5A7e551E811b414',
-    oidc_domain_attestation: '0x07121eb50b2Ebe1675E7Cb96c84B580A3fF6589e',
+    [CIRCUIT_IDS.COINBASE_ATTESTATION]: '0xCbC8E63fF92659E8B44cFF117D33005Bb669a018',
+    [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: '0x6646d970499BBeD728636823A5A7e551E811b414',
+    [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: '0x07121eb50b2Ebe1675E7Cb96c84B580A3fF6589e',
   },
   '84532': {
-    coinbase_attestation: '0x0036B61dBFaB8f3CfEEF77dD5D45F7EFBFE2035c',
-    coinbase_country_attestation: '0xdEe363585926c3c28327Efd1eDd01cf4559738cf',
-    oidc_domain_attestation: '0x27aFDEa349f247CF698F97FdFAb59E1BF8bD0550',
+    [CIRCUIT_IDS.COINBASE_ATTESTATION]: '0x0036B61dBFaB8f3CfEEF77dD5D45F7EFBFE2035c',
+    [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: '0xdEe363585926c3c28327Efd1eDd01cf4559738cf',
+    [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: '0x27aFDEa349f247CF698F97FdFAb59E1BF8bD0550',
   },
 };
 

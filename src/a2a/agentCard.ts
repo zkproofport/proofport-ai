@@ -3,6 +3,7 @@ import type { Request, Response } from 'express';
 import type { AgentCard as SDKAgentCard } from '@a2a-js/sdk';
 import { ERC8004_ADDRESSES } from '../config/contracts.js';
 import { getChainVerifiers } from '../config/deployments.js';
+import { CIRCUIT_IDS } from '../config/circuitIds.js';
 import { ethers } from 'ethers';
 
 export type TokenIdRef = { chains: Map<number, bigint> };
@@ -47,8 +48,8 @@ export function buildAgentCard(config: Config, tokenId?: bigint | null): AgentCa
   const chainId = getChainId(config);
   const chainName = isProduction ? 'Base Mainnet' : 'Base Sepolia';
   const chainVerifiers = getChainVerifiers(String(chainId));
-  const kycVerifier = chainVerifiers['coinbase_attestation'] ?? '(address not yet loaded)';
-  const countryVerifier = chainVerifiers['coinbase_country_attestation'] ?? '(address not yet loaded)';
+  const kycVerifier = chainVerifiers[CIRCUIT_IDS.COINBASE_ATTESTATION] ?? '(address not yet loaded)';
+  const countryVerifier = chainVerifiers[CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION] ?? '(address not yet loaded)';
 
   return {
     name: 'proveragent.base.eth',
@@ -179,8 +180,8 @@ export function buildMcpDiscovery(config: Config) {
   const chainId = getChainId(config);
   const chainName = isProductionChain(config) ? 'Ethereum Mainnet' : 'Base Sepolia';
   const chainVerifiers = getChainVerifiers(String(chainId));
-  const kycVerifier = chainVerifiers['coinbase_attestation'] ?? '(address not yet loaded)';
-  const countryVerifier = chainVerifiers['coinbase_country_attestation'] ?? '(address not yet loaded)';
+  const kycVerifier = chainVerifiers[CIRCUIT_IDS.COINBASE_ATTESTATION] ?? '(address not yet loaded)';
+  const countryVerifier = chainVerifiers[CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION] ?? '(address not yet loaded)';
 
   return {
     protocolVersion: '2025-11-25',

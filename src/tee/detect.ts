@@ -23,13 +23,13 @@ export function detectTeeEnvironment(): ResolvedTeeMode {
 }
 
 /**
- * Resolve TeeMode to ResolvedTeeMode
- * - 'auto' → detectTeeEnvironment()
- * - others → pass through
+ * Resolve TeeMode to ResolvedTeeMode.
+ *
+ * Every mode now names its own environment, so this is a pass-through. It is
+ * kept as the single place a future mode would be resolved, and because
+ * `detectTeeEnvironment` above is still worth having for diagnostics — asking
+ * the machine what it actually is, rather than trusting the variable.
  */
 export function resolveTeeMode(mode: TeeMode): ResolvedTeeMode {
-  if (mode === 'auto') {
-    return detectTeeEnvironment();
-  }
   return mode;
 }

@@ -12,7 +12,8 @@
 
 import { createLogger } from '../logger.js';
 import { FALLBACK_VERIFIERS } from './contracts.js';
-import type { CircuitId } from './contracts.js';
+import { CIRCUIT_IDS, PROVABLE_CIRCUIT_IDS } from './circuitIds.js';
+import type { CircuitId } from './circuitIds.js';
 
 const log = createLogger('Deployments');
 
@@ -21,15 +22,13 @@ const GITHUB_RAW = (ref: string) =>
   `https://raw.githubusercontent.com/${GITHUB_REPO}/${ref}`;
 
 const BROADCAST_PATHS: Record<CircuitId, (chainId: number) => string> = {
-  coinbase_attestation: (chainId) =>
+  [CIRCUIT_IDS.COINBASE_ATTESTATION]: (chainId) =>
     `broadcast/DeployCoinbaseAttestation.s.sol/${chainId}/run-latest.json`,
-  coinbase_country_attestation: (chainId) =>
+  [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: (chainId) =>
     `broadcast/DeployCoinbaseCountryAttestation.s.sol/${chainId}/run-latest.json`,
-  oidc_domain_attestation: (chainId) =>
+  [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: (chainId) =>
     `broadcast/DeployOidcDomainAttestation.s.sol/${chainId}/run-latest.json`,
 };
-
-const CIRCUIT_IDS: CircuitId[] = ['coinbase_attestation', 'coinbase_country_attestation', 'oidc_domain_attestation'];
 
 // ── In-memory cache ─────────────────────────────────────────────────────
 // Starts with fallback values, updated by syncDeployments() at startup.
@@ -172,7 +171,7 @@ async function syncChain(chainId: number, isProduction: boolean): Promise<boolea
   let updated = false;
 
   await Promise.all(
-    CIRCUIT_IDS.map(async (circuitId) => {
+    PROVABLE_CIRCUIT_IDS.map(async (circuitId) => {
       const url = await resolveBroadcastUrl(circuitId, chainId, isProduction);
       if (!url) return;
 

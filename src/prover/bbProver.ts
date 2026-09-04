@@ -8,17 +8,29 @@ import { Noir } from '@noir-lang/noir_js';
 import type { CircuitParams } from '../input/inputBuilder.js';
 import type { OidcCircuitInputs } from './inputFormatter.js';
 import { formatCoinbaseInputs, formatOidcInputs } from './inputFormatter.js';
+import { CIRCUIT_IDS } from '../config/circuitIds.js';
+import type { CircuitId } from '../config/circuitIds.js';
 import { createLogger } from '../logger.js';
 
 const log = createLogger('Prover');
 
 const execFileAsync = promisify(execFile);
 
-// Circuit ID to metadata mapping (directory name uses hyphens, package name uses underscores)
-const CIRCUIT_META: Record<string, { dir: string; packageName: string }> = {
-  coinbase_attestation: { dir: 'coinbase-attestation', packageName: 'coinbase_attestation' },
-  coinbase_country_attestation: { dir: 'coinbase-country-attestation', packageName: 'coinbase_country_attestation' },
-  oidc_domain_attestation: { dir: 'oidc-domain-attestation', packageName: 'oidc_domain_attestation' },
+// Circuit ID to metadata mapping (directory name uses hyphens, package name uses
+// underscores). Keyed by the canonical identifiers from config/circuitIds.ts.
+const CIRCUIT_META: Record<CircuitId, { dir: string; packageName: CircuitId }> = {
+  [CIRCUIT_IDS.COINBASE_ATTESTATION]: {
+    dir: 'coinbase-attestation',
+    packageName: CIRCUIT_IDS.COINBASE_ATTESTATION,
+  },
+  [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: {
+    dir: 'coinbase-country-attestation',
+    packageName: CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION,
+  },
+  [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: {
+    dir: 'oidc-domain-attestation',
+    packageName: CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION,
+  },
 };
 
 export interface BbProveResult {
@@ -47,11 +59,14 @@ export class BbProver {
    * 6. Off-chain verify
    * 7. Return proof + public inputs
    *
-   * @param circuitId - Canonical circuit ID
+   * @param circuitId - Canonical circuit ID. Accepts `string` because it comes
+   *   off the wire; unknown values are rejected here rather than guessed at.
    * @param inputs - Structured circuit inputs (CircuitParams for coinbase, OidcCircuitInputs for OIDC).
    */
   async prove(circuitId: string, inputs: Record<string, any>): Promise<BbProveResult> {
-    const meta = CIRCUIT_META[circuitId];
+    const meta = (CIRCUIT_META as Record<string, (typeof CIRCUIT_META)[CircuitId] | undefined>)[
+      circuitId
+    ];
     if (!meta) {
       throw new Error(`Unknown circuit ID: ${circuitId}`);
     }
@@ -68,14 +83,14 @@ export class BbProver {
 
       // 2. Build noir_js-compatible inputs
       let noirInputs: Record<string, unknown>;
-      if (circuitId === 'oidc_domain_attestation') {
+      if (circuitId === CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION) {
         // OIDC: inputs is OidcProvePayload { jwt, jwks, scope, provider } — validate + build circuit inputs
         const { prepareOidcCircuitInputs } = await import('./oidcProver.js');
         const oidcInputs = prepareOidcCircuitInputs(inputs as any);
         noirInputs = formatOidcInputs(oidcInputs);
       } else {
         noirInputs = formatCoinbaseInputs(
-          circuitId as 'coinbase_attestation' | 'coinbase_country_attestation',
+          circuitId as typeof CIRCUIT_IDS.COINBASE_ATTESTATION | typeof CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION,
           inputs as CircuitParams,
         );
       }

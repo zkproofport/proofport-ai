@@ -1,22 +1,28 @@
+import { CIRCUIT_IDS } from './circuits.js';
 import type { CircuitId } from './types.js';
 
-export const CIRCUITS: Record<string, {
+/**
+ * Per-circuit metadata. Keyed by the canonical identifiers from `./circuits.js`
+ * and typed `Record<CircuitId, …>`, so adding a provable circuit without an
+ * entry — or keeping an entry for one that no longer exists — is a compile error.
+ */
+export const CIRCUITS: Record<CircuitId, {
   displayName: string;
   easSchemaId?: string;
   functionSelector?: string;
   inputType?: string;
 }> = {
-  coinbase_attestation: {
+  [CIRCUIT_IDS.COINBASE_ATTESTATION]: {
     displayName: 'Coinbase KYC',
     easSchemaId: '0xf8b05c79f090979bf4a80270aba232dff11a10d9ca55c4f88de95317970f0de9',
     functionSelector: '0x56feed5e',
   },
-  coinbase_country_attestation: {
+  [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: {
     displayName: 'Coinbase Country',
     easSchemaId: '0x1801901fabd0e6189356b4fb52bb0ab855276d84f7ec140839fbd1f6801ca065',
     functionSelector: '0x0a225248',
   },
-  oidc_domain_attestation: {
+  [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: {
     displayName: 'OIDC Domain',
     inputType: 'oidc',
   },

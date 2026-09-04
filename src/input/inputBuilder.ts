@@ -1,5 +1,6 @@
 import { ethers } from 'ethers';
 import { CIRCUITS, type CircuitId } from '../config/circuits.js';
+import { CIRCUIT_IDS } from '../config/circuitIds.js';
 import { AUTHORIZED_SIGNERS } from '../config/contracts.js';
 import { SimpleMerkleTree } from './merkleTree.js';
 import {
@@ -426,7 +427,7 @@ export async function computeCircuitParams(
   }
 
   // Validate country fields for country circuit
-  if (circuitId === 'coinbase_country_attestation') {
+  if (circuitId === CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION) {
     if (!request.countryList || request.countryList.length === 0) {
       throw new Error('countryList is required for coinbase_country_attestation');
     }
@@ -509,7 +510,7 @@ export async function buildCircuitInputs(
   // Assemble flat input vector
   let inputs: string[];
 
-  if (circuitId === 'coinbase_attestation') {
+  if (circuitId === CIRCUIT_IDS.COINBASE_ATTESTATION) {
     inputs = assembleKycInputs(params);
 
     if (inputs.length !== COINBASE_ATTESTATION_INPUT_LENGTH) {
@@ -517,7 +518,7 @@ export async function buildCircuitInputs(
         `coinbase_attestation input vector has ${inputs.length} entries, expected ${COINBASE_ATTESTATION_INPUT_LENGTH}`
       );
     }
-  } else if (circuitId === 'coinbase_country_attestation') {
+  } else if (circuitId === CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION) {
     inputs = assembleCountryInputs({
       ...params,
       countryList: params.countryList!,

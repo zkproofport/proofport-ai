@@ -17,6 +17,21 @@ export type {
 
 export { CIRCUIT_NAME_MAP, CIRCUIT_ID_MAP } from './types.js';
 
+// Canonical circuit identifiers.
+// Mirrors @zkproofport-app/sdk/circuits — see ./circuits.ts for why a mirror.
+export {
+  CIRCUIT_IDS,
+  CIRCUIT_SUPPORT_STATUS,
+  ALL_CIRCUIT_IDS,
+  SUPPORTED_CIRCUIT_IDS,
+  PLANNED_CIRCUIT_IDS,
+  PROVABLE_CIRCUIT_IDS,
+  isCanonicalCircuitId,
+  isProvableCircuitId,
+  getCircuitSupportStatus,
+} from './circuits.js';
+export type { CanonicalCircuitId, CircuitSupportStatus } from './circuits.js';
+
 // Constants
 export {
   CIRCUITS,

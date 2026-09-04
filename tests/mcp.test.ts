@@ -158,15 +158,32 @@ describe('handleGetSupportedCircuits', () => {
     expect(ids).not.toContain('coinbase-kyc');
   });
 
-  it('should default to chainId 84532 when paymentMode is testnet (default)', () => {
+  // Verification happens on Ethereum; Base is the payment chain only. See
+  // getChainId() vs getPaymentChainId() in src/config/index.ts.
+  it('should default to chainId 11155111 (Ethereum Sepolia) when paymentMode is testnet (default)', () => {
     const result = handleGetSupportedCircuits({});
 
-    expect(result.chainId).toBe('84532');
+    expect(result.chainId).toBe('11155111');
+    // The default must be a chain we actually have verifiers on — a default
+    // pointing at an undeployed chain would silently drop every address.
+    for (const circuit of result.circuits) {
+      expect(circuit.verifierAddress).toBe(FALLBACK_VERIFIERS['11155111'][circuit.id]);
+    }
   });
 
-  it('should default to chainId 8453 when paymentMode is mainnet', () => {
+  it('should default to chainId 1 (Ethereum Mainnet) when paymentMode is mainnet', () => {
     const result = handleGetSupportedCircuits({}, 'mainnet');
-    expect(result.chainId).toBe('8453');
+    expect(result.chainId).toBe('1');
+    for (const circuit of result.circuits) {
+      expect(circuit.verifierAddress).toBe(FALLBACK_VERIFIERS['1'][circuit.id]);
+    }
+  });
+
+  // The payment chain must NOT leak into the verification chain — merging the
+  // two is exactly the mistake the getChainId/getPaymentChainId split corrected.
+  it('should never default to a Base chain id', () => {
+    expect(handleGetSupportedCircuits({}).chainId).not.toBe('84532');
+    expect(handleGetSupportedCircuits({}, 'mainnet').chainId).not.toBe('8453');
   });
 
   it('should use explicit chainId over paymentMode default', () => {

@@ -1,0 +1,105 @@
+name: CI
+
+# Runs the checks that were previously run only by hand. Until this existed,
+# .github/workflows/ held only npm-publish.yml and release-please.yml, neither of
+# which runs a test — which is how 38 unit tests stayed red on main unnoticed.
+#
+# Everything here calls a script that already exists in the repo, so a developer
+# reproduces CI by running the same npm scripts locally.
+#
+# Deliberately NOT here: anything needing a live backend. `npm run test:e2e`
+# (root) and `packages/mcp`'s e2e project both talk to a server at
+# E2E_BASE_URL / localhost:4002. proofport-ai is paused by design and staging was
+# torn down, so those cannot run unattended — see .claude/agents/ai-dev.md.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Typecheck, build and unit tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: proofport-ai
+    steps:
+      # This repo is checked out into a SUBDIRECTORY so proofport-app-sdk can sit
+      # beside it. tests/circuitIds.test.ts resolves the canonical circuit
+      # identifiers from `../proofport-app-sdk/dist/circuits.mjs` and is written
+      # to FAIL — deliberately, not skip — when it cannot find them, because a
+      # green run with nothing to compare against would mean nothing.
+      # `@zkproofport-app/sdk` is not an npm dependency here (the published
+      # package does not export ./circuits yet — see src/config/circuitIds.ts),
+      # so the sibling checkout is the only source.
+      - name: Checkout proofport-ai
+        uses: actions/checkout@v4
+        with:
+          path: proofport-ai
+
+      - name: Checkout proofport-app-sdk (canonical circuit identifiers)
+        uses: actions/checkout@v4
+        with:
+          repository: zkproofport/proofport-app-sdk
+          path: proofport-app-sdk
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Produces dist/circuits.mjs, which is what circuitIds.test.ts imports.
+      - name: Build proofport-app-sdk
+        working-directory: proofport-app-sdk
+        run: |
+          npm ci
+          npm run build
+
+      # npm-publish.yml deletes the lockfile before installing. This job keeps it
+      # so CI resolves the versions the repo actually pins.
+      - name: Install dependencies
+        run: npm ci
+
+      # ── Root server ────────────────────────────────────────────────────────
+      - name: Typecheck (root)
+        run: npm run typecheck
+
+      - name: Build (root)
+        run: npm run build
+
+      # .env.test is gitignored (it holds real E2E credentials) so it is absent
+      # here. tests/setup.ts tolerates a missing file, but tests/inputBuilder.ts
+      # hard-fails at import without PROVER_PRIVATE_KEY, so supply it.
+      #
+      # This is the standard Hardhat/Anvil dev account #0 key — the same value
+      # .env.test uses, where it is commented "public, no real funds". It is a
+      # deterministic test wallet, NOT a secret, and must never be replaced with
+      # a funded key. Every other name in .env.test IS a real credential and
+      # belongs in neither this file nor CI; nothing in the unit project needs one.
+      - name: Unit tests (root)
+        env:
+          PROVER_PRIVATE_KEY: '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'
+        run: npm run test:unit
+
+      # ── packages/sdk ───────────────────────────────────────────────────────
+      # Must be BUILT before packages/mcp is built or typechecked: packages/mcp
+      # imports @zkproofport-ai/sdk and cannot resolve it until
+      # packages/sdk/dist exists. npm-publish.yml relies on the same ordering.
+      - name: Typecheck (packages/sdk)
+        run: npm run typecheck --workspace @zkproofport-ai/sdk
+
+      - name: Build (packages/sdk)
+        run: npm run build --workspace @zkproofport-ai/sdk
+
+      # ── packages/mcp ───────────────────────────────────────────────────────
+      # `build` is `tsc`, so this typechecks packages/mcp as well as emitting.
+      - name: Build (packages/mcp)
+        run: npm run build --workspace @zkproofport-ai/mcp
+
+      - name: Unit tests (packages/mcp)
+        run: npm run test:unit --workspace @zkproofport-ai/mcp

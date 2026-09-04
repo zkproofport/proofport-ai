@@ -5,7 +5,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import request from 'supertest';
-import type { Express } from 'express';
+import { type Server } from 'http';
 import { createApp } from '../../src/index.js';
 import type { Config } from '../../src/config/index.js';
 
@@ -90,17 +90,25 @@ function makeTestConfig(overrides: Partial<Config> = {}): Config {
 }
 
 describe('TEE HTTP Integration', () => {
-  let app: Express;
+  // One listening server for the shared app. Handing supertest a bare Express
+  // app makes it create, listen(0) and close an ephemeral server per request,
+  // and that churn is what intermittently produced `socket hang up` in this
+  // suite. The two one-off apps in "TEE mode variations" below make a single
+  // request each and keep the plain form.
+  let server: Server;
   let originalTeeMode: string | undefined;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     originalTeeMode = process.env.TEE_MODE;
     process.env.TEE_MODE = 'disabled';
     const { app: testApp } = createApp(makeTestConfig({ teeMode: 'disabled' as const }));
-    app = testApp;
+    server = await new Promise<Server>((resolve) => {
+      const s = testApp.listen(0, () => resolve(s));
+    });
   });
 
-  afterAll(() => {
+  afterAll(async () => {
+    if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
     if (originalTeeMode !== undefined) {
       process.env.TEE_MODE = originalTeeMode;
     } else {
@@ -110,7 +118,7 @@ describe('TEE HTTP Integration', () => {
 
   describe('GET /health', () => {
     it('should return healthy status with disabled TEE mode', async () => {
-      const response = await request(app).get('/health');
+      const response = await request(server).get('/health');
 
       expect(response.status).toBe(200);
       expect(response.body.status).toBe('healthy');
@@ -119,7 +127,7 @@ describe('TEE HTTP Integration', () => {
     });
 
     it('should include tee.attestationEnabled field', async () => {
-      const response = await request(app).get('/health');
+      const response = await request(server).get('/health');
 
       expect(response.status).toBe(200);
       expect(response.body.tee).toHaveProperty('attestationEnabled');
@@ -127,7 +135,7 @@ describe('TEE HTTP Integration', () => {
     });
 
     it('should include tee.mode field with valid value', async () => {
-      const response = await request(app).get('/health');
+      const response = await request(server).get('/health');
 
       expect(response.status).toBe(200);
       expect(response.body.tee).toHaveProperty('mode');
@@ -135,14 +143,14 @@ describe('TEE HTTP Integration', () => {
     });
 
     it('should include paymentMode field', async () => {
-      const response = await request(app).get('/health');
+      const response = await request(server).get('/health');
 
       expect(response.status).toBe(200);
       expect(response.body).toHaveProperty('paymentMode');
     });
 
     it('should return JSON response', async () => {
-      const response = await request(app).get('/health');
+      const response = await request(server).get('/health');
 
       expect(response.status).toBe(200);
       expect(response.headers['content-type']).toMatch(/json/);
@@ -199,7 +207,7 @@ describe('TEE HTTP Integration', () => {
 
   describe('Response format validation', () => {
     it('should have all required fields', async () => {
-      const response = await request(app).get('/health');
+      const response = await request(server).get('/health');
 
       expect(response.status).toBe(200);
       expect(response.body).toHaveProperty('status');
@@ -210,7 +218,7 @@ describe('TEE HTTP Integration', () => {
     });
 
     it('should report service name correctly', async () => {
-      const response = await request(app).get('/health');
+      const response = await request(server).get('/health');
 
       expect(response.status).toBe(200);
       expect(response.body.service).toBe('proofport-ai');

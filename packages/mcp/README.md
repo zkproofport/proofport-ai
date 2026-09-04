@@ -254,7 +254,7 @@ Verify a ZK proof on-chain against the deployed Solidity verifier contract. Pass
 For fine-grained control, debugging, or custom workflows, use individual tools:
 
 ```
-prepare_inputs → submit_proof → verify_proof
+prepare_inputs → request_challenge → submit_proof → verify_proof
 ```
 
 #### Step 1: `prepare_inputs`
@@ -269,7 +269,16 @@ Prepare all circuit inputs: compute signal hash, sign with attestation wallet, f
 | `country_list` | string[] | For country circuit | ISO 3166-1 alpha-2 country codes |
 | `is_included` | boolean | For country circuit | Inclusion (`true`) or exclusion (`false`) proof |
 
-#### Step 2: `submit_proof`
+#### Step 2: `request_challenge`
+
+Ask the server for a challenge. Returns a single-use `nonce` (and, when the server runs in TEE mode, its public key). **The nonce is mandatory for step 3** — the server answers any submission that arrives without one with a fresh challenge instead of a proof.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `circuit` | `"coinbase_kyc"` \| `"coinbase_country"` \| `"oidc_domain"` | Yes | Which circuit to use |
+| `inputs` | object \| string | Yes | Full inputs object from `prepare_inputs` |
+
+#### Step 3: `submit_proof`
 
 Submit prepared inputs to generate the ZK proof. The TEE server runs the Noir circuit inside the enclave and returns the UltraHonk proof. This step takes 30-90 seconds.
 
@@ -277,8 +286,9 @@ Submit prepared inputs to generate the ZK proof. The TEE server runs the Noir ci
 |-----------|------|----------|-------------|
 | `circuit` | `"coinbase_kyc"` \| `"coinbase_country"` \| `"oidc_domain"` | Yes | Which circuit to use |
 | `inputs` | object \| string | Yes | Full inputs object from `prepare_inputs` |
+| `nonce` | string | Yes | The `nonce` from the `request_challenge` response. Single-use and bound to the circuit it was issued for |
 
-#### Step 3: `verify_proof`
+#### Step 4: `verify_proof`
 
 Same as described in the simple flow above. Verify the proof on-chain against the deployed Solidity verifier.
 

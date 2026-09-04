@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import express, { type Express } from 'express';
+import http, { type Server } from 'http';
 import request from 'supertest';
 import type { Task } from '@a2a-js/sdk';
 import { DefaultRequestHandler } from '@a2a-js/sdk/server';
@@ -10,10 +11,26 @@ import { ProofportExecutor } from '../../src/a2a/proofportExecutor.js';
 import type { Config } from '../../src/config/index.js';
 
 describe('A2A Integration Tests', () => {
+  // ONE listening server for the file, forwarding to the app the current test
+  // built. Handing supertest a bare Express app makes it create, listen(0) and
+  // close an ephemeral server per request; that churn is what produced the
+  // intermittent `socket hang up` seen elsewhere in this suite.
+  let server: Server;
   let app: Express;
   let mockConfig: Config;
   let mockRedis: any;
   let taskStore: RedisTaskStore;
+
+  beforeAll(async () => {
+    server = await new Promise<Server>((resolve) => {
+      const s = http.createServer((req, res) => app(req, res));
+      s.listen(0, () => resolve(s));
+    });
+  });
+
+  afterAll(async () => {
+    if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
 
   beforeEach(() => {
     // Create Express app
@@ -80,7 +97,9 @@ describe('A2A Integration Tests', () => {
     const requestHandler = new DefaultRequestHandler(agentCard, taskStore, executor);
 
     // Mount routes
-    app.get('/.well-known/agent-card.json', getAgentCardHandler(mockConfig, { value: null }));
+    // TokenIdRef = { chains: Map<chainId, tokenId> }; empty until ERC-8004
+    // registration completes, which is the state this integration test mounts.
+    app.get('/.well-known/agent-card.json', getAgentCardHandler(mockConfig, { chains: new Map() }));
     app.use('/a2a', jsonRpcHandler({ requestHandler, userBuilder: UserBuilder.noAuthentication }));
 
     // Add MCP route for coexistence test
@@ -91,7 +110,7 @@ describe('A2A Integration Tests', () => {
 
   describe('GET /.well-known/agent-card.json', () => {
     it('returns valid Agent Card with Content-Type application/json', async () => {
-      const response = await request(app).get('/.well-known/agent-card.json');
+      const response = await request(server).get('/.well-known/agent-card.json');
 
       expect(response.status).toBe(200);
       expect(response.headers['content-type']).toMatch(/application\/json/);
@@ -155,7 +174,7 @@ describe('A2A Integration Tests', () => {
       await taskStore.save(task);
 
       // Now retrieve it via tasks/get JSON-RPC
-      const response = await request(app)
+      const response = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -181,7 +200,7 @@ describe('A2A Integration Tests', () => {
     });
 
     it('returns JSON-RPC error for invalid method', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -202,7 +221,7 @@ describe('A2A Integration Tests', () => {
     });
 
     it('returns error for tasks/cancel on non-existent task', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',
@@ -227,7 +246,7 @@ describe('A2A Integration Tests', () => {
   describe('Route Coexistence', () => {
     it('A2A and MCP routes both respond correctly', async () => {
       // Test MCP route
-      const mcpResponse = await request(app)
+      const mcpResponse = await request(server)
         .post('/mcp')
         .send({ jsonrpc: '2.0', method: 'test' });
 
@@ -238,7 +257,7 @@ describe('A2A Integration Tests', () => {
       });
 
       // Test A2A Agent Card route
-      const agentCardResponse = await request(app).get('/.well-known/agent-card.json');
+      const agentCardResponse = await request(server).get('/.well-known/agent-card.json');
 
       expect(agentCardResponse.status).toBe(200);
       expect(agentCardResponse.body.name).toBe('proveragent.base.eth');
@@ -264,7 +283,7 @@ describe('A2A Integration Tests', () => {
       };
       await taskStore.save(task);
 
-      const a2aResponse = await request(app)
+      const a2aResponse = await request(server)
         .post('/a2a')
         .send({
           jsonrpc: '2.0',

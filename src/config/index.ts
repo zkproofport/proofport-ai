@@ -14,12 +14,12 @@ function validatePaymentMode(value: string): 'disabled' | 'testnet' | 'mainnet' 
   return value as 'disabled' | 'testnet' | 'mainnet';
 }
 
-function validateTeeMode(value: string): 'auto' | 'disabled' | 'local' | 'nitro' {
-  const valid = ['auto', 'disabled', 'local', 'nitro'] as const;
+function validateTeeMode(value: string): 'disabled' | 'local' | 'nitro' {
+  const valid = ['disabled', 'local', 'nitro'] as const;
   if (!valid.includes(value as any)) {
     throw new Error(`TEE_MODE must be one of: ${valid.join(', ')} (got: ${value})`);
   }
-  return value as 'auto' | 'disabled' | 'local' | 'nitro';
+  return value as 'disabled' | 'local' | 'nitro';
 }
 
 export function loadConfig() {

@@ -9,6 +9,7 @@ import { getChainIdentities } from '../config/index.js';
 import type { AgentMetadata } from './types.js';
 import type { TeeProvider } from '../tee/types.js';
 import { createLogger } from '../logger.js';
+import { CIRCUIT_IDS } from '../config/circuitIds.js';
 
 const log = createLogger('AutoRegister');
 
@@ -48,7 +49,7 @@ function buildAgentMetadata(
       'x402_payment',
     ],
     protocols: ['mcp', 'a2a', 'x402'],
-    circuits: ['coinbase_attestation', 'coinbase_country_attestation'],
+    circuits: [CIRCUIT_IDS.COINBASE_ATTESTATION, CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION],
     tags: ['ZK', 'Privacy', 'Proof', 'Coinbase', 'KYC', 'Attestation', 'x402', 'Identity', 'Country', 'Verification', 'Base', 'USDC', 'TEE', 'Noir', 'EAS', 'Zero-Knowledge'],
     ...(config.teeMode !== 'disabled' && { tee: config.teeMode }),
     x402Support: true,

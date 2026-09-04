@@ -32,6 +32,8 @@ import { Noir } from '@noir-lang/noir_js';
 import { formatCoinbaseInputs, formatOidcInputs } from '../prover/inputFormatter.js';
 import type { OidcCircuitInputs } from '../prover/inputFormatter.js';
 import type { CircuitParams } from '../input/inputBuilder.js';
+import { CIRCUIT_IDS } from '../config/circuitIds.js';
+import type { CircuitId } from '../config/circuitIds.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -46,24 +48,40 @@ const VMADDR_CID_ANY = 0xFFFFFFFF;
 
 const CIRCUIT_BASE_DIR = '/app/circuits';
 
-/** Canonical circuit ID → directory and artifact filenames */
-const CIRCUITS: Record<string, { dir: string; bytecode: string; vk: string }> = {
-  coinbase_attestation: {
+/**
+ * Canonical circuit ID → directory and artifact filenames.
+ *
+ * Keyed by the canonical identifiers from `config/circuitIds.ts`, so a circuit
+ * the server can prove but the enclave has no artifacts for is a compile error
+ * rather than an "Unknown circuit" at prove time inside the enclave.
+ */
+const CIRCUITS: Record<CircuitId, { dir: string; bytecode: string; vk: string }> = {
+  [CIRCUIT_IDS.COINBASE_ATTESTATION]: {
     dir: 'coinbase-attestation',
-    bytecode: 'coinbase_attestation.json',
+    bytecode: `${CIRCUIT_IDS.COINBASE_ATTESTATION}.json`,
     vk: 'vk/vk',
   },
-  coinbase_country_attestation: {
+  [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: {
     dir: 'coinbase-country-attestation',
-    bytecode: 'coinbase_country_attestation.json',
+    bytecode: `${CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION}.json`,
     vk: 'vk/vk',
   },
-  oidc_domain_attestation: {
+  [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: {
     dir: 'oidc-domain-attestation',
-    bytecode: 'oidc_domain_attestation.json',
+    bytecode: `${CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION}.json`,
     vk: 'vk/vk',
   },
 };
+
+/**
+ * Look up a circuit's artifact metadata by an id that arrived over vsock.
+ *
+ * The id is untrusted `string`, so it is checked against the canonical keys
+ * rather than cast. Returns `undefined` for anything unknown; callers raise.
+ */
+function lookupCircuitMeta(circuitId: string): (typeof CIRCUITS)[CircuitId] | undefined {
+  return (CIRCUITS as Record<string, (typeof CIRCUITS)[CircuitId] | undefined>)[circuitId];
+}
 
 const PROVE_TIMEOUT_MS = 120_000;
 const NSM_DEVICE = '/dev/nsm';
@@ -174,7 +192,7 @@ interface CircuitPaths {
 }
 
 function getCircuitPaths(circuitId: string): CircuitPaths {
-  const meta = CIRCUITS[circuitId];
+  const meta = lookupCircuitMeta(circuitId);
   if (!meta) {
     throw new Error(
       `Unknown circuitId '${circuitId}'. Supported: ${Object.keys(CIRCUITS).join(', ')}`
@@ -247,7 +265,7 @@ function normalizeToCircuitParams(circuitId: string, inputs: Record<string, any>
       merkleDepth: inputs.depth,
     };
 
-    if (circuitId === 'coinbase_country_attestation') {
+    if (circuitId === CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION) {
       converted.countryList = inputs.country_list;
       converted.countryListLength = (inputs.country_list || []).length;
       converted.isIncluded = inputs.is_included;
@@ -269,7 +287,7 @@ async function generateProof(
   inputs: Record<string, any>,
   requestId: string,
 ): Promise<ProofResult> {
-  const meta = CIRCUITS[circuitId];
+  const meta = lookupCircuitMeta(circuitId);
   if (!meta) {
     throw new Error(
       `Unknown circuitId '${circuitId}'. Supported: ${Object.keys(CIRCUITS).join(', ')}`
@@ -300,7 +318,7 @@ async function generateProof(
 
     // Step 2: Format inputs for noir_js
     let noirInputs: Record<string, unknown>;
-    if (circuitId === 'oidc_domain_attestation') {
+    if (circuitId === CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION) {
       // OIDC: inputs is OidcProvePayload { jwt, jwks, scope, provider } — validate + build circuit inputs
       const { prepareOidcCircuitInputs } = await import('../prover/oidcProver.js');
       const oidcInputs = prepareOidcCircuitInputs(inputs as any);
@@ -308,7 +326,7 @@ async function generateProof(
     } else {
       const normalized = normalizeToCircuitParams(circuitId, inputs);
       noirInputs = formatCoinbaseInputs(
-        circuitId as 'coinbase_attestation' | 'coinbase_country_attestation',
+        circuitId as typeof CIRCUIT_IDS.COINBASE_ATTESTATION | typeof CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION,
         normalized as CircuitParams,
       );
     }

@@ -15,9 +15,19 @@ vi.mock('ethers', () => {
     queryFilter: vi.fn().mockResolvedValue([]),
   };
 
+  // getNetwork/getFeeData are read by AgentRegistration.getGasOverrides() before
+  // every write TX — the chain decides whether gas is auto-estimated (Base) or
+  // set explicitly (Ethereum). A provider double missing them makes every write
+  // path throw instead of exercising that branch.
   const mockProvider = {
     getBlockNumber: vi.fn().mockResolvedValue(1000),
     getTransactionCount: vi.fn().mockResolvedValue(0),
+    getNetwork: vi.fn().mockResolvedValue({ chainId: 84532n }), // matches chainRpcUrl below
+    getFeeData: vi.fn().mockResolvedValue({
+      maxFeePerGas: 2_000_000_000n,
+      maxPriorityFeePerGas: 1_000_000_000n,
+      gasPrice: 2_000_000_000n,
+    }),
   };
 
   const mockWallet = {
@@ -38,6 +48,7 @@ describe('AgentRegistration', () => {
   let AgentRegistration: any;
   let createMetadataUri: any;
   let mockContract: any;
+  let mockProvider: any;
 
   const validConfig: AgentRegistrationConfig = {
     identityContractAddress: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
@@ -63,9 +74,11 @@ describe('AgentRegistration', () => {
     AgentRegistration = module.AgentRegistration;
     createMetadataUri = module.createMetadataUri;
 
-    // Get mock contract instance
+    // Get mock contract / provider instances
     const { ethers } = await import('ethers');
     mockContract = new ethers.Contract('', [], null);
+    mockProvider = new ethers.JsonRpcProvider('');
+    mockProvider.getNetwork.mockResolvedValue({ chainId: 84532n });
   });
 
   describe('Constructor', () => {
@@ -118,11 +131,35 @@ describe('AgentRegistration', () => {
       const result = await registration.register(validMetadata);
 
       expect(mockContract.register).toHaveBeenCalledTimes(1);
-      const calledUri = mockContract.register.mock.calls[0][0];
+      const [calledUri, overrides] = mockContract.register.mock.calls[0];
       expect(calledUri).toContain('data:application/json;base64,');
+      // Base chains auto-estimate gas — only the locally tracked nonce is sent.
+      expect(overrides).toEqual({ nonce: 0 });
       expect(result.tokenId).toBe(1n);
       expect(result.transactionHash).toBe('0xtxhash123');
       expect(result.agentAddress).toBe('0x1234567890123456789012345678901234567890');
+    });
+
+    it('should set an explicit gasLimit and boosted fees on Ethereum', async () => {
+      mockProvider.getNetwork.mockResolvedValue({ chainId: 1n });
+      const registration = new AgentRegistration(validConfig);
+
+      mockContract.register.mockResolvedValue({
+        wait: vi.fn().mockResolvedValue({
+          logs: [{ topics: ['0xevent', '0xfrom', '0xto', '0x' + '0'.repeat(63) + '1'], data: '0x' }],
+          hash: '0xtxhash',
+        }),
+      });
+
+      await registration.register(validMetadata);
+
+      const overrides = mockContract.register.mock.calls[0][1];
+      const uriLength = mockContract.register.mock.calls[0][0].length;
+      // Ethereum skips eth_estimateGas (slow on large calldata) and computes it.
+      expect(overrides.gasLimit).toBe(21000 + uriLength * 16 + 2200000);
+      // Fees are boosted 20% over feeData for faster inclusion.
+      expect(overrides.maxFeePerGas).toBe(2_000_000_000n * 120n / 100n);
+      expect(overrides.maxPriorityFeePerGas).toBe(1_000_000_000n * 120n / 100n);
     });
 
     it('should extract tokenId from receipt logs', async () => {

@@ -351,9 +351,23 @@ describe('Attestation Verification', () => {
       expect(result.signatureValid).toBeDefined();
     });
 
-    it('should cryptographically verify COSE_Sign1 signature with ES384', async () => {
+    // A genuinely ES384-signed document whose chain does NOT lead to the AWS
+    // Nitro root must still be rejected. verifyAttestationDocument pins that root
+    // by fingerprint (src/tee/attestation.ts:340) and returns before COSE
+    // signature verification, so a correct signature buys an attacker nothing.
+    //
+    // This replaces a test that claimed to verify the ES384 signature itself and
+    // asserted `isValid === true`. It could never have passed: the pinned root
+    // rejects a locally minted CA first. Its whole body was wrapped in a
+    // try/catch that swallowed every failure — including assertion failures —
+    // and printed "OpenSSL not available", so it silently asserted nothing.
+    // OpenSSL is present; the premise was wrong, not the toolchain.
+    //
+    // COSE/ES384 verification itself has no unit coverage and cannot get any
+    // without a real AWS-signed attestation document.
+    it('should reject a validly ES384-signed document that does not chain to the AWS Nitro root', async () => {
       // Generate EC P-384 keypair for ES384
-      try {
+      {
         execSync('openssl ecparam -genkey -name secp384r1 -out /tmp/test-es384-key.pem 2>/dev/null', { stdio: 'pipe' });
         execSync('openssl req -new -x509 -key /tmp/test-es384-key.pem -out /tmp/test-es384-cert.pem -days 1 -subj "/CN=TestES384" 2>/dev/null', { stdio: 'pipe' });
         execSync('openssl x509 -in /tmp/test-es384-cert.pem -outform DER -out /tmp/test-es384-cert.der 2>/dev/null', { stdio: 'pipe' });
@@ -431,17 +445,26 @@ describe('Attestation Verification', () => {
         const doc = parseAttestationDocument(coseDoc);
         const result = await verifyAttestationDocument(doc);
 
-        expect(result.isValid).toBe(true);
-        expect(result.signatureValid).toBe(true);
-      } catch (error) {
-        // Skip test if OpenSSL is not available or fails
-        console.warn('Skipping ES384 signature test: OpenSSL not available');
+        expect(result.isValid).toBe(false);
+        expect(result.rootCaValid).toBe(false);
+        expect(result.error).toContain('Root CA fingerprint mismatch');
+        // Fail closed: the signature is never even consulted.
+        expect(result.signatureValid).toBe(false);
       }
     });
 
-    it('should reject document with invalid/tampered signature', async () => {
+    // Same construction with a random signature instead of a real one. It exists
+    // to pin the ORDER of the checks: the chain of trust is evaluated before the
+    // signature, so a document with a foreign root is rejected identically
+    // whether its signature is genuine or garbage, and the reported error names
+    // the root — never the signature.
+    //
+    // Previously this asserted `error` contained 'signature verification failed',
+    // which the code never produces here; like the test above, the failure was
+    // swallowed by a catch that blamed OpenSSL.
+    it('should reject a document with a tampered signature at the root CA check, not the signature check', async () => {
       // Create a properly structured doc but with wrong signature
-      try {
+      {
         execSync('openssl ecparam -genkey -name secp384r1 -out /tmp/test-tamper-key.pem 2>/dev/null', { stdio: 'pipe' });
         execSync('openssl req -new -x509 -key /tmp/test-tamper-key.pem -out /tmp/test-tamper-cert.pem -days 1 -subj "/CN=TestTamper" 2>/dev/null', { stdio: 'pipe' });
         execSync('openssl x509 -in /tmp/test-tamper-cert.pem -outform DER -out /tmp/test-tamper-cert.der 2>/dev/null', { stdio: 'pipe' });
@@ -481,9 +504,8 @@ describe('Attestation Verification', () => {
 
         expect(result.isValid).toBe(false);
         expect(result.signatureValid).toBe(false);
-        expect(result.error).toContain('signature verification failed');
-      } catch (error) {
-        console.warn('Skipping tampered signature test: OpenSSL not available');
+        expect(result.error).toContain('Root CA fingerprint mismatch');
+        expect(result.error).not.toContain('signature');
       }
     });
 

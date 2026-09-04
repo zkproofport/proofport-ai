@@ -1,34 +1,36 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ─── Mock @zkproofport-ai/sdk ──────────────────────────────────────────────────
+// Mirrors the SDK's real public surface. Payment (makePayment / PaymentInfo /
+// USDC_ADDRESSES) was deleted from the SDK and the MCP in ee1c09d — it is
+// deliberately absent here so a re-introduction shows up as a failing import
+// rather than a silently-satisfied mock.
 const mockGenerateProof = vi.fn();
 const mockRequestChallenge = vi.fn();
 const mockPrepareInputs = vi.fn();
-const mockMakePayment = vi.fn();
+const mockPrepareOidcPayload = vi.fn();
 const mockSubmitProof = vi.fn();
-const mockVerifyOnChain = vi.fn();
+const mockVerifyProof = vi.fn();
 const mockComputeSignalHash = vi.fn().mockReturnValue('0xsignalhash');
 
 vi.mock('@zkproofport-ai/sdk', () => ({
   generateProof: mockGenerateProof,
   requestChallenge: mockRequestChallenge,
   prepareInputs: mockPrepareInputs,
-  makePayment: mockMakePayment,
+  prepareOidcPayload: mockPrepareOidcPayload,
   submitProof: mockSubmitProof,
-  verifyProof: mockVerifyOnChain,
+  verifyProof: mockVerifyProof,
   computeSignalHash: mockComputeSignalHash,
   CIRCUITS: {
     coinbase_attestation: { displayName: 'Coinbase KYC', easSchemaId: '0xschema1', functionSelector: '0xfunc1' },
     coinbase_country_attestation: { displayName: 'Coinbase Country', easSchemaId: '0xschema2', functionSelector: '0xfunc2' },
+    oidc_domain_attestation: { displayName: 'OIDC Domain', inputType: 'oidc' },
   },
   AUTHORIZED_SIGNERS: ['0x952f32128AF084422539C4Ff96df5C525322E564'],
   CIRCUIT_NAME_MAP: {
     coinbase_kyc: 'coinbase_attestation',
     coinbase_country: 'coinbase_country_attestation',
-  },
-  USDC_ADDRESSES: {
-    'base-sepolia': '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-    'base': '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+    oidc_domain: 'oidc_domain_attestation',
   },
 }));
 
@@ -52,13 +54,6 @@ const mockSigner = {
   signMessage: vi.fn().mockResolvedValue('0xmocksignature'),
   signTypedData: vi.fn().mockResolvedValue('0xmocktypeddata'),
   sendTransaction: vi.fn().mockResolvedValue({ hash: '0xtxhash', wait: async () => ({ status: 1 }) }),
-};
-
-const mockPaymentSigner = {
-  getAddress: vi.fn().mockReturnValue('0xMockPaymentAddress'),
-  signMessage: vi.fn().mockResolvedValue('0xpaysignature'),
-  signTypedData: vi.fn().mockResolvedValue('0xpaytypeddata'),
-  sendTransaction: vi.fn().mockResolvedValue({ hash: '0xpaytxhash', wait: async () => ({ status: 1 }) }),
 };
 
 async function callTool(name: string, params: Record<string, unknown> = {}) {
@@ -86,11 +81,6 @@ beforeEach(async () => {
   mockSigner.signTypedData.mockResolvedValue('0xmocktypeddata');
   mockSigner.sendTransaction.mockResolvedValue({ hash: '0xtxhash', wait: async () => ({ status: 1 }) });
 
-  mockPaymentSigner.getAddress.mockReturnValue('0xMockPaymentAddress');
-  mockPaymentSigner.signMessage.mockResolvedValue('0xpaysignature');
-  mockPaymentSigner.signTypedData.mockResolvedValue('0xpaytypeddata');
-  mockPaymentSigner.sendTransaction.mockResolvedValue({ hash: '0xpaytxhash', wait: async () => ({ status: 1 }) });
-
   mockComputeSignalHash.mockReturnValue('0xsignalhash');
 
   toolHandlers = {};
@@ -116,20 +106,19 @@ beforeEach(async () => {
   };
 
   const { registerTools } = await import('../src/tools.js');
-  registerTools(mockServer as any, testConfig as any, mockSigner as any, mockPaymentSigner as any);
+  registerTools(mockServer as any, testConfig as any, mockSigner as any);
 });
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe('registerTools', () => {
-  it('registers all 7 tools', () => {
-    expect(mockServer.tool).toHaveBeenCalledTimes(7);
+  it('registers all 6 tools', () => {
+    expect(mockServer.tool).toHaveBeenCalledTimes(6);
     const registeredNames = Object.keys(toolHandlers);
     expect(registeredNames).toContain('generate_proof');
     expect(registeredNames).toContain('get_supported_circuits');
     expect(registeredNames).toContain('request_challenge');
     expect(registeredNames).toContain('prepare_inputs');
-    expect(registeredNames).toContain('make_payment');
     expect(registeredNames).toContain('submit_proof');
     expect(registeredNames).toContain('verify_proof');
   });
@@ -149,6 +138,7 @@ describe('get_supported_circuits', () => {
     expect(data.circuits).toBeDefined();
     expect(data.circuits.coinbase_attestation).toBeDefined();
     expect(data.circuits.coinbase_country_attestation).toBeDefined();
+    expect(data.circuits.oidc_domain_attestation).toBeDefined();
     expect(data.authorized_signers).toEqual(['0x952f32128AF084422539C4Ff96df5C525322E564']);
     expect(result.isError).toBeUndefined();
   });
@@ -156,7 +146,7 @@ describe('get_supported_circuits', () => {
 
 describe('generate_proof', () => {
   it('calls generateProof with correct params', async () => {
-    const mockResult = { proof: '0xabc', publicInputs: '0xdef', paymentTxHash: '0x123' };
+    const mockResult = { proof: '0xabc', publicInputs: '0xdef' };
     mockGenerateProof.mockResolvedValue(mockResult);
 
     const result = await callTool('generate_proof', {
@@ -167,7 +157,9 @@ describe('generate_proof', () => {
     expect(mockGenerateProof).toHaveBeenCalledOnce();
     const [passedConfig, passedWallets, passedParams, passedOpts] = mockGenerateProof.mock.calls[0];
     expect(passedConfig).toEqual(testConfig);
-    expect(passedWallets).toEqual({ attestation: mockSigner, payment: mockPaymentSigner });
+    // The SDK's generateProof takes only an attestation signer — payment was
+    // removed from the flow entirely, so no second wallet is passed.
+    expect(passedWallets).toEqual({ attestation: mockSigner });
     expect(passedParams.circuit).toBe('coinbase_kyc');
     expect(passedParams.scope).toBe('test-scope');
     expect(passedOpts.onStep).toBeDefined();
@@ -191,6 +183,32 @@ describe('generate_proof', () => {
     expect(passedParams.isIncluded).toBe(true);
   });
 
+  it('forwards jwt and provider only for oidc_domain', async () => {
+    mockGenerateProof.mockResolvedValue({ proof: '0x' });
+
+    await callTool('generate_proof', {
+      circuit: 'oidc_domain',
+      scope: 'example.com',
+      jwt: 'header.payload.sig',
+      provider: 'microsoft',
+    });
+
+    const oidcParams = mockGenerateProof.mock.calls[0][2];
+    expect(oidcParams.jwt).toBe('header.payload.sig');
+    expect(oidcParams.provider).toBe('microsoft');
+
+    mockGenerateProof.mockClear();
+    await callTool('generate_proof', {
+      circuit: 'coinbase_kyc',
+      jwt: 'header.payload.sig',
+      provider: 'microsoft',
+    });
+
+    const coinbaseParams = mockGenerateProof.mock.calls[0][2];
+    expect(coinbaseParams).not.toHaveProperty('jwt');
+    expect(coinbaseParams).not.toHaveProperty('provider');
+  });
+
   it('returns error on failure', async () => {
     mockGenerateProof.mockRejectedValue(new Error('proof generation failed'));
 
@@ -206,7 +224,7 @@ describe('generate_proof', () => {
 
 describe('request_challenge', () => {
   it('calls requestChallenge with parsed JSON string inputs', async () => {
-    const mockChallenge = { nonce: '0xnonce', payTo: '0xrecipient', amount: 100000 };
+    const mockChallenge = { nonce: '0xnonce', teePublicKey: null };
     mockRequestChallenge.mockResolvedValue(mockChallenge);
 
     const inputsObj = { attestation: '0xabc', proof: '0xdef' };
@@ -303,6 +321,38 @@ describe('prepare_inputs', () => {
     });
   });
 
+  it('uses the local OIDC path for oidc_domain (no EAS, no signing)', async () => {
+    mockPrepareOidcPayload.mockResolvedValue({ jwt: 'x', jwks: {} });
+
+    const result = await callTool('prepare_inputs', {
+      circuit: 'oidc_domain',
+      scope: 'example.com',
+      jwt: 'header.payload.sig',
+      provider: 'google',
+    });
+
+    expect(mockPrepareOidcPayload).toHaveBeenCalledWith({
+      jwt: 'header.payload.sig',
+      scope: 'example.com',
+      provider: 'google',
+    });
+    // OIDC never touches the attestation wallet or the EAS input builder
+    expect(mockSigner.signMessage).not.toHaveBeenCalled();
+    expect(mockPrepareInputs).not.toHaveBeenCalled();
+    expect(result.isError).toBeUndefined();
+  });
+
+  it('rejects oidc_domain without a jwt', async () => {
+    const result = await callTool('prepare_inputs', {
+      circuit: 'oidc_domain',
+      scope: 'example.com',
+    });
+
+    expect(result.isError).toBe(true);
+    expect(parseToolResult(result).error).toBe('jwt is required for oidc_domain circuit');
+    expect(mockPrepareOidcPayload).not.toHaveBeenCalled();
+  });
+
   it('returns error on failure', async () => {
     mockPrepareInputs.mockRejectedValue(new Error('EAS query failed'));
 
@@ -316,71 +366,8 @@ describe('prepare_inputs', () => {
   });
 });
 
-describe('make_payment', () => {
-  it('calls makePayment with mockPaymentSigner and correct PaymentInfo', async () => {
-    mockMakePayment.mockResolvedValue('0xtxhash123');
-
-    const result = await callTool('make_payment', {
-      nonce: '0xpaymentnonce',
-      recipient: '0xrecipientaddr',
-      amount: 100000,
-      asset: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-      network: 'base-sepolia',
-      instruction: 'Pay $0.10 for proof generation',
-    });
-
-    expect(mockMakePayment).toHaveBeenCalledOnce();
-    const [signer, paymentInfo] = mockMakePayment.mock.calls[0];
-    expect(signer).toBe(mockPaymentSigner);
-    expect(paymentInfo).toEqual({
-      nonce: '0xpaymentnonce',
-      recipient: '0xrecipientaddr',
-      amount: 100000,
-      asset: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-      network: 'base-sepolia',
-      instruction: 'Pay $0.10 for proof generation',
-    });
-
-    const data = parseToolResult(result);
-    expect(data.tx_hash).toBe('0xtxhash123');
-  });
-
-  it('uses paymentSigner when available (not attestation signer)', async () => {
-    mockMakePayment.mockResolvedValue('0xtx');
-
-    await callTool('make_payment', {
-      nonce: '0x1',
-      recipient: '0xaddr',
-      amount: 100000,
-      asset: '0xusdc',
-      network: 'base-sepolia',
-      instruction: 'pay',
-    });
-
-    const [signer] = mockMakePayment.mock.calls[0];
-    expect(signer).toBe(mockPaymentSigner);
-  });
-
-  it('returns error on failure', async () => {
-    mockMakePayment.mockRejectedValue(new Error('insufficient USDC'));
-
-    const result = await callTool('make_payment', {
-      nonce: '0x1',
-      recipient: '0xaddr',
-      amount: 100000,
-      asset: '0xusdc',
-      network: 'base-sepolia',
-      instruction: 'pay',
-    });
-
-    expect(result.isError).toBe(true);
-    const data = parseToolResult(result);
-    expect(data.error).toBe('insufficient USDC');
-  });
-});
-
 describe('submit_proof', () => {
-  it('calls submitProof with correct circuit, inputs, payment info', async () => {
+  it('calls submitProof with circuit, inputs and the challenge nonce', async () => {
     const mockResult = { proof: '0xproof', publicInputs: '0xinputs' };
     mockSubmitProof.mockResolvedValue(mockResult);
 
@@ -388,19 +375,25 @@ describe('submit_proof', () => {
     const result = await callTool('submit_proof', {
       circuit: 'coinbase_kyc',
       inputs,
-      payment_tx_hash: '0xtxhash',
-      payment_nonce: '0xnonce',
+      nonce: '0xnonce',
     });
 
+    // The nonce MUST be forwarded: POST /api/v1/prove treats a request with no
+    // X-Payment-Nonce header as a fresh 402 challenge, so dropping it here makes
+    // the step-by-step flow incapable of ever returning a proof.
     expect(mockSubmitProof).toHaveBeenCalledWith(testConfig, {
       circuit: 'coinbase_kyc',
       inputs,
-      paymentTxHash: '0xtxhash',
-      paymentNonce: '0xnonce',
+      nonce: '0xnonce',
     });
 
     const data = parseToolResult(result);
     expect(data.proof).toBe('0xproof');
+  });
+
+  it('declares nonce in its input schema', () => {
+    const schema = toolHandlers['submit_proof'].schema as Record<string, unknown>;
+    expect(schema).toHaveProperty('nonce');
   });
 
   it('parses JSON string inputs', async () => {
@@ -410,12 +403,12 @@ describe('submit_proof', () => {
     await callTool('submit_proof', {
       circuit: 'coinbase_country',
       inputs: JSON.stringify(inputsObj),
-      payment_tx_hash: '0xtx',
-      payment_nonce: '0xnonce',
+      nonce: '0xnonce',
     });
 
     const passedArgs = mockSubmitProof.mock.calls[0][1];
     expect(passedArgs.inputs).toEqual(inputsObj);
+    expect(passedArgs.nonce).toBe('0xnonce');
   });
 
   it('returns error on failure', async () => {
@@ -424,8 +417,7 @@ describe('submit_proof', () => {
     const result = await callTool('submit_proof', {
       circuit: 'coinbase_kyc',
       inputs: '{}',
-      payment_tx_hash: '0x1',
-      payment_nonce: '0x2',
+      nonce: '0xnonce',
     });
 
     expect(result.isError).toBe(true);
@@ -435,19 +427,30 @@ describe('submit_proof', () => {
 });
 
 describe('verify_proof', () => {
-  it('calls verifyProof with verification info', async () => {
-    mockVerifyOnChain.mockResolvedValue({ valid: true });
+  // verify_proof takes the whole generate_proof result object (33f7923) —
+  // verifierAddress / chainId / rpcUrl are read out of result.verification
+  // rather than passed as five separate arguments.
+  const proofResult = {
+    circuit: 'coinbase_attestation',
+    proofType: 'ultra_honk',
+    proof: '0xproofbytes',
+    publicInputs: '0xinputs',
+    verification: {
+      verifierAddress: '0x0036B61dBFaB8f3CfEEF77dD5D45F7EFBFE2035c',
+      chainId: 84532,
+      rpcUrl: 'https://sepolia.base.org',
+    },
+  };
 
-    await callTool('verify_proof', {
-      proof: '0xproofbytes',
-      public_inputs: '0xinputs',
-      verifier_address: '0x0036B61dBFaB8f3CfEEF77dD5D45F7EFBFE2035c',
-      chain_id: 84532,
-      rpc_url: 'https://sepolia.base.org',
-    });
+  it('calls verifyProof with verification info from the result object', async () => {
+    mockVerifyProof.mockResolvedValue({ valid: true });
 
-    expect(mockVerifyOnChain).toHaveBeenCalledOnce();
-    const passedArg = mockVerifyOnChain.mock.calls[0][0];
+    await callTool('verify_proof', { result: proofResult });
+
+    expect(mockVerifyProof).toHaveBeenCalledOnce();
+    const passedArg = mockVerifyProof.mock.calls[0][0];
+    expect(passedArg.circuit).toBe('coinbase_attestation');
+    expect(passedArg.proofType).toBe('ultra_honk');
     expect(passedArg.verification.chainId).toBe(84532);
     expect(passedArg.verification.verifierAddress).toBe('0x0036B61dBFaB8f3CfEEF77dD5D45F7EFBFE2035c');
     expect(passedArg.verification.rpcUrl).toBe('https://sepolia.base.org');
@@ -456,30 +459,18 @@ describe('verify_proof', () => {
   });
 
   it('returns verification result', async () => {
-    mockVerifyOnChain.mockResolvedValue({ valid: true });
+    mockVerifyProof.mockResolvedValue({ valid: true });
 
-    const result = await callTool('verify_proof', {
-      proof: '0xproof',
-      public_inputs: '0xinputs',
-      verifier_address: '0xaddr',
-      chain_id: 84532,
-      rpc_url: 'https://sepolia.base.org',
-    });
+    const result = await callTool('verify_proof', { result: proofResult });
 
     const data = parseToolResult(result);
     expect(data.valid).toBe(true);
   });
 
   it('returns error on failure', async () => {
-    mockVerifyOnChain.mockRejectedValue(new Error('contract call reverted'));
+    mockVerifyProof.mockRejectedValue(new Error('contract call reverted'));
 
-    const result = await callTool('verify_proof', {
-      proof: '0xproof',
-      public_inputs: '0xinputs',
-      verifier_address: '0xaddr',
-      chain_id: 84532,
-      rpc_url: 'https://sepolia.base.org',
-    });
+    const result = await callTool('verify_proof', { result: proofResult });
 
     expect(result.isError).toBe(true);
     const data = parseToolResult(result);
@@ -488,7 +479,7 @@ describe('verify_proof', () => {
 });
 
 describe('proofport://config resource', () => {
-  it('returns config with wallet addresses and supported circuits', async () => {
+  it('returns config with the attestation wallet address and supported circuits', async () => {
     const result = await callResource('config');
 
     expect(result.contents).toHaveLength(1);
@@ -498,7 +489,8 @@ describe('proofport://config resource', () => {
     const data = JSON.parse(result.contents[0].text);
     expect(data.baseUrl).toBe(testConfig.baseUrl);
     expect(data.attestationWalletAddress).toBe('0xMockAttestationAddress');
-    expect(data.paymentWalletAddress).toBe('0xMockPaymentAddress');
+    // No payment wallet exists any more — the resource must not advertise one.
+    expect(data).not.toHaveProperty('paymentWalletAddress');
     expect(data.supportedCircuits).toBeDefined();
     expect(data.supportedCircuits.coinbase_attestation).toBeDefined();
   });

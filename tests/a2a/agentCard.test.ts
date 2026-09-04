@@ -191,26 +191,39 @@ describe('A2A Agent Card', () => {
       expect((card as any).securitySchemes.x402).toBeDefined();
     });
 
-    it('should use sepolia ERC-8004 address for development', async () => {
+    // Chain selection is driven by chainRpcUrl, NOT by paymentMode — see the
+    // isTestnet()/isProductionChain() pair in src/config/index.ts. The advertised
+    // chainId is the verification chain (Ethereum), not the payment chain (Base).
+    it('should use sepolia ERC-8004 address for a testnet RPC', async () => {
       const { buildAgentCard } = await import('../../src/a2a/agentCard');
-      mockConfig.nodeEnv = 'development';
+      mockConfig.chainRpcUrl = 'https://sepolia.base.org';
       const card = buildAgentCard(mockConfig);
 
       expect(card.identity).toBeDefined();
       expect(card.identity.erc8004).toBeDefined();
       expect(card.identity.erc8004.contractAddress).toBe(ERC8004_ADDRESSES.sepolia.identity);
-      expect(card.identity.erc8004.chainId).toBe(84532); // Base Sepolia
+      expect(card.identity.erc8004.chainId).toBe(11155111); // Ethereum Sepolia
       expect(card.identity.erc8004.tokenId).toBe(null);
     });
 
-    it('should use mainnet ERC-8004 address for production', async () => {
+    it('should use mainnet ERC-8004 address for a production RPC', async () => {
       const { buildAgentCard } = await import('../../src/a2a/agentCard');
-      mockConfig.paymentMode = 'mainnet';
+      mockConfig.chainRpcUrl = 'https://mainnet.base.org';
       const card = buildAgentCard(mockConfig);
 
       expect(card.identity.erc8004.contractAddress).toBe(ERC8004_ADDRESSES.mainnet.identity);
-      expect(card.identity.erc8004.chainId).toBe(8453); // Base Mainnet
+      expect(card.identity.erc8004.chainId).toBe(1); // Ethereum Mainnet
       expect(card.identity.erc8004.tokenId).toBe(null);
+    });
+
+    it('should ignore paymentMode when selecting the identity chain', async () => {
+      const { buildAgentCard } = await import('../../src/a2a/agentCard');
+      mockConfig.chainRpcUrl = 'https://sepolia.base.org';
+      mockConfig.paymentMode = 'mainnet';
+      const card = buildAgentCard(mockConfig);
+
+      expect(card.identity.erc8004.contractAddress).toBe(ERC8004_ADDRESSES.sepolia.identity);
+      expect(card.identity.erc8004.chainId).toBe(11155111);
     });
 
     it('should have proper description mentioning ZK proof and Coinbase', async () => {
@@ -225,9 +238,13 @@ describe('A2A Agent Card', () => {
   });
 
   describe('getAgentCardHandler', () => {
+    // The handler takes a TokenIdRef — { chains: Map<chainId, tokenId> } — which
+    // startServer() fills in per chain once ERC-8004 registration completes.
+    const noTokenIds = () => ({ chains: new Map<number, bigint>() });
+
     it('should return an Express request handler', async () => {
       const { getAgentCardHandler } = await import('../../src/a2a/agentCard');
-      const handler = getAgentCardHandler(mockConfig, { value: null });
+      const handler = getAgentCardHandler(mockConfig, noTokenIds());
 
       expect(handler).toBeDefined();
       expect(typeof handler).toBe('function');
@@ -235,7 +252,7 @@ describe('A2A Agent Card', () => {
 
     it('should set Content-Type to application/json', async () => {
       const { getAgentCardHandler } = await import('../../src/a2a/agentCard');
-      const handler = getAgentCardHandler(mockConfig, { value: null });
+      const handler = getAgentCardHandler(mockConfig, noTokenIds());
 
       const mockReq = {};
       const mockRes = {
@@ -250,7 +267,7 @@ describe('A2A Agent Card', () => {
 
     it('should respond with the agent card JSON', async () => {
       const { getAgentCardHandler, buildAgentCard } = await import('../../src/a2a/agentCard');
-      const handler = getAgentCardHandler(mockConfig, { value: null });
+      const handler = getAgentCardHandler(mockConfig, noTokenIds());
 
       const mockReq = {};
       const mockRes = {
@@ -266,7 +283,7 @@ describe('A2A Agent Card', () => {
 
     it('should produce valid JSON-serializable output', async () => {
       const { getAgentCardHandler } = await import('../../src/a2a/agentCard');
-      const handler = getAgentCardHandler(mockConfig, { value: null });
+      const handler = getAgentCardHandler(mockConfig, noTokenIds());
 
       const mockReq = {};
       let capturedResponse: any;
@@ -283,6 +300,34 @@ describe('A2A Agent Card', () => {
       expect(() => JSON.stringify(capturedResponse)).not.toThrow();
       const parsed = JSON.parse(JSON.stringify(capturedResponse));
       expect(parsed).toEqual(capturedResponse);
+    });
+
+    it('should serve the tokenId registered for the identity chain', async () => {
+      const { getAgentCardHandler } = await import('../../src/a2a/agentCard');
+      mockConfig.chainRpcUrl = 'https://sepolia.base.org';
+      // 11155111 is the identity chain; 84532 is the payment chain and must not
+      // be read here, or the card would advertise a Base tokenId as an Ethereum one.
+      const handler = getAgentCardHandler(mockConfig, {
+        chains: new Map<number, bigint>([[11155111, 123456n], [84532, 999n]]),
+      });
+
+      let capturedResponse: any;
+      await handler({}, { setHeader: vi.fn(), json: vi.fn((data) => { capturedResponse = data; }) });
+
+      expect(capturedResponse.identity.erc8004.tokenId).toBe('123456');
+    });
+
+    it('should serve a null tokenId when the identity chain has no registration', async () => {
+      const { getAgentCardHandler } = await import('../../src/a2a/agentCard');
+      mockConfig.chainRpcUrl = 'https://sepolia.base.org';
+      const handler = getAgentCardHandler(mockConfig, {
+        chains: new Map<number, bigint>([[84532, 999n]]),
+      });
+
+      let capturedResponse: any;
+      await handler({}, { setHeader: vi.fn(), json: vi.fn((data) => { capturedResponse = data; }) });
+
+      expect(capturedResponse.identity.erc8004.tokenId).toBe(null);
     });
   });
 });

@@ -6,10 +6,13 @@
  *
  * Prerequisites:
  *   - Backend running at E2E_BASE_URL (default: http://localhost:4002)
- *   - .env.test with ATTESTATION_KEY, E2E_PAYER_WALLET_KEY
- *   - For OIDC: E2E_OIDC_JWT
+ *   - .env.test with ATTESTATION_KEY
+ *   - For OIDC: E2E_OIDC_JWT (or a usable `gcloud auth print-identity-token`)
  *
- * Run: npx vitest run tests/e2e/circuits.test.ts
+ * With no backend reachable the whole suite is skipped at collection time —
+ * see the probe below.
+ *
+ * Run: npx vitest run --project e2e
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -36,31 +39,56 @@ try {
 
 const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:4002';
 const ATTESTATION_KEY = process.env.ATTESTATION_KEY;
-const PAYER_KEY = process.env.E2E_PAYER_WALLET_KEY;
 
-// Auto-generate OIDC JWT via gcloud CLI if not provided
+// Auto-generate OIDC JWT via gcloud CLI if not provided.
+// stderr is piped, not inherited: an unauthenticated gcloud otherwise dumps its
+// reauth instructions into the test output on every run.
 function getOidcJwt(): string | undefined {
   if (process.env.E2E_OIDC_JWT) return process.env.E2E_OIDC_JWT;
   try {
-    return execSync('gcloud auth print-identity-token', { encoding: 'utf-8' }).trim();
+    return execSync('gcloud auth print-identity-token', {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
   } catch {
     return undefined;
   }
 }
 const OIDC_JWT = getOidcJwt();
 
-describe('MCP E2E — All Circuits (local source)', () => {
+/**
+ * Probe the backend once, at collection time.
+ *
+ * This used to live in `beforeAll` as `expect(res.ok).toBe(true)`. A throwing
+ * beforeAll marks every test in the suite as skipped but reports the FILE as
+ * failed, so a machine with no backend (or with E2E_BASE_URL pointing at the
+ * paused staging host) could never get a green run. Deciding before the suite
+ * is declared lets vitest skip it outright.
+ */
+async function backendReachable(url: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(5_000) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+const SKIP_REASON = !ATTESTATION_KEY
+  ? 'ATTESTATION_KEY is not set (see .env.test)'
+  : (await backendReachable(BASE_URL))
+    ? ''
+    : `no backend answering GET ${BASE_URL}/health`;
+
+if (SKIP_REASON) {
+  console.warn(`[mcp e2e] skipping MCP E2E suite: ${SKIP_REASON}`);
+}
+
+describe.skipIf(SKIP_REASON !== '')('MCP E2E — All Circuits (local source)', () => {
   let client: Client;
   let transport: StdioClientTransport;
 
   beforeAll(async () => {
-    if (!ATTESTATION_KEY) throw new Error('ATTESTATION_KEY required in .env.test');
-    if (!PAYER_KEY) throw new Error('E2E_PAYER_WALLET_KEY required in .env.test');
-
-    // Health check
-    const res = await fetch(`${BASE_URL}/health`);
-    expect(res.ok).toBe(true);
-
     // Spawn MCP server using local tsx
     transport = new StdioClientTransport({
       command: 'npx',
@@ -69,7 +97,6 @@ describe('MCP E2E — All Circuits (local source)', () => {
         ...process.env,
         PROOFPORT_URL: BASE_URL,
         ATTESTATION_KEY: ATTESTATION_KEY!,
-        PAYMENT_KEY: PAYER_KEY!,
       },
     });
 
@@ -108,7 +135,9 @@ describe('MCP E2E — All Circuits (local source)', () => {
     expect(data.proof).toBeTruthy();
     expect(data.proof.startsWith('0x')).toBe(true);
     expect(data.publicInputs).toBeTruthy();
-    expect(data.paymentTxHash).toBeDefined();
+    // No paymentTxHash assertion: payment was removed from the SDK flow in
+    // ee1c09d and ProofResult no longer carries one.
+    expect(data.verification).toBeTruthy();
   }, 120_000);
 
   it('generate_proof coinbase_country: should generate proof end-to-end', async () => {

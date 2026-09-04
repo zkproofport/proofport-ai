@@ -116,7 +116,7 @@ RETURNS: Full ProofResult with proof bytes, public inputs, and timing informatio
   // ─── request_challenge ──────────────────────────────────────────────
   server.tool(
     'request_challenge',
-    `Step 2 of the step-by-step flow (after prepare_inputs): Request a challenge from the server. Sends circuit + inputs to POST /api/v1/prove. Server returns nonce and TEE key information. You MUST call prepare_inputs first to get the inputs parameter.`,
+    `Step 2 of the step-by-step flow (after prepare_inputs): Request a challenge from the server. Sends circuit + inputs to POST /api/v1/prove. Server returns nonce and TEE key information. You MUST call prepare_inputs first to get the inputs parameter, and you MUST pass the returned "nonce" to submit_proof — without it the server just issues another challenge.`,
     {
       circuit: z
         .enum(['coinbase_kyc', 'coinbase_country', 'oidc_domain'])
@@ -213,7 +213,9 @@ RETURNS: Full ProofResult with proof bytes, public inputs, and timing informatio
   // ─── submit_proof ───────────────────────────────────────────────────
   server.tool(
     'submit_proof',
-    `Step 3 of the step-by-step flow: Submit prepared inputs to generate the ZK proof. The TEE server runs the Noir circuit and returns the UltraHonk proof. This step may take 30-90 seconds. The TEE server builds Prover.toml from these inputs.`,
+    `Step 3 of the step-by-step flow: Submit prepared inputs to generate the ZK proof. The TEE server runs the Noir circuit and returns the UltraHonk proof. This step may take 30-90 seconds. The TEE server builds Prover.toml from these inputs.
+
+You MUST pass the nonce returned by request_challenge. POST /api/v1/prove answers every request that arrives without that nonce with a fresh 402 challenge, so a submission that omits it can never produce a proof.`,
     {
       circuit: z
         .enum(['coinbase_kyc', 'coinbase_country', 'oidc_domain'])
@@ -222,6 +224,11 @@ RETURNS: Full ProofResult with proof bytes, public inputs, and timing informatio
         .union([z.string(), z.record(z.unknown())])
         .describe(
           'Full ProveInputs object from prepare_inputs. Accepts a JSON string or a structured object.',
+        ),
+      nonce: z
+        .string()
+        .describe(
+          'The "nonce" field from the request_challenge response. Single-use and bound to the circuit it was issued for — request a new challenge for every submission and for every circuit.',
         ),
     },
     async (params) => {
@@ -234,6 +241,7 @@ RETURNS: Full ProofResult with proof bytes, public inputs, and timing informatio
         const result = await submitProof(config, {
           circuit: params.circuit,
           inputs,
+          nonce: params.nonce,
         });
 
         return jsonResult(result);

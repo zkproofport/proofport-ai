@@ -135,7 +135,8 @@ vi.mock('../../src/circuit/artifactManager.js', () => ({
 }));
 
 vi.mock('../../src/identity/autoRegister.js', () => ({
-  ensureAgentRegistered: vi.fn().mockResolvedValue(123456n),
+  // Resolves to Map<chainId, tokenId> — one entry per chain registered on.
+  ensureAgentRegistered: vi.fn().mockResolvedValue(new Map([[11155111, 123456n]])),
 }));
 
 vi.mock('../../src/identity/reputation.js', () => ({
@@ -247,7 +248,10 @@ describe('MCP SDK Client Integration', () => {
 
     // Create app with correct config
     const config = makeTestConfig({ a2aBaseUrl: `http://localhost:${port}` });
-    const { app } = createApp(config, 123456n);
+    // createApp takes only the config; tokenIds arrive afterwards on the returned
+    // TokenIdRef, the way startServer() feeds them in after registration.
+    const { app, tokenIdRef } = createApp(config);
+    tokenIdRef.chains.set(11155111, 123456n);
 
     // Start real HTTP server
     server = await new Promise<Server>((resolve) => {

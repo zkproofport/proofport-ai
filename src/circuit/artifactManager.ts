@@ -1,12 +1,29 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
+import { CIRCUIT_IDS } from '../config/circuitIds.js';
+import type { CircuitId } from '../config/circuitIds.js';
 
-// Circuit metadata mapping
-const CIRCUIT_META: Record<string, { repoDir: string; packageName: string }> = {
-  coinbase_attestation: { repoDir: 'coinbase-attestation', packageName: 'coinbase_attestation' },
-  coinbase_country_attestation: { repoDir: 'coinbase-country-attestation', packageName: 'coinbase_country_attestation' },
-  oidc_domain_attestation: { repoDir: 'oidc-domain-attestation', packageName: 'oidc_domain_attestation' },
+/**
+ * Where each circuit's artifacts live in the `zkproofport/circuits` repo.
+ *
+ * `repoDir` is a directory name and uses hyphens; `packageName` is the circuit's
+ * canonical id and uses underscores. They are different strings on purpose —
+ * only `packageName` is an identifier, and it comes from `CIRCUIT_IDS`.
+ */
+const CIRCUIT_META: Record<CircuitId, { repoDir: string; packageName: CircuitId }> = {
+  [CIRCUIT_IDS.COINBASE_ATTESTATION]: {
+    repoDir: 'coinbase-attestation',
+    packageName: CIRCUIT_IDS.COINBASE_ATTESTATION,
+  },
+  [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: {
+    repoDir: 'coinbase-country-attestation',
+    packageName: CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION,
+  },
+  [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: {
+    repoDir: 'oidc-domain-attestation',
+    packageName: CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION,
+  },
 };
 
 const DEFAULT_REPO_BASE_URL = 'https://raw.githubusercontent.com/zkproofport/circuits/main';

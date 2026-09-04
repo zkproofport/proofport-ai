@@ -6,6 +6,12 @@
  */
 
 import type { CircuitParams } from '../input/inputBuilder.js';
+import { CIRCUIT_IDS } from '../config/circuitIds.js';
+
+/** The two coinbase circuits, which share an input shape. */
+type CoinbaseCircuitId =
+  | typeof CIRCUIT_IDS.COINBASE_ATTESTATION
+  | typeof CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION;
 
 // ─── OIDC Circuit Inputs ────────────────────────────────────────────────
 
@@ -107,7 +113,7 @@ function formatCountryListArray(countries: string[], maxEntries: number): string
  * Field names match the circuit's main() parameter names exactly.
  */
 export function formatCoinbaseInputs(
-  circuitId: 'coinbase_attestation' | 'coinbase_country_attestation',
+  circuitId: CoinbaseCircuitId,
   params: CircuitParams,
 ): Record<string, unknown> {
   const inputs: Record<string, unknown> = {};
@@ -115,7 +121,7 @@ export function formatCoinbaseInputs(
   inputs.signal_hash = toHexArray(params.signalHash);
   inputs.signer_list_merkle_root = toHexArray(hexStringToBytes(params.merkleRoot));
 
-  if (circuitId === 'coinbase_country_attestation') {
+  if (circuitId === CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION) {
     if (!params.countryList || params.countryListLength === undefined || params.isIncluded === undefined) {
       throw new Error('countryList, countryListLength, and isIncluded are required for coinbase_country_attestation');
     }

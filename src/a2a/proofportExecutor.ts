@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { createLogger } from '../logger.js';
+import { CIRCUIT_IDS } from '../config/circuitIds.js';
 
 const log = createLogger('A2A');
 import type { AgentExecutor, RequestContext, ExecutionEventBus } from '@a2a-js/sdk/server';
@@ -239,8 +240,8 @@ export class ProofportExecutor implements AgentExecutor {
         case 'get_supported_circuits': {
           const circuitsResult = handleGetSupportedCircuits(skillParams as any, this.deps.config.paymentMode);
           const aliasMap: Record<string, string> = {
-            coinbase_attestation: 'coinbase_kyc',
-            coinbase_country_attestation: 'coinbase_country',
+            [CIRCUIT_IDS.COINBASE_ATTESTATION]: 'coinbase_kyc',
+            [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: 'coinbase_country',
           };
           result = {
             ...circuitsResult,
@@ -254,8 +255,8 @@ export class ProofportExecutor implements AgentExecutor {
         case 'get_guide': {
           const circuitAlias = (skillParams as any).circuit || 'coinbase_kyc';
           const circuitIdMap: Record<string, string> = {
-            coinbase_kyc: 'coinbase_attestation',
-            coinbase_country: 'coinbase_country_attestation',
+            coinbase_kyc: CIRCUIT_IDS.COINBASE_ATTESTATION,
+            coinbase_country: CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION,
           };
           const circuitId = circuitIdMap[circuitAlias] || circuitAlias;
           const { buildGuide } = await import('../proof/guideBuilder.js');

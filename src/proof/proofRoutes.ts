@@ -2,7 +2,8 @@ import { Router, type Request, type Response } from 'express';
 import type { RedisClient } from '../redis/client.js';
 import type { Config } from '../config/index.js';
 import type { TeeProvider } from '../tee/types.js';
-import type { CircuitId } from '../config/circuits.js';
+import { CIRCUIT_IDS } from '../config/circuitIds.js';
+import type { CircuitId } from '../config/circuitIds.js';
 import { verifyPaymentOnChain } from './paymentVerifier.js';
 import { BbProver } from '../prover/bbProver.js';
 import { hexToBytes } from '../input/inputBuilder.js';
@@ -19,16 +20,18 @@ import type {
 
 const log = createLogger('ProofRoutes');
 
-// Map client-friendly circuit names to canonical IDs
+// Map client-friendly circuit names to canonical IDs.
+// The canonical ids come from config/circuitIds.ts; only the friendly aliases
+// on the left are this route's own vocabulary.
 const CIRCUIT_MAP: Record<string, CircuitId> = {
-  'coinbase_kyc': 'coinbase_attestation',
-  'coinbase_country': 'coinbase_country_attestation',
+  'coinbase_kyc': CIRCUIT_IDS.COINBASE_ATTESTATION,
+  'coinbase_country': CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION,
   // Also accept canonical IDs directly
-  'coinbase_attestation': 'coinbase_attestation',
-  'coinbase_country_attestation': 'coinbase_country_attestation',
+  [CIRCUIT_IDS.COINBASE_ATTESTATION]: CIRCUIT_IDS.COINBASE_ATTESTATION,
+  [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION,
   // OIDC Domain
-  'oidc_domain': 'oidc_domain_attestation',
-  'oidc_domain_attestation': 'oidc_domain_attestation',
+  'oidc_domain': CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION,
+  [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION,
 };
 
 export interface ProofRoutesDeps {
@@ -61,7 +64,7 @@ async function generateProofFromInputs(
   res: Response,
 ): Promise<void> {
   const { circuitId, inputs, paymentVerifyMs, startTime, requestId } = ctx;
-  const isOidc = circuitId === 'oidc_domain_attestation';
+  const isOidc = circuitId === CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION;
 
   // ── Build structured inputs for the prover ──
   // Server is a BLIND RELAY: validates minimally, passes inputs as-is to TEE/bbProver.
@@ -86,7 +89,7 @@ async function generateProofFromInputs(
       return;
     }
 
-    if (circuitId === 'coinbase_country_attestation') {
+    if (circuitId === CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION) {
       if (!cb.country_list || cb.country_list.length === 0) {
         res.status(400).json({ error: 'INVALID_REQUEST', message: 'country_list required for country circuit' });
         return;
@@ -114,7 +117,7 @@ async function generateProofFromInputs(
       merkleProof: cb.merkle_proof,
       merkleLeafIndex: cb.leaf_index,
       merkleDepth: cb.depth,
-      ...(circuitId === 'coinbase_country_attestation' && {
+      ...(circuitId === CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION && {
         countryList: cb.country_list,
         countryListLength: (cb.country_list || []).length,
         isIncluded: cb.is_included,
@@ -188,10 +191,10 @@ async function generateProofFromInputs(
   }
 
   // Derive proofType from circuit + provider
-  let proofType: string = ctx.circuitId === 'coinbase_attestation' ? 'kyc'
-    : ctx.circuitId === 'coinbase_country_attestation' ? 'country'
+  let proofType: string = ctx.circuitId === CIRCUIT_IDS.COINBASE_ATTESTATION ? 'kyc'
+    : ctx.circuitId === CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION ? 'country'
     : 'google_login';
-  if (ctx.circuitId === 'oidc_domain_attestation') {
+  if (ctx.circuitId === CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION) {
     const oidcInputs = ctx.inputs as { provider?: string };
     if (oidcInputs.provider === 'google') proofType = 'google_workspace';
     else if (oidcInputs.provider === 'microsoft') proofType = 'microsoft_365';
@@ -444,8 +447,8 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
         const e2eChainId = isTestnet ? 11155111 : 1;
         const e2eVerifierAddress = getVerifierAddress(circuitId, String(e2eChainId)) || null;
 
-        const e2eProofType: string = circuitId === 'coinbase_attestation' ? 'kyc'
-          : circuitId === 'coinbase_country_attestation' ? 'country'
+        const e2eProofType: string = circuitId === CIRCUIT_IDS.COINBASE_ATTESTATION ? 'kyc'
+          : circuitId === CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION ? 'country'
           : 'google_login';
 
         const response: ProveResponse = {

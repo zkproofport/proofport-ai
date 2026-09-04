@@ -3,11 +3,13 @@
  * Tests the full HTTP endpoint flow for MCP (POST /mcp)
  */
 
-import { describe, it, expect, vi, beforeEach, type MockInstance } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, type MockInstance } from 'vitest';
 import request from 'supertest';
+import http, { type Server } from 'http';
 import { createApp } from '../../src/index.js';
 import type { Config } from '../../src/config/index.js';
 import { loadConfig } from '../../src/config/index.js';
+import { FALLBACK_VERIFIERS } from '../../src/config/contracts.js';
 
 // ─── Mock modules ─────────────────────────────────────────────────────────
 
@@ -112,8 +114,15 @@ vi.mock('ethers', () => ({
   },
 }));
 
-// Mock loadConfig — MCP tool handlers call loadConfig() internally
-vi.mock('../../src/config/index.js', () => ({
+// Mock loadConfig — MCP tool handlers call loadConfig() internally, and there
+// is no real environment here for it to read.
+//
+// This MUST stay a PARTIAL mock. A whole-module factory silently replaces every
+// other export with undefined, so the next helper added to src/config (that was
+// getChainId, reached via buildMcpDiscovery → createApp) takes down the entire
+// file from beforeEach with a mock-export error rather than a test failure.
+vi.mock('../../src/config/index.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/config/index.js')>()),
   loadConfig: vi.fn(() => ({
     port: 4002,
     nodeEnv: 'test',
@@ -194,7 +203,31 @@ vi.mock('../../src/config/contracts.js', async () => {
 // ─── Test suite ───────────────────────────────────────────────────────────
 
 describe('MCP Endpoint E2E', () => {
+  // ONE listening server for the whole file, forwarding to whatever app the
+  // current test built.
+  //
+  // Handing supertest a bare Express app makes it create, listen(0) and close a
+  // fresh ephemeral server for EVERY request. Across this project — which runs
+  // test files in parallel — that churn intermittently produced `socket hang
+  // up` / connection resets. Measured on this tree: 2 of 40 full unit runs
+  // failed that way, one of them here on GET /.well-known/mcp.json.
+  //
+  // Forwarding keeps the per-test app (and so the existing isolation) while
+  // supertest sees an already-listening address and never creates or closes a
+  // server of its own.
+  let server: Server;
   let app: any;
+
+  beforeAll(async () => {
+    server = await new Promise<Server>((resolve) => {
+      const s = http.createServer((req, res) => app(req, res));
+      s.listen(0, () => resolve(s));
+    });
+  });
+
+  afterAll(async () => {
+    if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
 
   beforeEach(() => {
     const testConfig: Config = {
@@ -239,7 +272,7 @@ describe('MCP Endpoint E2E', () => {
 
   describe('POST /mcp', () => {
     it('should handle MCP initialize request', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/mcp')
         .set('Accept', 'application/json, text/event-stream')
         .send({
@@ -275,7 +308,7 @@ describe('MCP Endpoint E2E', () => {
     });
 
     it('should handle tools/list request', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/mcp')
         .set('Accept', 'application/json, text/event-stream')
         .send({
@@ -318,7 +351,7 @@ describe('MCP Endpoint E2E', () => {
     });
 
     it('should reject malformed MCP request (invalid JSON-RPC)', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/mcp')
         .set('Accept', 'application/json, text/event-stream')
         .send({
@@ -333,7 +366,7 @@ describe('MCP Endpoint E2E', () => {
     });
 
     it('should reject invalid method', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/mcp')
         .set('Accept', 'application/json, text/event-stream')
         .send({
@@ -356,7 +389,7 @@ describe('MCP Endpoint E2E', () => {
     });
 
     it('should handle tools/call for get_supported_circuits', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/mcp')
         .set('Accept', 'application/json, text/event-stream')
         .send({
@@ -386,10 +419,43 @@ describe('MCP Endpoint E2E', () => {
       });
     });
 
+    // Regression guard. This tool used to derive its chain from `deps.paymentMode`
+    // — a dep createApp() never sets — so it silently fell back to the 'testnet'
+    // default and returned Ethereum Sepolia (11155111) verifier addresses on
+    // every deployment, production included, while its own description text
+    // advertised the real chain. An agent following the payload would have
+    // verified production proofs against a testnet contract.
+    //
+    // testConfig.chainRpcUrl is not a sepolia URL, so this environment is a
+    // production one and getChainId() is 1 (Ethereum Mainnet).
+    it('should report the config chain in get_supported_circuits, not a testnet default', async () => {
+      const response = await request(server)
+        .post('/mcp')
+        .set('Accept', 'application/json, text/event-stream')
+        .send({
+          jsonrpc: '2.0',
+          id: 33,
+          method: 'tools/call',
+          params: { name: 'get_supported_circuits', arguments: {} },
+        });
+
+      expect(response.status).toBe(200);
+      // content[0] is human guidance; content[1] is the JSON payload agents parse.
+      const payload = JSON.parse(response.body.result.content[1].text);
+
+      expect(payload.chainId).toBe('1');
+      expect(payload.chainId).not.toBe('11155111');
+
+      // ...and the addresses must be that chain's, not another's.
+      const kyc = payload.circuits.find((c: any) => c.id === 'coinbase_attestation');
+      expect(kyc.verifierAddress).toBe(FALLBACK_VERIFIERS['1']['coinbase_attestation']);
+      expect(kyc.verifierAddress).not.toBe(FALLBACK_VERIFIERS['11155111']['coinbase_attestation']);
+    });
+
     it('should handle tools/call for unknown tool (verify_proof does not exist in remote MCP)', async () => {
       // verify_proof is only in the local MCP server (packages/mcp), not the remote MCP server.
       // The remote MCP server only has: prove, get_supported_circuits.
-      const response = await request(app)
+      const response = await request(server)
         .post('/mcp')
         .set('Accept', 'application/json, text/event-stream')
         .send({
@@ -428,7 +494,7 @@ describe('MCP Endpoint E2E', () => {
 
     it('should handle tools/call for prove — returns REST endpoint redirect message', async () => {
       // The prove tool redirects to the REST endpoint due to MCP timeout limitations
-      const response = await request(app)
+      const response = await request(server)
         .post('/mcp')
         .set('Accept', 'application/json, text/event-stream')
         .send({
@@ -485,7 +551,7 @@ describe('MCP Endpoint E2E', () => {
     });
 
     it('should handle tools/call for unknown tool', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/mcp')
         .set('Accept', 'application/json, text/event-stream')
         .send({
@@ -524,7 +590,7 @@ describe('MCP Endpoint E2E', () => {
 
   describe('GET /mcp', () => {
     it('should return 200 with MCP info JSON for GET /mcp', async () => {
-      const response = await request(app).get('/mcp');
+      const response = await request(server).get('/mcp');
 
       expect(response.status).toBe(200);
       expect(response.headers['content-type']).toMatch(/application\/json/);
@@ -538,7 +604,7 @@ describe('MCP Endpoint E2E', () => {
 
   describe('DELETE /mcp', () => {
     it('should return 405 for DELETE /mcp', async () => {
-      const response = await request(app).delete('/mcp');
+      const response = await request(server).delete('/mcp');
 
       expect(response.status).toBe(405);
       expect(response.body).toMatchObject({
@@ -549,7 +615,7 @@ describe('MCP Endpoint E2E', () => {
 
   describe('MCP Discovery', () => {
     it('GET /.well-known/mcp.json should return MCP discovery', async () => {
-      const response = await request(app).get('/.well-known/mcp.json');
+      const response = await request(server).get('/.well-known/mcp.json');
 
       expect(response.status).toBe(200);
       expect(response.headers['content-type']).toMatch(/application\/json/);
@@ -573,7 +639,7 @@ describe('MCP Endpoint E2E', () => {
 
   describe('prompts/list', () => {
     it('should handle prompts/list request and include proof_generation_flow prompt', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/mcp')
         .set('Accept', 'application/json, text/event-stream')
         .send({
@@ -598,7 +664,7 @@ describe('MCP Endpoint E2E', () => {
     });
 
     it('should return proof_generation_flow prompt content via prompts/get', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/mcp')
         .set('Accept', 'application/json, text/event-stream')
         .send({
@@ -626,7 +692,7 @@ describe('MCP Endpoint E2E', () => {
 
   describe('tools/list — inputSchema structure validation', () => {
     it('should have correct inputSchema structure for each tool', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/mcp')
         .set('Accept', 'application/json, text/event-stream')
         .send({

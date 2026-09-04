@@ -1,23 +1,33 @@
 // ─── Circuit name mappings ──────────────────────────────────────────────
 
+import { CIRCUIT_IDS, PROVABLE_CIRCUIT_IDS } from './circuits.js';
+
 /** Client-friendly circuit aliases. */
 export type CircuitName = 'coinbase_kyc' | 'coinbase_country' | 'oidc_domain';
 
-/** Canonical circuit IDs matching Nargo.toml names. */
-export type CircuitId = 'coinbase_attestation' | 'coinbase_country_attestation' | 'oidc_domain_attestation';
+/**
+ * Canonical circuit IDs this server can prove.
+ *
+ * Derived from `PROVABLE_CIRCUIT_IDS` in `./circuits.js`, which is itself built
+ * from the canonical identifiers owned by `@zkproofport-app/sdk/circuits`. The
+ * union is unchanged — the three names are no longer typed out here, so a
+ * rename in the customer SDK becomes a compile error instead of a silent
+ * divergence.
+ */
+export type CircuitId = (typeof PROVABLE_CIRCUIT_IDS)[number];
 
 /** Map client-friendly names to canonical circuit IDs. */
 export const CIRCUIT_NAME_MAP: Record<CircuitName, CircuitId> = {
-  coinbase_kyc: 'coinbase_attestation',
-  coinbase_country: 'coinbase_country_attestation',
-  oidc_domain: 'oidc_domain_attestation',
+  coinbase_kyc: CIRCUIT_IDS.COINBASE_ATTESTATION,
+  coinbase_country: CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION,
+  oidc_domain: CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION,
 };
 
 /** Map canonical circuit IDs back to client-friendly names. */
 export const CIRCUIT_ID_MAP: Record<CircuitId, CircuitName> = {
-  coinbase_attestation: 'coinbase_kyc',
-  coinbase_country_attestation: 'coinbase_country',
-  oidc_domain_attestation: 'oidc_domain',
+  [CIRCUIT_IDS.COINBASE_ATTESTATION]: 'coinbase_kyc',
+  [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: 'coinbase_country',
+  [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: 'oidc_domain',
 };
 
 // ─── Configuration ──────────────────────────────────────────────────────
