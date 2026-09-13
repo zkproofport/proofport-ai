@@ -7,11 +7,11 @@ import { resolvePaymentNetworks, type PaymentNetwork } from '../payment/networks
 import type { Config } from '../config/index.js';
 
 const require = createRequire(import.meta.url);
-let mcpPkgVersion: string;
+let mcpPkgVersion: string | null;
 try {
   mcpPkgVersion = require('../../packages/mcp/package.json').version;
 } catch {
-  mcpPkgVersion = '0.1.0';
+  mcpPkgVersion = null;
 }
 
 // ---------------------------------------------------------------------------
@@ -33,9 +33,15 @@ function derivePaymentConstants(config: Config) {
 }
 
 function circuitAlias(circuitId: CircuitId): string {
-  if (circuitId === CIRCUIT_IDS.COINBASE_ATTESTATION) return 'coinbase_kyc';
-  if (circuitId === CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION) return 'oidc_domain';
-  return 'coinbase_country';
+  const aliases: Record<CircuitId, string> = {
+    [CIRCUIT_IDS.COINBASE_ATTESTATION]: 'coinbase_kyc',
+    [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: 'coinbase_country',
+    [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: 'oidc_domain',
+    [CIRCUIT_IDS.ARC_ELIGIBILITY]: 'arc_eligibility',
+  };
+  const alias = aliases[circuitId];
+  if (!alias) throw new Error(`Unknown circuit '${circuitId}'.`);
+  return alias;
 }
 
 // ---------------------------------------------------------------------------
@@ -454,12 +460,109 @@ function buildEndpoints(config: Config, circuitId: CircuitId) {
   };
 }
 
+
+/** Arc's single proof binds the KYC holder to a typed action, not a generic KYC signature. */
+function buildArcGuide(config: Config) {
+  const circuit = CIRCUITS[CIRCUIT_IDS.ARC_ELIGIBILITY];
+  const networks = resolvePaymentNetworks(config.paymentNetworks);
+  const nano = networks.find(network => network.id === 'arc-testnet-nano');
+  const chainId = 5042002;
+  const verifier = getChainVerifiers(String(chainId))[CIRCUIT_IDS.ARC_ELIGIBILITY] ?? null;
+  const encrypted = config.teeMode === 'nitro' && config.teeAttestationEnabled;
+  const payment = { required: config.paymentMode !== 'disabled', recipient: config.paymentPayTo,
+    price: config.paymentProofPrice, source: 'Use the live 402 accepts list for amount, asset, recipient and payment domain.' };
+  return {
+    circuit_id: circuit.id, display_name: circuit.displayName, description: circuit.description,
+    e2e_encryption: {
+      enabled: encrypted,
+      description: encrypted
+        ? 'Use the attested teePublicKey returned by the challenge to encrypt proof inputs.'
+        : 'This deployment provides no hardware TEE attestation. HTTPS protects transport; the prover receives proof inputs.',
+      sdk_usage: 'generateProof checks the actual challenge for teePublicKey. Never infer TEE availability from a circuit name.',
+    },
+    local_mcp_server: {
+      recommended: true, npm_package: '@zkproofport-ai/mcp', version: mcpPkgVersion,
+      install: `npm install @zkproofport-ai/mcp${mcpPkgVersion ? '@' + mcpPkgVersion : ''}`,
+      command: 'zkproofport-mcp', transport: 'stdio',
+      discovery: 'Connect to the local MCP server and call tools/list. Read generate_proof inputSchema before tools/call.',
+      required_arguments: ['circuit', 'action'],
+      generate_proof: { circuit: 'arc_eligibility', scope: 'ledger-house',
+        action: '<complete EIP-712 typed action prepared by the trusted application>',
+        ...(nano ? { pay_with: 'arc', pay_on: nano.id } : {}),
+      },
+      verification: 'After generate_proof, call verify_proof with its result. Verify on Arc Testnet before staking.',
+      credentials: 'ATTESTATION_KEY stays in the local signer process. Circle Agent Wallet signing uses the existing Circle CLI login. Do not put keys in model prompts or tool arguments.',
+    },
+    sdk: {
+      package: '@zkproofport-ai/sdk',
+      quick_start: `import { createConfig, generateProof, walletFromArcAgent } from '@zkproofport-ai/sdk';
+const payment = await walletFromArcAgent({ address: agentWalletB, chain: 'ARC-TESTNET' });
+const result = await generateProof(
+  createConfig({ baseUrl: '${config.a2aBaseUrl}' }),
+  { attestation: existingKycSigner, payment },
+  { circuit: 'arc_eligibility', scope: 'ledger-house', action${nano ? ", payOn: 'arc-testnet-nano'" : ''} },
+);`,
+      cli: `PROOFPORT_URL=${config.a2aBaseUrl} zkproofport-prove arc_eligibility --action delegation.json --scope ledger-house${nano ? ' --pay-with arc --pay-on arc-testnet-nano' : ''} --silent`,
+      payment_selection: 'Explicitly choose an offered payment network and a funded payment wallet; no attestation-key payment fallback exists.',
+    },
+    constants: {
+      eas: { graphql_endpoint: config.easGraphqlEndpoint, schema_id: (circuit as any).easSchemaId,
+        chain_id: 8453, note: 'Coinbase KYC attestation data is read on Base Mainnet; proof verification is on Arc.' },
+      contracts: { coinbase_attester: COINBASE_ATTESTER_CONTRACT, verifier_address: verifier, chain_id: chainId },
+      authorized_signers: AUTHORIZED_SIGNERS,
+      payment,
+      x402: {
+        protocol: 'x402 v2; use the selected live offer',
+        chains: networks.map(network => ({
+          network: network.caip2, network_name: network.id, asset: network.usdc, decimals: network.decimals,
+          settlement: network.settlement,
+          eip712_domain: network.batching
+            ? { name: network.batching.name, version: network.batching.version, chainId: network.chainId,
+                verifyingContract: network.batching.gatewayWallet }
+            : { name: network.eip3009.name, version: network.eip3009.version, chainId: network.chainId,
+                verifyingContract: network.usdc },
+        })),
+        single_step_flow: 'POST /api/v1/prove → 402 PAYMENT-REQUIRED and accepts → sign selected offer → retry with PAYMENT-SIGNATURE and X-Payment-Nonce.',
+        nanopayments: 'For arc-testnet-nano, use @circle-fin/x402-batching. Circle CLI signs GatewayWalletBatched typed data using the Agent Wallet backing EOA. Gateway verifies and settles against its deposited balance; each proof purchase requires no buyer transfer transaction.',
+      },
+      verification: { verifier_address: verifier, chain_id: chainId, chain_name: 'Arc Testnet',
+        rpc_url: config.arcRpcUrl,
+        function_signature: 'verify(bytes proof, bytes32[] publicInputs) external view returns (bool)',
+        public_input_count: 192,
+        input_format: '192 bytes32 field words encoding six [u8;32] values. Keep the proof and publicInputs separate.',
+      },
+    },
+    action: {
+      type: 'EIP-712 TypedData', required_fields: ['domain', 'types', 'primaryType', 'message'],
+      domain: 'Bind name, version, chainId and verifyingContract to the intended application.',
+      message: 'The staking application builds CredentialDelegation(delegate, action, amount, expiresAt, nonce). Never replace the application-provided action with a generic example.',
+      security: 'One circuit verifies both an authorized Coinbase attester transaction for wallet A and A\'s EIP-712 action signature. The application contract must match domain, action hash, trusted attester root, scope, expiry and replay protection before acting as delegate B.',
+    },
+    formulas: {
+      signing_digest: 'keccak256(0x1901 || domain_separator || action_hash)',
+      domain_separator: 'EIP-712 domain hash', action_hash: 'EIP-712 hashStruct(primaryType, message)',
+      scope: 'keccak256(UTF8(scope))',
+    },
+    input_schema: {
+      preparation: 'Use local MCP generate_proof with the typed action; the SDK prepares the private circuit witness locally.',
+      public_fields: ['signal_hash', 'domain_separator', 'action_hash', 'signer_list_merkle_root', 'scope', 'nullifier'],
+      private_inputs: 'KYC holder public key and EIP-712 signature, signed Coinbase attestation transaction and attester membership proof. Never send these through an LLM.',
+    },
+    endpoints: {
+      prove: { method: 'POST', url: `${config.a2aBaseUrl}/api/v1/prove`, content_type: 'application/json' },
+      guide: { method: 'GET', url: `${config.a2aBaseUrl}/api/v1/guide/arc_eligibility` },
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Main export
 // ---------------------------------------------------------------------------
 
 export function buildGuide(circuitId: CircuitId, config: Config): object {
   const circuit = CIRCUITS[circuitId];
+  if (!circuit) throw new Error(`Unknown circuit '${circuitId}'.`);
+  if (circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY) return buildArcGuide(config);
   const { isTestnet, chainId, usdcAddress, paymentAmount } = derivePaymentConstants(config);
 
   // OIDC-specific guide
@@ -501,7 +604,7 @@ const response = await fetch('${config.a2aBaseUrl}/api/v1/prove', {
         recommended: true,
         npm_package: '@zkproofport-ai/mcp',
         version: mcpPkgVersion,
-        install: `npm install @zkproofport-ai/mcp@${mcpPkgVersion}`,
+        install: `npm install @zkproofport-ai/mcp${mcpPkgVersion ? '@' + mcpPkgVersion : ''}`,
         readme: 'https://www.npmjs.com/package/@zkproofport-ai/mcp',
       },
 
@@ -532,7 +635,7 @@ const response = await fetch('${config.a2aBaseUrl}/api/v1/prove', {
       recommended: true,
       npm_package: '@zkproofport-ai/mcp',
       version: mcpPkgVersion,
-      install: `npm install @zkproofport-ai/mcp@${mcpPkgVersion}`,
+      install: `npm install @zkproofport-ai/mcp${mcpPkgVersion ? '@' + mcpPkgVersion : ''}`,
       readme: 'https://www.npmjs.com/package/@zkproofport-ai/mcp',
     },
 

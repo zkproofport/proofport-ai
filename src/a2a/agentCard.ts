@@ -519,155 +519,87 @@ export function getDidHandler(config: Config): (req: Request, res: Response) => 
  */
 export function buildSkillMd(config: Config): string {
   const network = paymentNetworks(config);
-  const priceStr = config.paymentProofPrice;
-
   return `---
 name: zk-proof-generator
 version: ${config.agentVersion}
 description: ${serviceDescription(config)}
-author: zkproofport
-tags: zk-proof, privacy, coinbase, kyc, base, arc, noir${config.teeMode === 'nitro' ? ', tee' : ''}, x402, identity, country, eas, usdc
 ---
 
-# proveragent.base.eth
+# ZKProofport prover
 
-ZK proof generation agent for Coinbase KYC and country-of-residence verification.
 Provable circuits: ${PROVABLE_CIRCUIT_IDS.join(', ')}.
 Execution: ${executionDescription(config)}.
 
-## Skills
+## Discover and read the integration instructions
 
-### get_supported_circuits
-- **Description**: List all supported ZK circuits with metadata and verifier addresses.
-- **Method**: Available via MCP tool or A2A skill
-- **Input**: None
-- **Output**: Array of circuit objects with EAS schema IDs, verifier addresses, chain info
-
-### get_guide
-- **Description**: Get comprehensive step-by-step guide for preparing proof inputs.
-- **Method**: Available via MCP tool, A2A skill, or REST \`GET /api/v1/guide/{circuit}\`
-- **Input**: Canonical circuit id: ${PROVABLE_CIRCUIT_IDS.join(', ')}
-- **Output**: Setup instructions, environment variables, manual step reference
-
-### prove
-- **Description**: Generate a ZK proof via x402 single-step flow.
-- **Method**: \`POST ${config.a2aBaseUrl}/api/v1/prove\`
-- **Input**: \`{ "circuit": "<canonical circuit id>", "inputs": { ... } }\`. Read the circuit guide for its inputs.
-- **Output**: ZK proof (hex), public inputs${config.teeMode === 'nitro' && config.teeAttestationEnabled ? ', hardware TEE attestation when requested' : '; no hardware TEE attestation'}
-- **Duration**: 30-90 seconds
-- **Flow**: POST with circuit+inputs → 402 with nonce → pay USDC → retry with \`X-Payment-TX\` and \`X-Payment-Nonce\` headers. Nonce is single-use and circuit-bound.
-
-## Payment
-
-- **Protocol**: x402
-- **Amount**: ${priceStr} USDC
-- **Network**: ${network}
-- **Method**: Read the returned x402 payment offers; the scheme and settlement method depend on the selected network.
-- **x402 Single-Step**: POST /prove with \`{ circuit, inputs }\` → 402 response includes nonce in body → pay with signature → retry with \`X-Payment-TX\` and \`X-Payment-Nonce\` headers. Nonce is single-use and circuit-bound.
-
-## Quick Start
-
-\`@zkproofport-ai/sdk\` — install via npm or clone the GitHub repo.
-
-### Option A: Local MCP Server (Recommended for Agents)
-
-\`\`\`bash
-git clone https://github.com/zkproofport/proofport-ai.git
-cd proofport-ai && npm install
-\`\`\`
-
-Configure in \`claude_desktop_config.json\`:
-\`\`\`json
-{
-  "mcpServers": {
-    "proofport": {
-      "command": "npx",
-      "args": ["tsx", "packages/mcp/src/index.ts"],
-      "env": {
-        "ATTESTATION_KEY": "0x... (private key of wallet with Coinbase EAS attestation on Base)",
-        "PAYMENT_KEY": "0x... (optional: private key of wallet with USDC, defaults to ATTESTATION_KEY)",
-        "PROOFPORT_URL": "${config.a2aBaseUrl}"
-      }
-    }
-  }
-}
-\`\`\`
-
-Or run directly:
-\`\`\`bash
-ATTESTATION_KEY=0x... npx tsx packages/mcp/src/index.ts
-\`\`\`
-
-Tools: generate_proof, get_supported_circuits, prepare_inputs, request_challenge, make_payment, submit_proof, verify_proof
-
-### Option B: SDK (Programmatic)
-
-\`\`\`bash
-git clone https://github.com/zkproofport/proofport-ai.git
-cd proofport-ai && npm install
-\`\`\`
-
-\`\`\`typescript
-import { generateProof } from '@zkproofport-ai/sdk';
-const result = await generateProof(config, signers, { circuit: 'coinbase_kyc' });
-\`\`\`
-
-### Option C: CLI
-
-\`\`\`bash
-git clone https://github.com/zkproofport/proofport-ai.git
-cd proofport-ai && npm install
-ATTESTATION_KEY=0x... PAYMENT_KEY=0x... SERVER_URL=${config.a2aBaseUrl} npx tsx packages/sdk/examples/full-flow.ts
-\`\`\`
-
-## Environment Variables
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| ATTESTATION_KEY | Yes | Private key of wallet with Coinbase EAS attestation on Base |
-| PAYMENT_KEY | No | Private key of wallet with USDC balance (defaults to ATTESTATION_KEY) |
-| PROOFPORT_URL | No | Server URL (default: production) |
-
-## CDP Wallet (Optional)
-
-Use Coinbase MPC wallet instead of PAYMENT_KEY. Private keys never leave Coinbase's TEE.
-
-Set these env vars alongside ATTESTATION_KEY:
-
-| Variable | Description |
-|----------|-------------|
-| CDP_API_KEY_ID | Coinbase Developer Platform API key ID |
-| CDP_API_KEY_SECRET | CDP API key secret |
-| CDP_WALLET_SECRET | CDP wallet encryption secret |
-| CDP_WALLET_ADDRESS | (Optional) Existing CDP wallet address to reuse |
-
-Get credentials at https://portal.cdp.coinbase.com
-
-## Guides
-
-Detailed step-by-step guides for preparing proof inputs:
+Validate the ERC-8004 registration's current owner and active capability metadata.
+Use its x402 endpoint's origin to read this document and the circuit guide.
+- Arc action-bound KYC: ${config.a2aBaseUrl}/api/v1/guide/arc_eligibility
 - Coinbase KYC: ${config.a2aBaseUrl}/api/v1/guide/coinbase_kyc
 - Coinbase Country: ${config.a2aBaseUrl}/api/v1/guide/coinbase_country
+- OIDC: ${config.a2aBaseUrl}/api/v1/guide/oidc_domain
 
-## Protocols
+## Local MCP for agents
 
-- **MCP (Remote)**: ${config.a2aBaseUrl}/mcp (StreamableHTTP, tools: prove, get_supported_circuits, get_guide)
-- **MCP (Local)**: \`npx tsx packages/mcp/src/index.ts\` (stdio, tools: generate_proof, get_supported_circuits, prepare_inputs, request_challenge, make_payment, submit_proof, verify_proof)
-- **A2A**: ${config.a2aBaseUrl}/a2a (JSON-RPC v0.3)
-- **REST**: ${config.a2aBaseUrl}/api/v1/*
+Install \`@zkproofport-ai/mcp\` and launch \`zkproofport-mcp\` over stdio.
+Set PROOFPORT_URL=${config.a2aBaseUrl} in that local process.
+Load the existing ATTESTATION_KEY only into the local signer process; never send credentials to an LLM.
+Connect and call \`tools/list\`; use the returned inputSchema for \`tools/call\`.
 
-## Discovery
+Local tools: generate_proof, deposit_to_gateway, gateway_balance, get_supported_circuits,
+request_challenge, prepare_inputs, submit_proof, verify_proof.
+Read guides with HTTPS GET; get_guide is a remote service tool, not a local SDK tool.
 
-- OASF Identity: ${config.a2aBaseUrl}/.well-known/agent.json
-- A2A Agent Card: ${config.a2aBaseUrl}/.well-known/agent-card.json
-- MCP Discovery: ${config.a2aBaseUrl}/.well-known/mcp.json
+For a single KYC-and-delegation proof, select \`generate_proof\` with:
+- circuit: \`arc_eligibility\`
+- action: the application's complete EIP-712 typed action (required)
+- scope: the application's scope, e.g. \`ledger-house\`
+- pay_with: \`arc\` for an existing Circle Agent Wallet
+- pay_on: \`arc-testnet-nano\` only when present in the live offered networks below
+
+Circle Agent Wallet uses an existing authenticated Circle CLI session and optional ARC_AGENT_WALLET.
+The key-based adapter instead uses PAYMENT_PRIVATE_KEY with pay_with=key. These are separate choices;
+there is no automatic payment fallback to the KYC signer's key.
+The deposit_to_gateway and gateway_balance convenience tools use the key-based adapter;
+for an Agent Wallet inspect its Gateway balance through the Circle CLI.
+
+After proof generation, call \`verify_proof\` with the proof result. The application must also bind
+its domain, delegate, amount, action, expiry, nonce, scope and trusted attester root before staking.
+Arc Eligibility proves KYC and the same KYC wallet's authorization in one circuit.
+
+## x402 payment
+
+Configured networks: ${network}.
+Configured proof price: ${config.paymentProofPrice} USDC.
+POST ${config.a2aBaseUrl}/api/v1/prove with circuit and prepared inputs to receive a 402 challenge.
+Read the live \`accepts\` list and \`PAYMENT-REQUIRED\` header; do not substitute a static payment domain.
+The SDK signs the selected offer and retries with \`PAYMENT-SIGNATURE\` and \`X-Payment-Nonce\`.
+
+For arc-testnet-nano, @circle-fin/x402-batching selects the GatewayWalletBatched domain.
+The Circle Agent Wallet's backing EOA signs against its deposited Gateway balance; Gateway verifies
+and settles the payment. A proof purchase does not require a separate buyer transfer transaction.
+USDC held in the Agent Wallet and USDC deposited in Gateway are different balances.
+
+## CLI equivalent
+
+With the existing signer environment loaded and an offered Arc nanopayment network:
+
+\`PROOFPORT_URL=${config.a2aBaseUrl} zkproofport-prove arc_eligibility --action delegation.json --scope ledger-house --pay-with arc --pay-on arc-testnet-nano --silent\`
+
+This CLI calls the local MCP generate_proof tool. An agent already connected to the local MCP
+server can call that tool directly without spawning the prove CLI.
+
+## Protocols and identity
+
+- Remote MCP: ${config.a2aBaseUrl}/mcp (tools: prove, get_supported_circuits, get_guide)
+- A2A: ${config.a2aBaseUrl}/a2a
+- REST: ${config.a2aBaseUrl}/api/v1/*
+- Verified ERC-8004 registrations: ${config.a2aBaseUrl}/identity/status
+- Registration document: ${config.a2aBaseUrl}/.well-known/agent-registration.json
+- Agent metadata: ${config.a2aBaseUrl}/.well-known/agent.json
+- Agent card: ${config.a2aBaseUrl}/.well-known/agent-card.json
+- MCP discovery: ${config.a2aBaseUrl}/.well-known/mcp.json
 - OpenAPI: ${config.a2aBaseUrl}/openapi.json
-
-## Identity
-
-- **ERC-8004**: Check ${config.a2aBaseUrl}/identity/status and /.well-known/agent-registration.json for verified registrations.
-- **Execution**: ${executionDescription(config)}
-- **8004scan**: https://testnet.8004scan.io
 `;
 }
 
