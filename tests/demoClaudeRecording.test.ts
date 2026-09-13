@@ -74,6 +74,7 @@ describe('real Claude Code recording evidence', () => {
     expect(value.snapshot().status).toBe('failed');
     const success = run(); success.observeClaude(call('s', 'stake')); success.observeClaude(result('s', {...stake, amount: '0.100000'})); success.finish(0);
     expect(success.snapshot().status).toBe('completed'); expect(success.snapshot().txHash).toBe(txHash);
+    expect(success.snapshot().error).toBeNull();
     expect(success.snapshot().steps[0].status).toBe('waiting'); // No invented earlier tool evidence.
   });
 

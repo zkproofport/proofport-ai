@@ -206,8 +206,9 @@ export class RecordingRun {
     this.finishedAt = new Date().toISOString();
     this.status = code === 0 && this.sawResult && (!this.claude || this.model !== null) ? 'completed' : 'failed';
     this.terminal(this.status === 'completed' ? 'Agent exited 0. Proof accepted and Arc stake confirmed.' : 'Agent stopped before confirmed completion. Check the local operator terminal.', 'system');
-    if (this.status === 'completed' && !this.claude) this.steps.forEach(step => { step.status = 'done'; });
-    else {
+    if (this.status === 'completed') {
+      if (!this.claude) this.steps.forEach(step => { step.status = 'done'; });
+    } else {
       this.error = this.redact(reason ?? `Agent did not complete the flow (exit ${code ?? 'signal'}).`);
       this.steps.filter(step => step.status === 'active').forEach(step => { step.status = 'failed'; });
     }
