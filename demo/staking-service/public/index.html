@@ -18,8 +18,8 @@
         <div class="requirement"><strong>Eligibility required: Coinbase KYC</strong><span id="requirement-detail">KYC + action authorization proof · the credential holder stays private.</span></div>
         <form id="stake-form">
           <label for="instruction">Your instruction</label>
-          <textarea id="instruction" name="instruction" rows="4" maxlength="2000" required spellcheck="false" placeholder="Stake 0.1 USDC on Arc. Find the required proof and ask me before spending."></textarea>
-          <label for="amount">Requested staking amount</label><div class="amount-input"><input id="amount" name="amount" value="0.1" inputmode="decimal" autocomplete="off" aria-describedby="amount-help" required><span>USDC</span></div><p id="amount-help" class="micro">You approve the proof fee and the stake separately.</p><button id="run-button" type="submit"><span>Ask agent</span><span>↗</span></button>
+          <textarea id="instruction" name="instruction" rows="4" maxlength="2000" required spellcheck="false" placeholder="Stake 10 USDC on Arc. Find the required proof and ask me before spending."></textarea>
+          <label for="amount">Requested staking amount</label><div class="amount-input"><input id="amount" name="amount" value="10" inputmode="decimal" autocomplete="off" aria-describedby="amount-help" required><span>USDC</span></div><p id="amount-help" class="micro">You approve the proof fee and the stake separately.</p><button id="run-button" type="submit"><span>Ask agent</span><span>↗</span></button>
         </form>
         <p id="form-error" class="error" role="alert" hidden></p>
         <p class="launch-note">Your instruction starts discovery. Signing, payment and staking wait for your approval.</p>
@@ -31,7 +31,7 @@
         <h2 id="activity-title">From intent to verified stake</h2>
         <div class="marketplace"><div><span class="micro-label marketplace-label">Agent Marketplace</span><strong id="market-result">Find a compatible prover</strong><p id="market-detail">Identity: ERC-8004 · prover discovery pending</p><p id="market-capability" hidden></p></div><button id="find-prover" type="button" class="text-button">Inspect ↗</button></div>
         <ol class="steps" id="steps"></ol>
-        <div class="authorization-card"><div class="section-top"><strong>Exact-action authorization</strong><span id="authorization-status" class="small">Awaiting preparation</span></div><p id="authorization-summary">Private Wallet A → operational Wallet B</p><dl><dt>Action</dt><dd id="authorization-action">Stake 0.1 USDC · Arc Testnet</dd><dt>Target</dt><dd><a id="authorization-gate" target="_blank" rel="noreferrer">EligibilityGate · awaiting dApp policy</a></dd><dt>Nonce</dt><dd id="authorization-nonce">Not prepared</dd><dt>Deadline</dt><dd id="authorization-deadline">Not prepared</dd></dl></div>
+        <div class="authorization-card"><div class="section-top"><strong>Exact-action authorization</strong><span id="authorization-status" class="small">Awaiting preparation</span></div><p id="authorization-summary">Private Wallet A → operational Wallet B</p><dl><dt>Action</dt><dd id="authorization-action">Stake 10 USDC · Arc Testnet</dd><dt>Target</dt><dd><a id="authorization-gate" target="_blank" rel="noreferrer">EligibilityGate · awaiting dApp policy</a></dd><dt>Nonce</dt><dd id="authorization-nonce">Not prepared</dd><dt>Deadline</dt><dd id="authorization-deadline">Not prepared</dd></dl></div>
         <div id="result" class="result" hidden><div class="result-icon">✓</div><div><strong id="result-title">Stake confirmed on Arc</strong><p id="result-copy"></p><a id="transaction-link" target="_blank" rel="noreferrer" hidden>View on Arc Explorer ↗</a></div></div>
         <div id="run-error" class="error run-error" role="alert" hidden></div>
       </section>
@@ -46,6 +46,7 @@
           <p class="mcp-pipeline">Claude Code <span>→</span> dApp MCP adapter <span>→</span> <strong>ZKProofport MCP</strong> <span>→</span> prover</p>
           <div class="section-top"><span class="micro-label">INNER PROVER MCP · OBSERVED PROTOCOL</span><strong id="mcp-status" class="status-pending">WAITING</strong></div>
           <p id="mcp-installation">Install from npm after reading provider instructions</p>
+          <details id="npm-install-command" hidden><summary>Actual npm installation command</summary><code id="npm-install-text"></code></details>
           <p id="mcp-server">Awaiting the actual prover MCP handshake</p><p id="mcp-packages" hidden></p>
           <details id="mcp-request"><summary id="mcp-call">No prover MCP call observed yet</summary><pre id="mcp-details">Actual connection and tool arguments appear here when observed.</pre></details>
         </article>

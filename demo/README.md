@@ -25,11 +25,11 @@ Open **http://localhost:4115**. Keep any existing CLI/server running; choose ano
 unused port for a clean session. The remote prover is **staging** at
 `https://stg-ai.zkproofport.app`.
 
-For the next recording, start with an empty instruction and zero events, then enter the complete prompt below. This is the proposed fresh-install prompt, not evidence of a completed new run. The textarea must expand so every sentence is visible.
+Match the submitted presentation's **10 USDC** action. For the next recording, start with an empty instruction and zero events, then enter the complete prompt below. This is the proposed fresh-install prompt, not evidence of a completed new run. The textarea must expand so every sentence is visible.
 
-> Stake 0.1 USDC with my Agent Wallet. Find a registered ZKProofport prover in the dApp Agent Marketplace and verify its ERC-8004 identity. Read its installation instructions, install the published SDK and MCP packages from npm, then connect and read the MCP tools. Ask me to approve the exact-action authorization and proof fee, then ask me again before submitting the verified stake.
+> Stake 10 USDC with my Agent Wallet. Find a registered ZKProofport prover in the dApp Agent Marketplace and verify its ERC-8004 identity. Read its installation instructions, install the published SDK and MCP packages from npm, then connect and read the MCP tools. Ask me to approve the exact-action authorization and proof fee, then ask me again before submitting the verified stake.
 
-Set amount `0.1`, click **Ask agent**, review and approve **Authorize this action +
+Set amount `10`, click **Ask agent**, review and approve **Authorize this action +
 proof fee**, then review **Confirm the verified stake**. Capture the actual
 Gateway payment, proof result, verification checks, position update and **View on
 Arc Explorer**. The presentation ends at Explorer; it does not include the internal
@@ -53,7 +53,7 @@ this run invokes the actual prover MCP tool.
   Arc registry ownership and metadata. This is not a search of an external Arc
   marketplace. Registration identity does not grant spending authority.
 - **Circle Gateway nanopayment** is real: `pay_with: arc`,
-  `pay_on: arc-testnet-nano`, proof fee **0.001 USDC**. The proof fee and **0.1 USDC**
+  `pay_on: arc-testnet-nano`, proof fee **0.001 USDC**. The proof fee and **10 USDC**
   staking deposit are separate. SDK signing checks the exact approved payment
   terms before signing the final challenge.
 
@@ -101,7 +101,7 @@ turn a confirmed paid proof or stake into a request to repeat spending.
 
 ## Historical presentation execution — 2026-09-13 16:05–16:07 KST
 
-This is the earlier execution, before the new agent-selected fresh npm installation workflow. It is not evidence that the new workflow or recording has completed.
+This historical action was **0.1 USDC**, not the new 10 USDC presentation action. This is the earlier execution, before the new agent-selected fresh npm installation workflow. It is not evidence that the new workflow or recording has completed.
 
 - Actual proof approval **16:05:52 KST**, proof returned **16:06:24**.
 - Arc preflight verified **16:06:26**, stake approved **16:06:35**.

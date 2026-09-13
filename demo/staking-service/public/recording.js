@@ -72,7 +72,9 @@ function renderProverMcp(run) {
 function renderEvidence(run, results) {
   renderProverMcp(run);
   const installation = results.install_prover_mcp;
-  $('mcp-installation').textContent = installation?.ok === true ? `✓ npm installed · MCP ${installation.mcpVersion} · SDK ${installation.sdkVersion}` : results.read_prover_guide ? 'Provider installation instructions read · awaiting npm install' : 'Install from npm after reading provider instructions';
+  $('mcp-installation').textContent = installation?.ok === true ? `✓ npm installed · MCP ${installation.mcpVersion} · SDK ${installation.sdkVersion}` : pendingTool(run, 'install_prover_mcp') ? 'Installing SDK + MCP from npm… · actual agent tool' : results.read_prover_guide ? 'Provider installation instructions read · awaiting npm install' : 'Install from npm after reading provider instructions';
+  $('npm-install-command').hidden = !installation?.npmCommand;
+  $('npm-install-text').textContent = installation?.npmCommand || '';
   const payment = run?.protocol?.payment;
   const paid = payment?.status === 'confirmed';
   $('payment-status').textContent = paid ? `✓ ${payment.fee || '0.001'} USDC PAID` : payment?.status === 'pending' ? 'PROCESSING' : 'WAITING';
