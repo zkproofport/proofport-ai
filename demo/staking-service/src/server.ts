@@ -3,10 +3,11 @@ import express from 'express';
 import { fileURLToPath } from 'node:url';
 import { ethers, STAKING_ABI, STAKE_TYPES } from '../../shared/flow.ts';
 import { loadDemoConfig } from '../../shared/config.ts';
-import { discoverProver } from '../../shared/discovery.ts';
+import { discoverMarketplaceProver } from '../../shared/discovery.ts';
 import { stakeFromReceipt } from '../../shared/receipt.ts';
 import { candidateMatchesProof, normalizeArcPublicInputs, extractArcPublicMetadata } from '../../audit/address-audit.ts';
 import { installRecordingRoutes, isLocalRecordingRequest } from './recordingRoutes.ts';
+import {readOperationalWallet} from '../../shared/walletStatus.ts';
 
 const PORT=Number(process.env.PORT ?? 4100);
 const config=loadDemoConfig();
@@ -17,31 +18,32 @@ const app=express();
 app.use(express.json({limit:'4mb'}));
 let latestProof:{circuitId:string;proof:string;publicInputs:string[]}|null=null;
 let positionsCache:{at:number;rows:unknown[]}|null=null;
-let discoveryCache:{at:number;value:Awaited<ReturnType<typeof discoverProver>>}|null=null;
+const recordedStakes=new Map<string,{txHash:string;blockNumber:number}>();
+let discoveryCache:{at:number;value:Awaited<ReturnType<typeof discoverMarketplaceProver>>}|null=null;
+let walletCache:{at:number;value:Awaited<ReturnType<typeof readOperationalWallet>>}|null=null;
+app.get('/demo/wallet',async(_req,res)=>{
+ try{if(!walletCache||Date.now()-walletCache.at>30000)walletCache={at:Date.now(),value:await readOperationalWallet(provider,config)};
+  res.set('Cache-Control','no-store').json(walletCache.value);
+ }catch{res.status(503).json({error:'Operational wallet status is unavailable.'});}
+});
 
 async function positions(){
   if(positionsCache&&Date.now()-positionsCache.at<5000)return positionsCache.rows;
-  const head=await provider.getBlockNumber();
-  const events:ethers.EventLog[]=[];
-  for(let start=config.deploymentBlock;start<=head;start+=9999){
-    const chunk=await gate.queryFilter(gate.filters.Staked(),start,Math.min(head,start+9998));
-    events.push(...chunk as ethers.EventLog[]);
-  }
-  const latestByWallet=new Map<string,ethers.EventLog>();
-  for(const event of events)latestByWallet.set(ethers.getAddress(event.args.delegate),event);
-  const rows=await Promise.all([...latestByWallet].map(async([wallet,event])=>({wallet,
-    amount:ethers.formatUnits(await gate.balances(wallet),6),txHash:event.transactionHash,blockNumber:event.blockNumber})));
+  // Initial position comes from /demo/wallet. Poll balances for receipts observed
+  // in this recording, rather than scanning the entire chain history each time.
+  const rows=await Promise.all([...recordedStakes].map(async([wallet,receipt])=>({wallet,
+    amount:ethers.formatUnits(await gate.balances(wallet),6),...receipt})));
   positionsCache={at:Date.now(),rows};
   return rows;
 }
 async function marketplace(){
   if(discoveryCache&&Date.now()-discoveryCache.at<15000)return discoveryCache.value;
-  const value=await discoverProver(provider,config.discovery);
+  const value=await discoverMarketplaceProver(provider,config.discovery);
   discoveryCache={at:Date.now(),value};
   return value;
 }
 app.get('/.well-known/service.json',(_req,res)=>res.json({
-  name:'Ledger House',description:'Stake USDC on Arc with a Coinbase KYC delegation proof.',chain:config,
+  name:'Ledger House',description:'Stake USDC on Arc with a Coinbase KYC + exact-action authorization proof.',chain:config,
   requires:{proof:{circuit:'arc_eligibility',credential:'Coinbase KYC',discovery:config.discovery},
     delegation:{primaryType:'CredentialDelegation',domain:{name:'Ledger House Staking',version:'1',chainId:config.chainId,verifyingContract:config.gate},
       fields:STAKE_TYPES.CredentialDelegation}},
@@ -52,12 +54,13 @@ app.get('/marketplace/agents',async(_req,res)=>{
   catch(error){res.status(503).json({error:(error as Error).message,agents:[]});}
 });
 app.post('/stake',async(req,res)=>{
-  if(!req.body?.txHash)return res.status(402).json({error:'PROOF_REQUIRED',message:'Obtain a Coinbase KYC delegation proof, then call the Arc staking contract from the delegate wallet.',gate:config.gate,discovery:'/marketplace/agents'});
+  if(!req.body?.txHash)return res.status(402).json({error:'PROOF_REQUIRED',message:'Coinbase KYC eligibility is required. Obtain a KYC + exact-action authorization proof, then stake from the authorized operational wallet.',gate:config.gate,discovery:'/marketplace/agents'});
   if(typeof req.body.txHash!=='string'||!/^0x[0-9a-fA-F]{64}$/.test(req.body.txHash))return res.status(400).json({error:'BAD_TRANSACTION_HASH'});
   try{
     const receipt=await provider.getTransactionReceipt(req.body.txHash);
     if(!receipt)return res.status(409).json({error:'TRANSACTION_PENDING'});
     const staked=stakeFromReceipt(receipt,config.gate);
+    recordedStakes.set(staked.wallet,{txHash:staked.txHash,blockNumber:staked.blockNumber});
     positionsCache=null;
     res.json({ok:true,staked,verifiedOn:{chainId:config.chainId,gate:config.gate,verifier:config.verifier}});
   }catch(error){res.status(403).json({error:'STAKE_NOT_VERIFIED',message:(error as Error).message});}

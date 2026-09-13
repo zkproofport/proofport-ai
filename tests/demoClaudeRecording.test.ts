@@ -12,6 +12,18 @@ const stake = {ok: true, amount: '0.1', wallet, txHash, block: 123};
 function run() { const value = new RecordingRun('0.1'); value.startClaude('Stake 0.1 USDC after checking the dApp.'); value.observeClaude(init); return value; }
 
 describe('real Claude Code recording evidence', () => {
+  it('shows payment success only for the matching wallet and exact observed Gateway debit',()=>{
+    const value=run();value.observeClaude(call('p','prepare_delegation'));value.observeClaude(result('p',{ok:true,wallet}));
+    const pending={status:'pending',wallet,fee:'0.001',method:'x402 / Gateway Nanopayment',beforeUSDC:'2.984'};
+    expect(value.observePayment(pending)).toBe(true);
+    expect(value.snapshot().protocol.payment?.status).toBe('pending');
+    expect(value.observePayment({...pending,status:'confirmed',afterUSDC:'2.984'})).toBe(false);
+    expect(value.observePayment({...pending,status:'confirmed',afterUSDC:'2.982'})).toBe(false);
+    expect(value.observePayment({...pending,status:'confirmed',afterUSDC:'2.983',wallet:'0x'+'22'.repeat(20)})).toBe(false);
+    expect(value.observePayment({...pending,status:'confirmed',afterUSDC:'2.983'})).toBe(true);
+    expect(value.snapshot().protocol.payment?.status).toBe('confirmed');
+    expect(value.observePayment(pending)).toBe(false);
+  });
   it('publishes actual tool inputs/results and the actual initialized model, never narration or thinking', () => {
     const value = run();
     value.observeClaude({type: 'assistant', message: {content: [{type: 'text', text: 'private narration'}, {type: 'thinking', thinking: 'private chain of thought'}]}});
@@ -110,4 +122,20 @@ describe('Claude subprocess boundaries', () => {
     const env = claudeEnvironment({HOME: '/tmp/home', PATH: '/bin', CLAUDE_CODE_OAUTH_TOKEN: 'auth', ATTESTATION_KEY: 'private', OPENAI_API_KEY: 'private', GEMINI_API_KEY: 'private', CIRCLE_API_KEY: 'private', NODE_OPTIONS: '--require unsafe'});
     expect(env).toEqual({HOME: '/tmp/home', PATH: '/bin', CLAUDE_CODE_OAUTH_TOKEN: 'auth'});
   });
+});
+
+
+describe('actual nested prover MCP evidence',()=>{
+ it('keeps protocol observations separate from model calls and accepts only ordered public evidence',()=>{
+  const value=run();const connected={serverName:'zkproofport-mcp',version:'1.0.0',endpoint:'https://stg-ai.zkproofport.app',transport:'stdio',status:'connected'};
+  expect(value.observeProverMcp({...connected,status:'returned'})).toBe(false);
+  expect(value.observeProverMcp(connected)).toBe(true);
+  const calling={...connected,status:'calling',tool:'generate_proof',arguments:{circuit:'arc_eligibility',scope:'ledger-house',pay_on:'arc-testnet-nano',pay_with:'arc',max_payment:'0.001'}};
+  expect(value.observeProverMcp(calling)).toBe(true);
+  expect(value.observeProverMcp({...calling,status:'returned',proofBytes:100,publicInputCount:128,secret:'never-store'})).toBe(true);
+  expect(value.snapshot().protocol.proverMcp).toMatchObject({status:'returned',proofBytes:100});
+  expect(JSON.stringify(value.snapshot())).not.toContain('never-store');
+  expect(value.snapshot().terminal.lines).toHaveLength(1);
+  expect(value.observeProverMcp(connected)).toBe(false);
+ });
 });

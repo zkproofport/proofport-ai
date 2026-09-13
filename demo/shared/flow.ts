@@ -10,6 +10,8 @@ export const STAKING_ABI = [
   'function domainSeparator() view returns (bytes32)',
   'function trustedSignerRoot() view returns (bytes32)',
   'function verifier() view returns (address)',
+  'function usedNonces(address,bytes32) view returns (bool)',
+  'function usedActions(bytes32) view returns (bool)',
   'event Staked(address indexed delegate,uint256 amount,bytes32 indexed actionHash)',
   'event Withdrawn(address indexed delegate,uint256 amount)',
 ];

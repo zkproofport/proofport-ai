@@ -60,6 +60,16 @@ export function installRecordingRoutes(app: Express, options: { proverUrl: strin
     req.on('close', () => { clearInterval(heartbeat); subscribers.delete(res); });
   });
   const isAgent=(req:Request)=>isLocalRecordingRequest(req,options.port)&&agentToken.length>0&&req.get('authorization')===`Bearer ${agentToken}`&&current?.snapshot().status==='running';
+  app.post('/demo/protocol/prover-mcp',(req,res)=>{
+    if(!isAgent(req)||(req.body?.status!=='connected'&&!permissions.snapshot().some(p=>p.kind==='proof'&&p.status==='approved')))return res.status(403).json({error:'Only the active authorized agent may publish prover MCP evidence.'});
+    if(!current!.observeProverMcp(req.body))return res.status(400).json({error:'Invalid prover MCP observation.'});
+    publish();return res.json({ok:true});
+  });
+  app.post('/demo/protocol/payment',(req,res)=>{
+    if(!isAgent(req)||!permissions.snapshot().some(p=>p.kind==='proof'&&p.status==='approved'))return res.status(403).json({error:'Payment observation requires an active user-approved proof request.'});
+    if(!current!.observePayment(req.body))return res.status(400).json({error:'Invalid payment observation.'});
+    publish();return res.json({ok:true});
+  });
   app.post('/demo/permissions', (req,res)=>{
     if(!isAgent(req))return res.status(403).json({error:'Only the active agent may request permission.'});
     const {kind,details}=req.body??{};

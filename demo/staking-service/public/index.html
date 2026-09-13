@@ -8,47 +8,56 @@
 <body>
   <header><a class="brand" href="/" aria-label="Ledger House home"><span class="brandmark">L<span>H</span></span><strong>Ledger House</strong></a><div class="network"><span class="network-icon">◈</span> Arc Testnet <span class="chain">5042002</span></div></header>
   <main>
-    <div class="heading"><div><p class="eyebrow">CREDENTIAL-GATED FINANCE</p><h1>Your agent. Your next move.</h1><p class="intro">Give an instruction. Follow the agent's tools, proof and transaction.</p></div><div class="live"><span id="connection-dot"></span><span id="connection">Connecting</span></div></div>
-    <section class="marketplace panel"><div><p class="eyebrow">ARC AGENT MARKETPLACE</p><strong id="market-result">The agent discovers the registered prover on Arc.</strong><p id="market-detail" class="muted small">ERC-8004 identifies the prover. Your signed delegation authorizes the staking action.</p></div><button id="find-prover" type="button" class="secondary">Inspect registry ↗</button></section>
+    <div class="heading"><div><p class="eyebrow">PRIVATE CREDENTIALS. AUTHORIZED AGENTS.</p><h1>Your agent. Your next move.</h1><p class="intro">One KYC + action authorization proof. A verified USDC stake on Arc.</p></div><div class="live"><span id="connection-dot"></span><span id="connection">Connecting</span></div></div>
     <div class="workspace">
       <section class="vault panel" aria-labelledby="vault-title">
-        <div class="section-top"><span class="eyebrow">THE VAULT</span><span class="tag">USDC</span></div>
-        <h2 id="vault-title">Arc USDC Vault</h2><p class="muted">Access with a proof. Act through a delegate.</p>
-        <div class="requirement"><span class="shield">◇</span><div><strong>One proof: KYC + delegation</strong><span>arc_eligibility binds Coinbase KYC to your EIP-712 staking authorization.</span></div></div>
+        <div class="section-top"><span class="eyebrow">LEFT / USER + DAPP</span><span class="tag">USDC</span></div>
+        <h2 id="vault-title">Arc USDC Vault</h2>
+        <div class="wallet-card"><div class="wallet-heading"><span class="wallet-letter">B</span><div><strong>Circle Agent Wallet</strong><span class="muted small">Operational wallet · pays &amp; stakes</span></div></div><code id="wallet-address">Connecting wallet…</code><div class="wallet-policy"><span>Direct Coinbase KYC</span><strong id="wallet-kyc" class="status-pending">CHECKING</strong></div><p id="wallet-kyc-detail" class="micro">Checking the operational wallet's credential.</p></div>
+        <div class="private-wallet"><span class="wallet-letter private">A</span><div><strong>Private Wallet A · Coinbase KYC holder</strong><span>Address hidden from the service: <code>****</code></span></div><span class="privacy-mark" aria-label="Private">◇</span></div>
+        <div class="requirement"><strong>Eligibility required: Coinbase KYC</strong><span id="requirement-detail">KYC + action authorization proof · the credential holder stays private.</span></div>
         <form id="stake-form">
           <label for="instruction">Your instruction</label>
-          <textarea id="instruction" name="instruction" rows="5" maxlength="2000" required spellcheck="false" placeholder="Tell your agent what you want to do."></textarea>
-          <label for="amount">Requested staking amount</label><div class="amount-input"><input id="amount" name="amount" value="0.1" inputmode="decimal" autocomplete="off" aria-describedby="amount-help" required><span>USDC</span></div><p id="amount-help" class="micro">The agent must ask before signing, paying or submitting a stake.</p><button id="run-button" type="submit"><span>Ask agent</span><span>↗</span></button>
+          <textarea id="instruction" name="instruction" rows="4" maxlength="2000" required spellcheck="false" placeholder="Stake 0.1 USDC on Arc. Find the required proof and ask me before spending."></textarea>
+          <label for="amount">Requested staking amount</label><div class="amount-input"><input id="amount" name="amount" value="0.1" inputmode="decimal" autocomplete="off" aria-describedby="amount-help" required><span>USDC</span></div><p id="amount-help" class="micro">You approve the proof fee and the stake separately.</p><button id="run-button" type="submit"><span>Ask agent</span><span>↗</span></button>
         </form>
         <p id="form-error" class="error" role="alert" hidden></p>
-        <p class="launch-note">Sending an instruction allows discovery and preparation. Review the agent's permission requests before anything is signed or spent.</p>
+        <p class="launch-note">Your instruction starts discovery. Signing, payment and staking wait for your approval.</p>
         <div id="permission-history" class="permission-history" aria-live="polite"></div>
-        <div class="powered"><span>Paid with <strong>Circle Agent Wallet</strong></span><span>Proof by <strong>ZKProofport</strong></span></div>
+        <div class="position-summary"><span>Your on-chain position</span><strong id="position-value">— <small>USDC</small></strong><p id="position-change">Read from the Arc staking contract</p></div>
       </section>
       <section class="activity panel" aria-labelledby="activity-title">
-        <div class="section-top"><div><span class="eyebrow">AGENT ACTIVITY</span><h2 id="activity-title">From instruction to verification</h2></div><span class="run-status" id="run-status">Ready</span></div>
+        <div class="section-top"><span class="eyebrow">CENTER / AGENT ACTIVITY</span><span class="run-status" id="run-status">Ready</span></div>
+        <h2 id="activity-title">From intent to verified stake</h2>
+        <div class="marketplace"><div><span class="micro-label">DISCOVERY</span><strong id="market-result">dApp Agent Marketplace</strong><p id="market-detail">Identity: ERC-8004 · prover discovery pending</p><p id="market-capability" hidden></p></div><button id="find-prover" type="button" class="text-button">Inspect ↗</button></div>
         <ol class="steps" id="steps"></ol>
-        <div id="result" class="result" hidden><div class="result-icon">✓</div><div><strong id="result-title">Proof accepted</strong><p id="result-copy"></p><a id="transaction-link" target="_blank" rel="noreferrer" hidden>View staking transaction ↗</a></div></div>
+        <div class="authorization-card"><div class="section-top"><strong>Exact-action authorization</strong><span id="authorization-status" class="small">Awaiting preparation</span></div><p id="authorization-summary">Private Wallet A → operational Wallet B</p><dl><dt>Action</dt><dd id="authorization-action">Stake 0.1 USDC · Arc Testnet</dd><dt>Target</dt><dd><a id="authorization-gate" target="_blank" rel="noreferrer">EligibilityGate · awaiting dApp policy</a></dd><dt>Nonce</dt><dd id="authorization-nonce">Not prepared</dd><dt>Deadline</dt><dd id="authorization-deadline">Not prepared</dd></dl></div>
+        <div id="result" class="result" hidden><div class="result-icon">✓</div><div><strong id="result-title">Stake confirmed on Arc</strong><p id="result-copy"></p><a id="transaction-link" target="_blank" rel="noreferrer" hidden>View on Arc Explorer ↗</a></div></div>
         <div id="run-error" class="error run-error" role="alert" hidden></div>
-        <div class="evidence"><div><span>Payment rail</span><strong>Arc nanopayments</strong></div><div><span>Proof host</span><strong id="tee-mode">GCP Cloud Run</strong></div><div><span>Verification</span><a href="https://testnet.arcscan.app/address/0xD0F3eE648386B59B484157332E736388Fcc41F47" target="_blank" rel="noreferrer">Staking contract ↗</a></div></div>
       </section>
       <section class="cli-panel panel" aria-labelledby="cli-title">
-        <div class="section-top"><div><p class="eyebrow">LIVE AGENT</p><h2 id="cli-title">Agent tools &amp; results</h2></div><span id="cli-stream-status" class="cli-status" role="status">Connecting</span></div>
-        <p class="cli-caption"><span id="agent-model">Model shown when the agent starts</span><span>Tool activity only · credential values omitted</span></p>
-        <div class="cli-command-bar"><span id="cli-command-label">SUBMITTED INSTRUCTION</span><button id="copy-command" type="button" disabled>Copy</button></div>
-        <code id="cli-command"></code>
-        <div class="cli-log" id="cli-log" tabindex="0" aria-label="Agent tool activity">
-          <p id="cli-empty">Ask the agent to see its tool calls and results here.</p>
-          <div id="cli-output" role="log" aria-live="polite" aria-relevant="additions" aria-label="Agent tool calls and results"></div>
+        <div class="section-top"><span class="eyebrow">RIGHT / PROTOCOL / TOOL CALLS</span><span id="cli-stream-status" class="cli-status" role="status">Connecting</span></div>
+        <div class="protocol-cards">
+          <article class="protocol-card"><div class="card-label">01 / PAYMENT <span id="payment-status" class="status-pending">WAITING</span></div><strong class="protocol-value">0.001 <small>USDC</small></strong><p>x402 / Gateway Nanopayment</p><span id="payment-detail">Circle Agent Wallet B · approval required</span></article>
+          <article class="protocol-card"><div class="card-label">02 / PROVER <span id="proof-status" class="status-pending">WAITING</span></div><strong class="protocol-value" id="tee-mode">GCP demo prover</strong><p>KYC + action authorization proof</p><span id="prover-detail">Nitro: separate implementation</span></article>
         </div>
-        <div class="cli-footer"><span>Instruction → tools → proof → Arc transaction</span><span id="cli-line-count">0 events</span></div>
+        <article class="verification-card"><div class="section-top"><div><span class="micro-label">03 / VERIFICATION</span><strong>EligibilityGate <span id="verification-status">· Awaiting proof</span></strong></div><div class="contract-links"><a id="gate-link" href="https://testnet.arcscan.app/address/0xD0F3eE648386B59B484157332E736388Fcc41F47" target="_blank" rel="noreferrer">Gate ↗</a><a id="verifier-link" target="_blank" rel="noreferrer" hidden>Verifier ↗</a></div></div><div id="verification-checks" class="verification-checks"></div><p id="verification-detail">Eligibility, authorized wallet, exact action, nonce and deadline are checked before staking.</p></article>
+        <article class="mcp-evidence" aria-label="ZKProofport MCP protocol evidence">
+          <p class="mcp-pipeline">Claude Code <span>→</span> dApp MCP adapter <span>→</span> <strong>ZKProofport MCP</strong> <span>→</span> GCP</p>
+          <div class="section-top"><span class="micro-label">INNER PROVER MCP · OBSERVED PROTOCOL</span><strong id="mcp-status" class="status-pending">WAITING</strong></div>
+          <p id="mcp-server">Awaiting the actual prover MCP handshake</p>
+          <details id="mcp-request"><summary id="mcp-call">No prover MCP call observed yet</summary><pre id="mcp-details">Actual connection and tool arguments appear here when observed.</pre></details>
+        </article>
+        <div class="section-top tools-heading"><h2 id="cli-title">Native dApp adapter tools &amp; results</h2><span id="cli-line-count">0 events</span></div>
+        <p class="cli-caption"><span id="agent-model">Model shown when the agent starts</span><span>ledger_house = dApp authorization adapter</span></p>
+        <div class="cli-command-bar"><span>SUBMITTED INSTRUCTION</span><button id="copy-command" type="button" disabled>Copy</button></div>
+        <code id="cli-command"></code>
+        <div class="cli-log" id="cli-log" tabindex="0" aria-label="Agent tool activity"><p id="cli-empty">Ask the agent to see its tool calls and results here.</p><div id="cli-output" role="log" aria-live="polite" aria-relevant="additions" aria-label="Agent tool calls and results"></div></div>
+        <div class="cli-footer"><span>Instruction → tools → proof → Arc transaction</span><span>Live evidence</span></div>
       </section>
     </div>
-    <div class="lower-panels">
-    <section class="positions panel"><div class="section-top"><div><span class="eyebrow">ON-CHAIN POSITIONS</span><h2>Positions</h2></div><span class="muted small">Read from the Arc staking contract</span></div><div id="positions"><p class="empty">Your agent's verified position will appear here.</p></div></section>
-    <section class="audit panel"><div><p class="eyebrow">PUBLIC PROOF AUDIT</p><h2>Can a known address be matched?</h2><p class="muted small">Compare the configured KYC address with the public nullifier. The address stays off this screen.</p></div><div class="audit-actions"><button id="audit-proof" type="button" class="secondary">Compare configured address</button><a href="/demo/proof" target="_blank" class="small">View public proof ↗</a></div><p id="audit-result" role="status" hidden></p></section>
-    </div>
-    <footer><span>Ledger House / ZKProofport</span><span id="runtime-note">Checking the live prover…</span></footer>
+    <section id="positions-panel" class="positions panel" hidden><div class="section-top"><span class="eyebrow">CONFIRMED TRANSACTIONS</span><span class="muted small">Authorized operational wallet</span></div><div id="positions"></div></section>
+    <footer><span>Ledger House / ZKProofport</span><span id="runtime-note">GCP demo prover · Arc Testnet · Circle Agent Wallet</span></footer>
   </main>
   <dialog id="permission-dialog" aria-labelledby="permission-title">
     <p class="eyebrow">YOUR DECISION</p><h2 id="permission-title"></h2>

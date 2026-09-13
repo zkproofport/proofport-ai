@@ -25,7 +25,8 @@ function amountUnits(value: string) {
   return BigInt(whole) * 1_000_000n + BigInt(fraction.padEnd(6, '0'));
 }
 
-const labels = ['Instruction received', 'Credential required', 'Prover discovered', 'Delegation prepared', 'Payment & proof', 'On-chain stake'];
+const labels = ['Instruction received', 'Eligibility required', 'Prover discovered', 'Action authorization prepared', 'Payment & proof', 'On-chain stake'];
+interface PaymentObservation {status:'pending'|'confirmed';wallet:string;fee:string;method:string;beforeUSDC:string;afterUSDC?:string;observedAt:string}
 
 /** Only recognised, public facts cross from the credential process into the page. */
 export class RecordingRun {
@@ -45,6 +46,7 @@ export class RecordingRun {
   private model: string | null = null;
   private instruction: string | null = null;
   private pendingTools = new Map<string, string>();
+  private protocol:{payment?:PaymentObservation;proverMcp?:Record<string,unknown>}={};
   private steps = labels.map((label, index) => ({ number: index + 1, label, status: 'waiting', detail: '', at: null as string | null }));
   readonly amount: string;
   private readonly redact: (text: string) => string;
@@ -63,6 +65,37 @@ export class RecordingRun {
     this.instruction = this.redact(parseInstruction(instruction));
     this.command = `claude -p ${JSON.stringify(this.instruction)}`;
     this.terminal(this.command, 'command');
+  }
+
+  observeProverMcp(input:unknown){
+    if(this.status!=='running'||!record(input)||input.serverName!=='zkproofport-mcp'||typeof input.version!=='string'||!/^[a-zA-Z0-9.+-]{1,64}$/.test(input.version)||input.endpoint!=='https://stg-ai.zkproofport.app'||input.transport!=='stdio')return false;
+    const previous=this.protocol.proverMcp?.status;
+    if((!previous&&input.status!=='connected')||(previous==='connected'&&input.status!=='calling')||(previous==='calling'&&input.status!=='returned')||previous==='returned')return false;
+    const value:Record<string,unknown>={serverName:input.serverName,version:input.version,endpoint:input.endpoint,transport:input.transport,status:input.status,observedAt:new Date().toISOString()};
+    if(input.status!=='connected'){
+      if(input.tool!=='generate_proof'||!record(input.arguments))return false;
+      const expected={circuit:'arc_eligibility',scope:'ledger-house',pay_on:'arc-testnet-nano',pay_with:'arc',max_payment:'0.001'};
+      const args=input.arguments;
+      if(Object.entries(expected).some(([key,v])=>args[key]!==v))return false;
+      value.tool=input.tool;value.arguments=expected;
+    }
+    if(input.status==='returned'){
+      if(!Number.isSafeInteger(input.proofBytes)||Number(input.proofBytes)<=0||!Number.isSafeInteger(input.publicInputCount)||Number(input.publicInputCount)<=0)return false;
+      value.proofBytes=input.proofBytes;value.publicInputCount=input.publicInputCount;
+    }
+    this.protocol.proverMcp=value;return true;
+  }
+
+  observePayment(input:unknown){
+    if(this.status!=='running'||!record(input)||input.wallet!==this.wallet||input.fee!=='0.001'||input.method!=='x402 / Gateway Nanopayment'||!['pending','confirmed'].includes(String(input.status)))return false;
+    const units=(value:unknown)=>{if(typeof value!=='string'||!/^\d+(\.\d{1,6})?$/.test(value))throw Error('Invalid balance');const [whole,fraction='']=value.split('.');return BigInt(whole)*1000000n+BigInt(fraction.padEnd(6,'0'));};
+    try{
+      units(input.beforeUSDC);
+      if(this.protocol.payment?.status==='confirmed')return input.status==='confirmed'&&input.beforeUSDC===this.protocol.payment.beforeUSDC&&input.afterUSDC===this.protocol.payment.afterUSDC;
+      if(input.status==='confirmed'&&(!this.protocol.payment||this.protocol.payment.beforeUSDC!==input.beforeUSDC||units(input.beforeUSDC)-units(input.afterUSDC)!==1000n))return false;
+      this.protocol.payment={status:input.status as 'pending'|'confirmed',wallet:this.wallet!,fee:'0.001',method:'x402 / Gateway Nanopayment',beforeUSDC:input.beforeUSDC as string,...(input.status==='confirmed'?{afterUSDC:input.afterUSDC as string}:{}),observedAt:new Date().toISOString()};
+      return true;
+    }catch{return false;}
   }
 
   observeClaude(event: unknown) {
@@ -116,7 +149,7 @@ export class RecordingRun {
     }
     if (name === 'mcp__ledger_house__prepare_delegation') {
       if (typeof result.wallet !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(result.wallet)) return;
-      this.wallet = result.wallet; mark(4, 'Delegate, amount, action and expiry prepared; KYC signing occurs in proof generation');
+      this.wallet = result.wallet; mark(4, 'Exact-action authorization prepared; unsigned until the user approves');
     }
     if (name === 'mcp__ledger_house__generate_proof') {
       if (typeof result.fingerprint !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(result.fingerprint)) return;
@@ -217,7 +250,7 @@ export class RecordingRun {
   snapshot() {
     const snapshot = { id: this.id, amount: this.amount, instruction: this.instruction, agent: this.claude ? {provider: 'Claude Code', model: this.model} : null, startedAt: this.startedAt, finishedAt: this.finishedAt,
       status: this.status, wallet: this.wallet, txHash:this.txHash,agentId:this.agentId,proofFingerprint:this.proofFingerprint,error: this.error, steps: this.steps.map(step => ({ ...step })),
-      terminal: { command: this.command, lines: this.terminalLines.map(line => ({ ...line })) } };
+      protocol:structuredClone(this.protocol),terminal: { command: this.command, lines: this.terminalLines.map(line => ({ ...line })) } };
     return JSON.parse(this.redact(JSON.stringify(snapshot))) as typeof snapshot;
   }
 }

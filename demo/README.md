@@ -1,118 +1,109 @@
-# Ledger House: actual agent execution inside a dApp
+# Ledger House: an actual agent inside an Arc dApp
 
-The dApp accepts a natural-language instruction and starts an isolated,
-authenticated **Claude Code** session. The model selects actual MCP tool calls
-based on the user's instruction, the staking service policy, the discovered
-prover's documentation, and tool responses. The page shows submitted input,
-the model reported by the session, and actual tool calls/results. Private
-reasoning, credentials and the KYC holder's address are not displayed.
+The user enters a staking instruction in the dApp. An authenticated Claude Code
+session selects tools, reads the provider's published guide and MCP schemas,
+waits for the user's action/payment approval, obtains a real proof, verifies it
+on Arc, and waits for the final staking approval. The UI displays actual inputs,
+tool calls and responses. It does not display private reasoning or replay a script.
+`user-agent/src/stake.ts` is a separate legacy rehearsal runner; Ask agent does not call it.
 
-**`user-agent/src/stake.ts` is an older deterministic standalone rehearsal
-runner. The dApp's Ask agent button does not execute it.**
+## Run and film
 
-## Run and film the actual dApp
-
-Use Node 22.18+, existing Claude Code and Circle CLI logins, and the existing
-`.env.development` / `.env.test`. Prepare the local packages if necessary:
+Use Node 22.18+, existing Claude Code and Circle CLI logins, and the private
+`.env.development` / `.env.test` files. From `proofport-ai`:
 
 ```bash
 npm ci
 npm run build --workspace @zkproofport-ai/sdk
 npm run build --workspace @zkproofport-ai/mcp
-RECORDING_PORT=4111 bash demo/record.sh
+RECORDING_PORT=4114 bash demo/record.sh
 ```
 
-Open **http://localhost:4111**. If that page is already running, keep its process
-and use the existing page. The prover is GCP staging at
-`https://stg-ai.zkproofport.app`; the dApp runs locally.
+Open **http://localhost:4114**. Keep any existing CLI/server running; choose another
+unused port for a clean session. The remote prover is **GCP staging** at
+`https://stg-ai.zkproofport.app`.
 
-Start recording before entering an instruction in **Your instruction**:
+Start recording with an empty instruction and zero events, then enter:
 
-> Stake 0.1 USDC in Ledger House with my Agent Wallet. Find a registered prover
-> on Arc, read its instructions, and obtain the KYC and delegation proof this
-> dApp requires. Verify the proof on-chain before staking.
+> Stake 0.1 USDC with my Agent Wallet. Find a registered prover and read its
+> instructions. Ask me to approve the exact-action authorization and proof fee,
+> then ask me again before submitting the verified stake.
 
-Set **Requested staking amount** to `0.1`, then click **Ask agent** once.
-The instruction authorizes discovery and preparation only. Approve the actual
-**KYC delegation & 0.001 USDC proof payment** request in the dApp, then after
-verification separately confirm the **0.1 USDC stake**. The real MCP tool waits
-for each decision; Reject stops the corresponding action.
+Set amount `0.1`, click **Ask agent**, review and approve **Authorize this action +
+proof fee**, then review **Confirm the verified stake**. Capture the actual
+Gateway payment, proof result, verification checks, position update and **View on
+Arc Explorer**. The presentation ends at Explorer; it does not include the internal
+candidate-address audit.
 
-Film both permission dialogs and user clicks, the user input, **LIVE AGENT / Agent tools & results**, verification and
-receipt, the increased on-chain position, and **Compare configured address**.
-Expand tool responses to inspect the fetched documents, MCP schema, selected
-proof arguments, verifier response and transaction hash.
+The [Korean team guide](https://github.com/zkproofport/proofport-app-dev/blob/main/docs/ops/ai-usage.md)
+provides the full filming procedure. No separate prove CLI command is needed:
+this run invokes the actual prover MCP tool.
 
-The [Korean team filming guide](https://github.com/zkproofport/proofport-app-dev/blob/main/docs/ops/ai-usage.md)
-contains the full step-by-step procedure.
+## Wallets and protocol boundaries
 
-## Actual execution path
+- **Private Wallet A** has the Coinbase KYC credential and signs authorization for
+  this exact action. Its address and key are masked as `****` in the dApp/model.
+- **Wallet B** is the existing **Circle Agent Wallet**. Its direct Coinbase KYC
+  query returns `NOT FOUND`; it pays the proof fee and executes the stake.
+- The credential is not transferred to B. One `arc_eligibility` proof combines
+  Coinbase KYC and the same holder's EIP-712 action signature. The gate checks B,
+  policy, target/domain, stake amount, nonce and deadline before transfer.
+- **Discovery** uses the dApp's provider catalog, reading live published
+  registration IDs; **ERC-8004 identity** is independently checked through current
+  Arc registry ownership and metadata. This is not a search of an external Arc
+  marketplace. Registration identity does not grant spending authority.
+- **Circle Gateway nanopayment** is real: `pay_with: arc`,
+  `pay_on: arc-testnet-nano`, proof fee **0.001 USDC**. The proof fee and **0.1 USDC**
+  staking deposit are separate. SDK signing checks the exact approved payment
+  terms before signing the final challenge.
+- **This execution uses GCP Cloud Run.** `tee.mode: local` names the in-process GCP
+  prover; hardware attestation is disabled for this execution. Coinbase KYC
+  attestation is still queried and validated. AWS Nitro Enclave is a separate
+  implementation, not the runtime that generated this recorded proof.
 
-- [`recordingRoutes.ts`](staking-service/src/recordingRoutes.ts) receives
-  `{instruction, amount}` and spawns `claude`, with a restricted local MCP config.
-- [`claudeSession.ts`](staking-service/src/claudeSession.ts) supplies the user
-  instruction and authority bounds. It does not select or replay tool calls.
-- [`dapp-mcp.ts`](user-agent/src/dapp-mcp.ts) implements the real capabilities:
-  service access challenge, ERC-8004 discovery, HTTPS guide retrieval, local
-  prover MCP connection and `tools/list`, delegation preparation,
-  `generate_proof`, Arc verifier `eth_call`, and Circle Agent Wallet staking.
-- [`recording.ts`](staking-service/src/recording.ts) displays correlated native
-  Claude `tool_use` / `tool_result` events. It excludes model reasoning and
-  accepts completion only from a successful staking result and process exit.
+## Actual MCP path
 
-The model chooses tool calls. The executor enforces trusted deployment,
-approved amount, document/connection prerequisites, proof binding and
-verification, and protection against duplicate paid attempts. A read-only
-instruction can finish without buying a proof or staking.
+```text
+Claude Code
+  → ledger_house dApp authorization/execution adapter
+  → proofport-ai/packages/mcp (handshake: zkproofport-mcp)
+  → GCP staging prover
+```
 
-ERC-8004 discovers the prover's **identity and endpoint**. Spending authority
-comes from the KYC wallet A's EIP-712 delegation to the existing Agent Wallet B.
-`arc_eligibility` proves **Coinbase KYC and that same holder's signed delegation
-in one circuit**. The gate binds the delegate, amount, scope, signer root,
-expiry and nonce, and verifies the proof again when staking.
+The native `mcp__ledger_house__*` names are preserved. The **INNER PROVER MCP**
+panel separately shows the actual server handshake, `tools/call generate_proof`,
+and returned proof sizes. These are nested protocol observations, not invented
+additional model tool choices. Only public, whitelisted facts reach the page.
 
-Proof fees use `pay_with: arc` and `pay_on: arc-testnet-nano`: Circle Agent
-Wallet signing and Gateway settlement. The 0.001 USDC proof fee and 0.1 USDC
-on-chain staking deposit are separate operations. GCP runs in local prover
-mode and does not advertise hardware TEE attestation.
+The model selects among ten local capabilities under fixed dApp policy. The
+published guide and tools/list schemas are returned to the model before it selects
+`generate_proof`. Some preparation calls are batched; the recording does not claim
+that every call was selected in a separate post-guide reasoning turn. Remote
+instructions cannot install arbitrary executables.
 
-## Recorded real execution
+User decisions are bound to the run, amount, chain, wallet, target, complete action,
+nonce/deadline, and payment terms or proof fingerprint. The model has no decision
+tool or browser access. Read-only requests do not grant spending approval. Private
+A's KYC must be confirmed before the proof approval request; unknown query results
+are never labeled as absence or valid KYC. Optional balance observations cannot
+turn a confirmed paid proof or stake into a request to repeat spending.
 
-The latest interactive run began at **2026-09-13 14:27:49 KST**. The user
-approved proof/delegation at **14:28:30** and the verified stake at **14:29:38**.
-The new transaction completed at **14:29:56**, session exit at **14:30:01**.
-Claude selected ten tools, including two blocking permission requests. Gateway
-changed 2.985 → 2.984 USDC, wallet 0.4 → 0.3, position 1.6 → 1.7. A separate
-real rejection run produced no proof/payment/stake and no balance changes.
+## Fresh presentation execution — 2026-09-13
 
-- [Interactive video, 3m14s](https://github.com/zkproofport/proofport-app-dev/blob/main/videos/arc-recording/ledger-house-cli-walkthrough.mp4)
-- [Actual approval and transaction evidence](artifacts/interactive-verification.json)
-- [Actual rejection evidence](artifacts/interactive-rejection-verification.json)
-- [Public proof](artifacts/interactive-proof.json)
-- [New transaction](https://testnet.arcscan.app/tx/0x16eea46e81a904ba4f7504542264da65b3a462f16d8121919e38bfcaba0815e8)
+- Actual proof approval **16:05:52 KST**, proof returned **16:06:24**.
+- Arc preflight verified **16:06:26**, stake approved **16:06:35**.
+- Successful stake result **16:07:14**, block **61860540**.
+- Gateway **2.984 → 2.983**, Wallet B **0.3 → 0.2**, position **1.7 → 1.8 USDC**.
+- One paid proof and one staking call. Initial read-only RPC errors were retried
+  by the model and recovered before payment; raw evidence preserves them.
 
-Exact approved payment terms are passed through MCP into SDK payment signing.
-If the final challenge changes amount, recipient, asset, chain or signing domain,
-the SDK refuses to sign. The model has no approval decision tool or browser access.
+[78-second presentation video](https://github.com/zkproofport/proofport-app-dev/blob/main/videos/arc-recording/ledger-house-cli-walkthrough.mp4)
+· [public execution evidence](artifacts/presentation-verification.json)
+· [public proof](artifacts/presentation-proof.json)
+· [Arc transaction](https://testnet.arcscan.app/tx/0x40d05805e2179291d0e24ff8c19f1bf190d240ac1d17b9360598d32dfd05c268).
 
-The approval follow-up stores immutable browser-decision receipts instead of
-spend-permission booleans. Before proof generation or staking, the executor
-compares the full current request with the approved request and rechecks the
-delegation expiry. The second request also includes the original signed action.
-The server creates a separate permission ledger and agent token for each run;
-old request IDs and tokens cannot authorize a new run.
-
-[Recorded model-context audit](artifacts/interactive-context-review.json) links
-the complete returned guide bodies, their hashes and observation times to the
-subsequent proof call. Some preparation calls were emitted in the same model
-response before the guide result returned; the recording does not demonstrate
-a separate post-guide choice for every tool. Both the guide and MCP schema
-results preceded the model's `generate_proof` call. The model selects from ten
-allowlisted local capabilities under fixed dApp policy constraints. Remote
-documentation cannot install arbitrary tools. The audit distinguishes the
-recorded version from this subsequent approval hardening.
-
-The public nullifier supports checking a known candidate address. Hiding A in
-the interface is not an unlinkability guarantee; see the [audit guide](audit/README.md).
-Earlier deterministic CLI evidence remains in `artifacts/filmed-cli-*` as
-history, separate from the actual model-driven `agent-dapp-*` recording.
+The video uses fresh browser captures with waiting-time cuts and restrained crop/
+zoom; no generated logs or cursor movement. Hiding A's literal address is not an
+unlinkability guarantee: the existing public nullifier supports checking a known
+candidate. That internal [security audit](audit/README.md) remains separate from
+this presentation.

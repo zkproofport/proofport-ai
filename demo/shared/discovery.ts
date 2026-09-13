@@ -18,6 +18,11 @@ export async function discoverProver(provider: ethers.JsonRpcProvider, config: D
     const logs=await registry.queryFilter(registry.filters.Transfer(null,owner),start,end);
     for(const log of logs.reverse()) ids.add((log as ethers.EventLog).args[2].toString());
   }
+  return validateIdentities(registry,config,ids);
+}
+
+async function validateIdentities(registry:ethers.Contract,config:DiscoveryConfig,ids:Set<string>) {
+  const owner=ethers.getAddress(config.owner);
   const candidates: {agentId:string;registry:string;owner:string;endpoint:string;name:string}[]=[];
   for(const id of ids) {
     if(ethers.getAddress(await registry.ownerOf(id)) !== owner) continue;
@@ -31,4 +36,22 @@ export async function discoverProver(provider: ethers.JsonRpcProvider, config: D
   }
   if(candidates.length!==1) throw new Error(`Registry discovery found ${candidates.length} matching provers; expected one active GCP prover.`);
   return candidates[0];
+}
+
+/** Discover a live provider listing; independently verify its ERC-8004 identity on Arc. */
+export async function discoverMarketplaceProver(provider:ethers.JsonRpcProvider,config:DiscoveryConfig,fetcher:typeof fetch=fetch) {
+  if(Number((await provider.getNetwork()).chainId)!==ARC_CHAIN_ID)throw new Error('Discovery RPC is not Arc Testnet.');
+  const response=await fetcher(new URL('/.well-known/agent-registration.json',config.allowedOrigin),{redirect:'error',signal:AbortSignal.timeout(15000)});
+  if(!response.ok)throw new Error('Provider registration document unavailable.');
+  const text=await response.text();if(text.length>150000)throw new Error('Provider registration document is too large.');
+  const document=JSON.parse(text);
+  const expected=`eip155:${ARC_CHAIN_ID}:${config.registry}`.toLowerCase();
+  const ids=new Set<string>();
+  for(const entry of Array.isArray(document.registrations)?document.registrations:[]) {
+    if(String(entry?.agentRegistry).toLowerCase()!==expected)continue;
+    const id=String(entry.agentId);
+    if(/^[0-9]{1,78}$/.test(id)&&BigInt(id)<2n**256n)ids.add(BigInt(id).toString());
+  }
+  if(!ids.size)throw new Error('No matching Arc registry identities in the provider listing.');
+  return validateIdentities(new ethers.Contract(config.registry,ABI,provider),config,ids);
 }
