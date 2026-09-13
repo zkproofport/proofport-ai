@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.2.7](https://github.com/zkproofport/proofport-ai/compare/server-v0.2.6...server-v0.2.7) (2026-09-13)
+
+
+### Bug Fixes
+
+* **ci:** publish existing releases with supported Node and npm ([1caac98](https://github.com/zkproofport/proofport-ai/commit/1caac98ea305d6a4951fbe66435ec99c484dfe46))
+* **demo:** match presentation action and expose actual npm installation ([6065239](https://github.com/zkproofport/proofport-ai/commit/6065239459300a6486e70adc08972e7a51ba6ca8))
+* **demo:** preserve the user action through approval and proof ([b88e801](https://github.com/zkproofport/proofport-ai/commit/b88e8018de9d87e73e985e928bc6256df10ff39d))
+* **demo:** resolve published ESM packages and pin verified npm runtime ([acbc338](https://github.com/zkproofport/proofport-ai/commit/acbc3385e265002a4b15fb58f35c5cfbff3034bb))
+* **demo:** wait for verified Arc identity before showing prover readiness ([dc6ef7c](https://github.com/zkproofport/proofport-ai/commit/dc6ef7c9504c10ca575cc8c0bdbf546880040d5c))
+* **deploy:** include workspace package metadata in prover images ([08d798d](https://github.com/zkproofport/proofport-ai/commit/08d798d2a8ef91fdad236466681bf4e0410d97a4))
+* **sdk:** validate exact actions before both proof paths sign ([119779d](https://github.com/zkproofport/proofport-ai/commit/119779d513cf98e3540e73be6001642aeb781286))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @zkproofport-ai/mcp bumped from ^0.2.11 to ^0.2.12
+    * @zkproofport-ai/sdk bumped from ^0.2.11 to ^0.2.12
+
 ## [0.2.6](https://github.com/zkproofport/proofport-ai/compare/server-v0.2.5...server-v0.2.6) (2026-09-13)
 
 
