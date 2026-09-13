@@ -1,4 +1,9 @@
-/** CLI agent: registry discovery -> paid GCP proof -> Circle wallet -> Arc staking. */
+/**
+ * Standalone deterministic rehearsal runner retained for direct CLI use.
+ * The dApp Ask agent button does NOT launch this file.
+ * Its actual Claude Code/MCP path is recordingRoutes.ts -> claudeSession.ts
+ * -> dapp-mcp.ts; the language model selects tools from the user's instruction.
+ */
 import { listArcAgentWallets } from '@zkproofport-ai/sdk';
 import { selectAgentDelegate } from './wallet.ts';
 import { spawn } from 'node:child_process';
