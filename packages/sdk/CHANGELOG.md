@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.12](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.2.11...sdk-v0.2.12) (2026-09-13)
+
+
+### Bug Fixes
+
+* **sdk:** validate exact actions before both proof paths sign ([119779d](https://github.com/zkproofport/proofport-ai/commit/119779d513cf98e3540e73be6001642aeb781286))
+
 ## [0.2.11](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.2.10...sdk-v0.2.11) (2026-09-13)
 
 

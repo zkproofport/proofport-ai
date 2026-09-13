@@ -1,6 +1,6 @@
 {
   "name": "@zkproofport-ai/mcp",
-  "version": "0.2.11",
+  "version": "0.2.12",
   "description": "Local MCP server and CLI for ZKProofport identity proofs and experimental Arc Testnet EIP-712 action authorization. Circle Agent Wallet payments, Circle Gateway nanopayments and x402 USDC; Coinbase KYC, country and OIDC proofs.",
   "keywords": [
     "mcp",
@@ -44,7 +44,7 @@
   "dependencies": {
     "@circle-fin/x402-batching": "^3.4.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "@zkproofport-ai/sdk": "^0.2.11",
+    "@zkproofport-ai/sdk": "^0.2.12",
     "zod": "^3.23.0"
   },
   "files": [
