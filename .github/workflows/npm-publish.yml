@@ -3,6 +3,15 @@ name: Publish to npm
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing Release Please tag to publish or retry (sdk-v… / mcp-v…)'
+        required: true
+        type: string
+
+env:
+  RELEASE_TAG: ${{ inputs.release_tag || github.event.release.tag_name }}
 
 # Only run for npm packages (sdk, mcp). Server releases use deploy-ai-aws.yml.
 
@@ -15,17 +24,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
       - name: Determine package from tag
         id: pkg
         run: |
-          TAG="${{ github.event.release.tag_name }}"
+          TAG="$RELEASE_TAG"
           if [[ "$TAG" == sdk-v* ]]; then
             echo "package=packages/sdk" >> "$GITHUB_OUTPUT"
             echo "name=@zkproofport-ai/sdk" >> "$GITHUB_OUTPUT"
@@ -38,10 +49,16 @@ jobs:
             exit 0
           fi
 
+      - name: Require an existing published GitHub release
+        if: steps.pkg.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$RELEASE_TAG" --json isDraft,publishedAt --jq 'if .isDraft == false and .publishedAt != null then .publishedAt else error("Release must be published by Release Please first") end'
+
       - name: Verify release tag matches package and manifest
         if: steps.pkg.outputs.skip != 'true'
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
           PACKAGE_PATH: ${{ steps.pkg.outputs.package }}
         run: |
           node --input-type=module <<'NODE'
@@ -72,7 +89,7 @@ jobs:
 
       - name: Upgrade npm for OIDC trusted publishing
         if: steps.pkg.outputs.skip != 'true'
-        run: npm install -g npm@latest
+        run: npm install -g npm@12.0.2
 
       - name: Wait for the released SDK dependency
         if: steps.pkg.outputs.skip != 'true' && steps.pkg.outputs.package == 'packages/mcp'
@@ -90,7 +107,7 @@ jobs:
         if: steps.pkg.outputs.skip != 'true'
         working-directory: ${{ steps.pkg.outputs.package }}
         run: |
-          TAG="${{ github.event.release.tag_name }}"
+          TAG="$RELEASE_TAG"
           if [[ "$TAG" == *"beta"* ]]; then
             npm publish --access public --tag beta
           else
