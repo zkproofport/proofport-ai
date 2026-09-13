@@ -1,0 +1,80 @@
+{
+  "auditedAt": "2026-09-13T05:40:58.471527+00:00",
+  "source": {
+    "path": "demo/artifacts/interactive-verification.json",
+    "sha256": "f1e8be72be53abd81669ff8650b7947deb0366a7ea92385fb61b2cd3e14a4e77",
+    "recordedImplementationCommit": "c7948f8db5edea900d6e10cfd0c337e2ecd75004",
+    "runId": "702c6fa7-2d33-4aa9-919b-04e944578b0b",
+    "model": {
+      "provider": "Claude Code",
+      "model": "claude-sonnet-5"
+    }
+  },
+  "modelContextEvidence": {
+    "sourceMechanism": "RecordingRun.observeClaude records Claude stream user/tool_result blocks only when correlated to a preceding assistant/tool_use ID. Full guide text is retained in the source artifact. Private reasoning is excluded.",
+    "guideResultLineIndex": 8,
+    "guideResultAt": "2026-09-13T05:27:57.620Z",
+    "documents": [
+      {
+        "url": "https://stg-ai.zkproofport.app/.well-known/SKILL.md",
+        "utf8Bytes": 4776,
+        "sha256": "8f4d4360ebf28c22e38d78390b7c2fd3ee4fe9a08d386fbb606f90a107fb3076"
+      },
+      {
+        "url": "https://stg-ai.zkproofport.app/api/v1/guide/arc_eligibility",
+        "utf8Bytes": 5828,
+        "sha256": "2ba12631cc8bd6df3f9c172469d5444a83cfa3c5a59d898795a56f6455a0a535"
+      }
+    ],
+    "mcpSchemaResultLineIndex": 9,
+    "mcpSchemaResultAt": "2026-09-13T05:27:57.916Z",
+    "generateProofCallLineIndex": 13,
+    "generateProofCallAt": "2026-09-13T05:28:32.942Z",
+    "generateProofArguments": {
+      "circuit": "arc_eligibility",
+      "scope": "ledger-house",
+      "pay_on": "arc-testnet-nano",
+      "pay_with": "arc"
+    },
+    "guideAndSchemaResultsPrecedeGenerateProofCall": true,
+    "connectCallAt": "2026-09-13T05:27:57.125Z",
+    "connectCallPrecedesGuideResult": true,
+    "interpretation": "The model emitted some dependent preparation calls in the same response before receiving the guide result. This is not evidence of a separate post-guide decision for every tool. The full guide and MCP schema tool results were available before the subsequent generate_proof call. Internal attention or reasoning is not observable.",
+    "recordingLimit": "Tool-use IDs were checked by the stream decoder but not retained in the published terminal records; this audit does not reconstruct or invent them."
+  },
+  "permissionEvidence": {
+    "proofRequestId": "d13a7e10-03e8-4f61-9d42-c5abe470d743",
+    "proofApprovedAt": "2026-09-13T05:28:30.991Z",
+    "stakeRequestId": "5aae9336-ea86-44d6-90bc-6c1d48b1d435",
+    "stakeApprovedAt": "2026-09-13T05:29:38.502Z",
+    "proofCallAfterBrowserApproval": true,
+    "stakeCallAfterBrowserApproval": true,
+    "executedProofActionMatchesApprovedAction": true,
+    "executedProofPaymentMatchesApprovedPayment": true,
+    "recordedStakeApprovalBinding": "Delegate, amount, Arc chain, gate, verifier and verified proof fingerprint; the fingerprint identifies the proof binding the original delegation. The follow-up hardening also includes the full original action in the second approval and compares immutable receipts before execution."
+  },
+  "capabilityBoundary": "Claude chooses calls from ten local allowlisted MCP tools. The application constrains the circuit, scope, payment route, amount and transaction contract. Public remote documentation is tool data; it cannot install or execute arbitrary code. Request-permission tools wait for the browser decision and cannot approve themselves.",
+  "video": {
+    "path": "videos/arc-recording/ledger-house-cli-walkthrough.mp4",
+    "sha256": "7c7cd0aec023431b5574b5cd0bf6bfdbf61523d0e12e5826287e16571edffb57",
+    "durationSeconds": 193.73666666666668,
+    "width": 2056,
+    "height": 1112,
+    "frames": 420,
+    "audio": false,
+    "reviewedVideoSeconds": [
+      2,
+      18,
+      36,
+      53,
+      62,
+      88,
+      112,
+      125,
+      148,
+      190
+    ],
+    "timing": "Actual capture timestamps preserved",
+    "interaction": "Actual CUA user input and two explicit UI approval actions; agent tools wait for each decision"
+  }
+}

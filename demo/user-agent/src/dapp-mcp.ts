@@ -17,6 +17,7 @@ import {executeFromAgentWallet} from '../../shared/circleExecution.ts';
 import {normalizeArcPublicInputs,extractArcPublicMetadata} from '../../audit/address-audit.ts';
 import {parseStakeAmount} from '../../staking-service/src/recording.ts';
 import {ActionGuard} from './actionGuard.ts';
+import type {Permission} from '../../staking-service/src/permissions.ts';
 import {createRedactor} from './privacy.ts';
 import {validateNanoOffer,validateProofBinding} from './policy.ts';
 
@@ -53,7 +54,7 @@ async function userPermission(kind:'proof'|'stake',details:Record<string,unknown
  const headers={Authorization:`Bearer ${token}`,'Content-Type':'application/json'};
  const initial=await fetch(service.origin+'/demo/permissions',{method:'POST',headers,body:JSON.stringify({kind,details}),signal:AbortSignal.timeout(10000)});
  if(!initial.ok)throw Error('Could not request user permission.');
- let permission=await initial.json() as {id:string;status:string;decidedAt:string|null;expiresAt:string};
+ let permission=await initial.json() as Permission;
  while(permission.status==='pending'){
   if(Date.now()>Date.parse(permission.expiresAt))throw Error('User permission expired. Do not retry automatically.');
   await new Promise(resolve=>setTimeout(resolve,750));
@@ -61,7 +62,16 @@ async function userPermission(kind:'proof'|'stake',details:Record<string,unknown
   if(!response.ok)throw Error('User permission session ended.');permission=await response.json() as typeof permission;
  }
  if(permission.status!=='approved')throw Error('The user rejected or did not approve this action. Stop; do not retry or spend.');
- return {ok:true,approved:true,kind,requestId:permission.id,decidedAt:permission.decidedAt,actor:'User decision in the dApp'};
+ return permission;
+}
+function approvalResult(permission:Permission){return {ok:true,approved:true,kind:permission.kind,requestId:permission.id,decidedAt:permission.decidedAt,actor:'User decision in the dApp'};}
+function proofPermissionDetails(terms:ApprovedPayment){
+ if(!action||!wallet||!prover)throw Error('Missing prepared proof request.');
+ return {amount,delegate:wallet,credentialSigner:'****',proverId:prover.agentId,proverUrl:origin(),recipient:terms.payTo,fee:'0.001',payment:'Circle Agent Wallet · Arc nanopayments',chainId:ARC_CHAIN_ID,circuit:'arc_eligibility',scope:'ledger-house',gate:config.gate,action,approvedPayment:terms};
+}
+function stakePermissionDetails(){
+ if(!proof||!wallet||!action)throw Error('Missing verified staking request.');
+ return {amount,delegate:wallet,chainId:ARC_CHAIN_ID,gate:config.gate,verifier:config.verifier,proofFingerprint:extractArcPublicMetadata(proof.publicInputs).publicInputsFingerprint,verified:true,transaction:'USDC approval if needed, then stakePacked',payment:'Circle Agent Wallet',action};
 }
 register('read_dapp','Read the staking dApp policy and request access. Returns actual service manifest, KYC challenge, connected wallet and balance. No transaction.',{},async()=>{
  const manifest=await http(service.origin+'/.well-known/service.json');
@@ -120,8 +130,8 @@ register('generate_proof','Call the connected prover MCP generate_proof tool wit
  const offers=challenge.data.accepts?.filter((offer:any)=>offer.network==='eip155:5042002'&&offer.extra?.name==='GatewayWalletBatched');
  if(challenge.status!==402||challenge.data.requiresPayment!==true||offers?.length!==1)throw Error('Expected one live Arc Gateway offer.');
  validateNanoOffer(offers[0],config.discovery.owner,config.usdc);
- guard.proof();
  if(!approvedPayment)throw Error('Missing user-approved payment terms.');
+ guard.proof(proofPermissionDetails(approvedPayment));
  const call={...args,action,approved_payment:approvedPayment,max_payment:'0.001'};
  const response=await mcp.callTool({name:'generate_proof',arguments:call},undefined,{timeout:240000});
  if(response.isError)throw Error('The prover MCP rejected the paid proof request. Automatic paid retry is disabled.');
@@ -141,8 +151,9 @@ register('request_proof_permission','Ask the user in the dApp to approve the exa
  if(challenge.status!==402||offers?.length!==1)throw Error('Live proof price unavailable.');validateNanoOffer(offers[0],config.discovery.owner,config.usdc);
  const offer=offers[0];
  const terms:ApprovedPayment={network:offer.network,scheme:offer.scheme,amount:offer.amount,asset:offer.asset,payTo:offer.payTo,extra:{name:offer.extra.name,version:offer.extra.version,verifyingContract:offer.extra.verifyingContract}};
- const approved=await userPermission('proof',{amount,delegate:wallet,credentialSigner:'****',proverId:prover.agentId,proverUrl:origin(),recipient:offer.payTo,fee:'0.001',payment:'Circle Agent Wallet · Arc nanopayments',chainId:ARC_CHAIN_ID,circuit:'arc_eligibility',scope:'ledger-house',gate:config.gate,action,approvedPayment:terms});
- approvedPayment=terms;guard.proofApproved=true;return approved;
+ const details=proofPermissionDetails(terms);
+ const approved=await userPermission('proof',details);
+ guard.approveProof(approved,details);approvedPayment=terms;return approvalResult(approved);
 });
 register('verify_proof_on_arc','Verify the actual proof with the deployed Arc verifier using eth_call. Staking still checks the delegation policy and verifies again atomically.',{},async()=>{
  if(!proof||!action)throw Error('Generate the actual proof first.');
@@ -156,7 +167,7 @@ register('verify_proof_on_arc','Verify the actual proof with the deployed Arc ve
  return {ok:true,valid,chainId:ARC_CHAIN_ID,verifier:config.verifier,method:'verify(bytes,bytes32[])',delegationPolicyMatched:true,fingerprint:extractArcPublicMetadata(proof.publicInputs).publicInputsFingerprint};
 });
 register('stake','Execute the user-approved stake through the existing Circle Agent Wallet, after proof verification. Sends approval if needed and stakePacked, then checks the receipt and dApp acceptance. No duplicate transaction attempts.',{amount:z.string()},async args=>{
- if(!wallet||!proof||!action)throw Error('Missing wallet, proof or delegation.');guard.stake(args.amount);
+ if(!wallet||!proof||!action)throw Error('Missing wallet, proof or delegation.');guard.stake(args.amount,stakePermissionDetails());
  const units=ethers.parseUnits(amount,6);
  const token=new ethers.Contract(config.usdc,['function allowance(address,address) view returns(uint256)'],provider);
  let approvalTx:string|null=null;
@@ -170,7 +181,7 @@ register('stake','Execute the user-approved stake through the existing Circle Ag
 });
 register('request_stake_permission','Ask the user to confirm the exact requested USDC staking transaction after Arc proof verification. Displays the delegate, amount, contract and proof fingerprint. Blocks for a real dApp click; required before stake.',{},async()=>{
  if(!guard.verified||!proof||!wallet)throw Error('Verify the proof on Arc first.');
- const approved=await userPermission('stake',{amount,delegate:wallet,chainId:ARC_CHAIN_ID,gate:config.gate,verifier:config.verifier,proofFingerprint:extractArcPublicMetadata(proof.publicInputs).publicInputsFingerprint,verified:true,transaction:'USDC approval if needed, then stakePacked',payment:'Circle Agent Wallet'});
- guard.stakeApproved=true;return approved;
+ const details=stakePermissionDetails();const approved=await userPermission('stake',details);
+ guard.approveStake(approved,details);return approvalResult(approved);
 });
 await server.connect(new StdioServerTransport());

@@ -95,6 +95,23 @@ Exact approved payment terms are passed through MCP into SDK payment signing.
 If the final challenge changes amount, recipient, asset, chain or signing domain,
 the SDK refuses to sign. The model has no approval decision tool or browser access.
 
+The approval follow-up stores immutable browser-decision receipts instead of
+spend-permission booleans. Before proof generation or staking, the executor
+compares the full current request with the approved request and rechecks the
+delegation expiry. The second request also includes the original signed action.
+The server creates a separate permission ledger and agent token for each run;
+old request IDs and tokens cannot authorize a new run.
+
+[Recorded model-context audit](artifacts/interactive-context-review.json) links
+the complete returned guide bodies, their hashes and observation times to the
+subsequent proof call. Some preparation calls were emitted in the same model
+response before the guide result returned; the recording does not demonstrate
+a separate post-guide choice for every tool. Both the guide and MCP schema
+results preceded the model's `generate_proof` call. The model selects from ten
+allowlisted local capabilities under fixed dApp policy constraints. Remote
+documentation cannot install arbitrary tools. The audit distinguishes the
+recorded version from this subsequent approval hardening.
+
 The public nullifier supports checking a known candidate address. Hiding A in
 the interface is not an unlinkability guarantee; see the [audit guide](audit/README.md).
 Earlier deterministic CLI evidence remains in `artifacts/filmed-cli-*` as

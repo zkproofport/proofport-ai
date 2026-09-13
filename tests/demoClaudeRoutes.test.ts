@@ -117,4 +117,23 @@ describe('Claude recording route', () => {
     const state = (await request(app).get('/demo/state')).body.run;
     expect(state.status).toBe('failed'); expect(state.txHash).toBeNull();
   });
+
+  it('cannot carry an approval or agent token into a later run',async()=>{
+    const first=await request(app).post('/demo/run').send({amount:'0.1',instruction:'Stake after approval.'});
+    const oldConfig=JSON.parse(await readFile(join(spawn.mock.calls[0][2].cwd,'mcp.json'),'utf8'));
+    const oldToken=oldConfig.mcpServers.ledger_house.env.DEMO_AGENT_TOKEN;
+    const details={amount:'0.1',chainId:5042002,gate:'gate-A',delegate:'B',action:{message:{expiresAt:123456789,nonce:'first'}}};
+    const p=(await request(app).post('/demo/permissions').set('Authorization',`Bearer ${oldToken}`).send({kind:'proof',details})).body;
+    const decide=(id:string)=>request(app).post(`/demo/permissions/${id}/decision`).set('Origin','http://localhost:4107').set('X-Demo-User-Action','1').send({decision:'approve'});
+    expect((await decide(p.id)).status).toBe(200);
+    for(const change of [{chainId:1},{gate:'gate-B'},{delegate:'C'},{action:{message:{expiresAt:999999999,nonce:'changed'}}}]){
+      expect((await request(app).post('/demo/permissions').set('Authorization',`Bearer ${oldToken}`).send({kind:'proof',details:{...details,...change}})).status).toBe(409);
+    }
+    children[0].emit('close',0);
+    const next=await request(app).post('/demo/run').send({amount:'0.1',instruction:'A separate staking instruction.'});
+    expect(next.body.runId).not.toBe(first.body.runId);
+    expect((await request(app).get('/demo/state')).body.run.permissions).toEqual([]);
+    expect((await decide(p.id)).status).toBe(409);
+    expect((await request(app).post('/demo/permissions').set('Authorization',`Bearer ${oldToken}`).send({kind:'proof',details})).status).toBe(403);
+  });
 });
