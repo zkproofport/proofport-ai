@@ -3,6 +3,7 @@ import { CIRCUITS, type CircuitId } from '../config/circuits.js';
 import { CIRCUIT_IDS } from '../config/circuitIds.js';
 import { AUTHORIZED_SIGNERS, COINBASE_ATTESTER_CONTRACT } from '../config/contracts.js';
 import { getChainVerifiers } from '../config/deployments.js';
+import { resolvePaymentNetworks, type PaymentNetwork } from '../payment/networks.js';
 import type { Config } from '../config/index.js';
 
 const require = createRequire(import.meta.url);
@@ -49,7 +50,7 @@ function buildConstants(
   chainId: number,
   usdcAddress: string,
   paymentAmount: string,
-  facilitatorUrl: string,
+  paymentNetworks: PaymentNetwork[],
 ) {
   const circuit = CIRCUITS[circuitId];
   const chainVerifiers = getChainVerifiers(String(chainId));
@@ -76,13 +77,40 @@ function buildConstants(
         payment_rpc_note: 'Used for x402 payment settlement and on-chain proof verification.',
       },
       x402: {
-        facilitator_url: facilitatorUrl,
-        settle_endpoint: `${facilitatorUrl}/settle`,
-        protocol: 'EIP-3009 TransferWithAuthorization',
-        description: 'Client signs EIP-712 authorization, facilitator settles on-chain (facilitator pays gas)',
+        protocol: 'x402 v2, exact scheme (EIP-3009 TransferWithAuthorization)',
+        description:
+          'You sign a USDC authorization and send it. You never submit a transaction, so you ' +
+          'need USDC on the chain you pay on and nothing else — no gas, no native token. ' +
+          'Settlement is not your problem: a public facilitator does it where one serves the ' +
+          'chain, and this service does it where none does.',
+        // Named per chain, not once. A single facilitator_url was published
+        // here and in the 402 body, which is wrong for any chain no public
+        // facilitator serves -- Arc and both Ethereum chains -- and told an
+        // agent to POST to a facilitator that would refuse it.
+        chains: paymentNetworks.map((net) => ({
+          network: net.caip2,
+          network_name: net.id,
+          asset: net.usdc,
+          decimals: net.decimals,
+          eip712_domain: { name: net.eip3009.name, version: net.eip3009.version, chainId: net.chainId },
+          settled_by:
+            net.settlement === 'facilitator'
+              ? `facilitator ${net.facilitatorUrl} (it pays the gas)`
+              : 'this service (it pays the gas, out of your payment)',
+        })),
         single_step_flow: {
-          description: 'x402 single-step flow. POST /prove with {circuit, inputs: {jwt, scope_string}} → 402 with nonce → pay → retry with payment headers.',
-          nonce_details: 'Server returns 32-byte nonce in 402 response body. Client must include nonce in retry as X-Payment-Nonce header.',
+          description:
+            'POST /prove with {circuit, inputs} → 402 listing chains in `accepts` → sign one → ' +
+            'retry with the PAYMENT-SIGNATURE and X-Payment-Nonce headers.',
+          header_note:
+            'PAYMENT-SIGNATURE carries the base64 x402 payment payload. That is the v2 header name; ' +
+            'X-Payment was v1 and is still read.',
+          nonce_details:
+            'The 402 body carries a 32-byte nonce. Send it back as X-Payment-Nonce. It is single-use ' +
+            'and bound to the circuit it was issued for.',
+          alternative:
+            'If you would rather submit your own transaction, send its hash as X-Payment-TX with ' +
+            'X-Payment-Network naming the chain. You pay the gas on that path.',
         },
       },
       verification: {
@@ -125,13 +153,37 @@ function buildConstants(
       payment_rpc_note: 'Used for x402 payment settlement and on-chain proof verification.',
     },
     x402: {
-      facilitator_url: facilitatorUrl,
-      settle_endpoint: `${facilitatorUrl}/settle`,
-      protocol: 'EIP-3009 TransferWithAuthorization',
-      description: 'Client signs EIP-712 authorization, facilitator settles on-chain (facilitator pays gas)',
+      protocol: 'x402 v2, exact scheme (EIP-3009 TransferWithAuthorization)',
+      description:
+        'You sign a USDC authorization and send it. You never submit a transaction, so you ' +
+        'need USDC on the chain you pay on and nothing else — no gas, no native token. ' +
+        'Settlement is not your problem: a public facilitator does it where one serves the ' +
+        'chain, and this service does it where none does.',
+      chains: paymentNetworks.map((net) => ({
+        network: net.caip2,
+        network_name: net.id,
+        asset: net.usdc,
+        decimals: net.decimals,
+        eip712_domain: { name: net.eip3009.name, version: net.eip3009.version, chainId: net.chainId },
+        settled_by:
+          net.settlement === 'facilitator'
+            ? `facilitator ${net.facilitatorUrl} (it pays the gas)`
+            : 'this service (it pays the gas, out of your payment)',
+      })),
       single_step_flow: {
-        description: 'x402 single-step flow for clients that do not use sessions. POST /prove with circuit + inputs → receive 402 with nonce in response body → client signs payment → retry with X-Payment-TX and X-Payment-Nonce headers.',
-        nonce_details: 'Server returns 32-byte nonce in 402 response body. Client must include nonce in retry as X-Payment-Nonce header. Nonce is single-use (consumed on first successful payment verification). Nonce is circuit-bound (cannot reuse a coinbase_kyc nonce for coinbase_country).',
+        description:
+          'POST /prove with circuit + inputs → 402 listing chains in `accepts` → sign one → ' +
+          'retry with the PAYMENT-SIGNATURE and X-Payment-Nonce headers.',
+        header_note:
+          'PAYMENT-SIGNATURE carries the base64 x402 payment payload. That is the v2 header name; ' +
+          'X-Payment was v1 and is still read.',
+        nonce_details:
+          'The 402 body carries a 32-byte nonce. Send it back as X-Payment-Nonce. Single-use ' +
+          '(consumed on first successful payment verification) and circuit-bound (a coinbase_kyc ' +
+          'nonce cannot be reused for coinbase_country).',
+        alternative:
+          'If you would rather submit your own transaction, send its hash as X-Payment-TX with ' +
+          'X-Payment-Network naming the chain. You pay the gas on that path.',
       },
     },
     verification: {
@@ -453,7 +505,7 @@ const response = await fetch('${config.a2aBaseUrl}/api/v1/prove', {
         readme: 'https://www.npmjs.com/package/@zkproofport-ai/mcp',
       },
 
-      constants: buildConstants(config, circuitId, isTestnet, chainId, usdcAddress, paymentAmount, config.x402FacilitatorUrl),
+      constants: buildConstants(config, circuitId, isTestnet, chainId, usdcAddress, paymentAmount, resolvePaymentNetworks(config.paymentNetworks)),
       formulas: buildFormulas(circuitId),
       input_schema: buildInputSchema(circuitId),
       endpoints: buildEndpoints(config, circuitId),
@@ -531,7 +583,7 @@ const result = await generateProof(
 );`,
     },
 
-    constants: buildConstants(config, circuitId, isTestnet, chainId, usdcAddress, paymentAmount, config.x402FacilitatorUrl),
+    constants: buildConstants(config, circuitId, isTestnet, chainId, usdcAddress, paymentAmount, resolvePaymentNetworks(config.paymentNetworks)),
     formulas: buildFormulas(circuitId),
 
     input_schema: buildInputSchema(circuitId),

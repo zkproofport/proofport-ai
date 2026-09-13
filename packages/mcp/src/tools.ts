@@ -3,6 +3,8 @@ import { z } from 'zod';
 import {
   generateProof,
   requestChallenge,
+  walletFor,
+  walletFromEnv,
   prepareInputs,
   prepareOidcPayload,
   submitProof,
@@ -11,9 +13,23 @@ import {
   CIRCUITS,
   AUTHORIZED_SIGNERS,
   CIRCUIT_NAME_MAP,
+  ensureGatewayBalance,
+  gatewayBalance,
+  type CircuitName,
   type ProofportSigner,
   type ClientConfig,
 } from '@zkproofport-ai/sdk';
+
+/**
+ * The circuit names every tool accepts, read from the map the SDK owns.
+ *
+ * Typed out four times until 2026-09-12, and two of the four had fallen behind:
+ * `generate_proof`, `request_challenge` and `submit_proof` did not list
+ * `arc_eligibility`, so the circuit could be prepared and then not proved. A
+ * new circuit now reaches every tool by being added to `CIRCUIT_NAME_MAP`.
+ */
+const CIRCUIT_NAMES = Object.keys(CIRCUIT_NAME_MAP) as [CircuitName, ...CircuitName[]];
+const circuitParam = () => z.enum(CIRCUIT_NAMES).describe('Which circuit to use');
 
 function errorResult(message: string) {
   return {
@@ -33,6 +49,18 @@ export function registerTools(
   config: ClientConfig,
   signer: ProofportSigner,
 ): void {
+/**
+ * Whether any payment wallet is configured at all.
+ *
+ * Checked before building one so a service running with payment disabled
+ * needs no wallet and no flag: the flow only asks for a payer when the 402
+ * says `requiresPayment`. Without this check, every free-tier call against a
+ * machine with no credentials would fail before reaching the service.
+ */
+function hasAnyPaymentWalletConfigured(): boolean {
+  return !!(process.env.PAYMENT_PRIVATE_KEY || process.env.CDP_API_KEY_ID || process.env.CIRCLE_API_KEY);
+}
+
   // ─── generate_proof ─────────────────────────────────────────────────
   server.tool(
     'generate_proof',
@@ -42,16 +70,33 @@ CIRCUITS:
   - "coinbase_kyc": Proves the user passed Coinbase KYC verification.
   - "coinbase_country": Proves the user's country of residence is (or is not) in a given list. Requires country_list and is_included.
   - "oidc_domain": Proves the user authenticated via OIDC and their email belongs to a specific domain. Requires jwt and scope.
+  - "arc_eligibility": Coinbase KYC, with the wallet's signature bound to ONE EIP-712 action. Requires action. The proof carries that action's hash, so a contract can check WHICH instruction was authorised -- not merely that somebody eligible signed something. Verified on Arc Testnet (chain 5042002).
 
 RETURNS: Full ProofResult with proof bytes, public inputs, and timing information. Use verify_proof separately to verify on-chain.`,
     {
-      circuit: z
-        .enum(['coinbase_kyc', 'coinbase_country', 'oidc_domain'])
-        .describe('Which circuit to use'),
+      circuit: circuitParam(),
       scope: z
         .string()
         .optional()
         .describe('Scope string for nullifier derivation. Defaults to "proofport" if omitted. For oidc_domain circuit, this is the domain scope string.'),
+      action: z
+        .object({
+          domain: z.object({
+            name: z.string(),
+            version: z.string(),
+            chainId: z.number(),
+            verifyingContract: z.string(),
+          }),
+          types: z.record(z.array(z.object({ name: z.string(), type: z.string() }))),
+          primaryType: z.string(),
+          message: z.record(z.unknown()),
+        })
+        .optional()
+        .describe(
+          'The EIP-712 action to authorise. Required for arc_eligibility and rejected for every other circuit. ' +
+          'Any structure is provable: the circuit hashes it without reading it, so a deposit, a grant of authority ' +
+          'or an agreement in prose all work. The wallet signs exactly these fields, and the proof carries their hash.',
+        ),
       country_list: z
         .array(z.string())
         .optional()
@@ -68,18 +113,54 @@ RETURNS: Full ProofResult with proof bytes, public inputs, and timing informatio
         .enum(['google', 'microsoft'])
         .optional()
         .describe('OIDC provider. "google" (default) for Google Workspace, "microsoft" for Microsoft 365.'),
+      pay_with: z
+        .enum(['key', 'cdp', 'circle', 'arc'])
+        .optional()
+        .describe(
+          'Which wallet pays, when the service charges. "arc" is an Arc agent wallet — Circle holds it, ' +
+          'it carries spending policies the agent cannot ignore, and Circle CLI signs with it ' +
+          '(install: npm i -g @circle-fin/cli, then circle wallet login <email> --testnet). ' +
+          '"key" signs with PAYMENT_PRIVATE_KEY. ' +
+          '"cdp" uses a Coinbase CDP server wallet (CDP_API_KEY_ID, CDP_API_KEY_SECRET, CDP_WALLET_SECRET). ' +
+          '"circle" uses a Circle developer-controlled wallet (CIRCLE_API_KEY, CIRCLE_ENTITY_SECRET, CIRCLE_WALLET_ID) ' +
+          'and is the way to pay on Arc. Omit it and the single configured wallet is used; ' +
+          'omit it with none configured against a paying service and the error names what to set. ' +
+          'Any wallet can pay on any offered chain -- the wallet and the chain are separate choices.',
+        ),
+      pay_on: z
+        .string()
+        .optional()
+        .describe(
+          'Which chain to pay on: a CAIP-2 id ("eip155:5042002") or a plain name ' +
+          '("arc-testnet", "arc-testnet-nano", "base-sepolia"). ' +
+          'Call request_challenge to see what a service offers. Omitted takes the first chain offered. ' +
+          'The payer signs an authorization and the service settles it, so no gas or native balance is needed ' +
+          'on the paying chain -- only USDC. ' +
+          '"arc-testnet-nano" is Arc nanopayments: the authorization goes to Circle Gateway, which verifies it ' +
+          'off chain in under a second and settles it later in a batch with thousands of others, so the gas per ' +
+          'payment approaches zero. It requires a Gateway balance -- deposit first with the deposit_to_gateway ' +
+          'tool -- and is the right choice for an agent buying many proofs. "arc-testnet" settles each payment ' +
+          'on chain immediately and costs gas every time.',
+        ),
     },
     async (params) => {
       try {
+        const payment = params.pay_with
+          ? await walletFor(params.pay_with)
+          : hasAnyPaymentWalletConfigured()
+            ? await walletFromEnv()
+            : undefined;
         const result = await generateProof(
           config,
-          { attestation: signer },
+          { attestation: signer, payment },
           {
             circuit: params.circuit,
+            ...(params.action ? { action: params.action } : {}),
             scope: params.scope,
             countryList: params.country_list,
             isIncluded: params.is_included,
             ...(params.circuit === 'oidc_domain' && { jwt: params.jwt, provider: params.provider }),
+            payOn: params.pay_on,
           },
           {
             onStep: (step) => {
@@ -91,6 +172,111 @@ RETURNS: Full ProofResult with proof bytes, public inputs, and timing informatio
           },
         );
         return jsonResult(result);
+      } catch (error) {
+        return errorResult(error instanceof Error ? error.message : String(error));
+      }
+    },
+  );
+
+  // ─── Arc nanopayments: deposit and balance ──────────────────────────
+  //
+  // Nanopayments are not "small payments". The authorization goes to Circle
+  // Gateway's off-chain ledger and is settled later in a batch with thousands
+  // of others, so the gas per payment approaches zero -- which is what makes
+  // a sub-cent price sensible at all. The money moves once, by depositing;
+  // after that each payment is a signature.
+  server.tool(
+    'deposit_to_gateway',
+    `Deposit USDC into Circle Gateway on Arc, so later proofs can be paid for with nanopayments (pay_on: "arc-testnet-nano").
+
+Do this ONCE, not per proof. The deposit is the only on-chain step and it costs gas; every payment drawn against the balance costs almost none. Paying with "arc-testnet-nano" against an empty Gateway balance is refused.
+
+Requires PAYMENT_PRIVATE_KEY -- the buyer signs authorizations with it and never sends a transaction per payment.
+
+RETURNS: whether a deposit was made, its transaction hash, and the Gateway balance afterwards (in USDC's smallest units, so 1000000 is one USDC).`,
+    {
+      amount: z
+        .string()
+        .describe('How much USDC to deposit, in whole USDC as a decimal string, e.g. "5" or "0.5".'),
+      at_least: z
+        .string()
+        .optional()
+        .describe(
+          'Skip the deposit if the Gateway balance already covers this, in USDC\'s smallest units ' +
+          '(1000000 = 1 USDC). Omitted deposits unconditionally.',
+        ),
+      rpc_url: z
+        .string()
+        .optional()
+        .describe('Arc RPC. Defaults to https://rpc.testnet.arc.io.'),
+    },
+    async (params) => {
+      try {
+        const key = process.env.PAYMENT_PRIVATE_KEY;
+        if (!key) {
+          return errorResult(
+            'PAYMENT_PRIVATE_KEY is required to deposit: Gateway holds the balance for the wallet that deposits, ' +
+            'and that wallet is the one signing the payments.',
+          );
+        }
+        const wallet = {
+          privateKey: (key.startsWith('0x') ? key : `0x${key}`) as `0x${string}`,
+          rpcUrl: params.rpc_url ?? 'https://rpc.testnet.arc.io',
+        };
+        const result = await ensureGatewayBalance(
+          wallet,
+          params.at_least ? BigInt(params.at_least) : 0n,
+          params.amount,
+        );
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(
+                {
+                  deposited: result.deposited,
+                  depositTxHash: result.depositTxHash ?? null,
+                  available: result.balance.available.toString(),
+                  withdrawing: result.balance.withdrawing.toString(),
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      } catch (error) {
+        return errorResult(error instanceof Error ? error.message : String(error));
+      }
+    },
+  );
+
+  server.tool(
+    'gateway_balance',
+    `What the buyer currently holds inside Circle Gateway on Arc — the balance nanopayments are drawn against. Amounts are in USDC's smallest units (1000000 = 1 USDC). Requires PAYMENT_PRIVATE_KEY.`,
+    {
+      rpc_url: z.string().optional().describe('Arc RPC. Defaults to https://rpc.testnet.arc.io.'),
+    },
+    async (params) => {
+      try {
+        const key = process.env.PAYMENT_PRIVATE_KEY;
+        if (!key) return errorResult('PAYMENT_PRIVATE_KEY is required to read a Gateway balance.');
+        const balance = await gatewayBalance({
+          privateKey: (key.startsWith('0x') ? key : `0x${key}`) as `0x${string}`,
+          rpcUrl: params.rpc_url ?? 'https://rpc.testnet.arc.io',
+        });
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(
+                { available: balance.available.toString(), withdrawing: balance.withdrawing.toString() },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
       } catch (error) {
         return errorResult(error instanceof Error ? error.message : String(error));
       }
@@ -118,9 +304,7 @@ RETURNS: Full ProofResult with proof bytes, public inputs, and timing informatio
     'request_challenge',
     `Step 2 of the step-by-step flow (after prepare_inputs): Request a challenge from the server. Sends circuit + inputs to POST /api/v1/prove. Server returns nonce and TEE key information. You MUST call prepare_inputs first to get the inputs parameter, and you MUST pass the returned "nonce" to submit_proof — without it the server just issues another challenge.`,
     {
-      circuit: z
-        .enum(['coinbase_kyc', 'coinbase_country', 'oidc_domain'])
-        .describe('Which circuit to use'),
+      circuit: circuitParam(),
       inputs: z
         .union([z.string(), z.record(z.unknown())])
         .describe('Full ProveInputs object from prepare_inputs. Accepts a JSON string or a structured object.'),
@@ -145,13 +329,29 @@ RETURNS: Full ProofResult with proof bytes, public inputs, and timing informatio
     'prepare_inputs',
     `Step 1 of the step-by-step flow: Prepare all circuit inputs. Computes signal hash, signs it with the attestation wallet, queries EAS for attestation data, builds Merkle proof, and returns all inputs needed for proof generation. Call this BEFORE request_challenge. For oidc_domain circuit, provide jwt and scope instead of Coinbase-specific parameters.`,
     {
-      circuit: z
-        .enum(['coinbase_kyc', 'coinbase_country', 'oidc_domain'])
-        .describe('Which circuit to use'),
+      circuit: circuitParam(),
       scope: z
         .string()
         .optional()
         .describe('Scope string for nullifier derivation. Defaults to "proofport" if omitted. For oidc_domain circuit, this is the domain scope string.'),
+      action: z
+        .object({
+          domain: z.object({
+            name: z.string(),
+            version: z.string(),
+            chainId: z.number(),
+            verifyingContract: z.string(),
+          }),
+          types: z.record(z.array(z.object({ name: z.string(), type: z.string() }))),
+          primaryType: z.string(),
+          message: z.record(z.unknown()),
+        })
+        .optional()
+        .describe(
+          'The EIP-712 action to authorise. Required for arc_eligibility and rejected for every other circuit. ' +
+          'Any structure is provable: the circuit hashes it without reading it, so a deposit, a grant of authority ' +
+          'or an agreement in prose all work. The wallet signs exactly these fields, and the proof carries their hash.',
+        ),
       country_list: z
         .array(z.string())
         .optional()
@@ -217,9 +417,7 @@ RETURNS: Full ProofResult with proof bytes, public inputs, and timing informatio
 
 You MUST pass the nonce returned by request_challenge. POST /api/v1/prove answers every request that arrives without that nonce with a fresh 402 challenge, so a submission that omits it can never produce a proof.`,
     {
-      circuit: z
-        .enum(['coinbase_kyc', 'coinbase_country', 'oidc_domain'])
-        .describe('Which circuit to use'),
+      circuit: circuitParam(),
       inputs: z
         .union([z.string(), z.record(z.unknown())])
         .describe(

@@ -78,6 +78,8 @@ describe('AgentRegistration', () => {
     const { ethers } = await import('ethers');
     mockContract = new ethers.Contract('', [], null);
     mockProvider = new ethers.JsonRpcProvider('');
+    mockContract.queryFilter.mockResolvedValue([]);
+    mockProvider.getBlockNumber.mockResolvedValue(1000);
     mockProvider.getNetwork.mockResolvedValue({ chainId: 84532n });
   });
 
@@ -93,9 +95,9 @@ describe('AgentRegistration', () => {
       expect(() => new AgentRegistration(invalidConfig)).toThrow();
     });
 
-    it('should throw if reputationContractAddress missing', () => {
+    it('does not require an unrelated reputation registry', () => {
       const invalidConfig = { ...validConfig, reputationContractAddress: '' };
-      expect(() => new AgentRegistration(invalidConfig)).toThrow();
+      expect(() => new AgentRegistration(invalidConfig)).not.toThrow();
     });
 
     it('should throw if chainRpcUrl missing', () => {
@@ -117,7 +119,8 @@ describe('AgentRegistration', () => {
       const mockReceipt = {
         logs: [
           {
-            topics: ['0xevent', '0xfrom', '0xto', '0x0000000000000000000000000000000000000000000000000000000000000001'],
+            address: validConfig.identityContractAddress,
+            topics: ['0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef', '0x' + '0'.repeat(64), '0x' + '0'.repeat(24) + '1234567890123456789012345678901234567890', '0x0000000000000000000000000000000000000000000000000000000000000001'],
             data: '0x',
           },
         ],
@@ -146,7 +149,8 @@ describe('AgentRegistration', () => {
 
       mockContract.register.mockResolvedValue({
         wait: vi.fn().mockResolvedValue({
-          logs: [{ topics: ['0xevent', '0xfrom', '0xto', '0x' + '0'.repeat(63) + '1'], data: '0x' }],
+          logs: [{ address: validConfig.identityContractAddress,
+            topics: ['0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef', '0x' + '0'.repeat(64), '0x' + '0'.repeat(24) + '1234567890123456789012345678901234567890', '0x' + '0'.repeat(63) + '1'], data: '0x' }],
           hash: '0xtxhash',
         }),
       });
@@ -168,7 +172,8 @@ describe('AgentRegistration', () => {
       const mockReceipt = {
         logs: [
           {
-            topics: ['0xevent', '0xfrom', '0xto', '0x000000000000000000000000000000000000000000000000000000000000002a'],
+            address: validConfig.identityContractAddress,
+            topics: ['0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef', '0x' + '0'.repeat(64), '0x' + '0'.repeat(24) + '1234567890123456789012345678901234567890', '0x000000000000000000000000000000000000000000000000000000000000002a'],
             data: '0x',
           },
         ],
@@ -181,6 +186,26 @@ describe('AgentRegistration', () => {
 
       const result = await registration.register(validMetadata);
       expect(result.tokenId).toBe(42n);
+    });
+
+    it('uses RPC gas estimation for Arc metadata storage instead of a guessed limit', async () => {
+      mockProvider.getNetwork.mockResolvedValue({ chainId: 5042002n });
+      mockContract.register.mockResolvedValue({ wait: vi.fn().mockResolvedValue({
+        logs: [{ address: validConfig.identityContractAddress, topics: ['0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef', '0x' + '0'.repeat(64), '0x' + '0'.repeat(24) + '1234567890123456789012345678901234567890', '0x2a'] }], hash: '0xtx',
+      }) });
+      await new AgentRegistration(validConfig).register(validMetadata);
+      expect(mockContract.register.mock.calls[0][1]).toEqual({ nonce: 0 });
+      expect(mockProvider.getFeeData).not.toHaveBeenCalled();
+    });
+
+    it('finds the registry mint after an unrelated receipt log', async () => {
+      mockContract.register.mockResolvedValue({ wait: vi.fn().mockResolvedValue({
+        logs: [
+          { address: '0x9999999999999999999999999999999999999999', topics: ['0xother'] },
+          { address: validConfig.identityContractAddress, topics: ['0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef', '0x' + '0'.repeat(64), '0x' + '0'.repeat(24) + '1234567890123456789012345678901234567890', '0x2a'] },
+        ], hash: '0xtx',
+      }) });
+      expect((await new AgentRegistration(validConfig).register(validMetadata)).tokenId).toBe(42n);
     });
 
     it('should handle transaction failure', async () => {
@@ -234,17 +259,40 @@ describe('AgentRegistration', () => {
   });
 
   describe('getRegistration()', () => {
-    it('should return info when registered', async () => {
-      const registration = new AgentRegistration(validConfig);
+    it('rejects unresolved registration instead of manufacturing token zero', async () => {
       mockContract.balanceOf.mockResolvedValue(1n);
+      mockContract.queryFilter.mockResolvedValue([]);
+      await expect(new AgentRegistration(validConfig).getRegistration()).rejects.toThrow('could not be resolved');
+    });
 
-      const result = await registration.getRegistration();
+    it('accepts token zero only when its owner is verified', async () => {
+      mockContract.ownerOf.mockResolvedValue('0x1234567890123456789012345678901234567890');
+      mockContract.tokenURI.mockResolvedValue('owned-uri');
+      const result = await new AgentRegistration(validConfig).getRegistration(0n);
+      expect(result.tokenId).toBe(0n);
+      expect(result.metadataUri).toBe('owned-uri');
+    });
 
-      expect(result).not.toBeNull();
-      // findTokenId returns null (no events in mock) → fallback with tokenId: 0n
-      expect(result?.tokenId).toBe(0n);
-      expect(result?.owner).toBe('0x1234567890123456789012345678901234567890');
-      expect(result?.isRegistered).toBe(true);
+    it('rejects a cached token belonging to another owner before reading metadata', async () => {
+      mockContract.ownerOf.mockResolvedValue('0x9999999999999999999999999999999999999999');
+      await expect(new AgentRegistration(validConfig).getRegistration(42n)).rejects.toThrow('owned by');
+      expect(mockContract.tokenURI).not.toHaveBeenCalled();
+    });
+
+    it('skips transferred-away events and verifies the owned token', async () => {
+      mockContract.balanceOf.mockResolvedValue(1n);
+      mockContract.queryFilter.mockResolvedValue([{ args: [null, null, 7n] }, { args: [null, null, 8n] }]);
+      mockContract.ownerOf.mockImplementation(async (id: bigint) => id === 7n ? '0x1234567890123456789012345678901234567890' : '0x9999999999999999999999999999999999999999');
+      const result = await new AgentRegistration(validConfig).getRegistration();
+      expect(result.tokenId).toBe(7n);
+    });
+
+    it('retries the same inclusive RPC range and propagates persistent failure', async () => {
+      mockProvider.getBlockNumber.mockResolvedValue(20001);
+      mockContract.balanceOf.mockResolvedValue(1n);
+      mockContract.queryFilter.mockRejectedValue(new Error('RPC range unavailable'));
+      await expect(new AgentRegistration(validConfig).getRegistration()).rejects.toThrow('RPC range unavailable');
+      expect(mockContract.queryFilter.mock.calls).toEqual([['transfer-filter', 10002, 20001], ['transfer-filter', 10002, 20001]]);
     });
 
     it('should return null when not registered', async () => {

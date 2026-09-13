@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { getPaymentModeConfig, createPaymentGate, validatePaymentConfig } from '../../src/payment/freeTier';
+import { getPaymentModeConfig, validatePaymentConfig } from '../../src/payment/freeTier';
 
 describe('freeTier', () => {
   describe('getPaymentModeConfig', () => {
@@ -38,103 +38,10 @@ describe('freeTier', () => {
     });
   });
 
-  describe('createPaymentGate', () => {
-    function createMockRequest(headers: Record<string, string> = {}) {
-      return { headers, paymentSkipped: undefined as boolean | undefined } as any;
-    }
-
-    function createMockResponse() {
-      const res: any = {};
-      res.status = vi.fn().mockReturnThis();
-      res.json = vi.fn().mockReturnThis();
-      return res;
-    }
-
-    it('should call next() when paymentMode is disabled', () => {
-      const middleware = createPaymentGate({ paymentMode: 'disabled' });
-      const req = createMockRequest();
-      const res = createMockResponse();
-      const next = vi.fn();
-
-      middleware(req, res, next);
-
-      expect(next).toHaveBeenCalledOnce();
-    });
-
-    it('should set req.paymentSkipped=true when paymentMode is disabled', () => {
-      const middleware = createPaymentGate({ paymentMode: 'disabled' });
-      const req = createMockRequest();
-      const res = createMockResponse();
-      const next = vi.fn();
-
-      middleware(req, res, next);
-
-      expect(req.paymentSkipped).toBe(true);
-    });
-
-    it('should return 402 when testnet mode and no payment header', () => {
-      const middleware = createPaymentGate({ paymentMode: 'testnet' });
-      const req = createMockRequest();
-      const res = createMockResponse();
-      const next = vi.fn();
-
-      middleware(req, res, next);
-
-      expect(res.status).toHaveBeenCalledWith(402);
-      expect(next).not.toHaveBeenCalled();
-    });
-
-    it('should return 402 JSON with network info when testnet mode and no payment header', () => {
-      const middleware = createPaymentGate({ paymentMode: 'testnet' });
-      const req = createMockRequest();
-      const res = createMockResponse();
-      const next = vi.fn();
-
-      middleware(req, res, next);
-
-      expect(res.json).toHaveBeenCalledWith({
-        error: 'Payment Required',
-        paymentMode: 'testnet',
-        network: 'eip155:84532',
-      });
-    });
-
-    it('should call next() when testnet mode and payment header present', () => {
-      const middleware = createPaymentGate({ paymentMode: 'testnet' });
-      const req = createMockRequest({ 'x-payment': 'some-payment-proof' });
-      const res = createMockResponse();
-      const next = vi.fn();
-
-      middleware(req, res, next);
-
-      expect(next).toHaveBeenCalledOnce();
-      expect(res.status).not.toHaveBeenCalled();
-    });
-
-    it('should return 402 when mainnet mode and no payment header', () => {
-      const middleware = createPaymentGate({ paymentMode: 'mainnet' });
-      const req = createMockRequest();
-      const res = createMockResponse();
-      const next = vi.fn();
-
-      middleware(req, res, next);
-
-      expect(res.status).toHaveBeenCalledWith(402);
-      expect(next).not.toHaveBeenCalled();
-    });
-
-    it('should call next() when mainnet mode and payment header present', () => {
-      const middleware = createPaymentGate({ paymentMode: 'mainnet' });
-      const req = createMockRequest({ 'x-payment': 'some-payment-proof' });
-      const res = createMockResponse();
-      const next = vi.fn();
-
-      middleware(req, res, next);
-
-      expect(next).toHaveBeenCalledOnce();
-      expect(res.status).not.toHaveBeenCalled();
-    });
-  });
+  // The `createPaymentGate` block that stood here went with the function on
+  // 2026-09-09. See the note in src/payment/freeTier.ts: nothing imported it,
+  // and its 402 body named a single chain derived from the payment mode, which
+  // is not the shape the service actually answers with.
 
   describe('validatePaymentConfig', () => {
     it('should do nothing for disabled mode', () => {
@@ -151,13 +58,15 @@ describe('freeTier', () => {
 
     it('should throw for testnet with empty paymentPayTo', () => {
       expect(() => validatePaymentConfig({ paymentMode: 'testnet', paymentPayTo: '' })).toThrow(
-        'PAYMENT_PAY_TO is required when paymentMode is testnet or mainnet'
+        'PAYMENT_PAY_TO is required when paymentMode is testnet'
       );
     });
 
     it('should throw for mainnet with empty paymentPayTo', () => {
+      // Names the mode it was actually given. The message used to list both
+      // ("testnet or mainnet"), which reads as if either might be the cause.
       expect(() => validatePaymentConfig({ paymentMode: 'mainnet', paymentPayTo: '' })).toThrow(
-        'PAYMENT_PAY_TO is required when paymentMode is testnet or mainnet'
+        'PAYMENT_PAY_TO is required when paymentMode is mainnet'
       );
     });
 

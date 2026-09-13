@@ -1,0 +1,49 @@
+{
+  "kind": "local-prover-real-arc-contract-integration",
+  "proverUrl": "http://localhost:4002",
+  "gcpEndToEnd": false,
+  "wallet": "0x06Ad6B4EEbcD486bE53d8a9dC760a67A5Bdf3F64",
+  "startedAt": "2026-09-13T03:53:17.071Z",
+  "amount": "1",
+  "chainId": 5042002,
+  "gate": "0xD0F3eE648386B59B484157332E736388Fcc41F47",
+  "before": {
+    "stakeUnits": "0",
+    "custodyUnits": "0",
+    "walletUnits": "2000000"
+  },
+  "publicProofFile": "demo/artifacts/onchain-verification-proof.json",
+  "publicInputsFingerprint": "0xb57f5e9634957466d15674fcfec72e7e63f5d909f0e7fec76fb5cb4e9362bd2d",
+  "actionHash": "0x965a22f43e85af382d658b95c4b0548f9656c752c81bef8096ce0504d118312a",
+  "realVerifierAccepted": true,
+  "wrongAmount": "ActionMismatch",
+  "wrongCaller": "ActionMismatch",
+  "approval": {
+    "txHash": "0x26a65f308af96a110b98f688479dce97e8e2b05cf4e89e242a9d2d5d8274dca4",
+    "blockNumber": 61837882
+  },
+  "stake": {
+    "wallet": "0x06Ad6B4EEbcD486bE53d8a9dC760a67A5Bdf3F64",
+    "amount": "1.0",
+    "actionHash": "0x965a22f43e85af382d658b95c4b0548f9656c752c81bef8096ce0504d118312a",
+    "txHash": "0xc7df4704cf3170a8f2971045972aae5a7faa53c4b65820caec4d2ddde38a65a7",
+    "blockNumber": 61837899
+  },
+  "afterStake": {
+    "stakeUnits": "1000000",
+    "custodyUnits": "1000000"
+  },
+  "replay": "DelegationUsed",
+  "withdrawal": {
+    "txHash": "0x9b82182646bb02dac0183089927eda7470904d1686f1bd8d9687f7a818e7a4ac",
+    "blockNumber": 61837915
+  },
+  "replayAfterWithdrawal": "DelegationUsed",
+  "afterWithdrawal": {
+    "stakeUnits": "0",
+    "custodyUnits": "0",
+    "walletUnits": "2000000"
+  },
+  "status": "passed",
+  "finishedAt": "2026-09-13T03:53:52.541Z"
+}

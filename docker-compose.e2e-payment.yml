@@ -1,12 +1,24 @@
-# Compose override for x402 payment E2E testing
-# Usage: docker compose -f docker-compose.yml -f docker-compose.e2e-payment.yml up -d ai
-# This overrides PAYMENT_MODE without rebuilding the image.
+# Compose override that switches payment ON, so the paid path can be exercised
+# locally without rebuilding the image.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.e2e-payment.yml up -d ai
+#
+# Offers all three staging chains, so one run covers a facilitator-settled
+# chain (Base Sepolia) and two this service settles itself (Arc, Ethereum
+# Sepolia). $0.01 rather than $0.10 -- cheap enough to run repeatedly, which is
+# the only way the paid path actually gets exercised.
+#
+# PAYMENT_SETTLER_PRIVATE_KEY must come from the environment: the service
+# refuses to start without it while a self-settled chain is offered, and a key
+# does not belong in a committed file.
 services:
   ai:
     environment:
       PAYMENT_MODE: testnet
+      PAYMENT_NETWORKS: "base-sepolia,arc-testnet,ethereum-sepolia"
       PAYMENT_PAY_TO: "0x5A3E649208Ae15ec52496c1Ae23b2Ff89Ac02f0c"
+      PAYMENT_SETTLER_PRIVATE_KEY: "${PAYMENT_SETTLER_PRIVATE_KEY:?set PAYMENT_SETTLER_PRIVATE_KEY to a wallet with USDC on Arc}"
       X402_FACILITATOR_URL: "https://x402.dexter.cash"
-      PAYMENT_PROOF_PRICE: "$0.10"
-      SETTLEMENT_CHAIN_RPC_URL: "https://sepolia.base.org"
-      SETTLEMENT_USDC_ADDRESS: "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+      PAYMENT_PROOF_PRICE: "$$0.01"
+      ARC_RPC_URL: "https://rpc.testnet.arc.io"
+      ETHEREUM_RPC_URL: "https://ethereum-sepolia-rpc.publicnode.com"

@@ -1,433 +1,115 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Config } from '../../src/config/index.js';
 
-// Records every config ensureAgentRegistered hands to AgentRegistration, so the
-// per-chain wiring can be asserted rather than assumed. vi.hoisted() so the
-// vi.mock factory below can close over it.
-const { constructorConfigs } = vi.hoisted(() => ({ constructorConfigs: [] as any[] }));
-
-// Mock the register module
+const state = vi.hoisted(() => ({
+  instances: [] as any[], registered: false, fail: '' as string,
+  metadata: new Map<string, any>(),
+}));
 vi.mock('../../src/identity/register.js', () => {
-  const mockRegister = vi.fn();
-  const mockIsRegistered = vi.fn();
-  const mockGetRegistration = vi.fn();
-  const mockUpdateMetadata = vi.fn();
-  const mockGetTokenMetadata = vi.fn();
-  const mockGetOnchainMetadata = vi.fn();
-  const mockSetOnchainMetadata = vi.fn();
-
-  class MockAgentRegistration {
-    constructor(config: any) {
-      // Mirror the real constructor's validation: a chain whose RPC URL is
-      // missing must fail here, exactly as AgentRegistration does, or the test
-      // would claim registration succeeds on an unconfigured chain.
-      if (!config.chainRpcUrl) throw new Error('chainRpcUrl is required');
-      constructorConfigs.push(config);
-      this.config = config;
-    }
-    config: any;
-    register = mockRegister;
-    isRegistered = mockIsRegistered;
-    getRegistration = mockGetRegistration;
-    updateMetadata = mockUpdateMetadata;
-    getTokenMetadata = mockGetTokenMetadata;
-    getOnchainMetadata = mockGetOnchainMetadata;
-    setOnchainMetadata = mockSetOnchainMetadata;
-    get agentAddress() {
-      return '0x1234567890123456789012345678901234567890';
-    }
+  class AgentRegistration {
+    agentAddress = '0x1234567890123456789012345678901234567890';
+    constructor(public config: any) { state.instances.push(this); }
+    isRegistered = vi.fn(async () => { if (state.fail === 'rpc') throw new Error('RPC down'); return state.registered; });
+    getRegistration = vi.fn(async (cached?: bigint) => {
+      if (state.fail === 'unresolved') throw new Error('token unresolved');
+      if (state.fail === 'null') return null;
+      return { tokenId: cached ?? 42n, owner: this.agentAddress, isRegistered: true, metadataUri: JSON.stringify(state.metadata.get(this.config.chainRpcUrl) ?? {}) };
+    });
+    assertTokenOwner = vi.fn(async () => { if (state.fail === 'owner') throw new Error('wrong owner'); });
+    register = vi.fn(async () => ({ tokenId: 42n, transactionHash: '0xmint', agentAddress: this.agentAddress }));
+    updateMetadata = vi.fn(async (_: bigint, metadata: any) => {
+      if (state.fail === 'write') throw new Error('write reverted');
+      state.metadata.set(this.config.chainRpcUrl, metadata); return '0xupdate';
+    });
+    getTokenMetadata = vi.fn(async () => JSON.stringify(state.fail === 'readback' ? {} : state.metadata.get(this.config.chainRpcUrl)));
+    getOnchainMetadata = vi.fn(async () => state.fail === 'active' ? 'false' : 'true');
+    setOnchainMetadata = vi.fn(async () => { throw new Error('active reverted'); });
   }
-
-  return {
-    AgentRegistration: MockAgentRegistration,
-    createMetadataUri: vi.fn((metadata) => `data:application/json;base64,${Buffer.from(JSON.stringify(metadata)).toString('base64')}`),
-    parseMetadataUri: vi.fn((uri) => {
-      if (uri.startsWith('data:application/json;base64,')) {
-        const base64 = uri.slice('data:application/json;base64,'.length);
-        const json = Buffer.from(base64, 'base64').toString('utf-8');
-        return JSON.parse(json);
-      }
-      return null;
-    }),
-  };
+  return { AgentRegistration, parseMetadataUri: (uri: string) => JSON.parse(uri) };
 });
+vi.mock('../../src/identity/registrationLock.js', () => ({ withRegistrationLock: (_url: string, _key: string, run: () => Promise<unknown>) => run() }));
+import { ensureAgentRegistered } from '../../src/identity/autoRegister.js';
+import { getChainIdentities } from '../../src/config/index.js';
 
-// ensureAgentRegistered registers on EVERY chain getChainIdentities() yields and
-// returns a Map of chainId -> tokenId. A sepolia chainRpcUrl means the testnet
-// pair below; every per-chain spy is therefore called once per chain.
-const ETHEREUM_SEPOLIA = 11155111;
-const BASE_SEPOLIA = 84532;
+const config = {
+  erc8004IdentityAddress: '', erc8004ReputationAddress: '', chainRpcUrl: 'https://sepolia.base.org',
+  ethereumRpcUrl: '', agentTokenId: '', agentTokenIdEthereum: '', teeMode: 'local',
+  proverPrivateKey: '0x' + '12'.repeat(32), a2aBaseUrl: 'https://stg-ai.zkproofport.app',
+  arcRpcUrl: 'https://rpc.testnet.arc.io', arcChainId: 5042002,
+  arcIdentityAddress: '0x8004A818BFB912233c491871b3d84c89A494BD9e', arcAgentTokenId: '',
+} as Config;
 
-describe('ensureAgentRegistered', () => {
-  let ensureAgentRegistered: any;
-  let AgentRegistration: any;
-  let mockRegister: any;
-  let mockIsRegistered: any;
-  let mockGetRegistration: any;
-  let mockUpdateMetadata: any;
-  let mockGetTokenMetadata: any;
-  let mockGetOnchainMetadata: any;
-  let mockSetOnchainMetadata: any;
+beforeEach(() => { state.instances.length = 0; state.registered = false; state.fail = ''; state.metadata.clear(); });
 
-  const validConfig: Config = {
-    erc8004IdentityAddress: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
-    erc8004ReputationAddress: '0x8004B663056A597Dffe9eCcC1965A193B7388713',
-    chainRpcUrl: 'https://sepolia.base.org',
-    ethereumRpcUrl: 'https://sepolia.infura.example/v3/key',
-    agentTokenId: '',
-    agentTokenIdEthereum: '',
-    teeMode: 'disabled',
-    proverPrivateKey: '0x1234567890123456789012345678901234567890123456789012345678901234',
-    a2aBaseUrl: 'https://ai.zkproofport.app',
-    websiteUrl: 'https://zkproofport.com',
-    port: 4002,
-    nodeEnv: 'development',
-    circuitsPath: './circuits',
-    redisUrl: 'redis://localhost:6379',
-    enableProofGeneration: true,
-    enableProofVerification: true,
-  } as unknown as Config;
-
-  /** Metadata ensureAgentRegistered must send for one chain of the testnet pair. */
-  const expectedMetadata = (chainId: number, agentName: string) => ({
-    name: agentName,
-    description: 'Autonomous ZK proof generation. ERC-8004 identity. x402 payments. Powered by ZKProofport',
-    agentType: 'service',
-    agentUrl: validConfig.a2aBaseUrl,
-    capabilities: [
-      'proof_generation',
-      'proof_verification',
-      'coinbase_kyc',
-      'coinbase_country',
-      'streaming',
-      'x402_payment',
-    ],
-    protocols: ['mcp', 'a2a', 'x402'],
-    circuits: ['coinbase_attestation', 'coinbase_country_attestation'],
-    tags: ['ZK', 'Privacy', 'Proof', 'Coinbase', 'KYC', 'Attestation', 'x402', 'Identity', 'Country', 'Verification', 'Base', 'USDC', 'TEE', 'Noir', 'EAS', 'Zero-Knowledge'],
-    x402Support: true,
-    type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
-    image: 'https://ai.zkproofport.app/icon.png',
-    protocolVersions: ['0.3'],
-    securitySchemes: {
-      x402: { type: 'apiKey', in: 'header', name: 'X-402-Payment' },
-    },
-    security: [{ x402: [] }],
-    services: [
-      { name: 'web', endpoint: 'https://ai.zkproofport.app' },
-      { name: 'MCP', endpoint: 'https://ai.zkproofport.app/mcp', version: '2025-11-25', mcpTools: ['prove', 'get_supported_circuits', 'get_guide'] },
-      { name: 'A2A', endpoint: 'https://ai.zkproofport.app/.well-known/agent-card.json', version: '0.3.0', a2aSkills: ['prove', 'get_supported_circuits', 'get_guide'] },
-      { name: 'OASF', endpoint: 'https://ai.zkproofport.app', version: 'v0.8.0', skills: ['security_privacy/privacy_risk_assessment', 'security_privacy/threat_detection'], domains: ['technology/blockchain', 'technology/security', 'trust_and_safety/data_privacy'] },
-      { name: 'ENS', endpoint: agentName },
-      { name: 'DID', endpoint: 'did:web:ai.zkproofport.app' },
-      { name: 'agentWallet', endpoint: `eip155:${chainId}:0x1234567890123456789012345678901234567890` },
-    ],
-    categories: ['privacy', 'security', 'verification', 'identity'],
-    domains: [
-      { name: 'technology/blockchain', id: 109 },
-      { name: 'technology/security', id: 107 },
-      { name: 'trust_and_safety/data_privacy', id: 404 },
-    ],
-    skills: [
-      { name: 'security_privacy/privacy_risk_assessment', id: 804 },
-      { name: 'security_privacy/threat_detection', id: 801 },
-    ],
-    registrations: [],
-    supportedTrust: ['tee-attestation'],
-    active: true,
+describe('Arc deployment registration', () => {
+  it('registers Arc without unrelated Base or reputation registry configuration', async () => {
+    expect(getChainIdentities(config).map(c => c.chainId)).toEqual([5042002]);
+    expect(await ensureAgentRegistered(config)).toEqual(new Map([[5042002, 42n]]));
+    expect(state.instances[0].config.chainRpcUrl).toBe(config.arcRpcUrl);
+    expect(state.instances[0].register).toHaveBeenCalledOnce();
+    expect(state.instances[0].assertTokenOwner).toHaveBeenCalledWith(42n);
   });
 
-  beforeEach(async () => {
-    vi.clearAllMocks();
-
-    // Dynamic import to get fresh mocked module
-    const registerModule = await import('../../src/identity/register.js');
-    AgentRegistration = registerModule.AgentRegistration;
-
-    // Get mock functions (arrow function class fields are on instances, not prototype)
-    const tempInstance = new AgentRegistration({ chainRpcUrl: 'https://example.invalid' });
-    mockRegister = tempInstance.register;
-    mockIsRegistered = tempInstance.isRegistered;
-    mockGetRegistration = tempInstance.getRegistration;
-    mockUpdateMetadata = tempInstance.updateMetadata;
-    mockGetTokenMetadata = tempInstance.getTokenMetadata;
-    mockGetOnchainMetadata = tempInstance.getOnchainMetadata;
-    mockSetOnchainMetadata = tempInstance.setOnchainMetadata;
-
-    // Defaults for the post-registration bookkeeping every chain performs.
-    mockGetOnchainMetadata.mockResolvedValue('true');
-    mockSetOnchainMetadata.mockResolvedValue('0xactivetx');
-    mockUpdateMetadata.mockResolvedValue('0xupdatetx');
-    mockGetTokenMetadata.mockResolvedValue('');
-
-    // Drop the throwaway instance above so only the ones ensureAgentRegistered
-    // builds are recorded.
-    constructorConfigs.length = 0;
-
-    const autoRegisterModule = await import('../../src/identity/autoRegister.js');
-    ensureAgentRegistered = autoRegisterModule.ensureAgentRegistered;
+  it('publishes Arc capability, payment endpoint and mint backreference without a false TEE claim', async () => {
+    await ensureAgentRegistered(config);
+    const metadata = state.metadata.get(config.arcRpcUrl);
+    expect(metadata.capabilities).toContain('arc_eligibility');
+    expect(metadata.circuits).toContain('arc_eligibility');
+    expect(metadata.services).toContainEqual({ name: 'x402', endpoint: `${config.a2aBaseUrl}/api/v1/prove` });
+    expect(metadata.registrations).toEqual([{ agentId: 42, agentRegistry: `eip155:5042002:${config.arcIdentityAddress}` }]);
+    expect(metadata.tee).toBeUndefined();
+    expect(metadata.tags).not.toContain('TEE');
+    expect(metadata.supportedTrust).toEqual([]);
   });
 
-  describe('Feature disabled checks', () => {
-    it('registers on no chain when erc8004IdentityAddress is empty', async () => {
-      const config = {
-        ...validConfig,
-        erc8004IdentityAddress: '',
-      };
-
-      const result = await ensureAgentRegistered(config);
-      expect(result).toBeInstanceOf(Map);
-      expect(result.size).toBe(0);
-      expect(mockIsRegistered).not.toHaveBeenCalled();
-    });
-
-    it('registers on no chain when erc8004ReputationAddress is empty', async () => {
-      const config = {
-        ...validConfig,
-        erc8004ReputationAddress: '',
-      };
-
-      const result = await ensureAgentRegistered(config);
-      expect(result).toBeInstanceOf(Map);
-      expect(result.size).toBe(0);
-      expect(mockIsRegistered).not.toHaveBeenCalled();
-    });
-
-    it('registers on no chain when both addresses are empty', async () => {
-      const config = {
-        ...validConfig,
-        erc8004IdentityAddress: '',
-        erc8004ReputationAddress: '',
-      };
-
-      const result = await ensureAgentRegistered(config);
-      expect(result).toBeInstanceOf(Map);
-      expect(result.size).toBe(0);
-      expect(mockIsRegistered).not.toHaveBeenCalled();
-    });
-
-    it('skips only the chain whose RPC URL is missing', async () => {
-      // ETHEREUM_RPC_URL unset is a silent single-chain degradation in staging:
-      // AgentRegistration's constructor throws, that chain is logged and dropped,
-      // and Base still registers.
-      mockIsRegistered.mockResolvedValue(false);
-      mockRegister.mockResolvedValue({
-        tokenId: 7n,
-        transactionHash: '0xhash',
-        agentAddress: '0x1234567890123456789012345678901234567890',
-      });
-
-      const result = await ensureAgentRegistered({ ...validConfig, ethereumRpcUrl: '' });
-
-      expect(result.has(ETHEREUM_SEPOLIA)).toBe(false);
-      expect(result.get(BASE_SEPOLIA)).toBe(7n);
-      expect(mockRegister).toHaveBeenCalledTimes(1);
-    });
+  it('updates existing metadata once then performs no writes on the next startup', async () => {
+    state.registered = true;
+    await ensureAgentRegistered(config);
+    await ensureAgentRegistered(config);
+    expect(state.instances[0].updateMetadata).toHaveBeenCalledOnce();
+    expect(state.instances[1].updateMetadata).not.toHaveBeenCalled();
+    expect(state.instances[1].register).not.toHaveBeenCalled();
+    expect(state.instances[1].getTokenMetadata).toHaveBeenCalledOnce();
   });
 
-  describe('Already registered', () => {
-    it('returns the existing tokenId for every chain', async () => {
-      mockIsRegistered.mockResolvedValue(true);
-      mockGetRegistration.mockResolvedValue({
-        tokenId: 42n,
-        owner: '0x1234567890123456789012345678901234567890',
-        metadataUri: 'data:application/json;base64,eyJ0ZXN0IjoidHJ1ZSJ9',
-        isRegistered: true,
-      });
-
-      const result = await ensureAgentRegistered(validConfig);
-
-      expect(result.size).toBe(2);
-      expect(result.get(ETHEREUM_SEPOLIA)).toBe(42n);
-      expect(result.get(BASE_SEPOLIA)).toBe(42n);
-      expect(mockIsRegistered).toHaveBeenCalledTimes(2);
-      expect(mockGetRegistration).toHaveBeenCalledTimes(2);
-      expect(mockRegister).not.toHaveBeenCalled();
-      // The stub metadata above ({"test":true}) is missing every field
-      // needsMetadataUpdate() checks, so both chains must be refreshed.
-      expect(mockUpdateMetadata).toHaveBeenCalledTimes(2);
-      expect(mockUpdateMetadata.mock.calls[0][0]).toBe(42n);
-    });
-
-    it('uses the cached tokenId instead of scanning when one is configured', async () => {
-      mockIsRegistered.mockResolvedValue(true);
-      mockGetTokenMetadata.mockResolvedValue('data:application/json;base64,eyJ0ZXN0IjoidHJ1ZSJ9');
-
-      const result = await ensureAgentRegistered({
-        ...validConfig,
-        agentTokenId: '11',
-        agentTokenIdEthereum: '22',
-      });
-
-      expect(result.get(ETHEREUM_SEPOLIA)).toBe(22n);
-      expect(result.get(BASE_SEPOLIA)).toBe(11n);
-      // Scanning for the tokenId is the slow path and must be skipped entirely;
-      // the cached id is read straight off the contract instead.
-      expect(mockGetRegistration).not.toHaveBeenCalled();
-      expect(mockGetTokenMetadata).toHaveBeenCalledWith(22n);
-      expect(mockGetTokenMetadata).toHaveBeenCalledWith(11n);
-    });
-
-    it('sets the on-chain active flag when it is not already true', async () => {
-      mockIsRegistered.mockResolvedValue(true);
-      mockGetRegistration.mockResolvedValue({
-        tokenId: 42n,
-        owner: '0x1234567890123456789012345678901234567890',
-        metadataUri: 'data:application/json;base64,eyJ0ZXN0IjoidHJ1ZSJ9',
-        isRegistered: true,
-      });
-      mockGetOnchainMetadata.mockResolvedValue('false');
-
-      await ensureAgentRegistered(validConfig);
-
-      expect(mockSetOnchainMetadata).toHaveBeenCalledTimes(2);
-      expect(mockSetOnchainMetadata).toHaveBeenCalledWith(42n, 'active', 'true');
-    });
+  it.each(['rpc', 'unresolved', 'null', 'owner', 'write', 'readback', 'active'])('fails visibly on %s instead of publishing readiness', async fail => {
+    state.registered = true; state.fail = fail;
+    await expect(ensureAgentRegistered(config)).rejects.toThrow('Required Arc ERC-8004 registration failed');
+    expect(state.instances[0].register).not.toHaveBeenCalled();
   });
 
-  describe('New registration', () => {
-    it('registers a new agent on every chain and returns each tokenId', async () => {
-      mockIsRegistered.mockResolvedValue(false);
-      mockRegister.mockResolvedValue({
-        tokenId: 1n,
-        transactionHash: '0xtxhash123',
-        agentAddress: '0x1234567890123456789012345678901234567890',
-      });
-
-      const result = await ensureAgentRegistered(validConfig);
-
-      expect(result.size).toBe(2);
-      expect(result.get(ETHEREUM_SEPOLIA)).toBe(1n);
-      expect(result.get(BASE_SEPOLIA)).toBe(1n);
-      expect(mockIsRegistered).toHaveBeenCalledTimes(2);
-      expect(mockRegister).toHaveBeenCalledTimes(2);
-      expect(mockGetRegistration).not.toHaveBeenCalled();
-    });
-
-    it('passes chain-specific metadata to register() for each chain', async () => {
-      mockIsRegistered.mockResolvedValue(false);
-      mockRegister.mockResolvedValue({
-        tokenId: 5n,
-        transactionHash: '0xhash',
-        agentAddress: '0xaddr',
-      });
-
-      await ensureAgentRegistered(validConfig);
-
-      expect(mockRegister).toHaveBeenCalledTimes(2);
-      // Each chain gets its own agent name, ENS entry and eip155 wallet ref —
-      // sending one chain's metadata to the other is the bug this pins down.
-      expect(mockRegister.mock.calls[0][0]).toEqual(
-        expectedMetadata(ETHEREUM_SEPOLIA, 'proveragent.sepolia'),
-      );
-      expect(mockRegister.mock.calls[1][0]).toEqual(
-        expectedMetadata(BASE_SEPOLIA, 'proveragent.base.sepolia'),
-      );
-    });
-
-    it('constructs one AgentRegistration per chain, each on its own RPC URL', async () => {
-      mockIsRegistered.mockResolvedValue(false);
-      mockRegister.mockResolvedValue({
-        tokenId: 1n,
-        transactionHash: '0xhash',
-        agentAddress: '0xaddr',
-      });
-
-      await ensureAgentRegistered(validConfig);
-
-      // Both chains must be reached through their OWN endpoint. Sending the
-      // Ethereum registration to the Base RPC would register twice on Base and
-      // still return a two-entry Map, so the RPC URL is the assertion that matters.
-      expect(constructorConfigs).toEqual([
-        {
-          identityContractAddress: validConfig.erc8004IdentityAddress,
-          reputationContractAddress: validConfig.erc8004ReputationAddress,
-          chainRpcUrl: validConfig.ethereumRpcUrl,
-          privateKey: validConfig.proverPrivateKey,
-        },
-        {
-          identityContractAddress: validConfig.erc8004IdentityAddress,
-          reputationContractAddress: validConfig.erc8004ReputationAddress,
-          chainRpcUrl: validConfig.chainRpcUrl,
-          privateKey: validConfig.proverPrivateKey,
-        },
-      ]);
-    });
+  it.each(['0', '1', String(Number.MAX_SAFE_INTEGER)])('passes cached id %s through verified registration lookup', async tokenId => {
+    state.registered = true;
+    expect((await ensureAgentRegistered({ ...config, arcAgentTokenId: tokenId })).get(5042002)).toBe(BigInt(tokenId));
+    expect(state.instances[0].getRegistration).toHaveBeenCalledWith(BigInt(tokenId));
   });
 
-  // Registration must never take the server down: a failing chain is dropped
-  // from the Map and the others still register.
-  describe('Error handling', () => {
-    it('returns an empty Map on registration error (does not throw)', async () => {
-      mockIsRegistered.mockResolvedValue(false);
-      mockRegister.mockRejectedValue(new Error('Contract error'));
+  it.each([' ', '-1', '1junk', '1e2', '0x2', '한글', '😀', '<script>', '1\n', String(BigInt(Number.MAX_SAFE_INTEGER) + 1n)])('rejects invalid or unsafe cached id %j', async tokenId => {
+    state.registered = true;
+    await expect(ensureAgentRegistered({ ...config, arcAgentTokenId: tokenId })).rejects.toThrow('Required Arc');
+    expect(state.instances[0].updateMetadata).not.toHaveBeenCalled();
+  });
 
-      const result = await ensureAgentRegistered(validConfig);
+  it.each(['http://localhost:4002', 'https://localhost', 'http://127.0.0.1:4002', 'https://[::1]', 'https://service.localhost'])('has no public registration side effect for %s', async a2aBaseUrl => {
+    expect((await ensureAgentRegistered({ ...config, a2aBaseUrl })).size).toBe(0);
+    expect(state.instances).toHaveLength(0);
+  });
 
-      expect(result.size).toBe(0);
-      // Attempted once per chain — a failure on one must not abort the other.
-      expect(mockRegister).toHaveBeenCalledTimes(2);
-    });
+  it('leaves unconfigured registration disabled', async () => {
+    expect((await ensureAgentRegistered({ ...config, arcRpcUrl: '' })).size).toBe(0);
+    expect(state.instances).toHaveLength(0);
+  });
 
-    it('returns an empty Map on isRegistered error', async () => {
-      mockIsRegistered.mockRejectedValue(new Error('RPC error'));
+  it('retains hardware trust only for Nitro configuration', async () => {
+    await ensureAgentRegistered({ ...config, teeMode: 'nitro' });
+    expect(state.metadata.get(config.arcRpcUrl).tee).toBe('nitro');
+  });
 
-      const result = await ensureAgentRegistered(validConfig);
+  it.each([0, -1, 1.5, NaN, Number.MAX_SAFE_INTEGER + 1])('rejects invalid configured Arc chain id %s', chainId => {
+    expect(() => getChainIdentities({ ...config, arcChainId: chainId })).toThrow('ARC_CHAIN_ID');
+  });
 
-      expect(result.size).toBe(0);
-      expect(mockIsRegistered).toHaveBeenCalledTimes(2);
-    });
-
-    it('returns an empty Map on getRegistration error when isRegistered is true', async () => {
-      mockIsRegistered.mockResolvedValue(true);
-      mockGetRegistration.mockRejectedValue(new Error('Query failed'));
-
-      const result = await ensureAgentRegistered(validConfig);
-
-      expect(result.size).toBe(0);
-    });
-
-    it('returns an empty Map on non-Error exception', async () => {
-      mockIsRegistered.mockResolvedValue(false);
-      mockRegister.mockRejectedValue('string error');
-
-      const result = await ensureAgentRegistered(validConfig);
-
-      expect(result.size).toBe(0);
-    });
-
-    it('keeps the chains that succeed when one chain fails', async () => {
-      mockIsRegistered.mockResolvedValue(false);
-      mockRegister
-        .mockRejectedValueOnce(new Error('Ethereum RPC down'))
-        .mockResolvedValueOnce({
-          tokenId: 9n,
-          transactionHash: '0xhash',
-          agentAddress: '0x1234567890123456789012345678901234567890',
-        });
-
-      const result = await ensureAgentRegistered(validConfig);
-
-      expect(result.size).toBe(1);
-      expect(result.has(ETHEREUM_SEPOLIA)).toBe(false);
-      expect(result.get(BASE_SEPOLIA)).toBe(9n);
-    });
-
-    it('still returns the tokenId when post-registration bookkeeping fails', async () => {
-      // setOnchainMetadata('active') is explicitly non-fatal — losing it must
-      // not lose the registration itself.
-      mockIsRegistered.mockResolvedValue(false);
-      mockRegister.mockResolvedValue({
-        tokenId: 3n,
-        transactionHash: '0xhash',
-        agentAddress: '0x1234567890123456789012345678901234567890',
-      });
-      mockSetOnchainMetadata.mockRejectedValue(new Error('gas estimation failed'));
-
-      const result = await ensureAgentRegistered(validConfig);
-
-      expect(result.get(ETHEREUM_SEPOLIA)).toBe(3n);
-      expect(result.get(BASE_SEPOLIA)).toBe(3n);
-    });
+  it('rejects missing Arc registry instead of borrowing a Base address', () => {
+    expect(() => getChainIdentities({ ...config, arcIdentityAddress: '' })).toThrow('ARC_IDENTITY_ADDRESS');
   });
 });

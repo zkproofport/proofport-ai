@@ -1,0 +1,16 @@
+{
+  "domain": {
+    "name": "ZKProofport Demo Vault",
+    "version": "1",
+    "chainId": 5042002,
+    "verifyingContract": "0xCbC8E63fF92659E8B44cFF117D33005Bb669a018"
+  },
+  "types": {
+    "Deposit": [
+      { "name": "amount", "type": "uint256" },
+      { "name": "nonce", "type": "uint256" }
+    ]
+  },
+  "primaryType": "Deposit",
+  "message": { "amount": "1000000", "nonce": "1" }
+}

@@ -41,6 +41,14 @@ export interface CoinbaseProveInputs {
   depth: number;
   country_list?: string[];     // for country circuit
   is_included?: boolean;       // for country circuit
+  /**
+   * EIP-712 domain hash, for the action-bound circuit. Names the verifying
+   * contract and chain, so it is the caller's to supply -- deriving one here
+   * would bind the proof to a contract nobody asked for.
+   */
+  domain_separator?: string;   // "0x..." 32 bytes, arc_eligibility only
+  /** EIP-712 hashStruct of the action. arc_eligibility only. */
+  action_hash?: string;        // "0x..." 32 bytes
 }
 
 // OIDC circuit inputs (oidc_domain_attestation)
@@ -97,5 +105,24 @@ export interface ProveResponse {
 export interface PaymentVerificationResult {
   valid: boolean;
   error?: string;
-  reason?: 'tx_not_found' | 'tx_pending' | 'tx_reverted' | 'wrong_recipient' | 'insufficient_amount' | 'nonce_missing' | 'nonce_mismatch';
+  /**
+   * Why it was refused. This is what a client branches on and what a log query
+   * counts, so each value names one distinct thing.
+   *
+   * `no_transfer` was added on 2026-09-09. "The transaction moved no USDC at
+   * all" had been reporting `wrong_recipient`, whose own message said "No USDC
+   * transfer found" -- so the code and the sentence beside it disagreed, and
+   * anyone counting wrong-recipient failures was counting two different
+   * problems together. A facilitator answering with a hash whose transaction
+   * did nothing lands here, which is why it is worth telling apart.
+   */
+  reason?:
+    | 'tx_not_found'
+    | 'tx_pending'
+    | 'tx_reverted'
+    | 'no_transfer'
+    | 'wrong_recipient'
+    | 'insufficient_amount'
+    | 'nonce_missing'
+    | 'nonce_mismatch';
 }

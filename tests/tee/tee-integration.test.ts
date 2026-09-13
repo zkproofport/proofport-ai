@@ -47,7 +47,8 @@ vi.mock('../../src/circuit/artifactManager.js', () => ({
 }));
 
 // Mock identity
-vi.mock('../../src/identity/autoRegister.js', () => ({
+vi.mock('../../src/identity/autoRegister.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/identity/autoRegister.js')>()),
   ensureAgentRegistered: vi.fn().mockResolvedValue(null),
 }));
 
@@ -70,6 +71,7 @@ function makeTestConfig(overrides: Partial<Config> = {}): Config {
     chainRpcUrl: 'https://sepolia.base.org',
     proverPrivateKey: '0x5c8eb0e0dcdcdabdc87f1fae3e992132e8a06b83188dfba625ca95036876bb0a',
     paymentMode: 'disabled' as const,
+    paymentNetworks: 'base-sepolia',
     a2aBaseUrl: 'http://localhost:4002',
     websiteUrl: 'https://zkproofport.com',
     agentVersion: '1.0.0',

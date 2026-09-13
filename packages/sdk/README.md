@@ -6,7 +6,70 @@ Client SDK for ZKProofport zero-knowledge proof generation on Base Mainnet.
 
 @zkproofport-ai/sdk is a TypeScript SDK for generating privacy-preserving zero-knowledge proofs using Coinbase KYC attestations and OIDC JWT tokens. Generate a proof with a single function call, or fine-tune each step for custom workflows.
 
-Proofs are generated in trusted execution environments (Nitro Enclaves) with cryptographic attestation. Proof generation is **free** — no payment required.
+Proofs are generated in trusted execution environments (Nitro Enclaves) with cryptographic attestation.
+
+## Paying for a proof
+
+A service tells you what it charges. Ask for a proof and the answer is either
+the proof or a `402` listing the chains it takes USDC on — you pick one.
+
+**You sign; you never send a transaction.** Payment is an EIP-3009 USDC
+authorization, and whoever collects it submits it. So a wallet needs USDC and
+nothing else: no gas, no native token on the chain being paid on.
+
+Three ways to hold that wallet:
+
+```ts
+import {
+  generateProof,
+  walletFromPrivateKey,   // a raw key
+  walletFromCdp,          // a Coinbase CDP server wallet
+  walletFromCircle,       // a Circle developer-controlled wallet
+} from '@zkproofport-ai/sdk';
+
+const proof = await generateProof(
+  config,
+  {
+    attestation: signer,                                  // proves who you are
+    payment: await walletFromPrivateKey(process.env.PAYMENT_KEY!), // pays
+  },
+  { circuit: 'coinbase_kyc' },
+);
+```
+
+The two wallets are separate on purpose. The attestation wallet is fixed — it
+is the one your KYC attestation is bound to. The paying wallet is whichever one
+holds USDC.
+
+To choose a chain rather than take the first offered, pass `payOn` with a name
+from the service's own list:
+
+```ts
+const offers = paymentOffers(await requestChallenge(config, 'coinbase_kyc'));
+// offers: [{ networkName, amount, asset, payTo }, ...]
+
+await generateProof(config, { attestation: signer, payment }, {
+  circuit: 'coinbase_kyc',
+  payOn: offers[0].networkName,
+});
+```
+
+Naming a chain the service does not offer is an error listing what it does. It
+never quietly pays on a different one.
+
+From the command line:
+
+```bash
+zkproofport-prove coinbase_kyc --pay-with circle --pay-on <chain>
+zkproofport-prove coinbase_kyc --pay-with cdp
+```
+
+`--pay-with cdp` needs `CDP_API_KEY_ID`, `CDP_API_KEY_SECRET` and
+`CDP_WALLET_SECRET`; `--pay-with circle` needs `CIRCLE_API_KEY`,
+`CIRCLE_ENTITY_SECRET` and `CIRCLE_WALLET_ID`; `--pay-with key` needs
+`PAYMENT_PRIVATE_KEY`. With exactly one of the three configured you can omit
+the flag. With more than one, naming it is required — a wallet is money, and
+guessing which account it leaves is not a default worth having.
 
 ## E2E Encryption (TEE Blind Relay)
 
@@ -41,6 +104,8 @@ npm install @zkproofport-ai/sdk ethers
 
 **For OIDC circuits** (`oidc_domain`): No wallet or attestation needed — just a JWT `id_token` from your OIDC provider.
 
+**For the action-bound circuit** (`arc_eligibility`): the same Coinbase KYC attestation as above. What differs is what the wallet signs — see below.
+
 ## Quick Start
 
 ```typescript
@@ -58,6 +123,117 @@ const result = await generateProof(
 const verification = await verifyProof(result);
 console.log('Valid:', verification.valid);
 ```
+
+
+## Binding a proof to one action (experimental, testnet only)
+
+> **Experimental. Testnet only.**
+>
+> `arc_eligibility` is not deployed on any mainnet, and no verifier contract
+> address exists for it yet. Its public-input layout may still change. Do not
+> put it in front of real funds. The circuits that are generally available are
+> `coinbase_kyc`, `coinbase_country` and `oidc_domain`.
+
+### The problem it solves
+
+Every other circuit here has the wallet sign `signal_hash`, which is
+`keccak256(address, scope, circuitId)`. That value is the same for a given
+wallet and scope no matter what the proof is later used for, so:
+
+- **It commits to no action.** A proof produced to deposit into one vault
+  verifies just as well at a different vault, for a different amount, from a
+  different caller, with no deadline. A verifier that checks
+  `msg.sender == expectedCaller` gains nothing if the proof never committed to
+  that caller.
+- **The person signing cannot read what they approve.** `personal_sign` over 32
+  opaque bytes shows a hex string. That is tolerable while a proof only asserts
+  "this wallet is KYC'd"; it is not once an agent moves money with it.
+
+### What changes
+
+Pass an `action` and the wallet signs an [EIP-712](https://eips.ethereum.org/EIPS/eip-712)
+typed structure instead. You define the structure — this SDK keeps no registry
+of action shapes and never invents one.
+
+```typescript
+const result = await generateProof(
+  config,
+  { attestation: attestationSigner },
+  {
+    circuit: 'arc_eligibility',
+    scope: 'my-app',
+    action: {
+      domain: {
+        name: 'MyVault',
+        version: '1',
+        chainId: 5042002,
+        verifyingContract: vaultAddress,   // binds the signature to ONE contract
+      },
+      types: {
+        Deposit: [
+          { name: 'amount', type: 'uint256' },
+          { name: 'nonce', type: 'uint256' },
+          { name: 'expiry', type: 'uint64' },
+        ],
+      },
+      primaryType: 'Deposit',
+      message: { amount: 10_000_000n, nonce: 1n, expiry: deadline },
+    },
+  },
+);
+```
+
+The wallet renders `amount`, `nonce` and `expiry` by name for the person to
+read. Two 32-byte hashes reach the circuit — the EIP-712 domain separator and
+the hash of the action — and the circuit proves the KYC'd key signed them. It
+never learns what the action was, so nothing about vaults or USDC is baked into
+it: a grant of authority or an agreement in prose works the same way.
+
+```typescript
+// Free-form text is a valid shape.
+types: { Agreement: [{ name: 'terms', type: 'string' }] },
+primaryType: 'Agreement',
+message: { terms: 'Deposit 10 USDC into the KYC-gated vault' },
+```
+
+A contract cannot enforce prose, though. To check an amount on-chain, the
+amount has to be its own field.
+
+### What your verifier does
+
+It recomputes both hashes from the call it is about to run and refuses a
+mismatch:
+
+```solidity
+bytes32 domainSeparator = _domainSeparatorV4();          // this contract, this chain
+bytes32 actionHash = keccak256(abi.encode(
+    DEPOSIT_TYPEHASH, amount, nonce, uint64(expiry)
+));
+require(publicInputs.domainSeparator == domainSeparator, "wrong contract");
+require(publicInputs.actionHash == actionHash, "wrong action");
+```
+
+Public inputs arrive in this order — read off the compiled ABI, 192 fields of
+one byte each:
+
+| Field | Byte range |
+|---|---|
+| `signal_hash` | 0–31 |
+| `domain_separator` | 32–63 |
+| `action_hash` | 64–95 |
+| `signer_list_merkle_root` | 96–127 |
+| `scope` | 128–159 |
+| `nullifier` | 160–191 |
+
+`signal_hash` is still present, and nobody signs it: the nullifier derives from
+it, exactly as on the other Coinbase circuits. Deriving the nullifier from the
+signed action instead would give a different nullifier per action and destroy
+the one-per-person property it exists for.
+
+### Omitting `action`
+
+Leave it out and nothing changes: the wallet signs `signal_hash` through
+`personal_sign` as before. Existing callers need no edit.
 
 ## Configuration
 

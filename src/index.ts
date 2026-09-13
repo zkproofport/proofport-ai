@@ -12,7 +12,7 @@ const { version } = require('../package.json');
 import swaggerUi from 'swagger-ui-express';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { Config } from './config/index.js';
-import { loadConfig } from './config/index.js';
+import { getChainIdentities, loadConfig } from './config/index.js';
 import { ensureArtifacts } from './circuit/artifactManager.js';
 import { createMcpServer } from './mcp/server.js';
 import { buildSwaggerSpec } from './swagger.js';
@@ -30,7 +30,7 @@ import { RedisTaskStore } from './a2a/redisTaskStore.js';
 import { ProofportExecutor } from './a2a/proofportExecutor.js';
 import { validatePaymentConfig, getPaymentModeConfig } from './payment/freeTier.js';
 import { getTeeConfig, createTeeProvider, resolveTeeMode } from './tee/index.js';
-import { ensureAgentRegistered } from './identity/autoRegister.js';
+import { ensureAgentRegistered, isIdentityRegistrationEnabled } from './identity/autoRegister.js';
 import { createAgentAuthMiddleware } from './identity/agentAuth.js';
 import { createProofRoutes } from './proof/proofRoutes.js';
 import type { LLMProvider } from './chat/llmProvider.js';
@@ -40,11 +40,32 @@ import { MultiLLMProvider } from './chat/multiProvider.js';
 import { syncDeployments } from './config/deployments.js';
 import { startAcpSeller } from './virtuals/acpSeller.js';
 
+export type IdentityState = { status: 'pending' | 'ready' | 'failed' | 'disabled' };
+
+export async function initializeIdentity(config: Config, tokenIdRef: TokenIdRef, identityState: IdentityState,
+  teeProvider?: Parameters<typeof ensureAgentRegistered>[1]): Promise<void> {
+  if (identityState.status === 'disabled') return;
+  try {
+    const results = await ensureAgentRegistered(config, teeProvider);
+    tokenIdRef.chains.clear();
+    for (const [chainId, tokenId] of results) tokenIdRef.chains.set(chainId, tokenId);
+    identityState.status = results.size > 0 ? 'ready' : 'disabled';
+    log.info({ action: 'identity.ready', status: identityState.status, chains: [...results.keys()] }, 'Identity readiness updated');
+  } catch {
+    tokenIdRef.chains.clear();
+    identityState.status = 'failed';
+    log.warn({ action: 'server.identity.failed' }, 'ERC-8004 identity registration failed; readiness unavailable');
+  }
+}
+
 function createApp(config: Config) {
   // Validate payment config at startup
   validatePaymentConfig(config);
 
   const tokenIdRef: TokenIdRef = { chains: new Map() };
+  const identityState: IdentityState = {
+    status: isIdentityRegistrationEnabled(config) && getChainIdentities(config).length > 0 ? 'pending' : 'disabled',
+  };
 
   const app = express();
 
@@ -94,10 +115,26 @@ function createApp(config: Config) {
       service: 'proofport-ai',
       paymentMode: paymentModeConfig.mode,
       paymentRequired: paymentModeConfig.requiresPayment,
+      // Which chains this instance will actually take payment on. Reported
+      // because it is the setting most likely to be wrong and least likely to
+      // be noticed: a service configured for Arc whose PAYMENT_NETWORKS never
+      // reached it refuses Arc payments while looking healthy. An operator can
+      // now read the answer here instead of inferring it from a 402.
+      paymentNetworks: config.paymentNetworks,
       tee: {
         mode: resolvedMode,
         attestationEnabled: teeConfig.attestationEnabled,
       },
+    });
+  });
+
+  app.get('/identity/status', (_req, res) => {
+    const unavailable = identityState.status === 'pending' || identityState.status === 'failed';
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(unavailable ? 503 : 200).json({
+      status: identityState.status,
+      registrations: [...tokenIdRef.chains].map(([chainId, agentId]) => ({ chainId, agentId: agentId.toString() })),
+      ...(identityState.status === 'failed' && { error: 'Identity registration failed.' }),
     });
   });
 
@@ -125,6 +162,7 @@ function createApp(config: Config) {
         a2a: '/a2a',
         mcp: '/mcp',
         health: '/health',
+        identityStatus: '/identity/status',
         discovery: {
           oasf: '/.well-known/agent.json',
           a2a: '/.well-known/agent-card.json',
@@ -208,7 +246,7 @@ function createApp(config: Config) {
     res.status(405).json({ error: 'Session management not supported in stateless mode.' });
   });
 
-  return { app, teeProvider, cleanupWorker, tokenIdRef };
+  return { app, teeProvider, cleanupWorker, tokenIdRef, identityState };
 }
 
 async function startServer() {
@@ -234,7 +272,7 @@ async function startServer() {
     const earlyTeeProvider = createTeeProvider({ ...teeConfig, mode: resolvedTeeMode });
 
     // Create app without tokenId (registration runs in background after server starts)
-    const { app, teeProvider, cleanupWorker, tokenIdRef } = createApp(config);
+    const { app, teeProvider, cleanupWorker, tokenIdRef, identityState } = createApp(config);
 
     app.listen(config.port, () => {
       log.info({ action: 'server.started', port: config.port }, 'proofport-ai server listening');
@@ -252,20 +290,7 @@ async function startServer() {
         log.warn({ action: 'server.virtuals.failed', err }, 'Virtuals ACP Seller failed to start (non-fatal)');
       });
 
-      // Register agent on ERC-8004 in background (non-blocking, does not delay server startup)
-      // Supports dual-chain registration (Base + Ethereum mainnet)
-      ensureAgentRegistered(config, earlyTeeProvider)
-        .then(results => {
-          if (results.size > 0) {
-            for (const [chainId, tokenId] of results) {
-              tokenIdRef.chains.set(chainId, tokenId);
-            }
-            log.info({ action: 'identity.tokenIds.updated', chains: [...results.entries()].map(([c, t]) => `${c}:${t}`) }, 'Discovery endpoints updated with tokenIds');
-          }
-        })
-        .catch(err => {
-          log.warn({ action: 'server.identity.failed', err }, 'ERC-8004 identity registration failed (non-fatal)');
-        });
+      void initializeIdentity(config, tokenIdRef, identityState, earlyTeeProvider);
     });
   } catch (error) {
     log.error({ action: 'server.start.failed', err: error }, 'Failed to start server');

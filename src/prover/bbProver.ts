@@ -8,7 +8,7 @@ import { Noir } from '@noir-lang/noir_js';
 import type { CircuitParams } from '../input/inputBuilder.js';
 import type { OidcCircuitInputs } from './inputFormatter.js';
 import { formatCoinbaseInputs, formatOidcInputs } from './inputFormatter.js';
-import { CIRCUIT_IDS } from '../config/circuitIds.js';
+import { CIRCUIT_IDS, CIRCUIT_DIRS } from '../config/circuitIds.js';
 import type { CircuitId } from '../config/circuitIds.js';
 import { createLogger } from '../logger.js';
 
@@ -18,20 +18,7 @@ const execFileAsync = promisify(execFile);
 
 // Circuit ID to metadata mapping (directory name uses hyphens, package name uses
 // underscores). Keyed by the canonical identifiers from config/circuitIds.ts.
-const CIRCUIT_META: Record<CircuitId, { dir: string; packageName: CircuitId }> = {
-  [CIRCUIT_IDS.COINBASE_ATTESTATION]: {
-    dir: 'coinbase-attestation',
-    packageName: CIRCUIT_IDS.COINBASE_ATTESTATION,
-  },
-  [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: {
-    dir: 'coinbase-country-attestation',
-    packageName: CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION,
-  },
-  [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: {
-    dir: 'oidc-domain-attestation',
-    packageName: CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION,
-  },
-};
+
 
 export interface BbProveResult {
   proof: string;           // hex-encoded proof (0x-prefixed)
@@ -64,7 +51,7 @@ export class BbProver {
    * @param inputs - Structured circuit inputs (CircuitParams for coinbase, OidcCircuitInputs for OIDC).
    */
   async prove(circuitId: string, inputs: Record<string, any>): Promise<BbProveResult> {
-    const meta = (CIRCUIT_META as Record<string, (typeof CIRCUIT_META)[CircuitId] | undefined>)[
+    const meta = (CIRCUIT_DIRS as Record<string, (typeof CIRCUIT_DIRS)[CircuitId] | undefined>)[
       circuitId
     ];
     if (!meta) {

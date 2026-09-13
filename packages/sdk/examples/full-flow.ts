@@ -8,7 +8,7 @@
  *   ATTESTATION_KEY  - Private key of wallet with Coinbase KYC attestation (required)
  *   PAYMENT_KEY      - Private key of wallet with USDC balance (optional, defaults to ATTESTATION_KEY)
  *   SERVER_URL       - proofport-ai server URL (default: https://stg-ai.zkproofport.app)
- *   CIRCUIT          - Circuit name: coinbase_kyc | coinbase_country (default: coinbase_kyc)
+ *   CIRCUIT          - Circuit name: coinbase_kyc | coinbase_country (required)
  *   SCOPE            - Scope string (default: proofport)
  */
 import { generateProof, verifyProof, fromPrivateKey, createConfig } from '../src/index.js';
@@ -31,7 +31,13 @@ async function main() {
     ? fromPrivateKey(process.env.PAYMENT_KEY)
     : undefined;
 
-  const circuit = (process.env.CIRCUIT || 'coinbase_kyc') as CircuitName;
+  // No default. An unset variable used to mean coinbase_kyc, so running this
+  // to try another circuit and forgetting to export CIRCUIT proved the wrong
+  // thing and looked like it worked.
+  const circuit = process.env.CIRCUIT as CircuitName | undefined;
+  if (!circuit) {
+    throw new Error('Set CIRCUIT to the circuit you want, e.g. CIRCUIT=coinbase_kyc');
+  }
   const scope = process.env.SCOPE || 'proofport';
 
   console.log('=== ZKProofport Proof Generation ===');

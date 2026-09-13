@@ -15,6 +15,12 @@ export async function submitProof(
     circuit: CircuitName;
     inputs?: ProveInputs | Record<string, unknown>;
     nonce?: string;
+    /**
+     * Payment headers from `signPayment` -- the x402 `X-Payment` header
+     * carrying a signed authorization. Absent against a service with payment
+     * disabled.
+     */
+    paymentHeaders?: Record<string, string>;
   },
 ): Promise<ProveResponse> {
   const url = `${config.baseUrl}/api/v1/prove`;
@@ -28,6 +34,7 @@ export async function submitProof(
   if (request.nonce) {
     headers['X-Payment-Nonce'] = request.nonce;
   }
+  Object.assign(headers, request.paymentHeaders ?? {});
   const response = await fetch(url, {
     method: 'POST',
     headers,
@@ -52,6 +59,7 @@ export async function submitEncryptedProof(
     circuit: CircuitName;
     encryptedPayload: EncryptedEnvelope;
     nonce?: string;
+    paymentHeaders?: Record<string, string>;
   },
 ): Promise<ProveResponse> {
   const url = `${config.baseUrl}/api/v1/prove`;
@@ -61,6 +69,7 @@ export async function submitEncryptedProof(
   if (request.nonce) {
     headers['X-Payment-Nonce'] = request.nonce;
   }
+  Object.assign(headers, request.paymentHeaders ?? {});
   const response = await fetch(url, {
     method: 'POST',
     headers,

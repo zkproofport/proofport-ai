@@ -110,7 +110,9 @@ REQUEST BODY SCHEMA:
       "leaf_index": <number>,                     // 0-based index of attester leaf in the Merkle tree
       "depth": <number>,                          // number of levels in the Merkle tree (max 8)
       "country_list": ["<string>", ...],          // optional: only for coinbase_country circuit
-      "is_included": <boolean>                    // optional: only for coinbase_country circuit
+      "is_included": <boolean>,                   // optional: only for coinbase_country circuit
+      "domain_separator": "<string>",             // required for arc_eligibility: EIP-712 domain hash
+      "action_hash": "<string>"                   // required for arc_eligibility: EIP-712 hashStruct of the action
     }
   }
 
@@ -118,7 +120,16 @@ VERIFIER ADDRESSES (${chainName}, chain ID ${chainId}):
   coinbase_kyc (coinbase_attestation):         ${kycVerifier}
   coinbase_country (coinbase_country_attestation): ${countryVerifier}`,
     {
-      circuit: z.enum(['coinbase_kyc', 'coinbase_country']).describe('Which circuit to use.'),
+      circuit: z
+        .enum(['coinbase_kyc', 'coinbase_country', 'arc_eligibility'])
+        .describe(
+          'Which circuit to use. `arc_eligibility` proves the same Coinbase ' +
+          'attestation but binds the signature to ONE EIP-712 action, so the ' +
+          'proof cannot be presented to a different contract, amount or caller. ' +
+          'It requires domain_separator and action_hash, and the wallet must ' +
+          'sign the typed structure (eth_signTypedData_v4), not signal_hash. ' +
+          'Experimental and testnet only: no verifier is deployed on a mainnet.',
+        ),
       inputs: z.object({
         signal_hash: z.string().describe('0x-prefixed 32-byte signal hash: keccak256(abi.encodePacked(address, scope, circuitId))'),
         nullifier: z.string().describe('0x-prefixed 32-byte nullifier: privacy-preserving unique identifier'),
@@ -137,6 +148,19 @@ VERIFIER ADDRESSES (${chainName}, chain ID ${chainId}):
         depth: z.number().describe('Number of levels in the Merkle tree. With 4 signers, depth = 2.'),
         country_list: z.array(z.string()).optional().describe('ISO 3166-1 alpha-2 country codes. Only for coinbase_country circuit.'),
         is_included: z.boolean().optional().describe('true = prove country IS in list, false = prove it is NOT. Only for coinbase_country circuit.'),
+        domain_separator: z.string().optional().describe(
+          '0x-prefixed 32-byte EIP-712 domain hash, i.e. hashStruct of ' +
+          '{name, version, chainId, verifyingContract}. Required for ' +
+          'arc_eligibility. The server never derives it: the domain names ' +
+          'the contract that will check the proof, and guessing one binds the ' +
+          'proof to a contract nobody asked for.',
+        ),
+        action_hash: z.string().optional().describe(
+          '0x-prefixed 32-byte EIP-712 hashStruct of the action being ' +
+          'authorized. Required for arc_eligibility. The verifying ' +
+          'contract recomputes it from the call it is about to run and ' +
+          'refuses a mismatch.',
+        ),
       }).describe('All circuit inputs required to generate the ZK proof.'),
     },
     async (_args) => {

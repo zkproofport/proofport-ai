@@ -1,6 +1,7 @@
 import { ethers } from 'ethers';
 import type { CircuitId, ProveInputs, ClientConfig } from './types.js';
 import { CIRCUIT_NAME_MAP, type CircuitName } from './types.js';
+import { CIRCUIT_IDS } from './circuits.js';
 import { CIRCUITS, RAW_TX_PADDED_LENGTH, MERKLE_PROOF_MAX_DEPTH, COUNTRY_LIST_MAX_LENGTH } from './constants.js';
 import { fetchAttestation, recoverAttesterPubkey, getSignerAddress } from './attestation.js';
 import { findSignerIndex, buildSignerMerkleTree } from './merkle.js';
@@ -183,6 +184,18 @@ export async function prepareInputs(config: ClientConfig, params: {
   scope: string;
   countryList?: string[];
   isIncluded?: boolean;
+  /**
+   * The EIP-712 hashes the wallet signed over, for `arc_eligibility`.
+   *
+   * Required there, because that circuit's wallet signs a typed action rather
+   * than `signal_hash` — recovering against `signal_hash` yields a public key
+   * that is not the user's, and the circuit then fails on "User pubkey does not
+   * match address", which points at the address rather than at the message.
+   * Added after exactly that failure on 2026-09-12: the caller was attaching
+   * these two AFTER this function had already recovered the key.
+   */
+  domainSeparator?: string;
+  actionHash?: string;
 }): Promise<ProveInputs> {
   const { circuitId, userAddress, userSignature, scope } = params;
 
@@ -204,8 +217,25 @@ export async function prepareInputs(config: ClientConfig, params: {
   // Step 1: Compute signal hash
   const signalHash = computeSignalHash(userAddress, scope, circuitId);
 
-  // Step 2: Recover user public key
-  const userPubkey = recoverUserPubkey(signalHash, userSignature);
+  // Step 2: Recover the user's public key from the digest they actually signed.
+  const isAction = circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY;
+  if (isAction && !(params.domainSeparator && params.actionHash)) {
+    throw new Error(
+      `${CIRCUIT_IDS.ARC_ELIGIBILITY} signs an EIP-712 action, so domainSeparator and actionHash are required here. ` +
+      'Without them the public key is recovered from signal_hash and belongs to nobody.',
+    );
+  }
+  if (!isAction && (params.domainSeparator || params.actionHash)) {
+    throw new Error(
+      `An EIP-712 action was given but '${circuitId}' does not carry one. Only ${CIRCUIT_IDS.ARC_ELIGIBILITY} does.`,
+    );
+  }
+  const userPubkey = isAction
+    ? ethers.SigningKey.recoverPublicKey(
+        ethers.keccak256(ethers.concat(['0x1901', params.domainSeparator!, params.actionHash!])),
+        userSignature,
+      )
+    : recoverUserPubkey(signalHash, userSignature);
   const { x: userPubkeyX, y: userPubkeyY } = extractPubkeyCoordinates(userPubkey);
 
   // Step 3: Fetch attestation transaction from Base chain

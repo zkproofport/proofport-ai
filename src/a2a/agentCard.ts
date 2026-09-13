@@ -1,12 +1,38 @@
-import { type Config, getChainId, isProductionChain } from '../config/index.js';
+import { type Config, getChainId, getChainIdentities, isProductionChain } from '../config/index.js';
 import type { Request, Response } from 'express';
 import type { AgentCard as SDKAgentCard } from '@a2a-js/sdk';
 import { ERC8004_ADDRESSES } from '../config/contracts.js';
 import { getChainVerifiers } from '../config/deployments.js';
-import { CIRCUIT_IDS } from '../config/circuitIds.js';
+import { CIRCUIT_IDS, PROVABLE_CIRCUIT_IDS } from '../config/circuitIds.js';
 import { ethers } from 'ethers';
+import { resolvePaymentNetworks } from '../payment/networks.js';
 
 export type TokenIdRef = { chains: Map<number, bigint> };
+
+function executionDescription(config: Config): string {
+  if (config.teeMode === 'nitro') return 'AWS Nitro Enclave';
+  return `deployed prover (${config.teeMode} mode, no hardware TEE attestation)`;
+}
+
+function paymentNetworks(config: Config): string {
+  return resolvePaymentNetworks(config.paymentNetworks).map(network => `${network.id} (${network.caip2})`).join(', ');
+}
+
+function serviceDescription(config: Config): string {
+  return `ZK proof generation for Coinbase KYC, country verification, OIDC domain verification, and Arc action eligibility. ` +
+    `Provable circuits: ${PROVABLE_CIRCUIT_IDS.join(', ')}. Noir circuits execute in ${executionDescription(config)}. ` +
+    `Configured x402 USDC payment networks: ${paymentNetworks(config)}. See /identity/status for verified ERC-8004 registrations.`;
+}
+
+function registrationRows(config: Config, chains: Map<number, bigint>) {
+  const identities = new Map(getChainIdentities(config).map(identity => [identity.chainId, identity]));
+  return [...chains].map(([chainId, tokenId]) => {
+    const identity = identities.get(chainId);
+    if (!identity) throw new Error(`Unknown registered chain ${chainId}; no configured identity registry.`);
+    if (tokenId < 0n || tokenId > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error(`Agent ID on chain ${chainId} exceeds safe registration JSON integer range.`);
+    return { agentId: Number(tokenId), agentRegistry: `eip155:${chainId}:${identity.identityAddress}` };
+  });
+}
 
 export type AgentCard = SDKAgentCard & {
   protocolVersions?: string[];
@@ -39,6 +65,28 @@ export type AgentCard = SDKAgentCard & {
  * @param tokenId - Optional ERC-8004 tokenId (set after registration)
  * @returns Agent Card JSON object
  */
+
+/**
+ * The on-chain verification line an agent reads to know where to check a proof.
+ *
+ * Built from PROVABLE_CIRCUIT_IDS rather than two hand-named circuits. The
+ * hand-written version listed Coinbase KYC and Coinbase country only, so an
+ * agent was never told this server also proves OIDC domain — which it has done
+ * for months — nor arc_eligibility.
+ *
+ * A circuit with no verifier on this chain is named as such instead of being
+ * dressed up. The previous `?? '(address not yet loaded)'` published a string
+ * that reads like a transient failure for a contract that is deliberately not
+ * there, and an agent retrying on it waits forever.
+ */
+function verifierLine(chainName: string, chainId: number, chainVerifiers: Record<string, string | null>): string {
+  const entries = PROVABLE_CIRCUIT_IDS.map(id => {
+    const address = chainVerifiers[id];
+    return address ? `${id}=${address}` : `${id}=(no verifier on this chain)`;
+  });
+  return `Verifier contracts on ${chainName} (chainId=${chainId}): ${entries.join(', ')}`;
+}
+
 export function buildAgentCard(config: Config, tokenId?: bigint | null): AgentCard {
   // Determine chain from RPC URL, independent of payment mode
   const isProduction = isProductionChain(config);
@@ -46,14 +94,13 @@ export function buildAgentCard(config: Config, tokenId?: bigint | null): AgentCa
     ? ERC8004_ADDRESSES.mainnet.identity
     : ERC8004_ADDRESSES.sepolia.identity;
   const chainId = getChainId(config);
-  const chainName = isProduction ? 'Base Mainnet' : 'Base Sepolia';
+  const chainName = isProduction ? 'Ethereum Mainnet' : 'Ethereum Sepolia';
   const chainVerifiers = getChainVerifiers(String(chainId));
-  const kycVerifier = chainVerifiers[CIRCUIT_IDS.COINBASE_ATTESTATION] ?? '(address not yet loaded)';
-  const countryVerifier = chainVerifiers[CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION] ?? '(address not yet loaded)';
+  const verifiers = verifierLine(chainName, chainId, chainVerifiers);
 
   return {
     name: 'proveragent.base.eth',
-    description: 'ZK proof generation agent for Coinbase KYC and country-of-residence verification. Generates zero-knowledge proofs from Coinbase Verified Account attestations on Base chain using Noir circuits in AWS Nitro TEE. Supports: (1) coinbase_kyc — prove KYC verification without revealing identity, (2) coinbase_country — prove country of residence with inclusion/exclusion lists. Payment via USDC on Base. ERC-8004 registered identity. x402 payment protocol compatible.',
+    description: serviceDescription(config),
     url: `${config.a2aBaseUrl}/a2a`,
     version: config.agentVersion,
     protocolVersion: '0.3.0',
@@ -79,35 +126,25 @@ export function buildAgentCard(config: Config, tokenId?: bigint | null): AgentCa
       {
         id: 'prove',
         name: 'Generate ZK Proof',
-        description: `[SINGLE-STEP x402] Generate a zero-knowledge proof via x402 single-step flow. POST circuit + inputs → receive 402 with nonce → pay USDC → retry with X-Payment-TX and X-Payment-Nonce headers. Atomically verifies USDC payment on-chain and generates the ZK proof in TEE. Takes 30-90 seconds.
+        description: `[SINGLE-STEP x402] Generate a zero-knowledge proof via x402 single-step flow in ${executionDescription(config)}. Read the payment requirements returned by the service for the selected payment scheme.
 
 SUPPORTED CIRCUITS:
+${PROVABLE_CIRCUIT_IDS.join(', ')}
 - coinbase_kyc: Prove Coinbase KYC verification without revealing identity. EAS schema 0xf8b05c79f090979bf4a80270aba232dff11a10d9ca55c4f88de95317970f0de9.
 - coinbase_country: Prove country of residence with inclusion/exclusion list. EAS schema 0x1801901fabd0e6189356b4fb52bb0ab855276d84f7ec140839fbd1f6801ca065.
 
-REQUIRED INPUTS (all prepared client-side — see guide_url for detailed instructions):
-- circuit: "coinbase_kyc" or "coinbase_country"
-- signal_hash: 0x-prefixed 32-byte signal hash (keccak256 of scope + address)
-- nullifier: 0x-prefixed 32-byte nullifier (derived from attestation UID + scope)
-- scope_bytes: 0x-prefixed 32-byte keccak256 of scope string
-- merkle_root: 0x-prefixed 32-byte Merkle root of authorized signers tree
-- user_address: 0x-prefixed 20-byte wallet address with Coinbase attestation
-- signature: eth_sign(signal_hash) from the KYC wallet, 65 bytes (r+s+v)
-- user_pubkey_x, user_pubkey_y: secp256k1 public key coordinates (recover via ecrecover from signature)
-- raw_transaction: RLP-encoded EAS attestation transaction (zero-padded to 300 bytes)
-- tx_length: Actual byte length before padding
-- coinbase_attester_pubkey_x/y: Attester public key (recover via ecrecover from attestation TX)
-- merkle_proof: Merkle proof for attester in authorized signers list (max depth 8)
-- leaf_index, depth: Position in Merkle tree
+REQUIRED INPUTS:
+Inputs are circuit-specific. Read /api/v1/guide/{circuit} and prepare them with the client SDK.
+Coinbase circuits use wallet/attestation witnesses. arc_eligibility additionally requires the EIP-712 domain separator and action hash signed by the KYC wallet. OIDC domain verification uses its OIDC witness.
 
-PAYMENT: 0.1 USDC on Base. x402 protocol — nonce returned in 402 body, pay, retry with headers.
+PAYMENT: ${config.paymentProofPrice} USDC. Configured networks: ${paymentNetworks(config)}. Read the returned x402 offers.
 
-RETURNS: proof (hex), publicInputs (hex), proofWithInputs (hex for on-chain verification), TEE attestation document
+RETURNS: proof (hex), publicInputs (hex), proofWithInputs (hex for on-chain verification)${config.teeMode === 'nitro' && config.teeAttestationEnabled ? ', hardware TEE attestation when requested' : '. No hardware TEE attestation is advertised'}
 
 ON-CHAIN VERIFICATION:
-- Verifier contracts on ${chainName} (chainId=${chainId}): coinbase_attestation=${kycVerifier}, coinbase_country_attestation=${countryVerifier}
+- ${verifiers}
 - Call verifier.verify(proofWithInputs) to verify on-chain`,
-        tags: ['zk-proof', 'generate', 'tee', 'noir', 'privacy', 'coinbase', 'attestation', 'on-chain-verification', 'x402', 'kyc', 'identity', 'country-verification', 'eas'],
+        tags: ['zk-proof', 'generate', ...(config.teeMode === 'nitro' ? ['tee'] : []), 'noir', 'privacy', 'coinbase', 'attestation', 'on-chain-verification', 'x402', 'kyc', 'identity', 'country-verification', 'eas'],
         examples: [
           'Generate a KYC proof for my Coinbase account',
           'Prove my Coinbase verification without revealing identity',
@@ -159,11 +196,11 @@ ON-CHAIN VERIFICATION:
         tokenId: tokenId !== null && tokenId !== undefined ? tokenId.toString() : null,
       },
     },
-    ...(config.teeMode !== 'disabled' && {
+    ...(config.teeMode === 'nitro' && {
       tee: {
         mode: config.teeMode,
         attestationEnabled: config.teeAttestationEnabled,
-        attestationFormat: config.teeMode === 'nitro' ? 'aws-nitro-nsm' : 'simulated',
+        attestationFormat: 'aws-nitro-nsm',
         attestationEndpoint: `${config.a2aBaseUrl}/api/v1/attestation/{proofId}`,
       },
     }),
@@ -178,17 +215,16 @@ ON-CHAIN VERIFICATION:
  */
 export function buildMcpDiscovery(config: Config) {
   const chainId = getChainId(config);
-  const chainName = isProductionChain(config) ? 'Ethereum Mainnet' : 'Base Sepolia';
+  const chainName = isProductionChain(config) ? 'Ethereum Mainnet' : 'Ethereum Sepolia';
   const chainVerifiers = getChainVerifiers(String(chainId));
-  const kycVerifier = chainVerifiers[CIRCUIT_IDS.COINBASE_ATTESTATION] ?? '(address not yet loaded)';
-  const countryVerifier = chainVerifiers[CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION] ?? '(address not yet loaded)';
+  const verifiers = verifierLine(chainName, chainId, chainVerifiers);
 
   return {
     protocolVersion: '2025-11-25',
     serverInfo: {
       name: 'proveragent.base.eth',
       version: config.agentVersion,
-      description: 'proveragent.base.eth — ZK proof generation agent for Coinbase KYC and country-of-residence verification. Generates zero-knowledge proofs from Coinbase Verified Account attestations on Base chain using Noir circuits in AWS Nitro TEE. Supports: (1) coinbase_kyc — prove KYC verification without revealing identity, (2) coinbase_country — prove country of residence with inclusion/exclusion lists. Payment via USDC on Base. ERC-8004 registered identity. x402 payment protocol compatible.',
+      description: serviceDescription(config),
     },
     capabilities: {
       tools: {},
@@ -196,11 +232,11 @@ export function buildMcpDiscovery(config: Config) {
     tools: [
       {
         name: 'prove',
-        description: `[SINGLE-STEP x402] Generate a zero-knowledge proof via x402 single-step flow. POST circuit + inputs → receive 402 with nonce → pay USDC → retry with X-Payment-TX and X-Payment-Nonce headers. Atomically verifies USDC payment on-chain and generates the ZK proof in AWS Nitro TEE. Takes 30-90 seconds. Supported circuits: coinbase_kyc (EAS schema 0xf8b05c79f090979bf4a80270aba232dff11a10d9ca55c4f88de95317970f0de9) and coinbase_country (EAS schema 0x1801901fabd0e6189356b4fb52bb0ab855276d84f7ec140839fbd1f6801ca065). Authorized signers: [0x952f32128AF084422539C4Ff96df5C525322E564, 0x8844591D47F17bcA6F5dF8f6B64F4a739F1C0080, 0x88fe64ea2e121f49bb77abea6c0a45e93638c3c5, 0x44ace9abb148e8412ac4492e9a1ae6bd88226803]. Returns proof (hex), publicInputs, proofWithInputs (for on-chain verification), and TEE attestation. Verifier contracts on ${chainName} (chainId=${chainId}): coinbase_attestation=${kycVerifier}, coinbase_country_attestation=${countryVerifier}.`,
+        description: `[SINGLE-STEP x402] Generate a zero-knowledge proof via x402 single-step flow. POST circuit + inputs → receive 402 with nonce → pay USDC → retry with X-Payment-TX and X-Payment-Nonce headers. Generates the ZK proof in ${executionDescription(config)}. Configured payment networks: ${paymentNetworks(config)}. Takes 30-90 seconds. Provable circuits: ${PROVABLE_CIRCUIT_IDS.join(', ')}. EAS schemas — coinbase_attestation 0xf8b05c79f090979bf4a80270aba232dff11a10d9ca55c4f88de95317970f0de9, coinbase_country_attestation 0x1801901fabd0e6189356b4fb52bb0ab855276d84f7ec140839fbd1f6801ca065. arc_eligibility reads the same Coinbase attestation as coinbase_attestation but binds the proof to one EIP-712 action the wallet signed; it is EXPERIMENTAL and its verifier is on Arc Testnet only. Authorized signers: [0x952f32128AF084422539C4Ff96df5C525322E564, 0x8844591D47F17bcA6F5dF8f6B64F4a739F1C0080, 0x88fe64ea2e121f49bb77abea6c0a45e93638c3c5, 0x44ace9abb148e8412ac4492e9a1ae6bd88226803]. Returns proof (hex), publicInputs, proofWithInputs (for on-chain verification)${config.teeMode === 'nitro' && config.teeAttestationEnabled ? ", hardware TEE attestation when requested" : ". No hardware TEE attestation is advertised"}. ${verifiers}.`,
         inputSchema: {
           type: 'object',
           properties: {
-            circuit: { type: 'string', description: 'Circuit name. Values: coinbase_kyc, coinbase_country' },
+            circuit: { type: 'string', description: `Canonical circuit id. Values: ${PROVABLE_CIRCUIT_IDS.join(', ')}` },
             inputs: {
               type: 'object',
               properties: {
@@ -243,7 +279,7 @@ export function buildMcpDiscovery(config: Config) {
         inputSchema: {
           type: 'object',
           properties: {
-            circuit: { type: 'string', description: 'Circuit alias: "coinbase_kyc" or "coinbase_country"' },
+            circuit: { type: 'string', description: `Canonical circuit id: ${PROVABLE_CIRCUIT_IDS.join(', ')}` },
           },
           required: ['circuit'],
         },
@@ -259,11 +295,11 @@ export function buildMcpDiscovery(config: Config) {
       baseUrl: config.a2aBaseUrl,
       documentation: 'https://docs.zkproofport.app',
     },
-    ...(config.teeMode !== 'disabled' && {
+    ...(config.teeMode === 'nitro' && {
       'x-tee': {
         mode: config.teeMode,
         attestationEnabled: config.teeAttestationEnabled,
-        attestationFormat: config.teeMode === 'nitro' ? 'aws-nitro-nsm' : 'simulated',
+        attestationFormat: 'aws-nitro-nsm',
         attestationEndpoint: `${config.a2aBaseUrl}/api/v1/attestation/{proofId}`,
       },
     }),
@@ -287,11 +323,10 @@ export function buildOasfAgent(config: Config, tokenId?: bigint | null) {
   return {
     type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
     name: 'proveragent.base.eth',
-    description:
-      'ZK proof generation agent for Coinbase KYC and country-of-residence verification. Generates zero-knowledge proofs from Coinbase Verified Account attestations on Base chain using Noir circuits in AWS Nitro TEE. Supports: (1) coinbase_kyc — prove KYC verification without revealing identity, (2) coinbase_country — prove country of residence with inclusion/exclusion lists. Payment via USDC on Base. ERC-8004 registered identity. x402 payment protocol compatible.',
+    description: serviceDescription(config),
     image: `${config.a2aBaseUrl}/icon.png`,
     agentType: 'service',
-    tags: ['ZK', 'Privacy', 'Proof', 'Coinbase', 'KYC', 'Attestation', 'x402', 'Identity', 'Country', 'Verification', 'Base', 'USDC', 'TEE', 'Noir', 'EAS', 'Zero-Knowledge'],
+    tags: ['ZK', 'Privacy', 'Proof', 'Coinbase', 'KYC', 'Attestation', 'x402', 'Identity', 'Country', 'Verification', 'Base', 'USDC', ...(config.teeMode === 'nitro' ? ['TEE'] : []), 'Arc', 'Noir', 'EAS', 'Zero-Knowledge'],
     domains: [
       { name: 'technology/blockchain', id: 109 },
       { name: 'technology/security', id: 107 },
@@ -356,14 +391,14 @@ export function buildOasfAgent(config: Config, tokenId?: bigint | null) {
           ]
         : []),
     ],
-    supportedTrust: config.teeMode !== 'disabled'
+    supportedTrust: config.teeMode === 'nitro' && config.teeAttestationEnabled
       ? ['reputation', 'tee-attestation']
       : ['reputation'],
-    ...(config.teeMode !== 'disabled' && {
+    ...(config.teeMode === 'nitro' && {
       teeMetadata: {
         mode: config.teeMode,
         attestationEnabled: config.teeAttestationEnabled,
-        attestationFormat: config.teeMode === 'nitro' ? 'aws-nitro-nsm' : 'simulated',
+        attestationFormat: 'aws-nitro-nsm',
         attestationEndpoint: `${config.a2aBaseUrl}/api/v1/attestation/{proofId}`,
       },
     }),
@@ -418,6 +453,7 @@ export function getOasfAgentHandler(config: Config, tokenIdRef: TokenIdRef): (re
   return (_req: Request, res: Response) => {
     const primaryTokenId = tokenIdRef.chains.get(getChainId(config)) ?? null;
     const oasfAgent = buildOasfAgent(config, primaryTokenId);
+    if (tokenIdRef.chains.size > 0) oasfAgent.registrations = registrationRows(config, tokenIdRef.chains);
     res.setHeader('Content-Type', 'application/json');
     res.json(oasfAgent);
   };
@@ -433,13 +469,7 @@ export function getAgentRegistrationHandler(config: Config, tokenIdRef: TokenIdR
     : ERC8004_ADDRESSES.sepolia.identity;
 
   return (_req: Request, res: Response) => {
-    const registrations: { agentId: number | null; agentRegistry: string }[] = [];
-    for (const [chainId, tokenId] of tokenIdRef.chains) {
-      registrations.push({
-        agentId: Number(tokenId),
-        agentRegistry: `eip155:${chainId}:${identityAddress}`,
-      });
-    }
+    const registrations: { agentId: number | null; agentRegistry: string }[] = registrationRows(config, tokenIdRef.chains);
     if (registrations.length === 0) {
       const primaryChainId = getChainId(config);
       registrations.push({
@@ -488,22 +518,22 @@ export function getDidHandler(config: Config): (req: Request, res: Response) => 
  * Lightweight service description for AI agent auto-discovery.
  */
 export function buildSkillMd(config: Config): string {
-  const isTestnet = config.paymentMode === 'testnet';
-  const network = isTestnet ? 'Base Sepolia' : 'Base';
-  const priceStr = config.paymentProofPrice || '$0.10';
+  const network = paymentNetworks(config);
+  const priceStr = config.paymentProofPrice;
 
   return `---
 name: zk-proof-generator
 version: ${config.agentVersion}
-description: ZK proof generation for Coinbase KYC and country verification on Base. Noir circuits in AWS Nitro TEE. x402 payment. ERC-8004 registered.
+description: ${serviceDescription(config)}
 author: zkproofport
-tags: zk-proof, privacy, coinbase, kyc, base, noir, tee, x402, identity, country, eas, usdc
+tags: zk-proof, privacy, coinbase, kyc, base, arc, noir${config.teeMode === 'nitro' ? ', tee' : ''}, x402, identity, country, eas, usdc
 ---
 
 # proveragent.base.eth
 
 ZK proof generation agent for Coinbase KYC and country-of-residence verification.
-Generates zero-knowledge proofs from Coinbase Verified Account attestations on Base chain.
+Provable circuits: ${PROVABLE_CIRCUIT_IDS.join(', ')}.
+Execution: ${executionDescription(config)}.
 
 ## Skills
 
@@ -516,14 +546,14 @@ Generates zero-knowledge proofs from Coinbase Verified Account attestations on B
 ### get_guide
 - **Description**: Get comprehensive step-by-step guide for preparing proof inputs.
 - **Method**: Available via MCP tool, A2A skill, or REST \`GET /api/v1/guide/{circuit}\`
-- **Input**: Circuit alias (\`coinbase_kyc\` or \`coinbase_country\`)
+- **Input**: Canonical circuit id: ${PROVABLE_CIRCUIT_IDS.join(', ')}
 - **Output**: Setup instructions, environment variables, manual step reference
 
 ### prove
 - **Description**: Generate a ZK proof via x402 single-step flow.
 - **Method**: \`POST ${config.a2aBaseUrl}/api/v1/prove\`
-- **Input**: \`{ "circuit": "coinbase_kyc" | "coinbase_country", "inputs": { ... } }\`
-- **Output**: ZK proof (hex), public inputs, TEE attestation
+- **Input**: \`{ "circuit": "<canonical circuit id>", "inputs": { ... } }\`. Read the circuit guide for its inputs.
+- **Output**: ZK proof (hex), public inputs${config.teeMode === 'nitro' && config.teeAttestationEnabled ? ', hardware TEE attestation when requested' : '; no hardware TEE attestation'}
 - **Duration**: 30-90 seconds
 - **Flow**: POST with circuit+inputs → 402 with nonce → pay USDC → retry with \`X-Payment-TX\` and \`X-Payment-Nonce\` headers. Nonce is single-use and circuit-bound.
 
@@ -532,7 +562,7 @@ Generates zero-knowledge proofs from Coinbase Verified Account attestations on B
 - **Protocol**: x402
 - **Amount**: ${priceStr} USDC
 - **Network**: ${network}
-- **Method**: EIP-3009 TransferWithAuthorization via x402 facilitator (configurable, default: https://x402.dexter.cash)
+- **Method**: Read the returned x402 payment offers; the scheme and settlement method depend on the selected network.
 - **x402 Single-Step**: POST /prove with \`{ circuit, inputs }\` → 402 response includes nonce in body → pay with signature → retry with \`X-Payment-TX\` and \`X-Payment-Nonce\` headers. Nonce is single-use and circuit-bound.
 
 ## Quick Start
@@ -635,8 +665,8 @@ Detailed step-by-step guides for preparing proof inputs:
 
 ## Identity
 
-- **ERC-8004**: Registered on-chain (Base Sepolia + Base Mainnet)
-- **TEE**: AWS Nitro Enclave with NSM attestation
+- **ERC-8004**: Check ${config.a2aBaseUrl}/identity/status and /.well-known/agent-registration.json for verified registrations.
+- **Execution**: ${executionDescription(config)}
 - **8004scan**: https://testnet.8004scan.io
 `;
 }

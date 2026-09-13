@@ -33,7 +33,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "ethers": "^6.13.0"
+    "@circle-fin/x402-batching": "^3.4.0",
+    "@x402/core": "^2.25.0",
+    "@x402/evm": "^2.25.0",
+    "ethers": "^6.13.0",
+    "viem": "^2.45.2"
   },
   "devDependencies": {
     "typescript": "^5.6.0"
@@ -47,5 +51,21 @@
     "type": "git",
     "url": "https://github.com/zkproofport/proofport-ai",
     "directory": "packages/sdk"
+  },
+  "peerDependencies": {
+    "@circle-fin/developer-controlled-wallets": ">=10.0.0",
+    "@coinbase/cdp-sdk": ">=1.55.0",
+    "@x402/extensions": ">=2.25.0"
+  },
+  "peerDependenciesMeta": {
+    "@coinbase/cdp-sdk": {
+      "optional": true
+    },
+    "@circle-fin/developer-controlled-wallets": {
+      "optional": true
+    },
+    "@x402/extensions": {
+      "optional": true
+    }
   }
 }

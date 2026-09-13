@@ -37,6 +37,7 @@ interface CustomerSdkCircuits {
   CIRCUIT_SUPPORT_STATUS: Record<string, string>;
   ALL_CIRCUIT_IDS: readonly string[];
   SUPPORTED_CIRCUIT_IDS: readonly string[];
+  EXPERIMENTAL_CIRCUIT_IDS: readonly string[];
   PLANNED_CIRCUIT_IDS: readonly string[];
 }
 
@@ -122,6 +123,7 @@ describe('circuit identifiers match the customer SDK', () => {
 
     expect(serverIds.SUPPORTED_CIRCUIT_IDS).toEqual(customer.SUPPORTED_CIRCUIT_IDS);
     expect(sdkIds.SUPPORTED_CIRCUIT_IDS).toEqual(customer.SUPPORTED_CIRCUIT_IDS);
+    expect(serverIds.EXPERIMENTAL_CIRCUIT_IDS).toEqual(customer.EXPERIMENTAL_CIRCUIT_IDS);
     expect(serverIds.PLANNED_CIRCUIT_IDS).toEqual(customer.PLANNED_CIRCUIT_IDS);
     expect(sdkIds.PLANNED_CIRCUIT_IDS).toEqual(customer.PLANNED_CIRCUIT_IDS);
   });
@@ -149,12 +151,17 @@ describe('what this server proves is a subset of what the SDK names', () => {
     }
   });
 
+  // 'experimental' is allowed and 'planned' is not, which is the whole
+  // distinction: an experimental circuit compiles, has a deployed verifier and
+  // produces a proof that verifies -- on a testnet, with its layout still open.
+  // A planned one has an identifier and nothing behind it, so selling a proof
+  // for it would be selling something that cannot be made.
   it('never sells proofs for a circuit the SDK still marks planned', () => {
     for (const id of serverIds.PROVABLE_CIRCUIT_IDS) {
       expect(
-        customer.CIRCUIT_SUPPORT_STATUS[id],
+        ['supported', 'experimental'],
         `${id} is provable here but '${customer.CIRCUIT_SUPPORT_STATUS[id]}' in the SDK`,
-      ).toBe('supported');
+      ).toContain(customer.CIRCUIT_SUPPORT_STATUS[id]);
     }
   });
 

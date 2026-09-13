@@ -31,14 +31,12 @@ export class AgentRegistration {
   private readonly signer: ethers.Wallet;
   private readonly contract: ethers.Contract;
   private lastTxNonce: number = -1;
+  private readonly identityAddress: string;
 
   constructor(config: AgentRegistrationConfig) {
     // Validate all required fields
     if (!config.identityContractAddress) {
       throw new Error('identityContractAddress is required');
-    }
-    if (!config.reputationContractAddress) {
-      throw new Error('reputationContractAddress is required');
     }
     if (!config.chainRpcUrl) {
       throw new Error('chainRpcUrl is required');
@@ -47,6 +45,7 @@ export class AgentRegistration {
       throw new Error('privateKey is required');
     }
 
+    this.identityAddress = config.identityContractAddress;
     this.provider = new ethers.JsonRpcProvider(config.chainRpcUrl);
     this.signer = new ethers.Wallet(config.privateKey, this.provider);
     this.contract = new ethers.Contract(
@@ -76,8 +75,9 @@ export class AgentRegistration {
     const network = await this.provider.getNetwork();
     const chainId = Number(network.chainId);
 
-    // Base chains: fast and cheap, let ethers auto-estimate
-    if (chainId === 8453 || chainId === 84532) {
+    // Arc stores the complete metadata URI; use real gas estimation rather
+    // than the Ethereum workaround, whose fixed limit can underprice storage.
+    if (chainId === 8453 || chainId === 84532 || chainId === 5042002) {
       return { nonce };
     }
 
@@ -122,9 +122,14 @@ export class AgentRegistration {
       throw new Error('No logs found in transaction receipt');
     }
 
-    // The fourth topic in the first log should be the tokenId (third indexed parameter in Transfer event)
-    const tokenIdHex = receipt.logs[0].topics[3];
-    const tokenId = BigInt(tokenIdHex);
+    const transferTopic = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+    const mint = receipt.logs.find((entry: ethers.Log) =>
+      entry.address.toLowerCase() === this.identityAddress.toLowerCase() &&
+      entry.topics[0] === transferTopic && entry.topics.length === 4 &&
+      BigInt(entry.topics[1]) === 0n &&
+      entry.topics[2].slice(-40).toLowerCase() === this.signer.address.slice(2).toLowerCase());
+    if (!mint) throw new Error('No identity mint Transfer to the configured prover in receipt');
+    const tokenId = BigInt(mint.topics[3]);
 
     return {
       tokenId,
@@ -144,7 +149,11 @@ export class AgentRegistration {
   /**
    * Get agent registration info by scanning Transfer events
    */
-  async getRegistration(): Promise<AgentIdentityInfo | null> {
+  async getRegistration(cachedTokenId?: bigint): Promise<AgentIdentityInfo | null> {
+    if (cachedTokenId !== undefined) {
+      await this.assertTokenOwner(cachedTokenId);
+      return { tokenId: cachedTokenId, owner: this.signer.address, metadataUri: await this.contract.tokenURI(cachedTokenId), isRegistered: true };
+    }
     const balance = await this.contract.balanceOf(this.signer.address);
 
     if (balance === 0n) {
@@ -154,23 +163,14 @@ export class AgentRegistration {
     // Find tokenId — try multiple strategies in order of efficiency
     // 1. ERC-721 Enumerable (single RPC call — fastest)
     // 2. Transfer event scan (indexed eth_getLogs — fast even on large collections)
-    // 3. ownerOf iteration (O(n) individual calls — last resort, slow on mainnet)
     let tokenId = await this.findTokenIdByEnumerable();
     if (tokenId === null) {
       tokenId = await this.findTokenId();
     }
     if (tokenId === null) {
-      tokenId = await this.findTokenIdByTotalSupply();
+      throw new Error('Registered agent tokenId could not be resolved; configure an owned AGENT_TOKEN_ID (ARC_AGENT_TOKEN_ID for Arc)');
     }
-    if (tokenId === null) {
-      log.warn({ action: 'identity.token.not_resolved' }, 'Agent is registered but tokenId could not be resolved — metadata update will be skipped');
-      return {
-        tokenId: 0n,
-        owner: this.signer.address,
-        metadataUri: '',
-        isRegistered: true,
-      };
-    }
+    await this.assertTokenOwner(tokenId);
     log.info({ action: 'identity.token.resolved', tokenId: tokenId.toString() }, 'Resolved tokenId');
 
     const metadataUri = await this.contract.tokenURI(tokenId);
@@ -190,26 +190,26 @@ export class AgentRegistration {
     const transferFilter = this.contract.filters.Transfer(null, this.signer.address);
 
     const currentBlock = await this.provider.getBlockNumber();
-    const chunkSize = 9999;
+    const chunkSize = 10000;
+    const oldestBlock = Math.max(0, currentBlock - 2000000);
 
-    // Scan backwards in chunks (most recent first)
-    for (let toBlock = currentBlock; toBlock > 0; toBlock -= chunkSize) {
-      const fromBlock = Math.max(0, toBlock - chunkSize);
+    // Inclusive ranges, with no gaps or overlaps. An unread range is an error,
+    // never evidence that the owner has no token in that range.
+    for (let toBlock = currentBlock; toBlock >= oldestBlock;) {
+      const fromBlock = Math.max(oldestBlock, toBlock - chunkSize + 1);
+      let events;
       try {
-        const events = await this.contract.queryFilter(transferFilter, fromBlock, toBlock);
-        if (events.length > 0) {
-          // Return the most recent token
-          const lastEvent = events[events.length - 1];
-          const tokenId = BigInt((lastEvent as ethers.EventLog).args[2]);
-          return tokenId;
-        }
+        events = await this.contract.queryFilter(transferFilter, fromBlock, toBlock);
       } catch {
-        // RPC error on this chunk, try next
-        continue;
+        // Retry the SAME range once; a persistent RPC failure remains visible.
+        events = await this.contract.queryFilter(transferFilter, fromBlock, toBlock);
       }
-
-      // Scan up to 2M blocks (~46 days on Base Sepolia at 2s/block)
-      if (currentBlock - fromBlock > 2000000) break;
+      for (const event of [...events].reverse()) {
+        const tokenId = BigInt((event as ethers.EventLog).args[2]);
+        const owner = await this.contract.ownerOf(tokenId);
+        if (owner.toLowerCase() === this.signer.address.toLowerCase()) return tokenId;
+      }
+      toBlock = fromBlock - 1;
     }
 
     return null;
@@ -228,32 +228,13 @@ export class AgentRegistration {
     }
   }
 
-  /**
-   * Find tokenId by iterating totalSupply and checking ownerOf
-   * Works for contracts without ERC-721 Enumerable but with totalSupply
-   */
-  private async findTokenIdByTotalSupply(): Promise<bigint | null> {
-    try {
-      const totalSupply = await this.contract.totalSupply();
-      const total = Number(totalSupply);
-      log.debug({ action: 'identity.token.scanning', total }, 'Scanning ownerOf for tokens');
-
-      // Scan in reverse (most recent first — our token is likely near the end)
-      for (let i = total - 1; i >= 0; i--) {
-        try {
-          const owner = await this.contract.ownerOf(BigInt(i));
-          if (owner.toLowerCase() === this.signer.address.toLowerCase()) {
-            log.debug({ action: 'identity.token.found_by_scan', tokenId: i }, 'Found tokenId via ownerOf scan');
-            return BigInt(i);
-          }
-        } catch {
-          continue;
-        }
-      }
-    } catch {
-      // Contract may not implement totalSupply
+  /** A cached id or historical Transfer is not proof of current ownership. */
+  async assertTokenOwner(tokenId: bigint): Promise<void> {
+    if (tokenId < 0n || tokenId > (1n << 256n) - 1n) throw new Error(`Invalid agent tokenId: ${tokenId}`);
+    const owner: string = await this.contract.ownerOf(tokenId);
+    if (owner.toLowerCase() !== this.signer.address.toLowerCase()) {
+      throw new Error(`Agent token ${tokenId} is owned by ${owner}, not configured prover ${this.signer.address}`);
     }
-    return null;
   }
 
   /**

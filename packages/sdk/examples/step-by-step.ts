@@ -32,7 +32,11 @@ async function main() {
     ...(process.env.SERVER_URL && { baseUrl: process.env.SERVER_URL }),
   });
 
-  const circuit: CircuitName = (process.env.CIRCUIT || 'coinbase_kyc') as CircuitName;
+  // No default, for the same reason as the other example.
+  const circuit = process.env.CIRCUIT as CircuitName | undefined;
+  if (!circuit) {
+    throw new Error('Set CIRCUIT to the circuit you want, e.g. CIRCUIT=coinbase_kyc');
+  }
   const circuitId = CIRCUIT_NAME_MAP[circuit];
   const scope = process.env.SCOPE || 'proofport';
 

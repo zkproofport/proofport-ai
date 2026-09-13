@@ -1,0 +1,15 @@
+{
+  "chainId": 5042002,
+  "rpcUrl": "https://rpc.testnet.arc.io",
+  "usdc": "0x3600000000000000000000000000000000000000",
+  "gate": "0xD0F3eE648386B59B484157332E736388Fcc41F47",
+  "verifier": "0xCbC8E63fF92659E8B44cFF117D33005Bb669a018",
+  "deploymentTx": "0x92f07f307b0b597b4786ca2f9c816297ad3db63694874842a213709f88ae4ba7",
+  "deploymentBlock": 61837155,
+  "discovery": {
+    "registry": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+    "owner": "0x5A3E649208Ae15ec52496c1Ae23b2Ff89Ac02f0c",
+    "fromBlock": 61836881,
+    "allowedOrigin": "https://stg-ai.zkproofport.app"
+  }
+}

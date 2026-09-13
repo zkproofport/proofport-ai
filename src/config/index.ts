@@ -45,7 +45,39 @@ export function loadConfig() {
 
     // Payment (required when paymentMode !== 'disabled')
     paymentPayTo: process.env.PAYMENT_PAY_TO || '',
+    /**
+     * Chains this deployment takes payment on, comma separated.
+     *
+     * A LIST because x402 sends payment options as a list and Circle's
+     * Discovery API reads it to say which networks a service accepts -- one
+     * chain per deployment cannot express "Base or Arc, your choice".
+     *
+     * Required, with no default. It briefly had `|| 'base-sepolia'` on the
+     * reasoning that an existing deployment should behave identically until
+     * the variable is set -- which is precisely the shape this project
+     * forbids: a deployment meant to take payment on Arc, whose variable was
+     * misspelled or never plumbed through, would quote prices in Base Sepolia
+     * USDC and publish a Base asset address, and every one of those steps
+     * would succeed while describing a chain nobody chose. Both deploy
+     * workflows set it per environment, next to the other chain-dependent
+     * values.
+     *
+     * An unknown name is likewise an error naming the available ones, never a
+     * silent drop: a typo would otherwise remove a chain from the offer with
+     * nothing said, and the service would look like it simply does not take
+     * payment there.
+     */
+    paymentNetworks: getRequiredEnv('PAYMENT_NETWORKS'),
     paymentProofPrice: process.env.PAYMENT_PROOF_PRICE || '$0.10',
+    /**
+     * Kept on the config object for the tests that construct one, but the
+     * value that decides anything now lives in `src/payment/networks.ts`,
+     * where each facilitator-settled chain names its facilitator and
+     * `X402_FACILITATOR_URL` overrides it. Nothing in src/ reads this field
+     * any more -- the 402 body and the agent guide report settlement per
+     * chain, because a single facilitator URL is wrong for every chain no
+     * public facilitator serves.
+     */
     x402FacilitatorUrl: process.env.X402_FACILITATOR_URL || 'https://x402.dexter.cash',
 
     // TEE (optional)
@@ -63,6 +95,18 @@ export function loadConfig() {
     // Ethereum mainnet (required for production — dual-chain agent identity)
     ethereumRpcUrl: process.env.ETHEREUM_RPC_URL || '',
     agentTokenIdEthereum: process.env.AGENT_TOKEN_ID_ETHEREUM || '',
+
+    // Arc — Circle's L1, where USDC is the gas token. Entirely opt-in: with no
+    // ARC_RPC_URL nothing below runs and the service behaves exactly as before.
+    // The chain id is NOT defaulted. Arc's docs publish only the testnet
+    // (5042002) today; public mainnet is 2026-09-16 and third-party chain
+    // lists already carry a number for it that Circle has not published. A
+    // guessed chain id would sign for the wrong network, so it is required
+    // input when Arc is switched on.
+    arcRpcUrl: process.env.ARC_RPC_URL || '',
+    arcChainId: process.env.ARC_CHAIN_ID ? Number(process.env.ARC_CHAIN_ID) : 0,
+    arcIdentityAddress: process.env.ARC_IDENTITY_ADDRESS || '',
+    arcAgentTokenId: process.env.ARC_AGENT_TOKEN_ID || '',
 
     // Chat / LLM (optional)
     openaiApiKey: process.env.OPENAI_API_KEY || '',
@@ -121,8 +165,40 @@ export function isProductionChain(config: Config): boolean {
  * Production: Ethereum mainnet (primary) + Base mainnet (both always registered).
  * Testnet: Base Sepolia only.
  */
+/**
+ * The Arc entry, or null when Arc is not configured.
+ *
+ * Arc's IdentityRegistry is deployed at the SAME address as the one this
+ * service already uses on Base Sepolia — `0x8004A818BFB912233c491871b3d84c89A494BD9e`,
+ * per docs.arc.io — because ERC-8004 is deployed deterministically. So Arc
+ * needs no new registration code: the existing path is already driven by
+ * `chain.rpcUrl` / `chain.chainId` / `chain.identityAddress`. ARC_IDENTITY_ADDRESS
+ * is still read separately rather than reusing erc8004IdentityAddress, because
+ * production points that at the mainnet registry and Arc must not silently
+ * inherit it.
+ */
+function arcIdentity(config: Config): ChainIdentity | null {
+  if (!config.arcRpcUrl) return null;
+  if (!Number.isSafeInteger(config.arcChainId) || config.arcChainId <= 0) {
+    throw new Error('ARC_RPC_URL is set but ARC_CHAIN_ID is not — refusing to guess the chain');
+  }
+  if (!config.arcIdentityAddress) {
+    throw new Error('ARC_RPC_URL is set but ARC_IDENTITY_ADDRESS is not');
+  }
+  return {
+    chainId: config.arcChainId,
+    chainName: `Arc (${config.arcChainId})`,
+    agentName: 'proveragent.arc',
+    rpcUrl: config.arcRpcUrl,
+    identityAddress: config.arcIdentityAddress,
+    cachedTokenId: config.arcAgentTokenId,
+  };
+}
+
 export function getChainIdentities(config: Config): ChainIdentity[] {
   const identityAddress = config.erc8004IdentityAddress;
+  const arc = arcIdentity(config);
+  if (!identityAddress) return arc ? [arc] : [];
 
   if (isTestnet(config)) {
     return [
@@ -142,6 +218,7 @@ export function getChainIdentities(config: Config): ChainIdentity[] {
         identityAddress,
         cachedTokenId: config.agentTokenId,
       },
+      ...(arc ? [arc] : []),
     ];
   }
 
@@ -163,5 +240,6 @@ export function getChainIdentities(config: Config): ChainIdentity[] {
       identityAddress,
       cachedTokenId: config.agentTokenId,
     },
+    ...(arc ? [arc] : []),
   ];
 }

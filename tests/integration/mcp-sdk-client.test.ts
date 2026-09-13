@@ -23,22 +23,18 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { createApp } from '../../src/index.js';
 import type { Config } from '../../src/config/index.js';
 
+// The four `vi.mock('@x402/...')` calls that stood here were removed on
+// 2026-09-09. They mocked a payment middleware no source file imported --
+// `@x402/express` and `@x402/fetch` were declared dependencies whose only
+// appearance anywhere in the repo was in these mocks. `vi.mock` of a module
+// nothing imports does nothing, so they were scaffolding that made the
+// official x402 middleware look wired up while payment was hand-rolled
+// elsewhere. Both packages have been dropped from package.json.
+//
+// The payment path these tests run through needs no mock: it is reached only
+// when a request carries payment headers, and none of them send any.
+
 // ─── Mock modules (external dependencies only) ────────────────────────────
-
-vi.mock('@x402/express', () => ({
-  paymentMiddleware: vi.fn(() => (_req: any, _res: any, next: any) => next()),
-  x402ResourceServer: vi.fn().mockImplementation(() => ({
-    register: vi.fn().mockReturnThis(),
-  })),
-}));
-
-vi.mock('@x402/evm/exact/server', () => ({
-  ExactEvmScheme: vi.fn(),
-}));
-
-vi.mock('@x402/core/server', () => ({
-  HTTPFacilitatorClient: vi.fn(),
-}));
 
 const { _redisStore, _redisListStore } = vi.hoisted(() => ({
   _redisStore: new Map<string, string>(),
@@ -134,7 +130,8 @@ vi.mock('../../src/circuit/artifactManager.js', () => ({
   ensureArtifacts: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('../../src/identity/autoRegister.js', () => ({
+vi.mock('../../src/identity/autoRegister.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/identity/autoRegister.js')>()),
   // Resolves to Map<chainId, tokenId> — one entry per chain registered on.
   ensureAgentRegistered: vi.fn().mockResolvedValue(new Map([[11155111, 123456n]])),
 }));
@@ -182,6 +179,7 @@ function makeTestConfig(overrides?: Partial<Config>): Config {
     chainRpcUrl: 'https://chain.example.com',
     proverPrivateKey: '0x' + 'ab'.repeat(32),
     paymentMode: 'disabled' as const,
+    paymentNetworks: 'base-sepolia',
     a2aBaseUrl: 'http://localhost:0',
     agentVersion: '1.0.0',
     paymentPayTo: '',

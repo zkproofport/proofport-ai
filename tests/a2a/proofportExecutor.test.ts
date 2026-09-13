@@ -89,6 +89,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     chainRpcUrl: 'https://sepolia.base.org',
     proverPrivateKey: '0xdeadbeef',
     paymentMode: 'disabled',
+    paymentNetworks: 'base-sepolia',
     a2aBaseUrl: 'http://localhost:4002',
     websiteUrl: 'https://zkproofport.com',
     agentVersion: '1.0.0',
@@ -369,9 +370,14 @@ describe('ProofportExecutor', () => {
         vi.clearAllMocks();
         mockHandleGetSupportedCircuits.mockReturnValue({ circuits: [], chainId: '84532' });
         const localEventBus = makeEventBus();
+        // `prove` and `get_guide` require the circuit to be named -- omitting
+        // it is an error, not a Coinbase KYC default. Every skill that needs a
+        // parameter gets one here; the refusal itself is covered below.
+        const params: Record<string, unknown> =
+          skill === 'prove' ? { circuit: 'coinbase_kyc' } : {};
         const ctx = makeContext({
           contextId: '',
-          userMessage: makeDataPartMessage(skill),
+          userMessage: makeDataPartMessage(skill, params),
         });
 
         await executor.execute(ctx, localEventBus);
@@ -384,6 +390,25 @@ describe('ProofportExecutor', () => {
         const finalUpdate = statusUpdates.find((e: any) => e.status?.state === expected);
         expect(finalUpdate, `skill "${skill}" should return state "${expected}"`).toBeDefined();
       }
+    });
+
+    it('refuses prove when no circuit is named, instead of assuming one', async () => {
+      // It used to fall back to `coinbase_kyc`, so an agent that forgot the
+      // parameter was handed the Coinbase KYC guide URL and followed it to the
+      // wrong endpoint -- surfacing much later as a proof nobody asked for.
+      const localEventBus = makeEventBus();
+      const ctx = makeContext({
+        contextId: '',
+        userMessage: makeDataPartMessage('prove'),
+      });
+
+      await executor.execute(ctx, localEventBus);
+
+      const states = (localEventBus.publish as ReturnType<typeof vi.fn>).mock.calls
+        .filter((call: any[]) => call[0]?.kind === 'status-update')
+        .map((call: any[]) => call[0]?.status?.state);
+      expect(states).toContain('failed');
+      expect(states).not.toContain('completed');
     });
   });
 

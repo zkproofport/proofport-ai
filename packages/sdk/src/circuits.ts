@@ -6,7 +6,7 @@
  * `@zkproofport-app/sdk/circuits` (repo `zkproofport/proofport-app-sdk`,
  * `src/circuits.ts`) is the single source of truth for circuit identifiers
  * across every layer: the mobile app, the relay, the demo, and proofport-ai.
- * The names below are that module's values, verbatim — the same seven ids in
+ * The names below are that module's values, verbatim — the same eight ids in
  * the same order with the same support statuses.
  *
  * This file is a **mirror, not a second source of truth**. Nothing here may be
@@ -16,12 +16,10 @@
  *
  * There are two reasons, and only the first is temporary:
  *
- * 1. The newest published customer SDK (0.2.11) does not ship the module at
- *    all — its `exports` map has a single `"."` entry and its tarball has no
- *    `circuits.*` in `dist/`, so `@zkproofport-app/sdk/circuits` fails with
- *    `ERR_PACKAGE_PATH_NOT_EXPORTED`. Depending on it today would break
- *    `npx tsc -p packages/sdk` in `.github/workflows/npm-publish.yml`, which
- *    reinstalls from the registry before building.
+ 1. ~~The published customer SDK does not ship the module.~~ **No longer true**
+ *    as of 0.2.16, whose `exports` map carries `./circuits` and whose tarball
+ *    has `dist/circuits.{js,esm.js,mjs,d.ts}` — verified with `npm pack`
+ *    2026-09-11. Reason 2 is now the only one holding this mirror up.
  * 2. This package is published to npm, and `@zkproofport-app/sdk` carries
  *    `qrcode` and `socket.io-client` (38 transitive packages, measured). The
  *    `./circuits` subpath is dependency-free at *import* time, but npm still
@@ -55,7 +53,7 @@
  * - `planned` — the identifier is reserved, but availability, inputs and
  *   public-input layout may still change.
  */
-export type CircuitSupportStatus = 'supported' | 'planned';
+export type CircuitSupportStatus = 'supported' | 'experimental' | 'planned';
 
 /**
  * Every canonical circuit identifier ZKProofport has assigned, keyed by a stable
@@ -71,6 +69,8 @@ export const CIRCUIT_IDS = Object.freeze({
   COINBASE_COUNTRY_ATTESTATION: 'coinbase_country_attestation',
   /** OIDC email-domain attestation. Officially supported. */
   OIDC_DOMAIN_ATTESTATION: 'oidc_domain_attestation',
+  /** Arc eligibility: one EIP-712 action, authorized. Officially supported. */
+  ARC_ELIGIBILITY: 'arc_eligibility',
   /** GIWA attestation. Planned — not officially supported yet. */
   GIWA_ATTESTATION: 'giwa_attestation',
   /** Korea Mobile ID ownership. Planned — not officially supported yet. */
@@ -102,6 +102,7 @@ export const CIRCUIT_SUPPORT_STATUS: Readonly<Record<CanonicalCircuitId, Circuit
     coinbase_attestation: 'supported',
     coinbase_country_attestation: 'supported',
     oidc_domain_attestation: 'supported',
+    arc_eligibility: 'experimental',
     giwa_attestation: 'planned',
     mdl_kr_ownership: 'planned',
     mdl_kr_age: 'planned',
@@ -157,6 +158,7 @@ export const PROVABLE_CIRCUIT_IDS = [
   CIRCUIT_IDS.COINBASE_ATTESTATION,
   CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION,
   CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION,
+  CIRCUIT_IDS.ARC_ELIGIBILITY,
 ] as const satisfies readonly CanonicalCircuitId[];
 
 /** Narrows an unknown value to a circuit the proofport-ai server can prove. */

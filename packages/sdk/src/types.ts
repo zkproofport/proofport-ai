@@ -3,7 +3,12 @@
 import { CIRCUIT_IDS, PROVABLE_CIRCUIT_IDS } from './circuits.js';
 
 /** Client-friendly circuit aliases. */
-export type CircuitName = 'coinbase_kyc' | 'coinbase_country' | 'oidc_domain';
+export type CircuitName =
+  | 'coinbase_kyc'
+  | 'coinbase_country'
+  | 'oidc_domain'
+  /** Coinbase KYC, with the signature bound to one EIP-712 action. */
+  | 'arc_eligibility';
 
 /**
  * Canonical circuit IDs this server can prove.
@@ -21,6 +26,7 @@ export const CIRCUIT_NAME_MAP: Record<CircuitName, CircuitId> = {
   coinbase_kyc: CIRCUIT_IDS.COINBASE_ATTESTATION,
   coinbase_country: CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION,
   oidc_domain: CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION,
+  arc_eligibility: CIRCUIT_IDS.ARC_ELIGIBILITY,
 };
 
 /** Map canonical circuit IDs back to client-friendly names. */
@@ -28,6 +34,7 @@ export const CIRCUIT_ID_MAP: Record<CircuitId, CircuitName> = {
   [CIRCUIT_IDS.COINBASE_ATTESTATION]: 'coinbase_kyc',
   [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: 'coinbase_country',
   [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: 'oidc_domain',
+  [CIRCUIT_IDS.ARC_ELIGIBILITY]: 'arc_eligibility',
 };
 
 // ─── Configuration ──────────────────────────────────────────────────────
@@ -48,12 +55,28 @@ export interface ChallengeResponse {
     keyId: string;
     attestationDocument: string | null;
   } | null;
+  /**
+   * False when the service is running with payment disabled. The nonce is
+   * still real and still single-use in that case -- it is replay protection,
+   * not a payment receipt -- so the flow is identical apart from the paying.
+   */
+  requiresPayment?: boolean;
+  /**
+   * The chains this service will take payment on, one entry each, in the
+   * order it prefers. Read it to choose; pass a chain to `signPayment` to
+   * pay on it.
+   */
+  accepts?: Array<Record<string, unknown>>;
 }
 
 // ─── Prove (POST /prove) ────────────────────────────────────────────────
 
 export interface ProveInputs {
   signal_hash: string;
+  /** EIP-712 domain hash. Present only when `action` was supplied. */
+  domain_separator?: string;
+  /** EIP-712 hashStruct of the action. Present only when `action` was supplied. */
+  action_hash?: string;
   nullifier: string;
   scope_bytes: string;
   merkle_root: string;
@@ -143,8 +166,51 @@ export interface AttestationData {
 
 // ─── Proof generation params ────────────────────────────────────────────
 
+/**
+ * An EIP-712 typed structure, exactly as `eth_signTypedData_v4` takes it.
+ *
+ * The caller owns every field here. This SDK keeps no registry of action
+ * shapes and never invents one: it hands the structure to the wallet, which
+ * renders the named fields for the person to read, and passes the two
+ * resulting 32-byte hashes to the circuit.
+ *
+ * Do NOT include an `EIP712Domain` entry in `types` -- ethers adds it, and
+ * passing it yourself produces a different hash than the wallet computes.
+ *
+ * A single free-form string is a valid shape:
+ *
+ *   types: { Agreement: [{ name: 'terms', type: 'string' }] },
+ *   primaryType: 'Agreement',
+ *   message: { terms: 'Deposit 10 USDC into the KYC-gated vault' }
+ *
+ * A contract cannot enforce prose, though -- to check an amount on-chain the
+ * amount has to be its own field.
+ */
+export interface TypedAction {
+  domain: {
+    name: string;
+    version: string;
+    chainId: number;
+    /** The contract that will verify this signature. Binds it to one address. */
+    verifyingContract: string;
+  };
+  types: Record<string, Array<{ name: string; type: string }>>;
+  primaryType: string;
+  message: Record<string, unknown>;
+}
+
 export interface ProofParams {
   circuit: CircuitName;
+  /**
+   * Which chain to pay on, when the service charges. Either the CAIP-2 id
+   * (`eip155:5042002`) or the plain name (`arc-testnet`).
+   *
+   * Omitting it takes the first chain the service offers. Naming a chain it
+   * does not offer is an error listing what it does -- never a quiet fall
+   * back to the first, which would spend money somewhere the caller did not
+   * choose and report success.
+   */
+  payOn?: string;
   /** Scope string for the proof (defaults to "proofport") */
   scope?: string;
   /** Country codes for the country circuit (e.g. ["US", "KR"]) */
@@ -155,6 +221,23 @@ export interface ProofParams {
   jwt?: string;
   /** OIDC provider: 'google' (default) or 'microsoft' for Microsoft 365 */
   provider?: 'google' | 'microsoft';
+
+  /**
+   * Bind this proof to one action.
+   *
+   * WITHOUT it the wallet signs `signal_hash` through personal_sign, exactly
+   * as every existing caller does today: the signature asserts "this wallet is
+   * KYC'd for this scope" and commits to no contract, amount, caller or
+   * deadline, and the wallet can only show the person 32 opaque bytes.
+   *
+   * WITH it the wallet signs the typed structure instead, so the person reads
+   * named fields before approving, and the verifying contract recomputes the
+   * same two hashes from the call it is about to run. A proof produced for one
+   * contract no longer verifies at another.
+   *
+   * Omitting it keeps the old behaviour, so existing callers need no change.
+   */
+  action?: TypedAction;
 }
 
 export interface ProofResult {
@@ -175,4 +258,48 @@ export interface StepResult<T = unknown> {
   name: string;
   data: T;
   durationMs: number;
+}
+
+
+/**
+ * A wallet that can pay for a proof: an address and the ability to sign one
+ * EIP-712 message. Deliberately nothing more -- see `wallets.ts` for why
+ * paying needs no transaction, no gas and no chain of its own.
+ *
+ * Structurally `ClientEvmSigner` from `@x402/evm`, so a viem account or
+ * Coinbase's `fromCdpEvmAccount` result satisfies it as-is.
+ */
+export interface PaymentWallet {
+  address: `0x${string}`;
+  signTypedData(message: {
+    domain: Record<string, unknown>;
+    types: Record<string, unknown>;
+    primaryType: string;
+    message: Record<string, unknown>;
+  }): Promise<`0x${string}`>;
+  /** A line naming this wallet for a log or a CLI, without its secrets. */
+  describe(): string;
+}
+
+/** One chain a service will take payment on, from its 402 answer. */
+export interface PaymentOffer {
+  /** CAIP-2, e.g. `eip155:5042002`. */
+  network: string;
+  /** The plain name, e.g. `arc-testnet`. */
+  networkName: string;
+  /** Price in that chain's USDC, in the token's own units. */
+  amount: string;
+  /** The USDC contract the payment must be in. */
+  asset: string;
+  payTo: string;
+  /** The requirement as the service sent it, passed to the signer untouched. */
+  raw: Record<string, unknown>;
+}
+
+/** A signed payment, ready to be sent back with the proof request. */
+export interface PaidRequest {
+  headers: Record<string, string>;
+  paidOn: string;
+  amount: string;
+  payer: string;
 }

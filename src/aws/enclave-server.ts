@@ -66,6 +66,11 @@ const CIRCUITS: Record<CircuitId, { dir: string; bytecode: string; vk: string }>
     bytecode: `${CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION}.json`,
     vk: 'vk/vk',
   },
+  [CIRCUIT_IDS.ARC_ELIGIBILITY]: {
+    dir: 'arc-eligibility',
+    bytecode: `${CIRCUIT_IDS.ARC_ELIGIBILITY}.json`,
+    vk: 'vk/vk',
+  },
   [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: {
     dir: 'oidc-domain-attestation',
     bytecode: `${CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION}.json`,

@@ -1,0 +1,9 @@
+{
+  "name": "user-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The user's agent: told to stake, it buys a KYC proof on Arc and stakes with a second wallet.",
+  "scripts": { "stake": "node src/stake.ts" },
+  "dependencies": { "ethers": "^6.16.0" }
+}

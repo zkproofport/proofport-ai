@@ -206,8 +206,19 @@ export class ProofportExecutor implements AgentExecutor {
 
       switch (skill) {
         case 'prove': {
-          // For prove, redirect to REST endpoint since A2A has timeout limitations
-          const circuitAlias = (skillParams as any).circuit || 'coinbase_kyc';
+          // For prove, redirect to REST endpoint since A2A has timeout limitations.
+          //
+          // An absent circuit is a REJECTION, not a Coinbase KYC guide. An
+          // agent that forgot the parameter -- or sent a name this build does
+          // not know -- used to be handed the Coinbase KYC guide URL and would
+          // follow it to the wrong endpoint, with the mistake surfacing much
+          // later as a proof for a circuit nobody asked for.
+          const circuitAlias = (skillParams as any).circuit;
+          if (typeof circuitAlias !== 'string' || circuitAlias.length === 0) {
+            throw new Error(
+              "The 'circuit' parameter is required. Call the 'list_circuits' skill for the names this server serves.",
+            );
+          }
           const guideUrl = `${this.deps.config.a2aBaseUrl}/api/v1/guide/${circuitAlias}`;
           result = {
             message: 'Proof generation requires the REST API endpoint due to 30-90 second processing time. Use the x402 single-step flow: POST with {circuit, inputs} → 402 with nonce → pay → retry with X-Payment-TX and X-Payment-Nonce headers.',
@@ -253,12 +264,23 @@ export class ProofportExecutor implements AgentExecutor {
           break;
         }
         case 'get_guide': {
-          const circuitAlias = (skillParams as any).circuit || 'coinbase_kyc';
+          // Same rule as 'prove' above: name the circuit or get an error.
+          // Returning the Coinbase KYC guide to an agent that asked for
+          // something else is worse than refusing, because the agent then
+          // builds inputs for a circuit it was never told about.
+          const circuitAlias = (skillParams as any).circuit;
+          if (typeof circuitAlias !== 'string' || circuitAlias.length === 0) {
+            throw new Error(
+              "The 'circuit' parameter is required. Call the 'list_circuits' skill for the names this server serves.",
+            );
+          }
           const circuitIdMap: Record<string, string> = {
             coinbase_kyc: CIRCUIT_IDS.COINBASE_ATTESTATION,
             coinbase_country: CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION,
           };
-          const circuitId = circuitIdMap[circuitAlias] || circuitAlias;
+          // A friendly alias resolves; anything else is passed through and
+          // rejected by the guide builder, which knows the canonical names.
+          const circuitId = circuitIdMap[circuitAlias] ?? circuitAlias;
           const { buildGuide } = await import('../proof/guideBuilder.js');
           result = buildGuide(circuitId as any, this.deps.config);
           break;

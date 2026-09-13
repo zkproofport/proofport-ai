@@ -106,7 +106,7 @@ describe('handleGetSupportedCircuits', () => {
     const result = handleGetSupportedCircuits({});
 
     expect(result.circuits).toHaveLength(Object.keys(CIRCUITS).length);
-    expect(result.circuits.length).toBe(3);
+    expect(result.circuits.length).toBe(4);
   });
 
   it('should include coinbase_attestation with correct metadata', () => {
@@ -198,11 +198,15 @@ describe('handleGetSupportedCircuits', () => {
     expect(kyc!.verifierAddress).toBe(FALLBACK_VERIFIERS['84532']['coinbase_attestation']);
   });
 
-  it('should return circuits without verifierAddress for unknown chain', () => {
+  it('reports every verifier as null on a chain nothing is deployed to', () => {
+    // `null`, not an absent field. An agent cannot tell an omitted field apart
+    // from one this server forgot to send, and the two call for opposite
+    // responses -- try another chain, versus report a bug.
     const result = handleGetSupportedCircuits({ chainId: '99999' });
 
+    expect(result.circuits.length).toBeGreaterThan(0);
     for (const circuit of result.circuits) {
-      expect(circuit.verifierAddress).toBeUndefined();
+      expect(circuit.verifierAddress, circuit.id).toBeNull();
     }
   });
 

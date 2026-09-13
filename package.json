@@ -18,12 +18,16 @@
     "test:e2e": "vitest run --project e2e",
     "test:unit": "vitest run --project unit",
     "typecheck": "tsc --noEmit",
-    "test:all": "vitest run"
+    "test:all": "vitest run",
+    "typecheck:all": "tsc --noEmit -p tsconfig.scripts.json",
+    "sdk:local": "npm install --no-save ../proofport-app-sdk && node -e \"console.log('Using LOCAL customer SDK (node_modules only; package.json untouched)')\"",
+    "sdk:npm": "npm ci && node -e \"console.log('Restored the npm-published customer SDK from the lockfile')\""
   },
   "dependencies": {
     "@a2a-js/sdk": "^0.3.10",
+    "@circle-fin/x402-batching": "^3.4.0",
     "@coinbase/agentkit": "^0.10.4",
-    "@coinbase/cdp-sdk": "^1.44.1",
+    "@coinbase/cdp-sdk": "^1.55.0",
     "@google/generative-ai": "^0.24.1",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@noir-lang/acvm_js": "^1.0.0-beta.8",
@@ -37,9 +41,10 @@
     "@opentelemetry/sdk-trace-node": "^2.5.1",
     "@opentelemetry/semantic-conventions": "^1.39.0",
     "@virtuals-protocol/acp-node": "^0.3.0-beta.38",
-    "@x402/core": "^2.3.0",
-    "@x402/evm": "^2.3.0",
-    "@x402/express": "^2.3.0",
+    "@x402/core": "^2.25.0",
+    "@x402/evm": "^2.25.0",
+    "@x402/extensions": "^2.25.0",
+    "@zkproofport-app/sdk": "0.3.1",
     "cbor-x": "^1.6.0",
     "ethers": "^6.13.0",
     "express": "^4.21.0",
@@ -61,7 +66,7 @@
     "@zkproofport-ai/mcp": "^0.2.9",
     "@zkproofport-ai/sdk": "^0.2.10",
     "supertest": "^7.2.2",
-    "tsx": "^4.19.0",
+    "tsx": "^4.23.13",
     "typescript": "^5.6.0",
     "vitest": "^3.0.0"
   }

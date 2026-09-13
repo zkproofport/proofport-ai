@@ -21,6 +21,7 @@ describe('A2A Agent Card', () => {
       chainRpcUrl: 'https://sepolia.base.org',
       proverPrivateKey: '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
       paymentMode: 'disabled',
+      paymentNetworks: 'base-sepolia',
       a2aBaseUrl: 'https://ai-dev.zkproofport.app',
       websiteUrl: 'https://zkproofport.app',
       agentVersion: '1.2.3',

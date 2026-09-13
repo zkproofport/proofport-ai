@@ -1,0 +1,22 @@
+{
+  "//": "The repository's own scripts and tests, typechecked.",
+  "//why": "tsconfig.json includes only src/**/*, so until this file existed a broken script compiled only when someone ran it -- and scripts here reach for real chains and real money. tests/ is NOT included: it produces 80 errors, nearly all relative imports missing the .js extension that nodenext requires (vitest resolves them anyway) plus implicit any in test callbacks. Fixing those is worth doing and is not this change; add \"tests/**/*.ts\" to include when someone takes it on.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": [
+      "node"
+    ],
+    "rootDir": "."
+  },
+  "include": [
+    "src/**/*",
+    "scripts/**/*.ts",
+    "packages/sdk/src/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "prover"
+  ]
+}

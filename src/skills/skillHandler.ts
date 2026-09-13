@@ -69,7 +69,15 @@ export interface CircuitInfo {
   displayName: string;
   description: string;
   requiredInputs: readonly string[];
-  verifierAddress?: string;
+  /**
+   * The verifier on the requested chain, or `null` when the circuit has no
+   * deployment there.
+   *
+   * Always present. It used to be omitted when there was no address, which an
+   * agent cannot tell apart from a field this server forgot to send -- and the
+   * two call for opposite responses: try another chain, versus report a bug.
+   */
+  verifierAddress: string | null;
 }
 
 /** Result of listing supported circuits. */
@@ -95,7 +103,7 @@ export function handleGetSupportedCircuits(
     displayName: circuit.displayName,
     description: circuit.description,
     requiredInputs: circuit.requiredInputs,
-    ...(chainVerifiers[circuit.id] && { verifierAddress: chainVerifiers[circuit.id] }),
+    verifierAddress: chainVerifiers[circuit.id] ?? null,
   }));
 
   return { circuits, chainId };

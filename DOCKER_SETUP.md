@@ -176,12 +176,12 @@ All services run on isolated `proofport-ai` bridge network:
 ## Build Context
 
 ### Node.js Server
-- Context: `/Users/nhn/Workspace/proofport-app-dev/proofport-ai/`
+- Context: `<repo>/proofport-ai/`
 - Includes: `package.json`, `tsconfig.json`, `src/`
 - Excludes: `node_modules`, `dist`, `prover`, `.env`, tests
 
 ### Rust Prover
-- Context: `/Users/nhn/Workspace/proofport-app-dev/proofport-ai/prover/`
+- Context: `<repo>/proofport-ai/prover/`
 - Includes: `Cargo.toml`, `src/`
 - Excludes: `target`, `Cargo.lock`
 

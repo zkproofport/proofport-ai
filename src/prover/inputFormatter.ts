@@ -8,10 +8,15 @@
 import type { CircuitParams } from '../input/inputBuilder.js';
 import { CIRCUIT_IDS } from '../config/circuitIds.js';
 
-/** The two coinbase circuits, which share an input shape. */
+/**
+ * The circuits built from a Coinbase EAS attestation. They share the wallet,
+ * the attester Merkle proof and the RLP transaction; they differ in which
+ * extra public inputs ride along.
+ */
 type CoinbaseCircuitId =
   | typeof CIRCUIT_IDS.COINBASE_ATTESTATION
-  | typeof CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION;
+  | typeof CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION
+  | typeof CIRCUIT_IDS.ARC_ELIGIBILITY;
 
 // ─── OIDC Circuit Inputs ────────────────────────────────────────────────
 
@@ -128,6 +133,23 @@ export function formatCoinbaseInputs(
     inputs.country_list = formatCountryListArray(params.countryList, 10);
     inputs.country_list_length = params.countryListLength.toString();
     inputs.is_included = params.isIncluded;
+  }
+
+  if (circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY) {
+    // The action the wallet signed, as EIP-712's two hashes. They sit between
+    // the signer Merkle root and the scope, matching the parameter order in
+    // arc-eligibility/src/main.nr -- noir_js takes an object, but the circuit
+    // reads its public inputs positionally, and a field in the wrong place
+    // produces a proof that fails to verify with nothing naming the cause.
+    if (!params.domainSeparator || !params.actionHash) {
+      throw new Error(
+        'arc_eligibility requires domain_separator and action_hash. The caller ' +
+        'must sign an EIP-712 typed action; personal_sign over signal_hash is ' +
+        'the coinbase_attestation flow.',
+      );
+    }
+    inputs.domain_separator = toHexArray(hexStringToBytes(params.domainSeparator));
+    inputs.action_hash = toHexArray(hexStringToBytes(params.actionHash));
   }
 
   inputs.scope = toHexArray(params.scopeBytes);

@@ -28,6 +28,8 @@ const BROADCAST_PATHS: Record<CircuitId, (chainId: number) => string> = {
     `broadcast/DeployCoinbaseCountryAttestation.s.sol/${chainId}/run-latest.json`,
   [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: (chainId) =>
     `broadcast/DeployOidcDomainAttestation.s.sol/${chainId}/run-latest.json`,
+  [CIRCUIT_IDS.ARC_ELIGIBILITY]: (chainId) =>
+    `broadcast/DeployArcEligibility.s.sol/${chainId}/run-latest.json`,
 };
 
 // ── In-memory cache ─────────────────────────────────────────────────────

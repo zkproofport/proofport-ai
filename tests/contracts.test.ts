@@ -41,11 +41,24 @@ describe('Contract Addresses', () => {
     });
 
     it('should have valid checksummed addresses for verifiers', () => {
-      Object.values(FALLBACK_VERIFIERS).forEach(chainVerifiers => {
-        Object.values(chainVerifiers).forEach(address => {
-          expect(address).toMatch(/^0x[a-fA-F0-9]{40}$/);
+      // `null` is the one non-address allowed, and it means NOT DEPLOYED on
+      // that chain. Anything else -- an empty string, a truncated address, a
+      // placeholder -- fails here, which is the point: those all read as an
+      // address that failed to load rather than a deployment that does not
+      // exist, and they satisfy a `string` type while satisfying nothing else.
+      Object.entries(FALLBACK_VERIFIERS).forEach(([chainId, chainVerifiers]) => {
+        Object.entries(chainVerifiers).forEach(([circuit, address]) => {
+          if (address === null) return;
+          expect(address, `${circuit} on chain ${chainId}`).toMatch(/^0x[a-fA-F0-9]{40}$/);
         });
       });
+    });
+
+    it('records a circuit with no deployment as null, not as an empty string', () => {
+      // Guards the distinction above. Written after an empty string was used
+      // for arc_eligibility and passed tsc while failing the address check.
+      const values = Object.values(FALLBACK_VERIFIERS).flatMap(Object.values);
+      expect(values.filter(v => v === '')).toEqual([]);
     });
   });
 

@@ -286,7 +286,7 @@ curl -s -X POST http://localhost:4002/a2a \
   }'
 ```
 
-> For `generate_proof`, use a wallet address that holds a valid Coinbase KYC attestation on the target chain. For Base Sepolia testing, the attested wallet is `0xD6C714247037E5201B7e3dEC97a3ab59a9d2F739`.
+> For `generate_proof`, use a wallet address that holds a valid Coinbase KYC attestation on the target chain. For Base Sepolia testing, the attested wallet is `${E2E_ATTESTATION_WALLET_ADDRESS}`.
 
 #### check_status
 
@@ -497,7 +497,7 @@ After restarting Claude Code, the 6 tools appear in the tool picker. Test by ask
 ### 11. MCP via stdio (local development)
 
 ```bash
-cd /Users/nhn/Workspace/proofport-app-dev/proofport-ai && npm run mcp:stdio
+cd <repo>/proofport-ai && npm run mcp:stdio
 ```
 
 This starts the MCP server in stdio mode for local development. Useful for testing with MCP Inspector or any stdio-based MCP client.
@@ -611,7 +611,7 @@ curl -s -X POST http://localhost:4002/api/v1/proofs \
   -d '{
     "circuitId": "coinbase_attestation",
     "scope": "test.com",
-    "address": "0xD6C714247037E5201B7e3dEC97a3ab59a9d2F739",
+    "address": "${E2E_ATTESTATION_WALLET_ADDRESS}",
     "signature": "0x..."
   }' | jq
 ```
@@ -632,7 +632,7 @@ curl -s -X POST http://localhost:4002/api/v1/flow \
   -d '{
     "circuitId": "coinbase_attestation",
     "scope": "test.com",
-    "address": "0xD6C714247037E5201B7e3dEC97a3ab59a9d2F739"
+    "address": "${E2E_ATTESTATION_WALLET_ADDRESS}"
   }' | jq
 ```
 
@@ -715,13 +715,13 @@ When `PAYMENT_MODE=testnet` is set, `POST /a2a` with `generate_proof` returns HT
 Full flow test:
 
 ```bash
-node /Users/nhn/Workspace/proofport-app-dev/proofport-ai/scripts/test-x402-payment.ts
+node <repo>/proofport-ai/scripts/test-x402-payment.ts
 ```
 
 Or use the staging E2E script:
 
 ```bash
-node /Users/nhn/Workspace/proofport-app-dev/proofport-ai/scripts/e2e-test.mjs
+node <repo>/proofport-ai/scripts/e2e-test.mjs
 ```
 
 **Manual 402 flow verification:**
@@ -730,7 +730,7 @@ node /Users/nhn/Workspace/proofport-app-dev/proofport-ai/scripts/e2e-test.mjs
 # Without payment header — expect 402
 curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:4002/a2a \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"message/send","params":{"message":{"role":"user","parts":[{"kind":"data","mimeType":"application/json","data":{"skill":"generate_proof","address":"0xD6C714247037E5201B7e3dEC97a3ab59a9d2F739","scope":"test.com","circuitId":"coinbase_attestation"}}]}}}'
+  -d '{"jsonrpc":"2.0","id":1,"method":"message/send","params":{"message":{"role":"user","parts":[{"kind":"data","mimeType":"application/json","data":{"skill":"generate_proof","address":"${E2E_ATTESTATION_WALLET_ADDRESS}","scope":"test.com","circuitId":"coinbase_attestation"}}]}}}'
 ```
 
 Expected: `402`
@@ -826,7 +826,7 @@ Traces appear within 1-2 seconds after a message is sent (using `SimpleSpanProce
 ### Unit and Integration Tests (Vitest)
 
 ```bash
-cd /Users/nhn/Workspace/proofport-app-dev/proofport-ai && npm test
+cd <repo>/proofport-ai && npm test
 ```
 
 Covers: A2A handler, task worker, MCP tools, chat handler, payment middleware, signing, TEE, identity, circuits.

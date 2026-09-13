@@ -5,6 +5,10 @@ import type { TeeProvider } from '../tee/types.js';
 import { CIRCUIT_IDS } from '../config/circuitIds.js';
 import type { CircuitId } from '../config/circuitIds.js';
 import { verifyPaymentOnChain } from './paymentVerifier.js';
+import { settlePayment } from '../payment/settle.js';
+import { buildPaymentRequirements } from '../payment/networks.js';
+import { resolvePaymentNetworks } from '../payment/networks.js';
+import { isTestnet as isTestnetConfig } from '../config/index.js';
 import { BbProver } from '../prover/bbProver.js';
 import { hexToBytes } from '../input/inputBuilder.js';
 import type { CircuitParams } from '../input/inputBuilder.js';
@@ -13,6 +17,7 @@ import { getVerifierAddress } from '../config/deployments.js';
 import { ethers } from 'ethers';
 import { createLogger } from '../logger.js';
 import { parseAttestationDocument, verifyAttestationDocument } from '../tee/attestation.js';
+import { isBatchPayment } from '@circle-fin/x402-batching';
 import type {
   ProveRequest,
   ProveResponse,
@@ -32,6 +37,10 @@ const CIRCUIT_MAP: Record<string, CircuitId> = {
   // OIDC Domain
   'oidc_domain': CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION,
   [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION,
+  // Arc eligibility: the signature is bound to one EIP-712 action. It
+  // needs no friendly alias -- the canonical id is what callers type,
+  // so a second entry here would be the same key twice.
+  [CIRCUIT_IDS.ARC_ELIGIBILITY]: CIRCUIT_IDS.ARC_ELIGIBILITY,
 };
 
 export interface ProofRoutesDeps {
@@ -127,6 +136,22 @@ async function generateProofFromInputs(
       return;
     }
 
+    if (circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY) {
+      // Required, and NOT derivable here: the domain names a verifying
+      // contract and a chain only the caller knows. Deriving one would bind
+      // the proof to the wrong contract, which is exactly what this circuit
+      // exists to prevent.
+      if (!cb.domain_separator || !cb.action_hash) {
+        res.status(400).json({
+          error: 'INVALID_REQUEST',
+          message:
+            'domain_separator and action_hash are required for the action-bound circuit. ' +
+            'Sign an EIP-712 typed action; personal_sign over signal_hash is the coinbase_kyc flow.',
+        });
+        return;
+      }
+    }
+
     if (circuitId === CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION) {
       if (!cb.country_list || cb.country_list.length === 0) {
         res.status(400).json({ error: 'INVALID_REQUEST', message: 'country_list required for country circuit' });
@@ -159,6 +184,10 @@ async function generateProofFromInputs(
         countryList: cb.country_list,
         countryListLength: (cb.country_list || []).length,
         isIncluded: cb.is_included,
+      }),
+      ...(circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY && {
+        domainSeparator: cb.domain_separator,
+        actionHash: cb.action_hash,
       }),
     } satisfies CircuitParams;
   }
@@ -262,11 +291,22 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
   const router = Router();
   const { config } = deps;
 
-  const isTestnet = config.paymentMode === 'testnet' || config.chainRpcUrl.includes('sepolia');
-  const network: 'base-sepolia' | 'base' = isTestnet ? 'base-sepolia' : 'base';
-  const usdcAddress = isTestnet
-    ? '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
-    : '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+  // The chains this deployment takes payment on, named explicitly. What was
+  // here before -- `isTestnet ? 'base-sepolia' : 'base'` -- turned every
+  // unrecognised configuration into Base mainnet without saying so: it would
+  // quote a Base price, publish a Base asset address and verify against Base
+  // for a service pointed somewhere else entirely.
+  //
+  // A list, not one chain, because x402 sends payment options as a list and
+  // Circle's Discovery API reads it to say which networks a service accepts.
+  const paymentNetworks = resolvePaymentNetworks(config.paymentNetworks);
+
+  // Which chain the PROOF is verified on, which is a different question from
+  // which chain the payment arrives on. Kept on the deployment's own chain
+  // setting rather than derived from the payment networks: a service that
+  // takes Arc USDC still verifies its proofs wherever its verifier contracts
+  // are deployed.
+  const isTestnet = isTestnetConfig(config);
   const priceStr = (config.paymentProofPrice || '$0.10').replace('$', '');
   const paymentAmount = Math.round(parseFloat(priceStr) * 1_000_000);
 
@@ -303,9 +343,33 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
       // Check nonce header presence to distinguish first request (402) from retry (proof submission)
       const paymentTxHeader = (req.headers['x-payment-tx'] as string) ?? '';
       const paymentNonceHeader = (req.headers['x-payment-nonce'] as string) ?? '';
-      const hasNonceHeader = !!paymentNonceHeader;
+      // Whether this request carries a payment at all.
+      //
+      // It used to be "does it have our own X-Payment-Nonce header", which no
+      // standard client sends. Circle's CLI signs a correct authorization,
+      // sends it as `PAYMENT-SIGNATURE` exactly as x402 says to, and got a
+      // second 402 back — the money had moved and the service asked to be paid
+      // again. The nonce is ours and stays optional; a signed authorization is
+      // a payment whether or not it is accompanied by one.
+      // A signed EIP-3009 authorization. The buyer signs and this service
+      // submits, so the buyer needs no gas on the chain it pays on -- which is
+      // the only way to be paid on Arc or Ethereum, where no public
+      // facilitator will submit on a buyer's behalf.
+      //
+      // `PAYMENT-SIGNATURE` is x402 v2's header name, and it pairs with the
+      // `PAYMENT-REQUIRED` header this route already sets on its 402. It is
+      // NOT `X-Payment`: that was v1, and reading only the v1 name means every
+      // payment from a v2 client arrives looking like no payment at all. Both
+      // are read so a v1 client still works.
+      //
+      // `X-Payment-TX` also remains: a buyer that would rather send its own
+      // transaction and hand over the hash still can.
+      const paymentAuthHeader =
+        ((req.headers['payment-signature'] ?? req.headers['x-payment']) as string) ?? '';
 
-      if (!hasNonceHeader) {
+      const hasPayment = !!paymentNonceHeader || !!paymentAuthHeader || !!paymentTxHeader;
+
+      if (!hasPayment) {
         // No payment header — return 402 challenge.
         // Always generate a real nonce (even when disabled) for replay protection.
         const nonce = ethers.hexlify(ethers.randomBytes(32));
@@ -314,21 +378,24 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
         await deps.redis.set(`x402:nonce:${nonce}`, circuitId, 'EX', 300);
 
         const isDisabled = config.paymentMode === 'disabled';
-        const paymentRequirements = {
-          scheme: 'exact',
-          network,
-          maxAmountRequired: isDisabled ? '0' : String(paymentAmount),
+
+        // One requirement per chain, in the order PAYMENT_NETWORKS names them.
+        // Built by the shared helper so the copy rebuilt at settle time is
+        // byte-identical -- see buildPaymentRequirements for why that matters.
+        const accepts = buildPaymentRequirements({
+          networks: paymentNetworks,
+          price: priceStr,
+          payTo: config.paymentPayTo,
           resource: `${config.a2aBaseUrl}/api/v1/prove`,
-          description: isDisabled ? 'Payment disabled — free proof generation' : `ZK proof generation fee (${priceStr} USDC)`,
-          mimeType: 'application/json',
-          payTo: isDisabled ? '' : config.paymentPayTo,
-          asset: usdcAddress,
-          extra: {
-            name: network === 'base-sepolia' ? 'USDC' : 'USD Coin',
-            version: '2',
-            nonce,
-          },
-        };
+          nonce,
+          disabled: isDisabled,
+          parseUnits: (v, d) => ethers.parseUnits(v, d),
+        });
+
+        // `payment` stays a single object for callers written against the old
+        // shape; `accepts` is the full list. Removing the singular field would
+        // break every existing client for no gain.
+        const paymentRequirements = accepts[0];
 
         // Fetch TEE public key for E2E encryption (if TEE is available)
         let teePublicKey: { publicKey: string; keyId: string; attestationDocument: string | null } | null = null;
@@ -347,16 +414,51 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
           }
         }
 
-        res.setHeader('PAYMENT-REQUIRED', Buffer.from(JSON.stringify(paymentRequirements)).toString('base64'));
+        // The whole offer, not the first option.
+        //
+        // This header carried `accepts[0]` alone until 2026-09-13, so a client
+        // that reads the header — Circle's CLI does — saw one chain and took
+        // it, or refused with "No supported payment method found" when that
+        // one chain was not one it could pay on. The shape below is what
+        // Circle's own starter kit sends and what its CLI reads.
+        res.setHeader(
+          'PAYMENT-REQUIRED',
+          Buffer.from(
+            JSON.stringify({
+              x402Version: 2,
+              resource: {
+                url: `${config.a2aBaseUrl}/api/v1/prove`,
+                description: `ZK proof generation fee`,
+                mimeType: 'application/json',
+              },
+              accepts,
+            }),
+          ).toString('base64'),
+        );
         res.status(402).json({
           error: 'PAYMENT_REQUIRED',
           message: isDisabled
             ? 'Payment disabled — send nonce back with X-Payment-Nonce to proceed'
-            : 'Send payment and retry with X-Payment-TX and X-Payment-Nonce headers',
+            : 'Sign one of the options in `accepts` and retry with the PAYMENT-SIGNATURE and ' +
+              'X-Payment-Nonce headers. You sign only — no transaction, no gas. If you would ' +
+              'rather submit your own transaction, send X-Payment-TX and X-Payment-Network instead.',
           nonce,
           requiresPayment: !isDisabled,
           payment: paymentRequirements,
-          facilitatorUrl: isDisabled ? null : config.x402FacilitatorUrl,
+          accepts,
+          // Which chain settles how, rather than one global facilitator URL.
+          // The single field said "use this facilitator" -- true for Base,
+          // false for Arc and both Ethereum chains, where no public
+          // facilitator serves and this service settles. An agent following
+          // it would POST to a facilitator that refuses the chain.
+          settlement: isDisabled
+            ? null
+            : paymentNetworks.map((net) => ({
+                network: net.caip2,
+                networkName: net.id,
+                settledBy: net.settlement === 'facilitator' ? net.facilitatorUrl : 'this service',
+                buyerNeedsGas: false,
+              })),
           teePublicKey,
         });
         return;
@@ -367,22 +469,37 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
 
       let paymentVerifyMs = 0;
 
-      if (!paymentNonceHeader) {
+      // Our nonce ties a payment to the challenge that offered it, and it is
+      // checked when present.
+      //
+      // Required when the buyer submitted its own transaction: a transaction
+      // hash proves money moved and nothing else, so without the nonce there
+      // is no link between that payment and this request, and the same hash
+      // would buy proofs forever.
+      //
+      // Optional when the buyer signed an authorization instead, because the
+      // authorization itself carries a nonce that Gateway and the USDC
+      // contract each refuse to spend twice. Requiring ours as well shut out
+      // every standard x402 client — Circle's own CLI signs correctly, gets a
+      // second 402, and its money has already moved.
+      if (paymentTxHeader && !paymentNonceHeader) {
         res.status(400).json({ error: 'MISSING_NONCE', message: 'X-Payment-Nonce header required with X-Payment-TX' });
         return;
       }
 
-      // Atomically read and consume nonce (GETDEL prevents TOCTOU race)
-      const storedCircuit = await deps.redis.getdel(`x402:nonce:${paymentNonceHeader}`);
-      if (!storedCircuit) {
-        res.status(400).json({ error: 'INVALID_NONCE', message: 'Nonce not found or expired. Request a new 402 challenge.' });
-        return;
-      }
+      if (paymentNonceHeader) {
+        // Atomically read and consume nonce (GETDEL prevents TOCTOU race)
+        const storedCircuit = await deps.redis.getdel(`x402:nonce:${paymentNonceHeader}`);
+        if (!storedCircuit) {
+          res.status(400).json({ error: 'INVALID_NONCE', message: 'Nonce not found or expired. Request a new 402 challenge.' });
+          return;
+        }
 
-      // Verify nonce was issued for the same circuit
-      if (storedCircuit !== circuitId) {
-        res.status(400).json({ error: 'NONCE_CIRCUIT_MISMATCH', message: `Nonce was issued for ${storedCircuit}, not ${circuitId}` });
-        return;
+        // Verify nonce was issued for the same circuit
+        if (storedCircuit !== circuitId) {
+          res.status(400).json({ error: 'NONCE_CIRCUIT_MISMATCH', message: `Nonce was issued for ${storedCircuit}, not ${circuitId}` });
+          return;
+        }
       }
 
       // For plaintext flow, inputs are required
@@ -400,18 +517,167 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
       // On-chain payment verification (skip when payment disabled)
       if (config.paymentMode !== 'disabled') {
         const paymentStart = Date.now();
+
+        // Which chain the buyer paid on.
+        //
+        // A signed authorization ALREADY says: the payload carries the CAIP-2
+        // network it was signed for, and the signature covers that chain's id
+        // through the EIP-712 domain. So the payload is the authority and the
+        // header is not consulted at all on that path. Reading a header
+        // instead would give two sources for one fact, and the disagreement
+        // would resolve as a signature verified against the wrong chain --
+        // failing as "invalid signature", which reads like the buyer's fault.
+        //
+        // The header stays for the X-Payment-TX path, where a buyer submitted
+        // its own transaction and nothing in the request says which chain it
+        // is on.
+        let decoded: ({ paymentPayload?: unknown } & Record<string, unknown>) | undefined;
+        if (paymentAuthHeader) {
+          try {
+            decoded = JSON.parse(Buffer.from(paymentAuthHeader, 'base64').toString('utf8'));
+          } catch {
+            res.status(402).json({
+              error: 'PAYMENT_INVALID',
+              reason: 'malformed_payment_header',
+              message: 'PAYMENT-SIGNATURE must be base64-encoded JSON (the x402 payment payload)',
+            });
+            return;
+          }
+        }
+        // An x402 v2 payload echoes the requirement it was signed against as
+        // `accepted`, and that is where the chain is named:
+        //
+        //   { x402Version: 2,
+        //     payload:  { authorization: {...}, signature: "0x..." },
+        //     accepted: { scheme, network: "eip155:5042002", amount, asset, ... } }
+        //
+        // The echo is NOT trusted for anything but choosing which chain to look
+        // at: the requirement used for settling is rebuilt below from this
+        // service's own price and payTo, so a buyer that echoes a smaller
+        // amount fails signature verification rather than paying less. The
+        // older `network` and `paymentPayload.network` spellings are read too,
+        // for a v1 client.
+        const signedFor = decoded
+          ? String(
+              (decoded.accepted as { network?: string } | undefined)?.network ??
+                (decoded.network as string | undefined) ??
+                (decoded.paymentPayload as { network?: string } | undefined)?.network ??
+                '',
+            )
+          : '';
+
+        // Which offer was paid, not merely which chain.
+        //
+        // Arc appears twice — once settled on chain per payment, once batched
+        // through Circle Gateway — and both carry the same CAIP-2 id, because
+        // they ARE the same chain. Matching on the id alone picks whichever
+        // was listed first, so a buyer who chose nanopayments had the payment
+        // settled the expensive way and the failure named the wrong chain.
+        //
+        // The payload says which it is: a batched authorization is signed
+        // against Gateway's wallet contract, and Circle's own `isBatchPayment`
+        // reads that out of it.
+        const paidBatched = isBatchPayment(
+          ((decoded?.accepted ?? decoded?.paymentRequirements ?? {}) as { extra?: Record<string, unknown> }),
+        );
+        const matchesChain = (n: (typeof paymentNetworks)[number]) =>
+          n.caip2 === signedFor || n.id === signedFor;
+        const payNet = signedFor
+          ? paymentNetworks.find((n) => matchesChain(n) && (n.settlement === 'gateway') === paidBatched)
+            ?? paymentNetworks.find(matchesChain)
+          : paymentNetworks.find((n) => n.id === String(req.headers['x-payment-network'] ?? ''));
+
+        if (!payNet) {
+          const named = signedFor || String(req.headers['x-payment-network'] ?? '(none given)');
+          res.status(402).json({
+            error: 'PAYMENT_INVALID',
+            reason: 'unsupported_network',
+            message:
+              `This service does not take payment on '${named}'. ` +
+              `Accepted: ${paymentNetworks.map((n) => `${n.id} (${n.caip2})`).join(', ')}`,
+          });
+          return;
+        }
+
+        // A signed authorization has to become a transaction before it can be
+        // verified. Settling and verifying stay separate on purpose: the hash
+        // that comes back from settlement is then checked on chain by exactly
+        // the same code that checks a buyer-submitted hash, so a facilitator
+        // that reports a transaction it did not land is caught the same way a
+        // buyer who does would be.
+        let paymentTxToVerify = paymentTxHeader;
+        if (decoded) {
+          const offer = buildPaymentRequirements({
+            networks: [payNet],
+            price: priceStr,
+            payTo: config.paymentPayTo,
+            resource: `${config.a2aBaseUrl}/api/v1/prove`,
+            nonce: paymentNonceHeader,
+            parseUnits: (v, d) => ethers.parseUnits(v, d),
+          })[0];
+          try {
+            const settled = await settlePayment({
+              payload: decoded.paymentPayload ?? decoded,
+              requirements: offer,
+              network: payNet,
+              networks: paymentNetworks,
+            });
+            paymentTxToVerify = settled.txHash;
+            log.info(
+              { action: 'prove.x402.settled', network: payNet.id, via: settled.via, txHash: settled.txHash },
+              'x402 authorization settled',
+            );
+          } catch (e) {
+            log.warn({ action: 'prove.x402.settle_failed', network: payNet.id, err: e }, 'x402 settle failed');
+            res.status(402).json({
+              error: 'PAYMENT_INVALID',
+              reason: 'settle_failed',
+              message: (e as Error).message,
+            });
+            return;
+          }
+        }
+
+        if (!paymentTxToVerify) {
+          res.status(402).json({
+            error: 'PAYMENT_INVALID',
+            reason: 'no_payment',
+            message: 'Send either X-Payment (a signed authorization) or X-Payment-TX (a transaction hash)',
+          });
+          return;
+        }
+
+        // A batched payment has nothing on chain to look up yet.
+        //
+        // Circle Gateway verifies the authorization off chain, in under a
+        // second, and settles it later alongside thousands of others. What it
+        // hands back is a batch id, not a transaction hash — and asking an RPC
+        // about it produces "Invalid params", which reads as a broken payment
+        // rather than as the wrong question. Gateway's own verification is the
+        // check here, and it already passed to get this far.
+        if (payNet.settlement === 'gateway') {
+          log.info(
+            { action: 'prove.x402.gateway_batched', batch: paymentTxToVerify, network: payNet.id },
+            'Payment accepted by Circle Gateway; it settles in a batch',
+          );
+          paymentVerifyMs = Date.now() - paymentStart;
+        } else {
+
+        const payRpc = process.env[payNet.rpcEnv] || payNet.defaultRpc;
         const paymentResult = await verifyPaymentOnChain({
-          txHash: paymentTxHeader,
+          txHash: paymentTxToVerify,
           expectedRecipient: config.paymentPayTo,
           expectedNonce: paymentNonceHeader,
-          expectedMinAmount: BigInt(paymentAmount),
-          rpcUrl: config.chainRpcUrl,
-          network,
+          expectedMinAmount: ethers.parseUnits(priceStr, payNet.decimals),
+          rpcUrl: payRpc,
+          network: payNet.id,
+          // True when we just settled the buyer's authorization ourselves.
+          settledByUs: !!decoded,
         });
         paymentVerifyMs = Date.now() - paymentStart;
 
         if (!paymentResult.valid) {
-          log.warn({ action: 'prove.x402.payment_invalid', reason: paymentResult.reason, txHash: paymentTxHeader }, 'x402 payment invalid');
+          log.warn({ action: 'prove.x402.payment_invalid', reason: paymentResult.reason, txHash: paymentTxToVerify }, 'x402 payment invalid');
           res.status(402).json({
             error: 'PAYMENT_INVALID',
             reason: paymentResult.reason,
@@ -420,7 +686,8 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
           return;
         }
 
-        log.info({ action: 'prove.x402.payment_verified', txHash: paymentTxHeader, paymentVerifyMs }, 'x402 payment verified');
+        log.info({ action: 'prove.x402.payment_verified', txHash: paymentTxToVerify, paymentVerifyMs }, 'x402 payment verified');
+        }
       } else {
         log.info({ action: 'prove.payment_skipped', circuit: circuitId }, 'Payment disabled, skipping on-chain verification');
       }

@@ -20,6 +20,8 @@ const COUNTRY_CODE_BYTES = 2;
 // Expected flat input vector lengths
 const COINBASE_ATTESTATION_INPUT_LENGTH = 899;
 const COINBASE_COUNTRY_ATTESTATION_INPUT_LENGTH = 921;
+// The KYC vector plus the two 32-byte EIP-712 hashes.
+const ARC_ELIGIBILITY_INPUT_LENGTH = 899 + 64;
 
 // ─── Utility functions ───────────────────────────────────────────────────
 
@@ -94,6 +96,44 @@ export function computeSignalHash(
 }
 
 // ─── Step 2: Recover user public key ─────────────────────────────────────
+
+/**
+ * keccak256(0x19 0x01 ++ domainSeparator ++ actionHash) -- the EIP-712 digest.
+ *
+ * Matches `create_eip712_digest` in coinbase-libs/src/ethereum.nr byte for
+ * byte. Verified against ethers' own TypedDataEncoder.hash, which is what the
+ * wallet computes.
+ */
+export function eip712Digest(domainSeparator?: string, actionHash?: string): Uint8Array {
+  if (!domainSeparator || !actionHash) {
+    throw new Error(
+      'arc_eligibility requires domainSeparator and actionHash. The caller signs ' +
+      'an EIP-712 typed action; personal_sign over signal_hash is the ' +
+      'coinbase_attestation flow.',
+    );
+  }
+  return ethers.getBytes(
+    ethers.keccak256(ethers.concat(['0x1901', domainSeparator, actionHash])),
+  );
+}
+
+/**
+ * Recover the signer's public key from the digest they actually signed.
+ *
+ * personal_sign wraps its argument in the EIP-191 prefix; a typed-data
+ * signature is already over the final digest and must NOT be wrapped again.
+ */
+export function recoverUserPubkeyFromDigest(
+  digest: Uint8Array,
+  signature: string,
+  circuitId: string,
+): string {
+  if (circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY) {
+    return ethers.SigningKey.recoverPublicKey(digest, signature);
+  }
+  return recoverUserPubkey(digest, signature);
+}
+
 
 /**
  * Recover user's uncompressed public key from their signature over the signal hash.
@@ -294,6 +334,40 @@ export function assembleKycInputs(params: {
  *   coinbase_attester_pubkey_x[32] ++ coinbase_attester_pubkey_y[32] ++
  *   coinbase_signer_merkle_proof[256] ++ coinbase_signer_leaf_index[1] ++ merkle_proof_depth[1]
  */
+/**
+ * The `arc_eligibility` flat vector.
+ *
+ * Identical to the KYC one except that `domain_separator` and `action_hash`
+ * sit between `signal_hash` and `signer_list_merkle_root`, which is the
+ * parameter order in arc-eligibility/src/main.nr. bb reads this list
+ * positionally, so a field in the wrong place makes a proof that fails to
+ * verify with nothing naming the cause.
+ */
+export function assembleActionInputs(params: CircuitParams): string[] {
+  if (!params.domainSeparator || !params.actionHash) {
+    throw new Error('arc_eligibility requires domainSeparator and actionHash');
+  }
+  const inputs: string[] = [];
+  inputs.push(...uint8ArrayToDecimalStrings(params.signalHash));
+  inputs.push(...bytesToDecimalStrings(hexToBytes(params.domainSeparator)));
+  inputs.push(...bytesToDecimalStrings(hexToBytes(params.actionHash)));
+  inputs.push(...bytesToDecimalStrings(hexToBytes(params.merkleRoot)));
+  inputs.push(...uint8ArrayToDecimalStrings(params.scopeBytes));
+  inputs.push(...uint8ArrayToDecimalStrings(params.nullifierBytes));
+  inputs.push(...bytesToDecimalStrings(hexToBytes(params.userAddress)));
+  inputs.push(...bytesToDecimalStrings(splitSignatureToBytes(params.userSignature)));
+  inputs.push(...bytesToDecimalStrings(hexToBytes(params.userPubkeyX)));
+  inputs.push(...bytesToDecimalStrings(hexToBytes(params.userPubkeyY)));
+  inputs.push(...bytesToDecimalStrings(padBytes(params.rawTxBytes, 300)));
+  inputs.push(params.txLength.toString());
+  inputs.push(...bytesToDecimalStrings(hexToBytes(params.attesterPubkeyX)));
+  inputs.push(...bytesToDecimalStrings(hexToBytes(params.attesterPubkeyY)));
+  inputs.push(...buildPaddedMerkleProof(params.merkleProof, params.merkleDepth));
+  inputs.push(params.merkleLeafIndex.toString());
+  inputs.push(params.merkleDepth.toString());
+  return inputs;
+}
+
 export function assembleCountryInputs(params: {
   signalHash: Uint8Array;
   merkleRoot: string;
@@ -368,6 +442,16 @@ export interface BuildInputsRequest {
   circuitId: CircuitId;
   countryList?: string[];
   isIncluded?: boolean;
+  /**
+   * EIP-712 domain hash. Required for `arc_eligibility`, absent otherwise.
+   *
+   * The server does NOT derive it: the domain names a verifying contract and a
+   * chain that only the caller knows, and guessing one here would produce a
+   * proof bound to the wrong contract.
+   */
+  domainSeparator?: string;
+  /** EIP-712 hashStruct of the action. Required for `arc_eligibility`. */
+  actionHash?: string;
 }
 
 export interface BuildInputsResult {
@@ -399,6 +483,8 @@ export interface CircuitParams {
   countryList?: string[];
   countryListLength?: number;
   isIncluded?: boolean;
+  domainSeparator?: string;
+  actionHash?: string;
 }
 
 /**
@@ -439,8 +525,18 @@ export async function computeCircuitParams(
   // Step 1: Compute signal hash
   const signalHash = computeSignalHash(address, scope, circuitId);
 
-  // Step 2: Recover user public key
-  const userPubkey = recoverUserPubkey(signalHash, signature);
+  // Step 2: Recover user public key.
+  //
+  // From whatever the wallet actually signed. `arc_eligibility` has it sign an
+  // EIP-712 digest over the action, not signal_hash, so recovering against
+  // signal_hash there yields a public key that is not the user's -- and the
+  // circuit then fails on "User pubkey does not match address", pointing at
+  // the address rather than at the message.
+  const signedDigest =
+    circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY
+      ? eip712Digest(request.domainSeparator, request.actionHash)
+      : signalHash;
+  const userPubkey = recoverUserPubkeyFromDigest(signedDigest, signature, circuitId);
   const { x: userPubkeyX, y: userPubkeyY } = extractPubkeyCoordinates(userPubkey);
 
   // Step 3: Fetch attestation transaction from Base chain
@@ -488,6 +584,8 @@ export async function computeCircuitParams(
     countryList: request.countryList,
     countryListLength: request.countryList?.length,
     isIncluded: request.isIncluded,
+    domainSeparator: request.domainSeparator,
+    actionHash: request.actionHash,
   };
 }
 
@@ -529,6 +627,14 @@ export async function buildCircuitInputs(
     if (inputs.length !== COINBASE_COUNTRY_ATTESTATION_INPUT_LENGTH) {
       throw new Error(
         `coinbase_country_attestation input vector has ${inputs.length} entries, expected ${COINBASE_COUNTRY_ATTESTATION_INPUT_LENGTH}`
+      );
+    }
+  } else if (circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY) {
+    inputs = assembleActionInputs(params);
+
+    if (inputs.length !== ARC_ELIGIBILITY_INPUT_LENGTH) {
+      throw new Error(
+        `arc_eligibility input vector has ${inputs.length} entries, expected ${ARC_ELIGIBILITY_INPUT_LENGTH}`
       );
     }
   } else {

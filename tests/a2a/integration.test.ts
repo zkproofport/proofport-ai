@@ -51,6 +51,7 @@ describe('A2A Integration Tests', () => {
       chainRpcUrl: 'https://chain.example.com',
       proverPrivateKey: '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
       paymentMode: 'disabled',
+      paymentNetworks: 'base-sepolia',
       a2aBaseUrl: 'https://test.example.com',
       websiteUrl: 'https://zkproofport.app',
       agentVersion: '1.0.0',

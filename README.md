@@ -254,7 +254,7 @@ npx zkproofport-mcp    # Starts stdio MCP server
 - Input schema with types and descriptions
 - EAS GraphQL query templates
 
-Circuits use aliases: `coinbase_kyc` → `coinbase_attestation`, `coinbase_country` → `coinbase_country_attestation`, `oidc_domain` → `oidc_domain_attestation`.
+Circuits use aliases: `coinbase_kyc` → `coinbase_attestation`, `coinbase_country` → `coinbase_country_attestation`, `oidc_domain` → `oidc_domain_attestation`. `arc_eligibility` has no alias — it is named canonically or not at all.
 
 ## A2A Protocol
 
@@ -307,6 +307,29 @@ Proves holder owns an email address at a specific domain via OIDC JWT verificati
 - **Input type:** OIDC JWT (`id_token` from Google, etc.)
 - **Public Inputs:** domain hash, scope
 - **Nullifier:** Yes (privacy, replay prevention)
+
+### Arc Eligibility (`arc_eligibility`) — EXPERIMENTAL
+
+The same Coinbase attestation as `coinbase_attestation`, with the wallet signing
+a named EIP-712 action instead of an opaque signal hash. The proof then carries
+the action's domain separator and struct hash, so a verifier checks **which**
+action was authorised rather than only that somebody eligible signed something.
+That is the difference that matters once an agent moves money: `personal_sign`
+over 32 opaque bytes shows a person a hex string.
+
+- **Aliases:** none — the canonical id only
+- **Required inputs:** `domainSeparator` and `actionHash`. A request without
+  both is refused; there is nothing to prove without them
+- **Public inputs, in order:** `signal_hash`, `domain_separator`, `action_hash`,
+  `signer_list_merkle_root`, `scope`, `nullifier` — scope at fields 128–159 and
+  nullifier at 160–191, which is 64 further along than every other circuit here
+- **Nullifier:** Yes, derived from `signal_hash` exactly as on Base, so it stays
+  one-per-person rather than one-per-action
+- **Verifier:** Arc Testnet (chain 5042002) only. `FALLBACK_VERIFIERS` has
+  `null` for it on every other chain, which is what "no verifier here" looks
+  like. Circle has published no mainnet chain id
+- **Status:** `experimental` in `@zkproofport-app/sdk` — provable and
+  verifiable, but the layout and the verifier address can still change
 
 ## Contract Addresses
 

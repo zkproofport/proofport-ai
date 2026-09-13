@@ -51,4 +51,17 @@ export const CIRCUITS: Record<CircuitId, {
     requiredInputs: ['jwt', 'scope'],
     inputType: 'oidc',
   },
+  [CIRCUIT_IDS.ARC_ELIGIBILITY]: {
+    id: CIRCUIT_IDS.ARC_ELIGIBILITY,
+    displayName: 'Arc Eligibility',
+    description:
+      'Prove a Coinbase KYC attestation AND that the same wallet signed one ' +
+      'EIP-712 action. The wallet shows the person named fields instead of an ' +
+      'opaque hash, and the verifying contract recomputes the same two hashes ' +
+      'from the call it is about to run, so a proof made for one contract does ' +
+      'not verify at another.',
+    requiredInputs: ['address', 'signature', 'scope', 'domain_separator', 'action_hash'],
+    easSchemaId: '0xf8b05c79f090979bf4a80270aba232dff11a10d9ca55c4f88de95317970f0de9',
+    functionSelector: '0x56feed5e',
+  },
 };
