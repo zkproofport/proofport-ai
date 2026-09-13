@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ethers } from 'ethers';
+import { z } from 'zod';
 
 // ─── Mock @zkproofport-ai/sdk ──────────────────────────────────────────────────
 // Mirrors the SDK's real public surface. Payment (makePayment / PaymentInfo /
@@ -13,7 +15,9 @@ const mockSubmitProof = vi.fn();
 const mockVerifyProof = vi.fn();
 const mockComputeSignalHash = vi.fn().mockReturnValue('0xsignalhash');
 
-vi.mock('@zkproofport-ai/sdk', () => ({
+vi.mock('@zkproofport-ai/sdk', async () => ({
+  hashTypedAction: (await import('../../sdk/src/index.js')).hashTypedAction,
+  CIRCUIT_IDS: (await import('../../sdk/src/circuits.js')).CIRCUIT_IDS,
   generateProof: mockGenerateProof,
   requestChallenge: mockRequestChallenge,
   prepareInputs: mockPrepareInputs,
@@ -28,6 +32,7 @@ vi.mock('@zkproofport-ai/sdk', () => ({
   },
   AUTHORIZED_SIGNERS: ['0x952f32128AF084422539C4Ff96df5C525322E564'],
   CIRCUIT_NAME_MAP: {
+    arc_eligibility: 'arc_eligibility',
     coinbase_kyc: 'coinbase_attestation',
     coinbase_country: 'coinbase_country_attestation',
     oidc_domain: 'oidc_domain_attestation',
@@ -495,5 +500,113 @@ describe('proofport://config resource', () => {
     expect(data).not.toHaveProperty('paymentWalletAddress');
     expect(data.supportedCircuits).toBeDefined();
     expect(data.supportedCircuits.coinbase_attestation).toBeDefined();
+  });
+});
+
+const CUSTOM_ACTION = {
+  domain: { name: 'Custom Service', version: '1', chainId: 5042002, verifyingContract: '0x0000000000000000000000000000000000000001' },
+  types: {
+    Instruction: [{ name: 'terms', type: 'Terms' }, { name: 'tags', type: 'string[]' }],
+    Terms: [{ name: 'quantity', type: 'uint256' }, { name: 'description', type: 'string' }],
+  },
+  primaryType: 'Instruction',
+  message: { terms: { quantity: '10000000', description: 'arbitrary caller text' }, tags: ['custom'] },
+};
+
+describe('prepare_inputs action authorization', () => {
+  it('signs exactly the custom nested action and returns both hashes used for key recovery', async () => {
+    mockPrepareInputs.mockResolvedValue({ field: 'prepared' });
+    const params = { circuit: 'arc_eligibility', action: CUSTOM_ACTION };
+    const schema = z.object(toolHandlers.prepare_inputs.schema as z.ZodRawShape);
+    expect(schema.parse(params)).toEqual(params);
+    const result = await callTool('prepare_inputs', schema.parse(params));
+    expect(result.isError).toBeUndefined();
+    expect(mockSigner.signTypedData).toHaveBeenCalledWith(CUSTOM_ACTION.domain, CUSTOM_ACTION.types, CUSTOM_ACTION.message);
+    expect(mockSigner.signMessage).not.toHaveBeenCalled();
+    const domainSeparator = ethers.TypedDataEncoder.hashDomain(CUSTOM_ACTION.domain);
+    const actionHash = ethers.TypedDataEncoder.hashStruct('Instruction', CUSTOM_ACTION.types, CUSTOM_ACTION.message);
+    expect(mockPrepareInputs).toHaveBeenCalledWith(testConfig, expect.objectContaining({
+      circuitId: 'arc_eligibility', userSignature: '0xmocktypeddata', domainSeparator, actionHash,
+    }));
+    expect(parseToolResult(result)).toEqual({ field: 'prepared', domain_separator: domainSeparator, action_hash: actionHash });
+  });
+
+  it.each([
+    ['missing action', 'arc_eligibility', undefined, /action is required|no action was given/],
+    ['missing field', 'arc_eligibility', { ...CUSTOM_ACTION, message: {} }, /missing/],
+    ['malformed value', 'arc_eligibility', { ...CUSTOM_ACTION, message: { ...CUSTOM_ACTION.message, terms: { quantity: 'bad', description: 'bad' } } }, /./],
+    ['wrong root', 'arc_eligibility', { ...CUSTOM_ACTION, primaryType: 'Terms', message: { quantity: '1', description: 'bad' } }, /primaryType.*root|root.*primaryType/],
+    ['Coinbase action', 'coinbase_kyc', CUSTOM_ACTION, /only arc_eligibility|rejected/],
+    ['OIDC action', 'oidc_domain', CUSTOM_ACTION, /only arc_eligibility|rejected/],
+  ])('rejects %s before any signing or input preparation', async (_name, circuit, action, error) => {
+    const result = await callTool('prepare_inputs', { circuit, action });
+    expect(result.isError).toBe(true);
+    expect(parseToolResult(result).error).toMatch(error as RegExp);
+    expect(mockSigner.getAddress).not.toHaveBeenCalled();
+    expect(mockSigner.signMessage).not.toHaveBeenCalled();
+    expect(mockSigner.signTypedData).not.toHaveBeenCalled();
+    expect(mockPrepareInputs).not.toHaveBeenCalled();
+    expect(mockPrepareOidcPayload).not.toHaveBeenCalled();
+  });
+
+  it('omits action hashes for ordinary circuits', async () => {
+    mockPrepareInputs.mockResolvedValue({ field: 'prepared' });
+    const result = await callTool('prepare_inputs', { circuit: 'coinbase_kyc' });
+    expect(parseToolResult(result)).toEqual({ field: 'prepared' });
+    expect(mockPrepareInputs.mock.calls[0][1]).not.toHaveProperty('domainSeparator');
+    expect(mockPrepareInputs.mock.calls[0][1]).not.toHaveProperty('actionHash');
+    expect(mockSigner.signTypedData).not.toHaveBeenCalled();
+  });
+});
+
+
+it('snapshots the MCP action before the local address lookup', async () => {
+  const action = structuredClone(CUSTOM_ACTION);
+  const approved = structuredClone(action);
+  mockSigner.getAddress.mockImplementationOnce(async () => {
+    action.message.terms.quantity = '999';
+    return '0xMockAttestationAddress';
+  });
+  mockPrepareInputs.mockResolvedValue({ field: 'prepared' });
+  const result = await callTool('prepare_inputs', { circuit: 'arc_eligibility', action });
+  expect(result.isError).toBeUndefined();
+  expect(mockSigner.signTypedData).toHaveBeenCalledWith(approved.domain, approved.types, approved.message);
+  expect(parseToolResult(result).action_hash).toBe(ethers.TypedDataEncoder.hashStruct(approved.primaryType, approved.types, approved.message));
+});
+
+
+const BOOLEAN_ACTION = {
+  ...CUSTOM_ACTION,
+  types: {
+    Instruction: [{ name: 'terms', type: 'Terms' }, { name: 'batches', type: 'Terms[][]' }],
+    Terms: [{ name: 'enabled', type: 'bool' }],
+  },
+  message: { terms: { enabled: true }, batches: [[{ enabled: false }], [{ enabled: true }]] },
+};
+
+describe('nested action field validation in MCP', () => {
+  it.each([
+    ['missing bool', { ...BOOLEAN_ACTION.message, terms: {} }],
+    ['string bool', { ...BOOLEAN_ACTION.message, terms: { enabled: 'false' } }],
+    ['number bool', { ...BOOLEAN_ACTION.message, terms: { enabled: 0 } }],
+    ['object bool', { ...BOOLEAN_ACTION.message, terms: { enabled: {} } }],
+    ['missing bool in nested array', { ...BOOLEAN_ACTION.message, batches: [[{}]] }],
+    ['malformed bool in nested array', { ...BOOLEAN_ACTION.message, batches: [[{ enabled: 'false' }]] }],
+  ])('rejects %s before local signing', async (_name, message) => {
+    const result = await callTool('prepare_inputs', { circuit: 'arc_eligibility', action: { ...BOOLEAN_ACTION, message } });
+    expect(result.isError).toBe(true);
+    expect(parseToolResult(result).error).toMatch(/action.message.*enabled.*required|action.message.*enabled.*boolean/);
+    expect(mockSigner.getAddress).not.toHaveBeenCalled();
+    expect(mockSigner.signTypedData).not.toHaveBeenCalled();
+    expect(mockSigner.signMessage).not.toHaveBeenCalled();
+    expect(mockPrepareInputs).not.toHaveBeenCalled();
+  });
+
+  it('preserves actual booleans in custom nested structs and arrays', async () => {
+    mockPrepareInputs.mockResolvedValue({ field: 'prepared' });
+    const result = await callTool('prepare_inputs', { circuit: 'arc_eligibility', action: BOOLEAN_ACTION });
+    expect(result.isError).toBeUndefined();
+    expect(mockSigner.signTypedData).toHaveBeenCalledWith(BOOLEAN_ACTION.domain, BOOLEAN_ACTION.types, BOOLEAN_ACTION.message);
+    expect(parseToolResult(result).action_hash).toBe(ethers.TypedDataEncoder.hashStruct('Instruction', BOOLEAN_ACTION.types, BOOLEAN_ACTION.message));
   });
 });

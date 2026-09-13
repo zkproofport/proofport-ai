@@ -16,6 +16,7 @@ import { submitProof, submitEncryptedProof } from './prove.js';
 import type { ProofportSigner } from './signer.js';
 import type { PaymentWallet } from './types.js';
 import { CIRCUITS } from './constants.js';
+import { hashTypedAction } from './action.js';
 import { CIRCUIT_IDS } from './circuits.js';
 import { encryptForTee } from './tee.js';
 
@@ -57,6 +58,8 @@ export async function generateProof(
   params: ProofParams,
   callbacks?: FlowCallbacks,
 ): Promise<ProofResult> {
+  // Keep the approved values stable across asynchronous signer operations.
+  const action = params.action ? structuredClone(params.action) : params.action;
   const circuitId: CircuitId = CIRCUIT_NAME_MAP[params.circuit];
   const scope = params.scope || 'proofport';
   const isOidc = CIRCUITS[circuitId]?.inputType === 'oidc';
@@ -75,32 +78,27 @@ export async function generateProof(
   let domainSeparator: string | undefined;
   let actionHash: string | undefined;
 
-  if (!isOidc) {
-    // The circuit decides the signature, and a mismatch is refused here.
-    //
-    // This used to be "typed data if an action was passed, personal_sign
-    // otherwise", with the circuit id carried along beside it. That reads as
-    // two paths and is really four, two of which are silently wrong:
-    // `arc_eligibility` with no action signed `signal_hash` and produced a
-    // proof whose domain and action hashes are absent, and a Coinbase circuit
-    // with an action signed typed data the circuit cannot verify. The mobile
-    // app had the same defect in its KYC hook and it produced proofs from the
-    // wrong circuit for a day.
-    if (circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY && !params.action) {
-      throw new Error(
-        `${CIRCUIT_IDS.ARC_ELIGIBILITY} proves that a wallet authorised ONE EIP-712 action, and no action was given. ` +
-          `Its domain separator and action hash are public inputs, so there is nothing to prove without one. ` +
-          `Pass \`action\`, or ask for ${CIRCUIT_IDS.COINBASE_ATTESTATION}.`,
-      );
-    }
-    if (params.action && circuitId !== CIRCUIT_IDS.ARC_ELIGIBILITY) {
-      throw new Error(
-        `An action was given but '${circuitId}' was requested, and only ${CIRCUIT_IDS.ARC_ELIGIBILITY} carries one. ` +
-          `Signing typed data for '${circuitId}' yields a signature that circuit cannot verify. ` +
-          `Ask for ${CIRCUIT_IDS.ARC_ELIGIBILITY}, or drop the action.`,
-      );
-    }
+  // Reject circuit/action mismatches before either EAS or OIDC processing.
+  if (circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY && !action) {
+    throw new Error(
+      `${CIRCUIT_IDS.ARC_ELIGIBILITY} proves that a wallet authorised ONE EIP-712 action, and no action was given. ` +
+        `Its domain separator and action hash are public inputs, so there is nothing to prove without one. ` +
+        `Pass \`action\`, or ask for ${CIRCUIT_IDS.COINBASE_ATTESTATION}.`,
+    );
+  }
+  if (action && circuitId !== CIRCUIT_IDS.ARC_ELIGIBILITY) {
+    throw new Error(
+      `An action was given but '${circuitId}' was requested, and only ${CIRCUIT_IDS.ARC_ELIGIBILITY} carries one. ` +
+        `Signing typed data for '${circuitId}' yields a signature that circuit cannot verify. ` +
+        `Ask for ${CIRCUIT_IDS.ARC_ELIGIBILITY}, or drop the action.`,
+    );
+  }
 
+  const actionHashes = circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY
+    ? hashTypedAction(action!)
+    : undefined;
+
+  if (!isOidc) {
     // Step 1: Sign.
     //
     // `signal_hash` is computed either way, because the nullifier derives from
@@ -117,16 +115,15 @@ export async function generateProof(
     const signalHashHex = ethers.hexlify(signalHash);
 
     let signature: string;
-    if (params.action) {
-      const { domain, types, message } = params.action;
+    if (action) {
+      const { domain, types, message } = action;
+      ({ domainSeparator, actionHash } = actionHashes!);
       signature = await signers.attestation.signTypedData(domain, types, message);
-      domainSeparator = ethers.TypedDataEncoder.hashDomain(domain);
-      actionHash = ethers.TypedDataEncoder.hashStruct(params.action.primaryType, types, message);
       recordStep(1, 'Sign Typed Action', {
         signalHash: signalHashHex,
         domainSeparator,
         actionHash,
-        primaryType: params.action.primaryType,
+        primaryType: action.primaryType,
         verifyingContract: domain.verifyingContract,
         signature,
       }, t);

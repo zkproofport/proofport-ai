@@ -10,7 +10,7 @@ npm install -g @zkproofport-ai/mcp@latest
 npm install @zkproofport-ai/mcp@latest @zkproofport-ai/sdk@latest ethers
 ```
 
-Arc support described here requires SDK/MCP **0.2.11 or later**. Install from npm and check the resolved version. Release Please manages package versions and the release workflow publishes them; repository source changes alone do not update `@latest`.
+The shared hashing helper and corrected Arc `prepare_inputs` behavior require SDK/MCP **0.2.12 or later**. Install from npm and check the resolved version. Release Please manages package versions and the release workflow publishes them; repository source changes alone do not update `@latest`.
 
 For an MCP client, use the installed `zkproofport-mcp` executable or:
 
@@ -25,7 +25,7 @@ For an MCP client, use the installed `zkproofport-mcp` executable or:
 }
 ```
 
-Supply required environment variables through a trusted local process or secret store. Do not paste private keys, login credentials or JWTs into model prompts, expose them in logs, or commit them in MCP configuration.
+Supply required environment variables through a trusted local process or secret store. A’s `ATTESTATION_KEY` belongs only in that local client environment; keep A’s key and address out of the dApp service, model, UI, logs, Git and npm packages. Do not paste private keys, login credentials or JWTs into model prompts, expose them in logs, or commit them in MCP configuration.
 
 ## Security and proving architecture
 
@@ -92,14 +92,65 @@ const proof = await mcp.callTool({
 
 Here `approvedAction` and `approvedPayment` are the actual user-reviewed objects, not placeholders to synthesize from a guide. `pay_with: "arc"` calls `walletFor('arc')` / `walletFromArcAgent`, using Circle CLI's existing login. `pay_with: "circle"` is a different adapter for Circle developer-controlled wallets.
 
-For Ledger House, `approvedAction` contains:
+### Action object: caller-owned types, keys and values
 
-- `domain`: `{name: "Ledger House Staking", version: "1", chainId: 5042002, verifyingContract: "0xD0F3eE648386B59B484157332E736388Fcc41F47"}`.
-- `types.CredentialDelegation`: `delegate: address`, `action: string`, `amount: uint256`, `expiresAt: uint256`, and `nonce: string`, in that order.
-- `primaryType`: `"CredentialDelegation"`.
-- `message`: the approved operational wallet in `delegate`, `action: "stake"`, `amount: "100000"` for 0.1 USDC, and the approved Unix-seconds deadline and fresh nonce.
+Both `generateProof`/`generate_proof` and Arc input preparation use this complete `TypedAction` shape:
 
-The user-facing term is **exact-action authorization**. Existing `CredentialDelegation`, `delegate`, and other wire names stay unchanged. Circle's backing EOA is used internally for Gateway payment signatures; the action's `delegate` remains the operational smart-wallet address.
+| Field | Type | Meaning |
+|---|---|---|
+| `domain` | object | EIP-712 signing context; all four fields below are required. |
+| `domain.name` | non-empty string | Application/domain name agreed with the verifier. |
+| `domain.version` | non-empty string | Signing-domain version. |
+| `domain.chainId` | integer number | Target chain ID, such as `5042002`. |
+| `domain.verifyingContract` | string | 20-byte `0x` contract address bound by the signature. |
+| `types` | object | Map from caller-chosen struct names to arrays of field declarations. Omit `EIP712Domain`; ethers derives it from `domain`. |
+| `types[structName]` | array of objects | Ordered fields; each declaration has `name` and `type`. Include referenced nested structs. |
+| `types[structName][i].name` | string | Caller-chosen message key. |
+| `types[structName][i].type` | string | EIP-712 type: `address`, `bool`, `string`, `bytes`, fixed `bytes1`–`bytes32`, integer types such as `uint256`, arrays such as `string[]`, or another declared struct. |
+| `primaryType` | non-empty string | The declared top-level struct; it must equal the single root inferred by the encoder. |
+| `message` | object | Values matching the declared field types, including nested objects and arrays. |
+
+No SDK action registry restricts struct names, field names or business values. For example, `Instruction` can contain `terms: Terms` and `labels: string[]`, where `Terms` contains `quantity: uint256` and `memo: string`. The circuit binds their hashes; each relying application decides which structures it can execute. Declare every approval-critical field in `types`: extra message keys absent from the schema are not signed. Invalid shape, missing declared fields (including nested structs/arrays), non-boolean `bool` values, malformed field declarations/encoded values, ambiguous roots and a mismatched `primaryType` are rejected before local signing. Field names and type declarations must be non-empty strings.
+
+Use decimal **integer strings** for JSON integer message values, especially `uint256` (for example `"10000000"`); JSON cannot represent `bigint`, and large JavaScript numbers can lose precision. Addresses/bytes are `0x` strings, booleans remain JSON booleans, and nested values follow their declared types. `domain.chainId` remains an integer JSON number.
+
+### Full 10-USDC Ledger House Gate action
+
+This valid JSON shows the Gate's exact five-field schema. The example delegate is a public placeholder for Wallet B: replace it with the approved operational smart-wallet address, choose a future approved Unix-seconds deadline and a fresh nonce, then review the whole object. Never include the private credential-holder A's address or key in it.
+
+```json
+{
+  "domain": {
+    "name": "Ledger House Staking",
+    "version": "1",
+    "chainId": 5042002,
+    "verifyingContract": "0xD0F3eE648386B59B484157332E736388Fcc41F47"
+  },
+  "types": {
+    "CredentialDelegation": [
+      { "name": "delegate", "type": "address" },
+      { "name": "action", "type": "string" },
+      { "name": "amount", "type": "uint256" },
+      { "name": "expiresAt", "type": "uint256" },
+      { "name": "nonce", "type": "string" }
+    ]
+  },
+  "primaryType": "CredentialDelegation",
+  "message": {
+    "delegate": "0x0000000000000000000000000000000000000001",
+    "action": "stake",
+    "amount": "10000000",
+    "expiresAt": "2000000000",
+    "nonce": "replace-with-fresh-user-approved-nonce"
+  }
+}
+```
+
+`"10000000"` means **10 USDC** (6 decimals). The proof fee is separate: **0.001 USDC**, or `"1000"` base units. `delegate` and `CredentialDelegation` are established wire names for exact-action authorization: A authorizes this operation by B; B does not inherit A's identity or KYC credential. User approval covers the exact action and live proof-payment terms, followed by separate approval of the actual stake transaction.
+
+The exported SDK `buildDelegationAction` helper is a legacy generic four-field schema (`delegate`, `action`, `expiresAt`, `nonce`). It **does not include `amount` and is not compatible with this staking Gate**. Its existing wire hash remains unchanged. Build the explicit five-field `TypedAction` above for the Gate; arbitrary custom actions remain valid SDK inputs but require a verifier that understands them.
+
+Circle's backing EOA is used internally for Gateway payment signatures; the action's `delegate` remains the operational smart-wallet address.
 
 `approvedPayment` pins these fields from the selected live x402 offer:
 
@@ -117,6 +168,19 @@ interface ApprovedPayment {
 `max_payment` is decimal USDC, so `"0.001"` caps the proof fee at 0.001 USDC. The SDK rejects changes to fee, recipient, asset, network or Gateway signing domain before signing the actual challenge. A new nonce is not pinned as a payment term. If the service offers no compatible Arc nanopayment option, stop instead of falling back to another chain.
 
 After proof generation, use `verify_proof`. Separately obtain approval for the staking transaction; the operational wallet then submits to EligibilityGate, which checks the proof, credential policy, exact actor/action, nonce and deadline atomically. Report success only after the actual receipt and position change are confirmed.
+
+### Stepwise Arc flow in trusted local code
+
+The corrected `prepare_inputs` path validates the complete action and encodes its values before asking local A to sign EIP-712. It passes both hashes into SDK key recovery and returns `domain_separator` and `action_hash` with the prepared witness. Missing or malformed Arc actions and actions supplied for Coinbase/OIDC are rejected before signing. Coinbase continues to sign `signal_hash`; OIDC uses the JWT path without wallet signing.
+
+**Prepared inputs are private witness data**, including A's public key, signature and attestation data. Run this orchestration inside a trusted local MCP client; do not pass tool responses through model context, the dApp, UI or logs. Share the public `generate_proof` result instead. `proofport://config` also exposes A's address and stays local.
+
+1. Obtain the action approval locally, then call `prepare_inputs` with `{circuit: "arc_eligibility", scope: "ledger-house", action: approvedAction}`. Preserve the entire result, including both snake_case hashes.
+2. Call `request_challenge` with `{circuit: "arc_eligibility", inputs: {}}` to obtain a fresh nonce, actual payment offers and optional TEE key without sending the witness yet.
+3. For an endpoint with payment disabled and no TEE key, call `submit_proof` with `{circuit: "arc_eligibility", inputs: preparedInputs, nonce: challenge.nonce}`. The nonce is required; omitting it only requests another challenge.
+4. Verify the returned public proof with `verify_proof`, then obtain the separate stake approval and confirm the transaction receipt.
+
+The MCP `submit_proof` tool currently accepts only `circuit`, `inputs` and `nonce`; it has no payment-header or encrypted-envelope argument. For a paid or encrypted flow, use all-in-one `generate_proof`, or the SDK stepwise API (`hashTypedAction` → local typed signature → `prepareInputs` with camelCase hashes → attach snake_case hashes → `requestChallenge` → `signPayment` with approved terms → `submitProof`/`submitEncryptedProof`). Do not assume this MCP stepwise tool automatically pays or encrypts. With Circle Agent Wallet, the SDK's `signPayment` uses `@circle-fin/x402-batching` for the live Gateway batched offer and signs through the Circle CLI adapter; it draws the 0.001-USDC proof fee from the existing funded Gateway balance.
 
 ### CLI path
 
@@ -138,7 +202,7 @@ The CLI loads `--action` from a JSON file and calls the local MCP server interna
 | `get_supported_circuits` | Discover circuits and verifier metadata. |
 | `prepare_inputs` | Prepare circuit inputs with the configured credential signer. |
 | `request_challenge` | Fetch a live challenge, payment offers and optional TEE key. |
-| `submit_proof` | Submit prepared inputs with the challenge/payment data required by the endpoint. |
+| `submit_proof` | Submit prepared inputs and nonce; no payment headers or encrypted-envelope argument. |
 | `gateway_balance` | Read Gateway balance using `PAYMENT_PRIVATE_KEY` only; returns USDC base units. |
 | `deposit_to_gateway` | Fund Gateway using `PAYMENT_PRIVATE_KEY` only; on-chain and paid. |
 

@@ -150,7 +150,7 @@ describe.skipIf(!enabled).sequential('live user-supplied action in the dApp',()=
 });
 
 describe.skipIf(!enabled)('published MCP accepts arbitrary action fields',()=>{
- it('signs a custom type and keys, then rejects a non-KYC fixture wallet without payment',async()=>{
+ it('both proof paths sign custom fields and refuse a non-KYC fixture before payment',async()=>{
   const config=loadDemoConfig(),packages=publishedProverPackages();
   const observed=await (await fetch(base+'/demo/wallet')).json() as {wallet:string};
   const before=await readGatewayBalance(observed.wallet);
@@ -174,6 +174,13 @@ describe.skipIf(!enabled)('published MCP accepts arbitrary action fields',()=>{
    const content=response.content as {type:string;text?:string}[];
    const error=JSON.parse(content.filter(c=>c.type==='text').map(c=>c.text).join('')).error as string;
    expect(/attestation|KYC/i.test(error)).toBe(true);
+   const prepared=await client.callTool({name:'prepare_inputs',arguments:{circuit:'arc_eligibility',scope:'custom-action-e2e',action}},undefined,{timeout:120000});
+   expect(prepared.isError).toBe(true);
+   const preparedContent=prepared.content as {type:string;text?:string}[];
+   const preparationError=JSON.parse(preparedContent.filter(c=>c.type==='text').map(c=>c.text).join('')).error as string;
+   // Old MCP accepted action but used personal_sign and omitted recovery hashes.
+   // The upgraded package must reach the actual KYC lookup with correct hashes.
+   expect(preparationError).toMatch(/No attestation found/);
    expect(await readGatewayBalance(observed.wallet)).toBe(before);
   }finally{await client.close();}
  },150_000);

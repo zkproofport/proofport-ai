@@ -231,19 +231,11 @@ export interface ProofParams {
   provider?: 'google' | 'microsoft';
 
   /**
-   * Bind this proof to one action.
-   *
-   * WITHOUT it the wallet signs `signal_hash` through personal_sign, exactly
-   * as every existing caller does today: the signature asserts "this wallet is
-   * KYC'd for this scope" and commits to no contract, amount, caller or
-   * deadline, and the wallet can only show the person 32 opaque bytes.
-   *
-   * WITH it the wallet signs the typed structure instead, so the person reads
-   * named fields before approving, and the verifying contract recomputes the
-   * same two hashes from the call it is about to run. A proof produced for one
-   * contract no longer verifies at another.
-   *
-   * Omitting it keeps the old behaviour, so existing callers need no change.
+   * Required for arc_eligibility; rejected for every other circuit, including OIDC.
+   * The local wallet signs these exact EIP-712 fields after shape, root-type and
+   * value validation. The relying contract must compare the domain/action hashes
+   * and enforce the approved actor, amount, nonce and deadline.
+   * Coinbase circuits without an action use personal_sign; OIDC does not sign.
    */
   action?: TypedAction;
 }

@@ -11,6 +11,7 @@ export type {
   EASAttestation,
   AttestationData,
   ProofParams,
+  TypedAction,
   ApprovedPayment,
   ProofResult,
   StepResult,
@@ -50,6 +51,7 @@ export type { FlowCallbacks } from './flow.js';
 // Individual steps (for step-by-step usage)
 export { requestChallenge, createSession } from './session.js';
 export { submitProof, submitEncryptedProof } from './prove.js';
+export { encryptForTee } from './tee.js';
 export { verifyProof } from './verify.js';
 
 // Input computation (customer-facing helpers)
@@ -106,8 +108,8 @@ export {
   type GatewayBalances,
 } from './nanopayment.js';
 
-// Delegating a credential from the KYC wallet to a second wallet, so the
-// second one can act while the first stays hidden. See ./delegation.ts.
+// Authorizing another wallet to act while the KYC holder stays hidden.
+// This generic legacy schema has no amount; see ./delegation.ts for Gate limits.
 export {
   buildDelegationAction,
   delegationActionHash,
@@ -127,3 +129,6 @@ export {
   ARC_CLI_CHAINS,
   type ArcCliChain,
 } from './arcWallet.js';
+
+// Validate and hash caller-owned actions before local signing.
+export { hashTypedAction } from './action.js';

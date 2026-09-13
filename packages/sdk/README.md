@@ -2,6 +2,8 @@
 
 Client SDK for ZKProofport zero-knowledge proofs, including experimental exact-action authorization on Arc Testnet.
 
+The shared `hashTypedAction` helper and corrected Arc stepwise signing require SDK/MCP **0.2.12 or later**. Release Please owns the versions. Confirm the resolved npm versions before using this path.
+
 ## Overview
 
 @zkproofport-ai/sdk is a TypeScript SDK for generating privacy-preserving zero-knowledge proofs using Coinbase KYC attestations and OIDC JWT tokens. Generate a proof with a single function call, or fine-tune each step for custom workflows.
@@ -83,7 +85,7 @@ An endpoint without that key receives readable circuit inputs over HTTPS and pro
 npm install @zkproofport-ai/sdk@latest ethers
 ```
 
-Arc support described here requires SDK/MCP **0.2.11 or later**. Install from npm and check the resolved version. Release Please manages package versions and the release workflow publishes them; repository source changes alone do not update `@latest`.
+Corrected Arc stepwise support and shared action hashing require SDK/MCP **0.2.12 or later**. Install from npm and check the resolved version. Release Please manages package versions and the release workflow publishes them; repository source changes alone do not update `@latest`.
 
 ## Prerequisites
 
@@ -125,7 +127,7 @@ console.log('Valid:', verification.valid);
 
 ### The problem it solves
 
-Every other circuit here has the wallet sign `signal_hash`, which is
+The Coinbase KYC and country circuits have the wallet sign `signal_hash`, which is
 `keccak256(address, scope, circuitId)`. That value is the same for a given
 wallet and scope no matter what the proof is later used for, so:
 
@@ -221,11 +223,11 @@ the one-per-person property it exists for.
 
 ### Omitting `action`
 
-`arc_eligibility` requires `action`; omitting it is rejected. Other circuits reject `action` and retain their existing `personal_sign` flow. The application must verify the exact target, operational wallet, amount, nonce and deadline as well as the proof.
+`arc_eligibility` requires `action`; omitting it is rejected. Other circuits reject `action`; Coinbase uses `personal_sign`, while OIDC uses its JWT flow without wallet signing. The application must verify the exact target, operational wallet, amount, nonce and deadline as well as the proof.
 
 ## Arc Circle Agent Wallet path — EXPERIMENTAL
 
-Use the existing Circle CLI login and selected Arc Agent Wallet; do not create or switch wallets as part of proof generation. Install the CLI if needed, then let the user complete any missing login locally. Keep `ATTESTATION_KEY` and login secrets outside prompts, model context, logs and committed configuration.
+Use the existing Circle CLI login and selected Arc Agent Wallet; do not create or switch wallets as part of proof generation. Install the CLI if needed, then let the user complete any missing login locally. Load A’s `ATTESTATION_KEY` only through the trusted local client environment or secret store. Keep A’s key and address out of the dApp service, model context, UI, logs, Git and npm package contents. Keep Circle login secrets local too.
 
 ```bash
 npm install -g @circle-fin/cli
@@ -236,7 +238,7 @@ circle gateway balance --address "$ARC_AGENT_WALLET" --chain ARC-TESTNET --outpu
 circle gateway deposit --amount 0.1 --address "$ARC_AGENT_WALLET" --chain ARC-TESTNET --method direct
 ```
 
-The payment adapter resolves Circle's backing EOA for Gateway authorization. The operational smart-wallet address remains Wallet B for the action and stake; do not substitute the backing EOA into the action's `delegate` field. `walletFromArcAgent({address: process.env.ARC_AGENT_WALLET, chain: 'ARC-TESTNET'})` and `walletFor('arc')` provide the same payment path.
+For the live Gateway batched offer, SDK `signPayment` uses `@circle-fin/x402-batching` and the Circle CLI wallet adapter. It signs the Gateway authorization against the offer’s Gateway signing domain and spends the existing funded Gateway balance. The payment adapter resolves Circle's backing EOA for Gateway authorization. The operational smart-wallet address remains Wallet B for the action and stake; do not substitute the backing EOA into the action's `delegate` field. `walletFromArcAgent({address: process.env.ARC_AGENT_WALLET, chain: 'ARC-TESTNET'})` and `walletFor('arc')` provide the same payment path.
 
 After the user reviews the action and the live x402 offer, save those exact approved objects locally as `approved-action.json` and `approved-payment.json`:
 
@@ -263,7 +265,64 @@ if (!verification.valid) throw new Error('Arc verifier rejected the proof');
 
 `approvedPayment` must pin the live offer's `network`, `scheme`, `amount`, `asset`, `payTo`, and `extra: {name, version, verifyingContract}`. `amount` is an integer string in USDC base units (`"1000"` is 0.001 USDC); `maxPayment` is a decimal USDC string (`"0.001"`). A changed fee, recipient, asset, network or Gateway signing domain is rejected before payment signing. Approve the actual offer; do not manufacture its recipient or domain from a documentation example.
 
-For the deployed Ledger House gate, use the dApp's exact EIP-712 shape: domain `Ledger House Staking`, version `1`, chain `5042002`, and the gate address above. Its `CredentialDelegation` type contains `delegate: address`, `action: string`, `amount: uint256`, `expiresAt: uint256`, `nonce: string`; the message uses Wallet B, `"stake"`, `"100000"` for 0.1 USDC, and the approved deadline and fresh nonce. **Exact-action authorization** is the user-facing term; existing wire keys and `CredentialDelegation` are unchanged.
+### Action object: caller-owned types, keys and values
+
+Both `generateProof`/`generate_proof` and Arc input preparation use this complete `TypedAction` shape:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `domain` | object | EIP-712 signing context; all four fields below are required. |
+| `domain.name` | non-empty string | Application/domain name agreed with the verifier. |
+| `domain.version` | non-empty string | Signing-domain version. |
+| `domain.chainId` | integer number | Target chain ID, such as `5042002`. |
+| `domain.verifyingContract` | string | 20-byte `0x` contract address bound by the signature. |
+| `types` | object | Map from caller-chosen struct names to arrays of field declarations. Omit `EIP712Domain`; ethers derives it from `domain`. |
+| `types[structName]` | array of objects | Ordered fields; each declaration has `name` and `type`. Include referenced nested structs. |
+| `types[structName][i].name` | string | Caller-chosen message key. |
+| `types[structName][i].type` | string | EIP-712 type: `address`, `bool`, `string`, `bytes`, fixed `bytes1`–`bytes32`, integer types such as `uint256`, arrays such as `string[]`, or another declared struct. |
+| `primaryType` | non-empty string | The declared top-level struct; it must equal the single root inferred by the encoder. |
+| `message` | object | Values matching the declared field types, including nested objects and arrays. |
+
+No SDK action registry restricts struct names, field names or business values. For example, `Instruction` can contain `terms: Terms` and `labels: string[]`, where `Terms` contains `quantity: uint256` and `memo: string`. The circuit binds their hashes; each relying application decides which structures it can execute. Declare every approval-critical field in `types`: extra message keys absent from the schema are not signed. Invalid shape, missing declared fields (including nested structs/arrays), non-boolean `bool` values, malformed field declarations/encoded values, ambiguous roots and a mismatched `primaryType` are rejected before local signing. Field names and type declarations must be non-empty strings.
+
+Use decimal **integer strings** for JSON integer message values, especially `uint256` (for example `"10000000"`); JSON cannot represent `bigint`, and large JavaScript numbers can lose precision. Addresses/bytes are `0x` strings, booleans remain JSON booleans, and nested values follow their declared types. `domain.chainId` remains an integer JSON number.
+
+### Full 10-USDC Ledger House Gate action
+
+This valid JSON shows the Gate's exact five-field schema. The example delegate is a public placeholder for Wallet B: replace it with the approved operational smart-wallet address, choose a future approved Unix-seconds deadline and a fresh nonce, then review the whole object. Never include the private credential-holder A's address or key in it.
+
+```json
+{
+  "domain": {
+    "name": "Ledger House Staking",
+    "version": "1",
+    "chainId": 5042002,
+    "verifyingContract": "0xD0F3eE648386B59B484157332E736388Fcc41F47"
+  },
+  "types": {
+    "CredentialDelegation": [
+      { "name": "delegate", "type": "address" },
+      { "name": "action", "type": "string" },
+      { "name": "amount", "type": "uint256" },
+      { "name": "expiresAt", "type": "uint256" },
+      { "name": "nonce", "type": "string" }
+    ]
+  },
+  "primaryType": "CredentialDelegation",
+  "message": {
+    "delegate": "0x0000000000000000000000000000000000000001",
+    "action": "stake",
+    "amount": "10000000",
+    "expiresAt": "2000000000",
+    "nonce": "replace-with-fresh-user-approved-nonce"
+  }
+}
+```
+
+`"10000000"` means **10 USDC** (6 decimals). The proof fee is separate: **0.001 USDC**, or `"1000"` base units. `delegate` and `CredentialDelegation` are established wire names for exact-action authorization: A authorizes this operation by B; B does not inherit A's identity or KYC credential. User approval covers the exact action and live proof-payment terms, followed by separate approval of the actual stake transaction.
+
+The exported SDK `buildDelegationAction` helper is a legacy generic four-field schema (`delegate`, `action`, `expiresAt`, `nonce`). It **does not include `amount` and is not compatible with this staking Gate**. Its existing wire hash remains unchanged. Build the explicit five-field `TypedAction` above for the Gate; arbitrary custom actions remain valid SDK inputs but require a verifier that understands them.
+
 
 Generating and verifying a proof does not submit a stake. After a separate stake approval, the operational wallet calls the dApp gate, which verifies the proof and enforces its policy, exact action, unused nonce and deadline atomically. Check the receipt before reporting a position change.
 
@@ -366,47 +425,61 @@ if (verification.valid) {
 
 ## Step-by-Step API
 
-For advanced workflows or debugging, use individual step functions instead of `generateProof()`.
+For Arc, validate/hash **before** local signing. `prepareInputs` needs the camelCase hashes to recover A's public key from the EIP-712 digest; it does not add those hashes to its returned object. Attach the snake_case fields for submission. `signal_hash` is still computed internally for nullifier derivation and is not the Arc signing message.
+
+Prepared inputs are **private witness data**: they include A's public key, signature and attestation data. Keep them inside trusted local code and send them only to the chosen prover (encrypted when a supported TEE key is provided). Do not forward them to the dApp, model, UI or logs. The `generateProof` public result is the boundary for sharing a proof; step callbacks and `proofport://config` can contain sensitive signer data and must not be forwarded wholesale.
 
 ```typescript
+import { readFile } from 'node:fs/promises';
 import {
-  prepareInputs,
-  submitProof,
-  computeSignalHash,
-  CIRCUIT_NAME_MAP,
-  EthersWalletSigner,
-  createConfig,
+  createConfig, fromPrivateKey, hashTypedAction, prepareInputs,
+  requestChallenge, signPayment, submitProof, submitEncryptedProof,
+  encryptForTee, walletFor, CIRCUIT_IDS,
+  type TypedAction, type ApprovedPayment,
 } from '@zkproofport-ai/sdk';
-import { ethers } from 'ethers';
 
-const config = createConfig();
-const circuit = 'coinbase_kyc';
-const circuitId = CIRCUIT_NAME_MAP[circuit];
-const scope = 'my-app';
+const config = createConfig({ baseUrl: 'https://stg-ai.zkproofport.app' });
+const action: TypedAction = JSON.parse(await readFile('approved-action.json', 'utf8'));
+const approvedPayment: ApprovedPayment = JSON.parse(await readFile('approved-payment.json', 'utf8'));
+const signer = fromPrivateKey(process.env.ATTESTATION_KEY!); // local A only
+const scope = 'ledger-house';
 
-// Step 1: Sign signal hash
-const attestationWallet = new ethers.Wallet(process.env.ATTESTATION_KEY);
-const signalHash = computeSignalHash(attestationWallet.address, scope, circuitId);
-const signalHashBytes = ethers.getBytes(ethers.hexlify(signalHash));
-const signature = await attestationWallet.signMessage(signalHashBytes);
+// 1. Validate the exact user-approved action, then sign it locally.
+const { domainSeparator, actionHash } = hashTypedAction(action);
+const userSignature = await signer.signTypedData(action.domain, action.types, action.message);
 
-// Step 2: Prepare circuit inputs
-const inputs = await prepareInputs(config, {
-  circuitId,
-  userAddress: attestationWallet.address,
-  userSignature: signature,
-  scope,
+// 2. Recover from the typed digest and build the private witness locally.
+const prepared = await prepareInputs(config, {
+  circuitId: CIRCUIT_IDS.ARC_ELIGIBILITY,
+  userAddress: await signer.getAddress(), userSignature, scope,
+  domainSeparator, actionHash,
 });
+const inputs = { ...prepared, domain_separator: domainSeparator, action_hash: actionHash };
 
-// Step 3: Submit proof
-const proofResponse = await submitProof(config, {
-  circuit,
-  inputs,
-});
+// 3. Fetch a fresh nonce/offer/TEE key without sending the witness yet.
+const challenge = await requestChallenge(config, 'arc_eligibility');
+const paymentHeaders = challenge.requiresPayment
+  ? (await signPayment(challenge, await walletFor('arc'), {
+      network: 'arc-testnet-nano', maxPayment: '0.001', approvedPayment,
+    })).headers
+  : undefined;
 
-console.log('Proof:', proofResponse.proof);
-console.log('Public inputs:', proofResponse.publicInputs);
+// 4. Submit with the same nonce and approved payment; preserve TEE encryption.
+const result = challenge.teePublicKey
+  ? await submitEncryptedProof(config, {
+      circuit: 'arc_eligibility', nonce: challenge.nonce, paymentHeaders,
+      encryptedPayload: encryptForTee(
+        JSON.stringify({ circuitId: CIRCUIT_IDS.ARC_ELIGIBILITY, inputs }),
+        challenge.teePublicKey.publicKey,
+      ),
+    })
+  : await submitProof(config, {
+      circuit: 'arc_eligibility', inputs, nonce: challenge.nonce, paymentHeaders,
+    });
+// Share only the public result, verify it, then separately approve the stake.
 ```
+
+`hashTypedAction(action)` returns `{domainSeparator: string, actionHash: string}` as 32-byte `0x` hashes. For Coinbase KYC/country, sign `computeSignalHash(address, scope, circuitId)` with `signMessage`, call `prepareInputs` without action hashes, then use the same challenge/payment/submission sequence. OIDC uses `prepareOidcPayload` and no attestation-wallet signature. The all-in-one `generateProof` already handles these distinctions.
 
 ## Circuits
 

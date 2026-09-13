@@ -1,5 +1,5 @@
 /**
- * Delegating a credential from one wallet to another.
+ * Authorizing an action by another wallet without transferring KYC or identity.
  *
  * ## The problem this solves
  *
@@ -37,7 +37,7 @@ import type { TypedAction } from './types.js';
 
 /** What a delegation says. Every field is signed and none may be inferred. */
 export interface Delegation {
-  /** The wallet being given the credential's benefit. */
+  /** The operational wallet authorized by this action; it does not acquire KYC. */
   delegate: string;
   /** What the delegate may do, e.g. 'stake'. Free text the service defines. */
   action: string;
@@ -61,7 +61,12 @@ export const DELEGATION_TYPES = {
 } as const;
 
 /**
- * Build the action that A signs to delegate to B.
+ * Build the legacy generic action that A signs to authorize B.
+ *
+ * This four-field wire schema has no amount and is not compatible with the
+ * Ledger House staking Gate's five-field CredentialDelegation type. For that
+ * Gate, supply its exact TypedAction including amount; do not change this
+ * helper's established type hash or treat this as a transfer of identity.
  *
  * `domain` names the service the delegation is for, so a delegation issued to
  * one service cannot be presented at another: the domain separator is part of

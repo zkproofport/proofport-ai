@@ -15,7 +15,20 @@
  * from the wrong circuit for a day before anyone noticed.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { ethers } from 'ethers';
 import { CIRCUIT_IDS } from '../packages/sdk/src/circuits.js';
+
+vi.mock('../packages/sdk/src/inputs.js', async (original) => ({
+  ...await original<typeof import('../packages/sdk/src/inputs.js')>(),
+  prepareInputs: vi.fn(async () => ({ signal_hash: '0xprepared' })),
+}));
+vi.mock('../packages/sdk/src/session.js', () => ({
+  requestChallenge: vi.fn(async () => ({ nonce: 'test-nonce', requiresPayment: false })),
+}));
+vi.mock('../packages/sdk/src/prove.js', () => ({
+  submitProof: vi.fn(async () => ({ proof: '0xproof' })),
+  submitEncryptedProof: vi.fn(),
+}));
 
 /** A signer that records what it was asked to sign, and is never reached here. */
 function watchfulSigner() {
@@ -84,4 +97,128 @@ describe('the circuit decides the signature', () => {
     ).catch((e: Error) => e.message);
     expect(extra).toContain(CIRCUIT_IDS.ARC_ELIGIBILITY);
   });
+});
+
+const NESTED_ACTION = {
+  ...ACTION,
+  types: {
+    Instruction: [{ name: 'terms', type: 'Terms' }, { name: 'labels', type: 'string[]' }],
+    Terms: [{ name: 'quantity', type: 'uint256' }, { name: 'memo', type: 'string' }],
+  },
+  primaryType: 'Instruction',
+  message: { terms: { quantity: '10000000', memo: 'caller-owned names and values' }, labels: ['custom', 'nested'] },
+};
+
+const BOOLEAN_ACTION = {
+  ...NESTED_ACTION,
+  types: {
+    Instruction: [{ name: 'terms', type: 'Terms' }, { name: 'batches', type: 'Terms[][]' }],
+    Terms: [{ name: 'enabled', type: 'bool' }],
+  },
+  message: { terms: { enabled: true }, batches: [[{ enabled: false }], [{ enabled: true }]] },
+};
+
+const invalidActions = [
+  ['missing nested bool', { ...BOOLEAN_ACTION, message: { ...BOOLEAN_ACTION.message, terms: {} } }, /action.message.terms.enabled.*required|missing/],
+  ...['false', 0, {}].map(value => [
+    `malformed nested bool ${JSON.stringify(value)}`,
+    { ...BOOLEAN_ACTION, message: { ...BOOLEAN_ACTION.message, terms: { enabled: value } } },
+    /action.message.terms.enabled.*boolean/,
+  ] as const),
+  ['missing field in nested struct array', { ...BOOLEAN_ACTION, message: { ...BOOLEAN_ACTION.message, batches: [[{}]] } }, /batches\[0\]\[0\].enabled.*required|missing/],
+  ['malformed bool in nested struct array', { ...BOOLEAN_ACTION, message: { ...BOOLEAN_ACTION.message, batches: [[{ enabled: 'false' }]] } }, /batches\[0\]\[0\].enabled.*boolean/],
+  ...[null, 7, ''].map(name => [
+    `malformed declaration name ${JSON.stringify(name)}`,
+    { ...ACTION, types: { Deposit: [{ name, type: 'uint256' }] }, message: { [String(name)]: '1' } },
+    /field.*name.*non-empty string/,
+  ] as const),
+  ['malformed declaration type', { ...ACTION, types: { Deposit: [{ name: 'amount', type: null }] } }, /field.*type.*non-empty string/],
+  ['missing domain', { ...ACTION, domain: undefined }, /action.domain/],
+  ['missing message field', { ...ACTION, message: {} }, /missing.*amount/],
+  ['malformed amount', { ...ACTION, message: { amount: 'not-an-integer' } }, /./],
+  ['malformed field', { ...ACTION, types: { Deposit: [{ name: 'amount', type: 'unknownType' }] } }, /./],
+  ['declared primaryType differs from encoder root', {
+    ...NESTED_ACTION, primaryType: 'Terms', message: { quantity: '1', memo: 'wrong root' },
+  }, /primaryType.*root|root.*primaryType/],
+  ['reserved EIP712Domain referenced by the root', {
+    ...ACTION,
+    types: { Deposit: [...ACTION.types.Deposit, { name: 'context', type: 'EIP712Domain' }], EIP712Domain: [{ name: 'name', type: 'string' }] },
+    message: { amount: '1', context: { name: 'reserved' } },
+  }, /EIP712Domain/],
+  ['explicit EIP712Domain', { ...ACTION, types: { ...ACTION.types, EIP712Domain: [{ name: 'name', type: 'string' }] } }, /./],
+] as const;
+
+describe('action validation before local signing', () => {
+  it.each(invalidActions)('rejects %s before either signature', async (_name, action, error) => {
+    const signer = watchfulSigner();
+    await expect(runFlow({ circuit: 'arc_eligibility', action }, signer)).rejects.toThrow(error);
+    expect(signer.getAddress).not.toHaveBeenCalled();
+    expect(signer.signMessage).not.toHaveBeenCalled();
+    expect(signer.signTypedData).not.toHaveBeenCalled();
+  });
+
+  it('rejects an action on OIDC before JWT processing or signing', async () => {
+    const signer = watchfulSigner();
+    await expect(runFlow({ circuit: 'oidc_domain', action: ACTION }, signer))
+      .rejects.toThrow(/only arc_eligibility carries one|An action was given but/);
+    expect(signer.getAddress).not.toHaveBeenCalled();
+    expect(signer.signMessage).not.toHaveBeenCalled();
+    expect(signer.signTypedData).not.toHaveBeenCalled();
+  });
+
+  it('signs caller-owned nested types and passes both hashes into recovery and proof submission', async () => {
+    const signer = watchfulSigner();
+    await runFlow({ circuit: 'arc_eligibility', action: NESTED_ACTION }, signer);
+    expect(signer.signTypedData).toHaveBeenCalledWith(NESTED_ACTION.domain, NESTED_ACTION.types, NESTED_ACTION.message);
+    expect(signer.signMessage).not.toHaveBeenCalled();
+    const domainSeparator = ethers.TypedDataEncoder.hashDomain(NESTED_ACTION.domain);
+    const actionHash = ethers.TypedDataEncoder.hashStruct('Instruction', NESTED_ACTION.types, NESTED_ACTION.message);
+    const { prepareInputs } = await import('../packages/sdk/src/inputs.js');
+    const { submitProof } = await import('../packages/sdk/src/prove.js');
+    expect(prepareInputs).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ domainSeparator, actionHash }));
+    expect(submitProof).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({
+      inputs: expect.objectContaining({ domain_separator: domainSeparator, action_hash: actionHash }),
+    }));
+  });
+
+  it('exports reusable hashing for SDK stepwise callers', async () => {
+    const sdk = await import('../packages/sdk/src/index.js');
+    expect(sdk).toHaveProperty('hashTypedAction', expect.any(Function));
+    expect(sdk.hashTypedAction(NESTED_ACTION)).toEqual({
+      domainSeparator: ethers.TypedDataEncoder.hashDomain(NESTED_ACTION.domain),
+      actionHash: ethers.TypedDataEncoder.hashStruct('Instruction', NESTED_ACTION.types, NESTED_ACTION.message),
+    });
+    expect(() => sdk.hashTypedAction(undefined as never)).toThrow(/action is required/);
+  });
+});
+
+
+describe('action ownership across asynchronous signing', () => {
+  it('snapshots the approved action before getAddress can mutate caller-owned values', async () => {
+    const action = { ...ACTION, types: { Deposit: [
+      { name: 'amount', type: 'uint256' }, { name: 'nonce', type: 'uint256' },
+    ] }, message: { amount: '10000000', nonce: '1' } };
+    const approved = structuredClone(action);
+    const wallet = ethers.Wallet.createRandom();
+    const signer = {
+      getAddress: vi.fn(async () => { action.message.nonce = '2'; return wallet.address; }),
+      signMessage: vi.fn(wallet.signMessage.bind(wallet)),
+      signTypedData: vi.fn(wallet.signTypedData.bind(wallet)),
+    };
+    await runFlow({ circuit: 'arc_eligibility', action }, signer);
+    const { prepareInputs } = await import('../packages/sdk/src/inputs.js');
+    const input = vi.mocked(prepareInputs).mock.calls.at(-1)![1];
+    expect(ethers.verifyTypedData(approved.domain, approved.types, approved.message, input.userSignature) === wallet.address).toBe(true);
+    expect(input.actionHash).toBe(ethers.TypedDataEncoder.hashStruct(approved.primaryType, approved.types, approved.message));
+    expect(signer.signTypedData).toHaveBeenCalledWith(approved.domain, approved.types, approved.message);
+  });
+});
+
+
+it('hashes and signs actual booleans in arbitrary nested structs and arrays', async () => {
+  const signer = watchfulSigner();
+  await runFlow({ circuit: 'arc_eligibility', action: BOOLEAN_ACTION }, signer);
+  expect(signer.signTypedData).toHaveBeenCalledWith(BOOLEAN_ACTION.domain, BOOLEAN_ACTION.types, BOOLEAN_ACTION.message);
+  const { hashTypedAction } = await import('../packages/sdk/src/index.js');
+  expect(hashTypedAction(BOOLEAN_ACTION).actionHash).toBe(ethers.TypedDataEncoder.hashStruct('Instruction', BOOLEAN_ACTION.types, BOOLEAN_ACTION.message));
 });

@@ -229,7 +229,7 @@ npm install @zkproofport-ai/mcp@latest @zkproofport-ai/sdk@latest ethers
 npx zkproofport-mcp    # Starts stdio MCP server
 ```
 
-Arc support described here requires SDK/MCP **0.2.11 or later**. Install from npm and check the resolved version. Release Please manages package versions and the release workflow publishes them; repository source changes alone do not update `@latest`.
+Arc support described here requires SDK/MCP **0.2.12 or later**, including shared action validation/hashing and exact EIP-712 signing in both proof paths. Install from npm and check the resolved version. Release Please manages package versions and the release workflow publishes them; repository source changes alone do not update `@latest`.
 
 ### Circle Agent Wallet on Arc — EXPERIMENTAL
 

@@ -10,6 +10,8 @@ import {
   submitProof,
   verifyProof,
   computeSignalHash,
+  hashTypedAction,
+  CIRCUIT_IDS,
   CIRCUITS,
   AUTHORIZED_SIGNERS,
   CIRCUIT_NAME_MAP,
@@ -123,9 +125,9 @@ RETURNS: Full ProofResult with proof bytes, public inputs, and timing informatio
           '"key" signs with PAYMENT_PRIVATE_KEY. ' +
           '"cdp" uses a Coinbase CDP server wallet (CDP_API_KEY_ID, CDP_API_KEY_SECRET, CDP_WALLET_SECRET). ' +
           '"circle" uses a Circle developer-controlled wallet (CIRCLE_API_KEY, CIRCLE_ENTITY_SECRET, CIRCLE_WALLET_ID) ' +
-          'and is the way to pay on Arc. Omit it and the single configured wallet is used; ' +
+          'when that wallet supports the selected offer. Omit it and the single configured wallet is used; ' +
           'omit it with none configured against a paying service and the error names what to set. ' +
-          'Any wallet can pay on any offered chain -- the wallet and the chain are separate choices.',
+          'Wallet and chain are separate choices; both must support the actual offered signing domain.',
         ),
       pay_on: z
         .string()
@@ -147,6 +149,7 @@ RETURNS: Full ProofResult with proof bytes, public inputs, and timing informatio
     },
     async (params) => {
       try {
+        const action = params.action ? structuredClone(params.action) : params.action;
         const payment = params.pay_with
           ? await walletFor(params.pay_with)
           : hasAnyPaymentWalletConfigured()
@@ -157,7 +160,7 @@ RETURNS: Full ProofResult with proof bytes, public inputs, and timing informatio
           { attestation: signer, payment },
           {
             circuit: params.circuit,
-            ...(params.action ? { action: params.action } : {}),
+            ...(action ? { action } : {}),
             scope: params.scope,
             countryList: params.country_list,
             isIncluded: params.is_included,
@@ -306,12 +309,12 @@ RETURNS: whether a deposit was made, its transaction hash, and the Gateway balan
   // ─── request_challenge ──────────────────────────────────────────────
   server.tool(
     'request_challenge',
-    `Step 2 of the step-by-step flow (after prepare_inputs): Request a challenge from the server. Sends circuit + inputs to POST /api/v1/prove. Server returns nonce and TEE key information. You MUST call prepare_inputs first to get the inputs parameter, and you MUST pass the returned "nonce" to submit_proof — without it the server just issues another challenge.`,
+    `Step 2 of the step-by-step flow: Request a challenge from the server. Pass inputs: {} to discover the live payment offers, nonce and optional TEE key without transmitting private witness inputs. You MUST pass the returned "nonce" to submit_proof — without it the server just issues another challenge. MCP submit_proof does not sign payments or encrypt inputs; use generate_proof or the SDK for paid/encrypted orchestration.`,
     {
       circuit: circuitParam(),
       inputs: z
         .union([z.string(), z.record(z.unknown())])
-        .describe('Full ProveInputs object from prepare_inputs. Accepts a JSON string or a structured object.'),
+        .describe('Use {} to discover the nonce, payment offers and optional TEE key without transmitting private witness inputs. Also accepts a JSON string or object from trusted local code; any supplied witness is sent to the selected prover and must stay out of model context, dApp/UI and logs.'),
     },
     async (params) => {
       try {
@@ -331,7 +334,7 @@ RETURNS: whether a deposit was made, its transaction hash, and the Gateway balan
   // ─── prepare_inputs ─────────────────────────────────────────────────
   server.tool(
     'prepare_inputs',
-    `Step 1 of the step-by-step flow: Prepare all circuit inputs. Computes signal hash, signs it with the attestation wallet, queries EAS for attestation data, builds Merkle proof, and returns all inputs needed for proof generation. Call this BEFORE request_challenge. For oidc_domain circuit, provide jwt and scope instead of Coinbase-specific parameters.`,
+    `Step 1 of the step-by-step flow: Prepare all circuit inputs. Arc requires action and signs that exact validated EIP-712 object; Coinbase signs the signal hash. Queries EAS, builds the Merkle proof, and returns private witness inputs including the Arc domain_separator and action_hash. Handle these inputs only in trusted local code, never expose them to the dApp, model or logs. Call this BEFORE request_challenge. For oidc_domain circuit, provide jwt and scope instead of Coinbase-specific parameters.`,
     {
       circuit: circuitParam(),
       scope: z
@@ -375,9 +378,17 @@ RETURNS: whether a deposit was made, its transaction hash, and the Gateway balan
     },
     async (params) => {
       try {
+        const action = params.action ? structuredClone(params.action) : params.action;
         const circuitId = CIRCUIT_NAME_MAP[params.circuit];
         const scope = params.scope || 'proofport';
         const isOidc = params.circuit === 'oidc_domain';
+
+        if (action && circuitId !== CIRCUIT_IDS.ARC_ELIGIBILITY) {
+          return errorResult(`An action was given but '${circuitId}' was requested; only arc_eligibility carries one.`);
+        }
+        const actionHashes = circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY
+          ? hashTypedAction(action!)
+          : undefined;
 
         if (isOidc) {
           // OIDC path: prepare inputs locally from JWT (no EAS attestation needed)
@@ -388,7 +399,7 @@ RETURNS: whether a deposit was made, its transaction hash, and the Gateway balan
           return jsonResult(oidcPayload);
         }
 
-        // Coinbase path: EAS attestation
+        // EAS path: the circuit selects typed action or personal_sign.
         const userAddress = await signer.getAddress();
         const signalHash = computeSignalHash(
           userAddress,
@@ -396,7 +407,9 @@ RETURNS: whether a deposit was made, its transaction hash, and the Gateway balan
           circuitId,
         );
 
-        const userSignature = await signer.signMessage(signalHash);
+        const userSignature = actionHashes
+          ? await signer.signTypedData(action!.domain, action!.types, action!.message)
+          : await signer.signMessage(signalHash);
 
         const inputs = await prepareInputs(config, {
           circuitId,
@@ -405,9 +418,14 @@ RETURNS: whether a deposit was made, its transaction hash, and the Gateway balan
           scope,
           countryList: params.country_list,
           isIncluded: params.is_included,
+          ...actionHashes,
         });
 
-        return jsonResult(inputs);
+        return jsonResult(actionHashes ? {
+          ...inputs,
+          domain_separator: actionHashes.domainSeparator,
+          action_hash: actionHashes.actionHash,
+        } : inputs);
       } catch (error) {
         return errorResult(error instanceof Error ? error.message : String(error));
       }
