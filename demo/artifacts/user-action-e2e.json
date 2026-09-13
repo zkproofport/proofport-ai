@@ -1,0 +1,299 @@
+{
+  "observedAt": "2026-09-13T08:40:04.966Z",
+  "source": "Real Playwright dApp interaction; actual Claude, npm MCP/SDK, staging prover and Arc calls",
+  "action": {
+    "domain": {
+      "name": "Ledger House Staking",
+      "version": "1",
+      "chainId": 5042002,
+      "verifyingContract": "0xD0F3eE648386B59B484157332E736388Fcc41F47"
+    },
+    "types": {
+      "CredentialDelegation": [
+        {
+          "name": "delegate",
+          "type": "address"
+        },
+        {
+          "name": "action",
+          "type": "string"
+        },
+        {
+          "name": "amount",
+          "type": "uint256"
+        },
+        {
+          "name": "expiresAt",
+          "type": "uint256"
+        },
+        {
+          "name": "nonce",
+          "type": "string"
+        }
+      ]
+    },
+    "primaryType": "CredentialDelegation",
+    "message": {
+      "delegate": "0x06Ad6B4EEbcD486bE53d8a9dC760a67A5Bdf3F64",
+      "action": "stake",
+      "amount": "10000000",
+      "expiresAt": "1789291402",
+      "nonce": "user-e2e-2daa5582-2343-43f6-953e-b4a97ed4dc00"
+    }
+  },
+  "before": {
+    "positionUSDC": "11.8",
+    "gatewayUSDC": "2.982"
+  },
+  "after": {
+    "positionUSDC": "21.8",
+    "gatewayUSDC": "2.981"
+  },
+  "proof": {
+    "bytes": 16256,
+    "publicInputCount": 192,
+    "circuitId": "arc_eligibility",
+    "publicInputsFingerprint": "0xcb9ed527407e95baa3ce7e553c1d4a79f9ea7a6360131147077afa632f4a9b2d",
+    "signalHash": "0x156da9cd49fb04e4b12b8fd789b3347d670c6dda33013afa27ecd15f7fc7a4c8",
+    "domainSeparator": "0x690922273390b31889bd58831eb6d10a9e88459f1208286785e4d0f38287aa27",
+    "actionHash": "0xbe713262faa6184b394f0b52b90975162bd7c83efe537599714384c487bdd333",
+    "signerRoot": "0xb60da9815c76261b61a1e91f199de5845fc171a6500e57c4240d2ac61d85e2bf",
+    "scope": "0xbf7ef228213a6406e50f2ed879372373cb519737595695c0a607cef49b4ae541",
+    "nullifier": "0xda6786cb0643be7455b46571a77ac175073b972fb781650499b294f633fbca90"
+  },
+  "proverMcp": {
+    "serverName": "zkproofport-mcp",
+    "version": "0.2.11",
+    "endpoint": "https://stg-ai.zkproofport.app",
+    "transport": "stdio",
+    "status": "returned",
+    "observedAt": "2026-09-13T08:39:28.635Z",
+    "packageSource": "npm",
+    "mcpVersion": "0.2.11",
+    "sdkVersion": "0.2.11",
+    "tool": "generate_proof",
+    "arguments": {
+      "circuit": "arc_eligibility",
+      "scope": "ledger-house",
+      "pay_on": "arc-testnet-nano",
+      "pay_with": "arc",
+      "max_payment": "0.001",
+      "action": {
+        "domain": {
+          "name": "Ledger House Staking",
+          "version": "1",
+          "chainId": 5042002,
+          "verifyingContract": "0xD0F3eE648386B59B484157332E736388Fcc41F47"
+        },
+        "types": {
+          "CredentialDelegation": [
+            {
+              "name": "delegate",
+              "type": "address"
+            },
+            {
+              "name": "action",
+              "type": "string"
+            },
+            {
+              "name": "amount",
+              "type": "uint256"
+            },
+            {
+              "name": "expiresAt",
+              "type": "uint256"
+            },
+            {
+              "name": "nonce",
+              "type": "string"
+            }
+          ]
+        },
+        "primaryType": "CredentialDelegation",
+        "message": {
+          "delegate": "0x06Ad6B4EEbcD486bE53d8a9dC760a67A5Bdf3F64",
+          "action": "stake",
+          "amount": "10000000",
+          "expiresAt": "1789291402",
+          "nonce": "user-e2e-2daa5582-2343-43f6-953e-b4a97ed4dc00"
+        }
+      }
+    },
+    "proofBytes": 16256,
+    "publicInputCount": 192
+  },
+  "permissions": [
+    {
+      "id": "a4a90118-4417-4aab-b414-51e662a1f717",
+      "kind": "proof",
+      "status": "approved",
+      "requestedAt": "2026-09-13T08:38:54.052Z",
+      "expiresAt": "2026-09-13T08:43:54.052Z",
+      "decidedAt": "2026-09-13T08:38:56.551Z",
+      "details": {
+        "amount": "10",
+        "delegate": "0x06Ad6B4EEbcD486bE53d8a9dC760a67A5Bdf3F64",
+        "credentialSigner": "****",
+        "proverId": "894776",
+        "proverUrl": "https://stg-ai.zkproofport.app",
+        "recipient": "0x5A3E649208Ae15ec52496c1Ae23b2Ff89Ac02f0c",
+        "fee": "0.001",
+        "payment": "Circle Agent Wallet · Arc nanopayments",
+        "chainId": 5042002,
+        "circuit": "arc_eligibility",
+        "scope": "ledger-house",
+        "gate": "0xD0F3eE648386B59B484157332E736388Fcc41F47",
+        "action": {
+          "domain": {
+            "name": "Ledger House Staking",
+            "version": "1",
+            "chainId": 5042002,
+            "verifyingContract": "0xD0F3eE648386B59B484157332E736388Fcc41F47"
+          },
+          "types": {
+            "CredentialDelegation": [
+              {
+                "name": "delegate",
+                "type": "address"
+              },
+              {
+                "name": "action",
+                "type": "string"
+              },
+              {
+                "name": "amount",
+                "type": "uint256"
+              },
+              {
+                "name": "expiresAt",
+                "type": "uint256"
+              },
+              {
+                "name": "nonce",
+                "type": "string"
+              }
+            ]
+          },
+          "primaryType": "CredentialDelegation",
+          "message": {
+            "delegate": "0x06Ad6B4EEbcD486bE53d8a9dC760a67A5Bdf3F64",
+            "action": "stake",
+            "amount": "10000000",
+            "expiresAt": "1789291402",
+            "nonce": "user-e2e-2daa5582-2343-43f6-953e-b4a97ed4dc00"
+          }
+        },
+        "approvedPayment": {
+          "network": "eip155:5042002",
+          "scheme": "exact",
+          "amount": "1000",
+          "asset": "0x3600000000000000000000000000000000000000",
+          "payTo": "0x5A3E649208Ae15ec52496c1Ae23b2Ff89Ac02f0c",
+          "extra": {
+            "name": "GatewayWalletBatched",
+            "version": "1",
+            "verifyingContract": "0x0077777d7EBA4688BDeF3E311b846F25870A19B9"
+          }
+        }
+      }
+    },
+    {
+      "id": "a87e7a35-8161-49c2-a171-49c510c08a21",
+      "kind": "stake",
+      "status": "approved",
+      "requestedAt": "2026-09-13T08:39:32.774Z",
+      "expiresAt": "2026-09-13T08:44:32.774Z",
+      "decidedAt": "2026-09-13T08:39:33.565Z",
+      "details": {
+        "amount": "10",
+        "delegate": "0x06Ad6B4EEbcD486bE53d8a9dC760a67A5Bdf3F64",
+        "chainId": 5042002,
+        "gate": "0xD0F3eE648386B59B484157332E736388Fcc41F47",
+        "verifier": "0xCbC8E63fF92659E8B44cFF117D33005Bb669a018",
+        "proofFingerprint": "0xcb9ed527407e95baa3ce7e553c1d4a79f9ea7a6360131147077afa632f4a9b2d",
+        "verified": true,
+        "transaction": "USDC approval if needed, then stakePacked",
+        "payment": "Circle Agent Wallet",
+        "action": {
+          "domain": {
+            "name": "Ledger House Staking",
+            "version": "1",
+            "chainId": 5042002,
+            "verifyingContract": "0xD0F3eE648386B59B484157332E736388Fcc41F47"
+          },
+          "types": {
+            "CredentialDelegation": [
+              {
+                "name": "delegate",
+                "type": "address"
+              },
+              {
+                "name": "action",
+                "type": "string"
+              },
+              {
+                "name": "amount",
+                "type": "uint256"
+              },
+              {
+                "name": "expiresAt",
+                "type": "uint256"
+              },
+              {
+                "name": "nonce",
+                "type": "string"
+              }
+            ]
+          },
+          "primaryType": "CredentialDelegation",
+          "message": {
+            "delegate": "0x06Ad6B4EEbcD486bE53d8a9dC760a67A5Bdf3F64",
+            "action": "stake",
+            "amount": "10000000",
+            "expiresAt": "1789291402",
+            "nonce": "user-e2e-2daa5582-2343-43f6-953e-b4a97ed4dc00"
+          }
+        }
+      }
+    }
+  ],
+  "verification": {
+    "ok": true,
+    "valid": true,
+    "chainId": 5042002,
+    "wallet": "0x06Ad6B4EEbcD486bE53d8a9dC760a67A5Bdf3F64",
+    "gate": "0xD0F3eE648386B59B484157332E736388Fcc41F47",
+    "verifier": "0xCbC8E63fF92659E8B44cFF117D33005Bb669a018",
+    "method": "verify(bytes,bytes32[])",
+    "checks": {
+      "coinbasePolicy": true,
+      "authorizedActor": true,
+      "exactAction": true,
+      "nonceUnused": true,
+      "deadlineValid": true
+    },
+    "checkedBlock": 61871395,
+    "deadline": "1789291402",
+    "nonce": "user-e2e-2daa5582-2343-43f6-953e-b4a97ed4dc00",
+    "actionAuthorizationMatched": true,
+    "fingerprint": "0xcb9ed527407e95baa3ce7e553c1d4a79f9ea7a6360131147077afa632f4a9b2d"
+  },
+  "stake": {
+    "ok": true,
+    "step": 6,
+    "amount": "10",
+    "wallet": "0x06Ad6B4EEbcD486bE53d8a9dC760a67A5Bdf3F64",
+    "txHash": "0xde06a71e275700a6a404a7c1d285885c015f48aa66ef73b4e6cc13d573855a47",
+    "block": 61871427,
+    "approvalTx": "0xfad6ffc904a9b38a3e94e3068bce85e363a542bef1a70ad597a004df12fe03b7",
+    "verifiedOn": {
+      "chainId": 5042002,
+      "gate": "0xD0F3eE648386B59B484157332E736388Fcc41F47",
+      "verifier": "0xCbC8E63fF92659E8B44cFF117D33005Bb669a018"
+    },
+    "receiptStatus": 1,
+    "positionBefore": "11.8",
+    "positionAfter": "21.8"
+  },
+  "explorer": "https://testnet.arcscan.app/tx/0xde06a71e275700a6a404a7c1d285885c015f48aa66ef73b4e6cc13d573855a47"
+}

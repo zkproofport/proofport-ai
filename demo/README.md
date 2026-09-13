@@ -16,12 +16,12 @@ Use Node 22.18+, existing Claude Code and Circle CLI logins, and the private
 ```bash
 npm ci
 npm ci --prefix demo/runtime --workspaces=false
-RECORDING_PORT=4116 bash demo/record.sh
+RECORDING_PORT=4118 bash demo/record.sh
 ```
 
 The `demo/runtime` npm install bootstraps the server and wallet observation. It is separate from the fresh per-run prover installation selected by the agent after reading the guide. Both use published npm packages; neither imports local workspace `packages/*/dist` output.
 
-Open **http://localhost:4116**. Keep any existing CLI/server running; choose another
+Open **http://localhost:4118**. Keep any existing CLI/server running; choose another
 unused port for a clean session. The remote prover is **staging** at
 `https://stg-ai.zkproofport.app`.
 
@@ -29,11 +29,59 @@ Match the submitted presentation's **10 USDC** action. Start with an empty instr
 
 > Stake 10 USDC with my Agent Wallet. Find a registered ZKProofport prover in the dApp Agent Marketplace and verify its ERC-8004 identity. Read its installation instructions, install the published SDK and MCP packages from npm, then connect and read the MCP tools. Ask me to approve the exact-action authorization and proof fee, then ask me again before submitting the verified stake.
 
-Set amount `10`, click **Ask agent**, review and approve **Authorize this action +
+Set amount `10`. Open **Exact action · review or edit EIP-712** and review or edit
+the complete `action` JSON before submitting. Its `domain`, `types`, `primaryType`
+and `message` travel unchanged through the user approval, actual prover MCP call
+and SDK EIP-712 signature. Wallet A's address/key never belongs in this JSON.
+For this deployed vault the action schema must match its contract; the SDK/MCP
+also support arbitrary valid EIP-712 struct names, keys, types and nested values.
+Click **Ask agent**, review and approve **Authorize this action +
 proof fee**, then review **Confirm the verified stake**. Capture the actual
 Gateway payment, proof result, verification checks, position update and **View on
 Arc Explorer**. The presentation ends at Explorer; it does not include the internal
 candidate-address audit.
+
+### Test the user-supplied action without recording
+
+Start a fresh local dApp on an unused port; keep existing sessions running:
+
+```bash
+RECORDING_PORT=4118 bash demo/record.sh
+```
+
+The launcher passes only runtime/Claude login settings and public Wallet B
+configuration to the service. Do **not** start it with private `--env-file` files.
+Only the local MCP client reads `.env.development` / `.env.test`; the service
+refuses startup with `ATTESTATION_KEY` or the private credential wallet address.
+
+Run the focused unit tests and the opt-in live browser E2E (Google Chrome required):
+
+```bash
+npx vitest run --project unit tests/demoUserAction.test.ts tests/demoClaudeRoutes.test.ts tests/dappAgent.test.ts tests/dappPolicy.test.ts
+ARC_DAPP_LIVE_E2E=1 ARC_DAPP_URL=http://localhost:4118 npm run test:demo:e2e
+```
+
+The live test operates the real form and both approval buttons, uses actual
+Claude/npm MCP/SDK and the staging prover, buys **one 0.001 USDC proof** and stakes
+**10 USDC once**. It requires an empty run and sufficient Wallet B/Gateway balances.
+There are no automatic paid retries. Without `ARC_DAPP_LIVE_E2E=1`, live tests skip.
+The submitted user nonce/deadline must equal the approval and actual MCP arguments;
+the proof hash must equal the deployed Gate's hash. Altered amount, actor, nonce,
+domain, deadline and replay are rejected by real `eth_call`. A separate custom-type
+MCP test signs with an ephemeral non-KYC fixture and confirms refusal before payment.
+
+After a successful run, recheck its proof and rejected mutations without another
+purchase or stake. Use the port containing that completed run (the execution
+below remains on 4117; the clean current service is 4118):
+
+```bash
+ARC_DAPP_LIVE_E2E=1 ARC_DAPP_REUSE_COMPLETED=1 ARC_DAPP_URL=http://localhost:4117 npm run test:demo:e2e
+```
+
+Real successful execution on **2026-09-13 17:38–17:40 KST**:
+position **11.8 → 21.8 USDC**, Gateway **2.982 → 2.981 USDC**;
+[Arc transaction](https://testnet.arcscan.app/tx/0xde06a71e275700a6a404a7c1d285885c015f48aa66ef73b4e6cc13d573855a47).
+Public evidence: [`artifacts/user-action-e2e.json`](artifacts/user-action-e2e.json).
 
 The [Korean team guide](https://github.com/zkproofport/proofport-app-dev/blob/main/docs/ops/ai-usage.md)
 provides the full filming procedure. No separate prove CLI command is needed:

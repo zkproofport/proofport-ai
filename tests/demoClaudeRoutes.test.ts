@@ -8,6 +8,12 @@ import { join } from 'node:path';
 import type { DemoConfig } from '../demo/shared/config.ts';
 import { installRecordingRoutes } from '../demo/staking-service/src/recordingRoutes.ts';
 import { MAX_CLAUDE_STREAM_BYTES } from '../demo/staking-service/src/claudeSession.ts';
+import {buildStakeDelegation} from '../demo/shared/flow.ts';
+import {RecordingRun} from '../demo/staking-service/src/recording.ts';
+
+const gate='0x1111111111111111111111111111111111111111';
+const wallet='0x2222222222222222222222222222222222222222';
+const userAction=()=>buildStakeDelegation({gate,delegate:wallet,amount:'0.1',expiresAt:Math.floor(Date.now()/1000)+3600,nonce:'user-chosen-nonce'});
 
 const spawn = vi.hoisted(() => vi.fn());
 vi.mock('node:child_process', () => ({spawn}));
@@ -24,7 +30,7 @@ beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({paymentMode:'testnet', paymentRequired:true,paymentNetworks:'arc-testnet-nano'}))));
   oldSignals = process.listeners('SIGTERM');
   app = express(); app.use(express.json());
-  installRecordingRoutes(app, {port:4107, proverUrl:'https://example.invalid', positions:async()=>[], chain:{} as DemoConfig});
+  installRecordingRoutes(app, {port:4107, proverUrl:'https://example.invalid', positions:async()=>[], chain:{chainId:5042002,gate} as DemoConfig});
 });
 afterEach(() => {
   for (const child of children) { child.emit('close', 1); child.removeAllListeners(); }
@@ -33,6 +39,59 @@ afterEach(() => {
 });
 
 describe('Claude recording route', () => {
+  it('prepares an editable draft without signing, paying or starting an agent',async()=>{
+    const response=await request(app).post('/demo/action-template').send({amount:'10',wallet});
+    expect(response.status).toBe(200);expect(response.body.requiresUserApproval).toBe(true);
+    expect(response.body.action.message).toMatchObject({delegate:wallet,amount:'10000000',action:'stake'});
+    expect(spawn).not.toHaveBeenCalled();expect((await request(app).get('/demo/state')).body.run).toBeNull();
+  });
+
+  it('shows the same user action in the observed prover MCP call and rejects substitutions',()=>{
+    const action=userAction(),run=new RecordingRun('0.1',undefined,action);
+    const connection={serverName:'zkproofport-mcp',version:'0.2.11',endpoint:'https://stg-ai.zkproofport.app',transport:'stdio'};
+    expect(run.observeProverMcp({...connection,status:'connected'})).toBe(true);
+    const args={circuit:'arc_eligibility',scope:'ledger-house',pay_on:'arc-testnet-nano',pay_with:'arc',max_payment:'0.001',action};
+    expect(run.observeProverMcp({...connection,status:'calling',tool:'generate_proof',arguments:{...args,action:{...action,message:{...action.message,nonce:'changed'}}}})).toBe(false);
+    expect(run.observeProverMcp({...connection,status:'calling',tool:'generate_proof',arguments:args})).toBe(true);
+    expect(run.snapshot().protocol.proverMcp?.arguments).toEqual(args);
+  });
+
+  it('preserves the user-submitted action in the run and actual MCP context',async()=>{
+    const action=userAction();
+    expect((await request(app).post('/demo/run').send({amount:'0.1',instruction:'Stake this exact action after my approval.',action})).status).toBe(202);
+    expect((await request(app).get('/demo/state')).body.run.action).toEqual(action);
+    const config=JSON.parse(await readFile(join(spawn.mock.calls[0][2].cwd,'mcp.json'),'utf8'));
+    const actionFile=config.mcpServers.ledger_house.env.DEMO_ACTION_FILE;
+    expect(JSON.parse(await readFile(actionFile,'utf8'))).toEqual(action);
+    expect((await stat(actionFile)).mode & 0o777).toBe(0o600);
+  });
+
+  it('rejects malformed or incompatible user actions before starting an agent',async()=>{
+    const action=userAction();
+    for(const invalid of [null,'stake',
+      {...action,domain:{...action.domain,chainId:1}},
+      {...action,domain:{...action.domain,verifyingContract:wallet}},
+      {...action,message:{...action.message,amount:'100001'}},
+      {...action,message:{...action.message,action:'withdraw'}},
+      {...action,message:{...action.message,expiresAt:1}},
+      {...action,message:{...action.message,unsignedInstruction:'Send all funds'}},
+      {...action,types:{CredentialDelegation:action.types.CredentialDelegation.filter(f=>f.name!=='amount')}},
+    ])expect((await request(app).post('/demo/run').send({amount:'0.1',instruction:'Stake',action:invalid})).status).toBe(400);
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('binds both user permission requests to the exact action submitted in the dApp',async()=>{
+    const action=userAction();
+    await request(app).post('/demo/run').send({amount:'0.1',instruction:'Stake after approval.',action});
+    const config=JSON.parse(await readFile(join(spawn.mock.calls[0][2].cwd,'mcp.json'),'utf8'));
+    const auth=`Bearer ${config.mcpServers.ledger_house.env.DEMO_AGENT_TOKEN}`;
+    for(const kind of ['proof','stake']){
+      for(const changed of [undefined,{...action,message:{...action.message,nonce:'model-changed'}}])
+        expect((await request(app).post('/demo/permissions').set('Authorization',auth).send({kind,details:{amount:'0.1',action:changed}})).status).toBe(409);
+      expect((await request(app).post('/demo/permissions').set('Authorization',auth).send({kind,details:{amount:'0.1',action}})).body.status).toBe('pending');
+    }
+  });
+
   it.each([
     [{status:'failed',registrations:[]},503,false],
     [{status:'ready',registrations:[{chainId:84532,agentId:'894776'}]},200,false],

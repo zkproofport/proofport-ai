@@ -5,6 +5,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {randomUUID} from 'node:crypto';
+import {isDeepStrictEqual} from 'node:util';
+import {ethers,buildStakeDelegation} from '../../shared/flow.ts';
+import {readUserStakeAction,type StakeAction} from '../../shared/userAction.ts';
 import {PermissionLedger} from './permissions.ts';
 import { RecordingRun, parseStakeAmount, parseInstruction } from './recording.ts';
 import { ClaudeStreamDecoder, claudeArguments, claudeEnvironment } from './claudeSession.ts';
@@ -50,6 +53,14 @@ export function installRecordingRoutes(app: Express, options: { proverUrl: strin
   }
 
   app.get('/health', (_req, res) => res.json({ service: 'ledger-house', recording: true }));
+  app.post('/demo/action-template',(req,res)=>{
+    if(!isLocalRecordingRequest(req,options.port))return res.sendStatus(403);
+    try{
+      const amount=parseStakeAmount(req.body?.amount);
+      const action=buildStakeDelegation({gate:options.chain.gate,delegate:req.body?.wallet,amount,expiresAt:Math.floor(Date.now()/1000)+3600,nonce:ethers.hexlify(ethers.randomBytes(16))});
+      return res.json({action,requiresUserApproval:true});
+    }catch{return res.status(400).json({error:'A valid amount and operational Wallet B address are required.'});}
+  });
   app.get('/demo/state', async (_req, res) => {
     try { res.set('Cache-Control', 'no-store').json({ run: snapshot(),
       prover: await health(), positions: await options.positions(), chainId: 5042002, chain:options.chain,
@@ -79,6 +90,7 @@ export function installRecordingRoutes(app: Express, options: { proverUrl: strin
     if(!isAgent(req))return res.status(403).json({error:'Only the active agent may request permission.'});
     const {kind,details}=req.body??{};
     if(!['proof','stake'].includes(kind)||!details||typeof details!=='object'||Array.isArray(details)||JSON.stringify(details).length>12000||details.amount!==current!.amount)return res.status(400).json({error:'Invalid permission request.'});
+    if(current!.action&&!isDeepStrictEqual(details.action,current!.action))return res.status(409).json({error:'Permission must authorize the exact action submitted by the user.'});
     try{const value=permissions.request(kind,JSON.parse(createRedactor(process.env)(JSON.stringify(details))));publish();return res.json(value);}
     catch(error){return res.status(409).json({error:(error as Error).message});}
   });
@@ -96,12 +108,19 @@ export function installRecordingRoutes(app: Express, options: { proverUrl: strin
   app.post('/demo/run', async (req, res) => {
     if (!isLocalRecordingRequest(req,options.port)) return res.status(403).json({ error: 'Run this demo from this computer.' });
     if (terminateAgent || current?.snapshot().status === 'running') return res.status(409).json({ error: 'An agent is already running. Wait for its result.' });
-    let amount: string, instruction: string;
-    try { amount = parseStakeAmount(req.body?.amount); instruction = parseInstruction(req.body?.instruction); }
+    let amount: string, instruction: string,action:StakeAction|undefined;
+    try {
+      amount = parseStakeAmount(req.body?.amount); instruction = parseInstruction(req.body?.instruction);
+      if(req.body?.action!==undefined){
+        const text=JSON.stringify(req.body.action);
+        if(text.length>12000||createRedactor(process.env)(text)!==text)throw Error('The action must contain only public authorization fields.');
+        action=readUserStakeAction(req.body.action,{gate:options.chain.gate,amount});
+      }
+    }
     catch (error) { return res.status(400).json({ error: (error as Error).message }); }
     const redact = createRedactor(process.env);
     instruction = redact(instruction);
-    const run = new RecordingRun(amount, redact);
+    const run = new RecordingRun(amount, redact,action);
     current = run;
     permissions=new PermissionLedger();agentToken=randomUUID();
     run.startClaude(instruction);
@@ -109,10 +128,12 @@ export function installRecordingRoutes(app: Express, options: { proverUrl: strin
     let directory: string;
     try {
       directory = await mkdtemp(join(tmpdir(), 'ledger-house-claude-'));
+      const actionFile=join(directory,'action.json');
+      if(action)await writeFile(actionFile,JSON.stringify(action),{mode:0o600});
       await writeFile(join(directory, 'mcp.json'), JSON.stringify({ mcpServers: { ledger_house: {
         command: process.execPath,
         args: [fileURLToPath(new URL('../../user-agent/src/dapp-mcp.ts', import.meta.url))],
-        env: { DEMO_SERVICE: `http://localhost:${options.port}`, DEMO_AMOUNT: amount, DEMO_AGENT_TOKEN:agentToken },
+        env: { DEMO_SERVICE: `http://localhost:${options.port}`, DEMO_AMOUNT: amount, DEMO_AGENT_TOKEN:agentToken,...(action?{DEMO_ACTION_FILE:actionFile}:{}) },
       } } }), { mode: 0o600 });
     } catch {
       run.finish(1, 'Could not prepare the Claude Code session.'); publish();

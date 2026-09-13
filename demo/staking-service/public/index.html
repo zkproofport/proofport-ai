@@ -19,7 +19,9 @@
         <form id="stake-form">
           <label for="instruction">Your instruction</label>
           <textarea id="instruction" name="instruction" rows="4" maxlength="2000" required spellcheck="false" placeholder="Stake 10 USDC on Arc. Find the required proof and ask me before spending."></textarea>
-          <label for="amount">Requested staking amount</label><div class="amount-input"><input id="amount" name="amount" value="10" inputmode="decimal" autocomplete="off" aria-describedby="amount-help" required><span>USDC</span></div><p id="amount-help" class="micro">You approve the proof fee and the stake separately.</p><button id="run-button" type="submit"><span>Ask agent</span><span>↗</span></button>
+          <label for="amount">Requested staking amount</label><div class="amount-input"><input id="amount" name="amount" value="10" inputmode="decimal" autocomplete="off" aria-describedby="amount-help" required><span>USDC</span></div><p id="amount-help" class="micro">You approve the proof fee and the stake separately.</p>
+          <details class="action-editor" id="action-editor"><summary>Exact action · review or edit EIP-712</summary><label for="action-input">Action sent for Wallet A authorization</label><textarea id="action-input" name="action" rows="12" maxlength="12000" spellcheck="false" aria-describedby="action-help" placeholder="Preparing your editable action…"></textarea><p id="action-help" class="micro">Your submitted fields are signed and bound to the KYC proof. Wallet A stays private.</p><button id="reset-action" type="button">Prepare a fresh action</button></details><p id="action-draft-status" class="micro">Preparing the action for Wallet B…</p>
+          <button id="run-button" type="submit"><span>Ask agent</span><span>↗</span></button>
         </form>
         <p id="form-error" class="error" role="alert" hidden></p>
         <p class="launch-note">Your instruction starts discovery. Signing, payment and staking wait for your approval.</p>

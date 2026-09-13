@@ -12,6 +12,7 @@ let refreshing = false;
 let walletRefreshing = false;
 const expandedEvents = new Set();
 let shownPermission = null;
+let actionEdited=false,actionPreparing=false;
 const shortAddress = value => typeof value === 'string' ? `${value.slice(0, 8)}…${value.slice(-6)}` : 'Wallet B';
 const deadline = value => { const date = new Date(Number(value) * 1000); return value && Number.isFinite(date.getTime()) ? date.toLocaleString('en-GB', {hour12:false, timeZone:'Asia/Seoul'}) + ' KST' : 'Not prepared'; };
 function fitInstruction() {
@@ -212,6 +213,7 @@ function renderTerminal(run) {
 function renderRun(run) {
   active = run?.status === 'running';
   $('run-button').disabled = active; $('amount').disabled = active; $('instruction').disabled = active;
+  $('action-input').disabled=active;$('reset-action').disabled=active||actionPreparing;
   $('run-button').firstElementChild.textContent = active ? 'Agent working…' : 'Ask agent';
   const results = observedResults(run);
   const receipt = results.stake;
@@ -219,7 +221,7 @@ function renderRun(run) {
   const pendingPermission = run?.permissions?.some(p => p.status === 'pending');
   $('run-status').textContent = pendingPermission ? 'Your approval' : confirmed ? 'Staked' : run ? ({running:'Running',completed:'Finished',failed:'Stopped'}[run.status] ?? 'Unknown') : 'Ready';
   $('run-status').className = `run-status ${confirmed ? 'completed' : run?.status ?? ''}`;
-  if (run && currentRunId !== run.id) { $('amount').value = run.amount; if (typeof run.instruction === 'string') { $('instruction').value = run.instruction; fitInstruction(); } currentRunId = run.id; }
+  if (run && currentRunId !== run.id) { $('amount').value = run.amount; if(run.action){$('action-input').value=JSON.stringify(run.action,null,2);actionEdited=true;$('action-draft-status').textContent='Submitted EIP-712 action · prepare a fresh action for another stake';} if (typeof run.instruction === 'string') { $('instruction').value = run.instruction; fitInstruction(); } currentRunId = run.id; }
   const called = new Set((run?.terminal?.lines ?? []).filter(line => line.kind === 'tool_call').map(line => /^mcp__ledger_house__(\w+)/.exec(line.text)?.[1]));
   const tools = [null, 'read_dapp', 'discover_prover', 'prepare_delegation', 'generate_proof', 'verify_proof_on_arc', 'stake'];
   const done = [Boolean(run?.instruction), Boolean(results.read_dapp), Boolean(results.discover_prover), Boolean(results.prepare_delegation), Boolean(results.generate_proof), results.verify_proof_on_arc?.valid === true, confirmed];
@@ -263,6 +265,7 @@ async function refreshWallet() {
     if (!response.ok) throw Error('Wallet unavailable');
     walletSnapshot = await response.json();
     renderWallet(walletSnapshot, terminalRun, observedResults(terminalRun));
+    if(!$('action-input').value&&!active)void prepareActionDraft();
   } catch { if (!walletSnapshot) renderWallet(null, terminalRun, observedResults(terminalRun)); }
   finally{walletRefreshing=false;}
 }
@@ -281,7 +284,24 @@ async function refresh() {
   finally{refreshing=false;}
 }
 
-$('stake-form').addEventListener('submit',async event=>{event.preventDefault();if(active)return;$('form-error').hidden=true;$('run-button').disabled=true;try{const instruction=$('instruction').value.trim();if(!instruction)throw new Error('Enter an instruction for the agent.');const response=await fetch('/demo/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:$('amount').value,instruction})});const data=await response.json();if(!response.ok)throw new Error(data.error ?? 'Could not start the agent');await refresh();}catch(error){$('form-error').textContent=error.message;$('form-error').hidden=false;$('run-button').disabled=false;}});
+async function prepareActionDraft(force=false){
+ if(active||actionPreparing||(!force&&actionEdited))return;
+ if(!walletSnapshot?.wallet)return;
+ actionPreparing=true;$('reset-action').disabled=true;
+ const amount=$('amount').value;
+ try{
+  const response=await fetch('/demo/action-template',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount,wallet:walletSnapshot.wallet})});
+  const data=await response.json();if(!response.ok)throw Error(data.error||'Action unavailable');
+  if(active||(!force&&actionEdited)||$('amount').value!==amount)return;
+  $('action-input').value=JSON.stringify(data.action,null,2);actionEdited=false;
+  $('action-draft-status').textContent=`Stake ${amount} USDC · editable EIP-712 action · approval required`;
+ }catch(error){$('action-draft-status').textContent=error.message;}
+ finally{actionPreparing=false;$('reset-action').disabled=active;}
+}
+$('action-input').addEventListener('input',()=>{actionEdited=true;$('action-draft-status').textContent='Your action fields · will be submitted unchanged for approval';});
+$('reset-action').addEventListener('click',()=>prepareActionDraft(true));
+$('amount').addEventListener('change',()=>{if(!actionEdited)void prepareActionDraft();else $('action-draft-status').textContent='Amount changed · update your action amount before submitting';});
+$('stake-form').addEventListener('submit',async event=>{event.preventDefault();if(active||actionPreparing)return;$('form-error').hidden=true;$('run-button').disabled=true;try{const instruction=$('instruction').value.trim();if(!instruction)throw new Error('Enter an instruction for the agent.');let action;try{action=JSON.parse($('action-input').value);}catch{throw Error('Review or prepare a valid EIP-712 action before asking the agent.');}const response=await fetch('/demo/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:$('amount').value,instruction,action})});const data=await response.json();if(!response.ok)throw new Error(data.error ?? 'Could not start the agent');await refresh();}catch(error){$('form-error').textContent=error.message;$('form-error').hidden=false;$('run-button').disabled=false;}});
 $('permission-dialog').addEventListener('cancel',event=>event.preventDefault());
 for(const decision of ['approve','reject'])$(decision+'-permission').addEventListener('click',async()=>{
  if(!shownPermission)return;const id=shownPermission.id;$('approve-permission').disabled=true;$('reject-permission').disabled=true;

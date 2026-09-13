@@ -9,6 +9,8 @@ import { candidateMatchesProof, normalizeArcPublicInputs, extractArcPublicMetada
 import { installRecordingRoutes, isLocalRecordingRequest } from './recordingRoutes.ts';
 import {readOperationalWallet} from '../../shared/walletStatus.ts';
 
+if(process.env.ATTESTATION_KEY||process.env.E2E_ATTESTATION_WALLET_ADDRESS)
+ throw Error('Private credential configuration must stay in the local prover client. Start the staking service without private env files.');
 const PORT=Number(process.env.PORT ?? 4100);
 const config=loadDemoConfig();
 const provider=new ethers.JsonRpcProvider(config.rpcUrl);
@@ -83,11 +85,7 @@ app.post('/demo/audit',async(req,res)=>{
   try{
     let candidate=req.body?.candidate;
     if(req.body?.fromEnvironment===true){
-      candidate=process.env.E2E_ATTESTATION_WALLET_ADDRESS;
-      if(!candidate&&process.env.ATTESTATION_KEY){
-        try{candidate=new ethers.Wallet(process.env.ATTESTATION_KEY).address;}
-        catch{throw new Error('Configured attestation key is invalid.');}
-      }
+      throw Error('Environment-based private wallet audit is available only in the local audit CLI.');
     }
     const matches=candidateMatchesProof(latestProof.publicInputs,candidate);
     const verifier=new ethers.Contract(config.verifier,['function verify(bytes,bytes32[]) view returns(bool)'],provider);

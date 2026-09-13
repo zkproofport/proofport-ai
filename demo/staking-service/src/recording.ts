@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import {isDeepStrictEqual} from 'node:util';
+import type {StakeAction} from '../../shared/userAction.ts';
 
 export function parseStakeAmount(value: unknown): string {
   if (typeof value !== 'string' || !/^\d{1,7}(\.\d{1,6})?$/.test(value)) {
@@ -49,10 +51,11 @@ export class RecordingRun {
   private protocol:{payment?:PaymentObservation;proverMcp?:Record<string,unknown>}={};
   private steps = labels.map((label, index) => ({ number: index + 1, label, status: 'waiting', detail: '', at: null as string | null }));
   readonly amount: string;
+  readonly action:StakeAction|null;
   private readonly redact: (text: string) => string;
 
-  constructor(amount: string, redact: (text: string) => string = text => text) {
-    this.amount = parseStakeAmount(amount); this.redact = redact;
+  constructor(amount: string, redact: (text: string) => string = text => text,action?:StakeAction) {
+    this.amount = parseStakeAmount(amount); this.redact = redact;this.action=action?structuredClone(action):null;
   }
 
   private terminal(text: string, kind: 'command' | 'output' | 'system' | 'tool_call' | 'tool_result' = 'output') {
@@ -79,7 +82,8 @@ export class RecordingRun {
       const expected={circuit:'arc_eligibility',scope:'ledger-house',pay_on:'arc-testnet-nano',pay_with:'arc',max_payment:'0.001'};
       const args=input.arguments;
       if(Object.entries(expected).some(([key,v])=>args[key]!==v))return false;
-      value.tool=input.tool;value.arguments=expected;
+      if(this.action&&!isDeepStrictEqual(args.action,this.action))return false;
+      value.tool=input.tool;value.arguments={...expected,...(this.action?{action:structuredClone(this.action)}:{})};
     }
     if(input.status==='returned'){
       if(!Number.isSafeInteger(input.proofBytes)||Number(input.proofBytes)<=0||!Number.isSafeInteger(input.publicInputCount)||Number(input.publicInputCount)<=0)return false;
@@ -250,7 +254,7 @@ export class RecordingRun {
   }
 
   snapshot() {
-    const snapshot = { id: this.id, amount: this.amount, instruction: this.instruction, agent: this.claude ? {provider: 'Claude Code', model: this.model} : null, startedAt: this.startedAt, finishedAt: this.finishedAt,
+    const snapshot = { id: this.id, amount: this.amount, action:this.action, instruction: this.instruction, agent: this.claude ? {provider: 'Claude Code', model: this.model} : null, startedAt: this.startedAt, finishedAt: this.finishedAt,
       status: this.status, wallet: this.wallet, txHash:this.txHash,agentId:this.agentId,proofFingerprint:this.proofFingerprint,error: this.error, steps: this.steps.map(step => ({ ...step })),
       protocol:structuredClone(this.protocol),terminal: { command: this.command, lines: this.terminalLines.map(line => ({ ...line })) } };
     return JSON.parse(this.redact(JSON.stringify(snapshot))) as typeof snapshot;

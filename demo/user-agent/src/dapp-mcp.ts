@@ -11,7 +11,8 @@ import dotenv from 'dotenv';
 import type {ApprovedPayment} from '@zkproofport-ai/sdk';
 import {installPublishedProver} from '../../shared/installProver.ts';
 import {publishedSdk,publishedProverPackages} from '../../shared/proverPackages.ts';
-import {ethers,buildStakeDelegation,STAKING_ABI,ARC_CHAIN_ID} from '../../shared/flow.ts';
+import {ethers,STAKING_ABI,ARC_CHAIN_ID} from '../../shared/flow.ts';
+import {readUserStakeAction,assertUnusedStakeAction,type StakeAction} from '../../shared/userAction.ts';
 import {selectAgentDelegate} from './wallet.ts';
 import {discoverMarketplaceProver} from '../../shared/discovery.ts';
 import {loadDemoConfig} from '../../shared/config.ts';
@@ -33,11 +34,12 @@ const service=new URL(process.env.DEMO_SERVICE!);
 if(service.protocol!=='http:'||service.hostname!=='localhost'||service.pathname!=='/')throw Error('Expected the local dApp.');
 const amount=parseStakeAmount(process.env.DEMO_AMOUNT);
 const config=loadDemoConfig();
+const submittedAction=env.DEMO_ACTION_FILE?readUserStakeAction(JSON.parse(readFileSync(env.DEMO_ACTION_FILE,'utf8')),{gate:config.gate,amount}):undefined;
 const provider=new ethers.JsonRpcProvider(config.rpcUrl);
 const guard=new ActionGuard(amount);
 const server=new McpServer({name:'ledger-house',version:'1.0.0'});
 let wallet:string|undefined,prover:Awaited<ReturnType<typeof discoverMarketplaceProver>>|undefined;
-let action:ReturnType<typeof buildStakeDelegation>|undefined;
+let action:StakeAction|undefined;
 let proof:{proof:string;publicInputs:string[]}|undefined;
 let mcp:Client|undefined,transport:StdioClientTransport|undefined;
 let connecting=false;
@@ -94,6 +96,7 @@ register('read_dapp','Read the staking dApp policy and request access. Returns a
  if(Number((await provider.getNetwork()).chainId)!==ARC_CHAIN_ID)throw Error('Wrong chain.');
  const {listArcAgentWallets}=await publishedSdk();
  wallet=selectAgentDelegate(await listArcAgentWallets('ARC-TESTNET'),env.ARC_AGENT_WALLET);
+ if(submittedAction)readUserStakeAction(submittedAction,{gate:config.gate,amount,wallet});
  process.env.ARC_AGENT_WALLET=wallet;
  const token=new ethers.Contract(config.usdc,['function balanceOf(address) view returns(uint256)'],provider);
  const balance=await token.balanceOf(wallet) as bigint;
@@ -103,7 +106,7 @@ register('read_dapp','Read the staking dApp policy and request access. Returns a
  if(challenge.status!==402||challenge.data.error!=='PROOF_REQUIRED')throw Error('Unexpected access policy.');
  if(balance<ethers.parseUnits(amount,6))throw Error('Connected Agent Wallet has insufficient USDC.');
  readService=true;
- return {ok:true,step:2,wallet,amount,manifest:manifest.data,challenge:challenge.data,httpStatus:challenge.status,balance:ethers.formatUnits(balance,6),directKyc,positionBefore,walletType:'Circle Agent Wallet'};
+ return {ok:true,step:2,wallet,amount,submittedAction,manifest:manifest.data,challenge:challenge.data,httpStatus:challenge.status,balance:ethers.formatUnits(balance,6),directKyc,positionBefore,walletType:'Circle Agent Wallet'};
 });
 register('discover_prover','Search the dApp agent marketplace for a compatible prover, then independently validate its ERC-8004 identity, owner and endpoint on Arc. Provider identity is separate from action authorization.',{},async()=>{
  if(!readService)throw Error('Read the dApp policy first.');
@@ -157,17 +160,20 @@ register('connect_prover_mcp','Connect the prover npm package installed in this 
  }catch(error){await client?.close().catch(()=>{});throw error;}
  finally{connecting=false;}
 });
-register('prepare_delegation','Prepare the exact user-approved staking action for the connected Agent Wallet B. The KYC wallet A signs this inside generate_proof. This is separate from ERC-8004 identity discovery.',{amount:z.string()},async args=>{
+register('prepare_delegation','Validate and retain the exact EIP-712 action submitted by the user in the dApp. Never invent, replace or edit its fields. Wallet A signs it inside generate_proof after user approval. Separate from ERC-8004 provider identity.',{amount:z.string()},async args=>{
  if(!wallet||!guard.guideRead)throw Error('Read the service and discovered guide first.');
  if(args.amount!==amount)throw Error('Delegation amount must equal the user-approved amount.');
  if(action)return {ok:true,step:4,wallet,amount,action,credentialSigner:'****',status:'prepared; signing occurs in generate_proof'};
- action=buildStakeDelegation({gate:config.gate,delegate:wallet,amount,expiresAt:Math.floor(Date.now()/1000)+3600,nonce:ethers.hexlify(ethers.randomBytes(16))});
+ if(!submittedAction)throw Error('The user must submit an EIP-712 action in the dApp before requesting an action-bound proof.');
+ action=readUserStakeAction(submittedAction,{gate:config.gate,amount,wallet});
+ await assertUnusedStakeAction(action,new ethers.Contract(config.gate,STAKING_ABI,provider) as any);
  guard.delegated=true;
  return {ok:true,step:4,wallet,amount,action,credentialSigner:'****',status:'prepared; signing occurs in generate_proof'};
 });
 register('generate_proof','Call the connected prover MCP generate_proof tool with the prepared delegation and model-selected circuit/scope/payment options. Buys ONE proof. Private credentials are handled by the prover client and the ZKProofport prover, never the staking service. Read the discovered schema before choosing arguments.',{circuit:z.string(),scope:z.string(),pay_on:z.string(),pay_with:z.string()},async args=>{
  if(args.circuit!=='arc_eligibility'||args.scope!=='ledger-house'||args.pay_on!=='arc-testnet-nano'||args.pay_with!=='arc')throw Error('This dApp requires arc_eligibility, ledger-house scope, arc-testnet-nano and the existing arc Agent Wallet.');
  if(!mcp||!action)throw Error('Connect prover MCP and prepare the delegation first.');
+ await assertUnusedStakeAction(action,new ethers.Contract(config.gate,STAKING_ABI,provider) as any);
  const challenge=await http(origin()+'/api/v1/prove',{circuit:'arc_eligibility',inputs:{}});
  const offers=challenge.data.accepts?.filter((offer:any)=>offer.network==='eip155:5042002'&&offer.extra?.name==='GatewayWalletBatched');
  if(challenge.status!==402||challenge.data.requiresPayment!==true||offers?.length!==1)throw Error('Expected one live Arc Gateway offer.');
@@ -223,7 +229,7 @@ register('verify_proof_on_arc','Verify the actual proof with the deployed Arc ve
  if(!valid)throw Error('Arc verifier rejected the proof.');
  const block=await provider.getBlock('latest');if(!block)throw Error('Arc block unavailable.');
  const [nonceUsed,actionUsed]=await Promise.all([gate.usedNonces(wallet,ethers.id(action.message.nonce)),gate.usedActions(metadata.actionHash)]);
- const checks={coinbasePolicy:valid,authorizedActor:ethers.getAddress(action.message.delegate)===wallet,exactAction:action.message.action==='stake'&&action.message.amount===ethers.parseUnits(amount,6).toString(),nonceUnused:!nonceUsed&&!actionUsed,deadlineValid:action.message.expiresAt>block.timestamp};
+ const checks={coinbasePolicy:valid,authorizedActor:ethers.getAddress(action.message.delegate)===wallet,exactAction:action.message.action==='stake'&&action.message.amount===ethers.parseUnits(amount,6).toString(),nonceUnused:!nonceUsed&&!actionUsed,deadlineValid:Number(action.message.expiresAt)>block.timestamp};
  if(Object.values(checks).some(value=>!value))throw Error('Arc exact-action policy check failed.');guard.verified=true;
  return {ok:true,valid,chainId:ARC_CHAIN_ID,wallet,gate:config.gate,verifier:config.verifier,method:'verify(bytes,bytes32[])',checks,checkedBlock:block.number,deadline:action.message.expiresAt,nonce:action.message.nonce,actionAuthorizationMatched:true,fingerprint:extractArcPublicMetadata(proof.publicInputs).publicInputsFingerprint};
 });
