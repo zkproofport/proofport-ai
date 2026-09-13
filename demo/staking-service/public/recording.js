@@ -6,56 +6,81 @@ let currentRunId = null;
 let terminalRun = null;
 let streamConnected = false;
 let lastTerminalSignature = '';
-function command() {
-  if (terminalRun) return;
-  const amount = $('amount').value;
-  const valid = /^\d{1,7}(\.\d{1,6})?$/.test(amount) && Number(amount) > 0 && Number(amount) <= 1000000;
-  $('cli-command').textContent = valid ? `node demo/user-agent/src/stake.ts --service ${location.origin} --amount ${amount} --pay-on arc-testnet-nano --pay-with arc` : 'Enter a valid USDC amount to preview the command.';
-  $('copy-command').disabled = !valid;
+const expandedEvents = new Set();
+function eventText(text) {
+  try { return JSON.stringify(JSON.parse(text), null, 2); } catch { /* A tool label may precede its JSON. */ }
+  for (const index of [text.indexOf('{'), text.indexOf('[')].filter(index => index > 0).sort((a, b) => a - b)) {
+    try { return `${text.slice(0, index).trim()}\n${JSON.stringify(JSON.parse(text.slice(index)), null, 2)}`; }
+    catch { /* Documentation excerpts and plain text remain unchanged. */ }
+  }
+  return text;
 }
 function renderTerminal(run) {
   const changedRun = run?.id !== terminalRun?.id;
   terminalRun = run;
+  if (changedRun) expandedEvents.clear();
   const status = $('cli-stream-status');
-  status.textContent = streamConnected ? (run?.status === 'running' ? 'Streaming' : run?.status === 'completed' ? 'Exited · success' : run?.status === 'failed' ? 'Exited · stopped' : 'Connected · idle') : 'Reconnecting';
+  status.textContent = streamConnected ? (run?.status === 'running' ? 'Running' : run?.status === 'completed' ? 'Completed' : run?.status === 'failed' ? 'Stopped' : 'Connected · idle') : 'Reconnecting';
   status.className = `cli-status ${streamConnected && run?.status === 'running' ? 'streaming' : ''}`;
-  $('cli-command-label').textContent = run ? 'PROCESS COMMAND' : 'COMMAND PREVIEW';
-  if (!run) command();
-  else {
-    $('cli-command').textContent = typeof run.terminal?.command === 'string' ? run.terminal.command : 'Waiting for the process command…';
-    $('copy-command').disabled = !run.terminal?.command;
-  }
-  const lines = Array.isArray(run?.terminal?.lines) ? run.terminal.lines.slice(-200) : [];
+  const instruction = typeof run?.instruction === 'string' ? run.instruction : null;
+  $('cli-command').textContent = instruction || 'Your submitted instruction will appear here.';
+  $('copy-command').disabled = !instruction;
+  const agent = run?.agent;
+  $('agent-model').textContent = typeof agent?.provider === 'string' && typeof agent?.model === 'string' ? `${agent.provider} · ${agent.model}` : 'Model shown when the agent starts';
+  // This surface accepts tool events only. Model content/reasoning is never rendered.
+  const lines = Array.isArray(run?.terminal?.lines) ? run.terminal.lines.filter(line =>
+    ['tool_call', 'tool_result'].includes(line.kind) && typeof line.text === 'string').slice(-200) : [];
   const signature = JSON.stringify([run?.id, lines]);
   if (signature === lastTerminalSignature) return;
   lastTerminalSignature = signature;
   const viewport = $('cli-log');
   const follow = changedRun || viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 60;
   const fragment = document.createDocumentFragment();
+  const visibleKeys = new Set();
   for (const line of lines) {
-    if (typeof line.text !== 'string') continue;
     const row = document.createElement('div'); row.className = 'cli-line';
-    if (['command', 'output', 'system'].includes(line.kind)) row.classList.add(`cli-${line.kind}`);
+    row.classList.add(`cli-${line.kind}`);
     const time = document.createElement('time');
     const date = new Date(line.at);
     if (Number.isFinite(date.getTime())) { time.dateTime = date.toISOString(); time.textContent = date.toLocaleTimeString('en-GB', { hour12: false }); }
-    const text = document.createElement('span'); text.textContent = line.text.slice(0, 4000);
-    row.append(time, text); fragment.append(row);
+    const content = document.createElement('div'); content.className = 'tool-event';
+    const kind = document.createElement('span'); kind.className = 'tool-kind';
+    kind.textContent = line.kind === 'tool_call' ? 'TOOL CALL' : 'TOOL RESULT';
+    content.append(kind);
+    const fullText = eventText(line.text);
+    if (fullText.length > 260 || fullText.includes('\n')) {
+      const key = `${line.at}:${line.kind}:${line.text}`;
+      visibleKeys.add(key);
+      const detail = document.createElement('details'); detail.className = 'tool-detail'; detail.open = expandedEvents.has(key);
+      const summary = document.createElement('summary');
+      summary.textContent = `${line.text.replace(/\s+/g, ' ').slice(0, 150)}${line.text.length > 150 ? '…' : ''}`;
+      const hint = document.createElement('span'); hint.className = 'tool-expand'; hint.textContent = 'Expand response / JSON';
+      summary.append(hint);
+      const text = document.createElement('pre'); text.textContent = fullText;
+      detail.append(summary, text);
+      detail.addEventListener('toggle', () => { if (detail.open) expandedEvents.add(key); else expandedEvents.delete(key); });
+      content.append(detail);
+    } else {
+      const text = document.createElement('span'); text.className = 'tool-text'; text.textContent = fullText; content.append(text);
+    }
+    row.append(time, content); fragment.append(row);
   }
+  for (const key of expandedEvents) if (!visibleKeys.has(key)) expandedEvents.delete(key);
   $('cli-output').replaceChildren(fragment);
   $('cli-empty').hidden = lines.length > 0;
-  $('cli-empty').textContent = run ? 'Waiting for process output…' : 'Run the CLI agent to see its process output here.';
-  $('cli-line-count').textContent = `${lines.length} lines`;
+  $('cli-empty').textContent = run ? 'Waiting for actual tool calls and results…' : 'Ask the agent to see its tool calls and results here.';
+  $('cli-line-count').textContent = `${lines.length} events`;
   if (follow) viewport.scrollTop = viewport.scrollHeight;
 }
 function renderRun(run) {
   active = run?.status === 'running';
   $('run-button').disabled = active;
   $('amount').disabled = active;
-  $('run-button').firstElementChild.textContent = active ? 'CLI agent running…' : run ? 'Run CLI agent again' : 'Run CLI agent';
+  $('instruction').disabled = active;
+  $('run-button').firstElementChild.textContent = active ? 'Agent working…' : 'Ask agent';
   $('run-status').textContent = run ? ({running:'Running',completed:'Verified',failed:'Stopped'}[run.status] ?? 'Unknown') : 'Ready';
   $('run-status').className = `run-status ${run?.status ?? ''}`;
-  if (run && currentRunId !== run.id) { $('amount').value = run.amount; currentRunId = run.id; command(); }
+  if (run && currentRunId !== run.id) { $('amount').value = run.amount; if (typeof run.instruction === 'string') $('instruction').value = run.instruction; currentRunId = run.id; }
   const fragment = document.createDocumentFragment();
   for (const [index, label] of labels.entries()) {
     const step = run?.steps[index];
@@ -90,13 +115,12 @@ async function refresh(){
     $('runtime-note').textContent=data.prover.teeMode==='nitro'?'AWS Nitro TEE · Arc Testnet · On-chain USDC':'GCP proof generation · Arc ERC-8004 discovery · On-chain USDC staking';
   }catch{$('connection').textContent='Reconnecting…';$('connection-dot').className='';}
 }
-$('stake-form').addEventListener('submit',async event=>{event.preventDefault();if(active)return;$('form-error').hidden=true;$('run-button').disabled=true;try{const response=await fetch('/demo/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:$('amount').value})});const data=await response.json();if(!response.ok)throw new Error(data.error ?? 'Could not start the agent');await refresh();}catch(error){$('form-error').textContent=error.message;$('form-error').hidden=false;$('run-button').disabled=false;}});
-$('amount').addEventListener('input',command);
+$('stake-form').addEventListener('submit',async event=>{event.preventDefault();if(active)return;$('form-error').hidden=true;$('run-button').disabled=true;try{const instruction=$('instruction').value.trim();if(!instruction)throw new Error('Enter an instruction for the agent.');const response=await fetch('/demo/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:$('amount').value,instruction})});const data=await response.json();if(!response.ok)throw new Error(data.error ?? 'Could not start the agent');await refresh();}catch(error){$('form-error').textContent=error.message;$('form-error').hidden=false;$('run-button').disabled=false;}});
 $('copy-command').addEventListener('click',async()=>{try{await navigator.clipboard.writeText($('cli-command').textContent);$('copy-command').textContent='Copied';setTimeout(()=>$('copy-command').textContent='Copy',1600);}catch{$('copy-command').textContent='Select below';const range=document.createRange();range.selectNodeContents($('cli-command'));const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);}});
 const events=new EventSource('/demo/events');events.onmessage=event=>{try{renderRun(JSON.parse(event.data));if(!active)refresh();}catch{}};
 events.onopen=()=>{streamConnected=true;renderTerminal(terminalRun);};
 events.onerror=()=>{streamConnected=false;renderTerminal(terminalRun);};
-renderRun(null);command();refresh();setInterval(refresh,5000);
+renderRun(null);refresh();setInterval(refresh,5000);
 
 $('find-prover').addEventListener('click',async()=>{
   $('find-prover').disabled=true;$('market-result').textContent='Reading the Arc registry…';

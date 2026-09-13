@@ -8,16 +8,20 @@
 <body>
   <header><a class="brand" href="/" aria-label="Ledger House home"><span class="brandmark">L<span>H</span></span><strong>Ledger House</strong></a><div class="network"><span class="network-icon">◈</span> Arc Testnet <span class="chain">5042002</span></div></header>
   <main>
-    <div class="heading"><div><p class="eyebrow">CREDENTIAL-GATED FINANCE</p><h1>Your agent. Your next move.</h1><p class="intro">A Coinbase KYC proof unlocks this vault. Your agent handles the rest.</p></div><div class="live"><span id="connection-dot"></span><span id="connection">Connecting</span></div></div>
-    <section class="marketplace panel"><div><p class="eyebrow">ARC AGENT MARKETPLACE</p><strong id="market-result">Search the on-chain registry for an eligible prover.</strong><p id="market-detail" class="muted small">ERC-8004 · Coinbase KYC · Arc nanopayments</p></div><button id="find-prover" type="button" class="secondary">Find prover ↗</button></section>
+    <div class="heading"><div><p class="eyebrow">CREDENTIAL-GATED FINANCE</p><h1>Your agent. Your next move.</h1><p class="intro">Give an instruction. Follow the agent's tools, proof and transaction.</p></div><div class="live"><span id="connection-dot"></span><span id="connection">Connecting</span></div></div>
+    <section class="marketplace panel"><div><p class="eyebrow">ARC AGENT MARKETPLACE</p><strong id="market-result">The agent discovers the registered prover on Arc.</strong><p id="market-detail" class="muted small">ERC-8004 identifies the prover. Your signed delegation authorizes the staking action.</p></div><button id="find-prover" type="button" class="secondary">Inspect registry ↗</button></section>
     <div class="workspace">
       <section class="vault panel" aria-labelledby="vault-title">
         <div class="section-top"><span class="eyebrow">THE VAULT</span><span class="tag">USDC</span></div>
-        <div class="coin">$</div><h2 id="vault-title">Arc USDC Vault</h2><p class="muted">Access with a proof. Act through a delegate.</p>
-        <div class="requirement"><span class="shield">◇</span><div><strong>Coinbase KYC required</strong><span>The service receives a proof and a delegation.</span></div><span class="lock">↗</span></div>
-        <form id="stake-form"><label for="amount">Amount</label><div class="amount-input"><input id="amount" name="amount" value="0.1" inputmode="decimal" autocomplete="off" aria-describedby="amount-help" required><span>USDC</span></div><p id="amount-help" class="micro">Arc Testnet · on-chain USDC</p><button id="run-button" type="submit"><span>Run CLI agent</span><span>↗</span></button></form>
+        <h2 id="vault-title">Arc USDC Vault</h2><p class="muted">Access with a proof. Act through a delegate.</p>
+        <div class="requirement"><span class="shield">◇</span><div><strong>One proof: KYC + delegation</strong><span>arc_eligibility binds Coinbase KYC to your EIP-712 staking authorization.</span></div></div>
+        <form id="stake-form">
+          <label for="instruction">Your instruction</label>
+          <textarea id="instruction" name="instruction" rows="5" maxlength="2000" required spellcheck="false">Stake 0.1 USDC in Ledger House. Find the registered prover, read its integration instructions, obtain the KYC and delegation proof, verify it on Arc, and stake with my Agent Wallet.</textarea>
+          <label for="amount">Authorized staking amount</label><div class="amount-input"><input id="amount" name="amount" value="0.1" inputmode="decimal" autocomplete="off" aria-describedby="amount-help" required><span>USDC</span></div><p id="amount-help" class="micro">Exact amount authorized for this request · Arc Testnet</p><button id="run-button" type="submit"><span>Ask agent</span><span>↗</span></button>
+        </form>
         <p id="form-error" class="error" role="alert" hidden></p>
-        <p class="launch-note">Starts the CLI agent on this computer. Follow its output in the live terminal.</p>
+        <p class="launch-note">The agent uses tools to discover the service, read instructions and complete your request.</p>
         <div class="powered"><span>Paid with <strong>Circle Agent Wallet</strong></span><span>Proof by <strong>ZKProofport</strong></span></div>
       </section>
       <section class="activity panel" aria-labelledby="activity-title">
@@ -28,15 +32,15 @@
         <div class="evidence"><div><span>Payment rail</span><strong>Arc nanopayments</strong></div><div><span>Proof host</span><strong id="tee-mode">GCP Cloud Run</strong></div><div><span>Verification</span><a href="https://testnet.arcscan.app/address/0xD0F3eE648386B59B484157332E736388Fcc41F47" target="_blank" rel="noreferrer">Staking contract ↗</a></div></div>
       </section>
       <section class="cli-panel panel" aria-labelledby="cli-title">
-        <div class="section-top"><div><p class="eyebrow">LIVE CLI</p><h2 id="cli-title">Agent terminal</h2></div><span id="cli-stream-status" class="cli-status" role="status">Connecting</span></div>
-        <p class="cli-caption">Actual process output · credential values omitted</p>
-        <div class="cli-command-bar"><span id="cli-command-label">COMMAND PREVIEW</span><button id="copy-command" type="button">Copy</button></div>
+        <div class="section-top"><div><p class="eyebrow">LIVE AGENT</p><h2 id="cli-title">Agent tools &amp; results</h2></div><span id="cli-stream-status" class="cli-status" role="status">Connecting</span></div>
+        <p class="cli-caption"><span id="agent-model">Model shown when the agent starts</span><span>Tool activity only · credential values omitted</span></p>
+        <div class="cli-command-bar"><span id="cli-command-label">SUBMITTED INSTRUCTION</span><button id="copy-command" type="button" disabled>Copy</button></div>
         <code id="cli-command"></code>
-        <div class="cli-log" id="cli-log" tabindex="0" aria-label="Live CLI output">
-          <p id="cli-empty">Run the CLI agent to see its process output here.</p>
-          <div id="cli-output" role="log" aria-live="polite" aria-relevant="additions" aria-label="Sanitized agent process output"></div>
+        <div class="cli-log" id="cli-log" tabindex="0" aria-label="Agent tool activity">
+          <p id="cli-empty">Ask the agent to see its tool calls and results here.</p>
+          <div id="cli-output" role="log" aria-live="polite" aria-relevant="additions" aria-label="Agent tool calls and results"></div>
         </div>
-        <div class="cli-footer"><span>CLI → client MCP → staging prover → Arc</span><span id="cli-line-count">0 lines</span></div>
+        <div class="cli-footer"><span>Instruction → tools → proof → Arc transaction</span><span id="cli-line-count">0 events</span></div>
       </section>
     </div>
     <div class="lower-panels">

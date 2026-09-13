@@ -468,7 +468,7 @@ function buildArcGuide(config: Config) {
   const nano = networks.find(network => network.id === 'arc-testnet-nano');
   const chainId = 5042002;
   const verifier = getChainVerifiers(String(chainId))[CIRCUIT_IDS.ARC_ELIGIBILITY] ?? null;
-  const encrypted = config.teeMode === 'nitro' && config.teeAttestationEnabled;
+  const encrypted = config.teeMode === 'nitro';
   const payment = { required: config.paymentMode !== 'disabled', recipient: config.paymentPayTo,
     price: config.paymentProofPrice, source: 'Use the live 402 accepts list for amount, asset, recipient and payment domain.' };
   return {

@@ -1,8 +1,12 @@
 import type { Express, Request } from 'express';
 import { spawn } from 'node:child_process';
-import { createInterface } from 'node:readline';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { RecordingRun, parseStakeAmount } from './recording.ts';
+import { RecordingRun, parseStakeAmount, parseInstruction } from './recording.ts';
+import { ClaudeStreamDecoder, claudeArguments, claudeEnvironment } from './claudeSession.ts';
+import { createRedactor } from '../../user-agent/src/privacy.ts';
 import type { DemoConfig } from '../../shared/config.ts';
 
 export function isLocalRecordingRequest(req: Request, port: number) {
@@ -50,34 +54,56 @@ export function installRecordingRoutes(app: Express, options: { proverUrl: strin
     const heartbeat = setInterval(() => res.write(': heartbeat\n\n'), 15000);
     req.on('close', () => { clearInterval(heartbeat); subscribers.delete(res); });
   });
-  app.post('/demo/run', (req, res) => {
+  app.post('/demo/run', async (req, res) => {
     if (!isLocalRecordingRequest(req,options.port)) return res.status(403).json({ error: 'Run this demo from this computer.' });
     if (terminateAgent || current?.snapshot().status === 'running') return res.status(409).json({ error: 'An agent is already running. Wait for its result.' });
-    let amount: string;
-    try { amount = parseStakeAmount(req.body?.amount); }
+    let amount: string, instruction: string;
+    try { amount = parseStakeAmount(req.body?.amount); instruction = parseInstruction(req.body?.instruction); }
     catch (error) { return res.status(400).json({ error: (error as Error).message }); }
-    if (!process.env.ATTESTATION_KEY || !process.env.PROVE_COMMAND) {
-      return res.status(503).json({ error: 'Start the recording server with demo/record.sh so it can read the existing wallet environment.' });
-    }
-    const run = new RecordingRun(amount);
+    const redact = createRedactor(process.env);
+    instruction = redact(instruction);
+    const run = new RecordingRun(amount, redact);
     current = run;
+    run.startClaude(instruction);
     publish();
-    const child = spawn(process.execPath, [fileURLToPath(new URL('../../user-agent/src/stake.ts', import.meta.url)),
-      '--service', `http://localhost:${options.port}`, '--amount', amount, '--pay-on', 'arc-testnet-nano', '--pay-with', 'arc'],
-    { env: { ...process.env, CIRCLE_ACCEPT_TERMS: '1' }, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
-    child.on('spawn', () => { run.startCli(`http://localhost:${options.port}`); publish(); });
+    let directory: string;
+    try {
+      directory = await mkdtemp(join(tmpdir(), 'ledger-house-claude-'));
+      await writeFile(join(directory, 'mcp.json'), JSON.stringify({ mcpServers: { ledger_house: {
+        command: process.execPath,
+        args: [fileURLToPath(new URL('../../user-agent/src/dapp-mcp.ts', import.meta.url))],
+        env: { DEMO_SERVICE: `http://localhost:${options.port}`, DEMO_AMOUNT: amount },
+      } } }), { mode: 0o600 });
+    } catch {
+      run.finish(1, 'Could not prepare the Claude Code session.'); publish();
+      return res.status(503).json({error: 'Could not prepare the Claude Code session.'});
+    }
+    const child = spawn('claude', claudeArguments(instruction, join(directory, 'mcp.json'), amount),
+      { cwd: directory, env: claudeEnvironment(process.env), detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
     const terminate = () => {
       if (!child.pid) return;
       try { process.kill(-child.pid, 'SIGTERM'); } catch { /* The process group already exited. */ }
     };
     terminateAgent = terminate;
-    const output = createInterface({ input: child.stdout });
-    output.on('line', line => { run.observe(line); publish(); });
-    // Keep diagnostics on the host, never transmit the credential process's raw output.
-    child.stderr.on('data', chunk => process.stderr.write(chunk));
+    const output = new ClaudeStreamDecoder(event => { run.observeClaude(event); publish(); });
+    let streamFailed = false;
+    child.stdout.on('data', chunk => {
+      if (streamFailed) return;
+      try { output.push(chunk); }
+      catch { streamFailed = true; terminate(); run.finish(1, 'Claude returned invalid or oversized stream JSON.'); publish(); }
+    });
+    // Drain diagnostics without storing or exposing model output or credentials.
+    child.stderr.on('data', () => {});
     child.on('error', () => { run.finish(1, 'The agent process could not start. Check the recording terminal.'); publish(); });
     const timeout = setTimeout(() => { terminate(); run.finish(1, 'The agent exceeded the 8 minute time limit. Check the recording terminal.'); publish(); }, 480000);
-    child.on('close', code => { clearTimeout(timeout); if (terminateAgent === terminate) terminateAgent = null; output.close(); run.finish(code); publish(); });
+    child.on('close', code => {
+      clearTimeout(timeout); if (terminateAgent === terminate) terminateAgent = null;
+      if (!streamFailed) {
+        try { output.end(); } catch { streamFailed = true; }
+      }
+      run.finish(streamFailed ? 1 : code); publish();
+      void rm(directory, { recursive: true, force: true });
+    });
     return res.status(202).json({ runId: run.id, state: '/demo/state', events: '/demo/events' });
   });
 }

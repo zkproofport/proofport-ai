@@ -105,7 +105,7 @@ async function main() {
   check(previous.run?.status !== 'running', 'A recording run is already active.');
   evidence.status = 'running'; save();
   progress('starting exactly one paid GCP proof and 1 USDC Arc stake');
-  const started = await json<{ runId: string }>(`${SERVICE}/demo/run`, { amount: '1' }, 202);
+  const started = await json<{ runId: string }>(`${SERVICE}/demo/run`, { amount: '1', instruction: 'Stake 1 USDC in Ledger House. Discover the registered prover, read its guide, obtain a KYC and delegation proof using Arc nanopayments, verify it on Arc, then stake.' }, 202);
   check(typeof started.runId === 'string' && started.runId.length > 0, 'Missing recording run ID.');
   evidence.runId = started.runId; save();
   const deadline = Date.now() + 480000;

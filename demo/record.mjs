@@ -32,5 +32,5 @@ child.on('error',()=>{console.error('The recording server could not start.');pro
 child.on('exit',code=>{process.exitCode=stopping?0:(code ?? 1);});
 console.log(`Recording page: http://localhost:${port}`);
 console.log(`Proof host: deployed GCP (${config.discovery.allowedOrigin}); discovery uses Arc ERC-8004.`);
-console.log(`CLI: curl -s http://localhost:${port}/demo/run -H 'Content-Type: application/json' -d '{"amount":"0.1"}'`);
+console.log('Agent: enter your instruction in the dApp and select Ask agent.');
 console.log('Ctrl-C stops this recording server; it does not stop the deployed prover.');

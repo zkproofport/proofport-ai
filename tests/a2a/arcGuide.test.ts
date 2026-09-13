@@ -28,6 +28,11 @@ describe('Arc discovery integration instructions', () => {
     expect(JSON.stringify(guide)).not.toMatch(/personal_sign|coinbase_country|NOT_DEPLOYED|PAYMENT_KEY/);
   });
 
+  it('requires encryption in Nitro even when optional attestation output is disabled', () => {
+    const guide=buildGuide('arc_eligibility',{...config,teeMode:'nitro',teeAttestationEnabled:false}) as any;
+    expect(guide.e2e_encryption.enabled).toBe(true);
+  });
+
   it('keeps verification independent of the first offered payment chain', () => {
     const guide = buildGuide('arc_eligibility', {...config,paymentNetworks:'base-sepolia,arc-testnet-nano'}) as any;
     expect(guide.constants.verification.chain_id).toBe(5042002);

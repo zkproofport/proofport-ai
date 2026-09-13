@@ -9,6 +9,22 @@ export function parseStakeAmount(value: unknown): string {
   return value;
 }
 
+export function parseInstruction(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim() || value.length > 2000) {
+    throw new Error('Enter an instruction of 1 to 2,000 characters.');
+  }
+  return value.trim();
+}
+
+export const CLAUDE_TOOLS = new Set(['read_dapp', 'discover_prover', 'read_prover_guide', 'connect_prover_mcp',
+  'prepare_delegation', 'generate_proof', 'verify_proof_on_arc', 'stake'].map(name => `mcp__ledger_house__${name}`));
+type PublicToolResult = Record<string, unknown>;
+function record(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null && !Array.isArray(value); }
+function amountUnits(value: string) {
+  const [whole, fraction = ''] = parseStakeAmount(value).split('.');
+  return BigInt(whole) * 1_000_000n + BigInt(fraction.padEnd(6, '0'));
+}
+
 const labels = ['Instruction received', 'Credential required', 'Prover discovered', 'Delegation prepared', 'Payment & proof', 'On-chain stake'];
 
 /** Only recognised, public facts cross from the credential process into the page. */
@@ -24,15 +40,98 @@ export class RecordingRun {
   private sawResult = false;
   private error: string | null = null;
   private command: string | null = null;
-  private terminalLines: { at: string; text: string; kind: 'command' | 'output' | 'system' }[] = [];
+  private terminalLines: { at: string; text: string; kind: 'command' | 'output' | 'system' | 'tool_call' | 'tool_result' }[] = [];
+  private claude = false;
+  private model: string | null = null;
+  private instruction: string | null = null;
+  private pendingTools = new Map<string, string>();
   private steps = labels.map((label, index) => ({ number: index + 1, label, status: 'waiting', detail: '', at: null as string | null }));
   readonly amount: string;
+  private readonly redact: (text: string) => string;
 
-  constructor(amount: string) { this.amount = parseStakeAmount(amount); }
+  constructor(amount: string, redact: (text: string) => string = text => text) {
+    this.amount = parseStakeAmount(amount); this.redact = redact;
+  }
 
-  private terminal(text: string, kind: 'command' | 'output' | 'system' = 'output') {
-    this.terminalLines.push({ at: new Date().toISOString(), text, kind });
+  private terminal(text: string, kind: 'command' | 'output' | 'system' | 'tool_call' | 'tool_result' = 'output') {
+    this.terminalLines.push({ at: new Date().toISOString(), text: this.redact(text).slice(0, 16384), kind });
     if (this.terminalLines.length > 128) this.terminalLines.shift();
+  }
+
+  startClaude(instruction: string) {
+    this.claude = true;
+    this.instruction = this.redact(parseInstruction(instruction));
+    this.command = `claude -p ${JSON.stringify(this.instruction)}`;
+    this.terminal(this.command, 'command');
+  }
+
+  observeClaude(event: unknown) {
+    if (!this.claude || this.status !== 'running' || !record(event)) return;
+    if (event.type === 'system' && event.subtype === 'init') {
+      if (typeof event.model === 'string' && /^[a-zA-Z0-9._:/-]{1,128}$/.test(event.model)) this.model = this.redact(event.model);
+      return;
+    }
+    if (event.type !== 'assistant' && event.type !== 'user') return;
+    if (event.parent_tool_use_id) return; // No subagent reasoning or nested conversations.
+    if (!record(event.message) || !Array.isArray(event.message.content)) return;
+    for (const block of event.message.content) {
+      if (!record(block)) continue;
+      if (event.type === 'assistant' && block.type === 'tool_use') {
+        if (typeof block.id !== 'string' || typeof block.name !== 'string' || !CLAUDE_TOOLS.has(block.name)
+          || this.pendingTools.has(block.id) || !record(block.input)) continue;
+        this.pendingTools.set(block.id, block.name);
+        this.terminal(`${block.name} ${JSON.stringify(block.input)}`, 'tool_call');
+      }
+      if (event.type === 'user' && block.type === 'tool_result') {
+        if (typeof block.tool_use_id !== 'string') continue;
+        const name = this.pendingTools.get(block.tool_use_id);
+        if (!name) continue;
+        this.pendingTools.delete(block.tool_use_id);
+        const raw = typeof block.content === 'string' ? block.content : Array.isArray(block.content)
+          ? block.content.filter(part => record(part) && part.type === 'text' && typeof part.text === 'string').map(part => part.text).join('\n') : '';
+        let result: unknown;
+        try { result = JSON.parse(raw); } catch { this.terminal(`${name} returned a non-JSON tool result.`, 'tool_result'); continue; }
+        if (!record(result)) continue;
+        this.terminal(`${name} ${JSON.stringify(result)}`, 'tool_result');
+        if (block.is_error === true || result.ok !== true) continue;
+        this.acceptToolResult(name, result);
+      }
+    }
+  }
+
+  private acceptToolResult(name: string, result: PublicToolResult) {
+    const mark = (number: number, detail: string) => {
+      const step = this.steps[number - 1];
+      step.status = 'done'; step.detail = this.redact(detail); step.at = new Date().toISOString();
+    };
+    if (name === 'mcp__ledger_house__read_dapp') {
+      mark(1, this.instruction ?? 'Instruction received');
+      mark(2, 'Coinbase KYC · arc_eligibility');
+    }
+    if (name === 'mcp__ledger_house__discover_prover') {
+      if (typeof result.agentId !== 'string' && typeof result.agentId !== 'number') return;
+      const id = String(result.agentId);
+      if (!/^\d+$/.test(id)) return;
+      this.agentId = id; mark(3, `Arc ERC-8004 agent #${id} · registered GCP endpoint`);
+    }
+    if (name === 'mcp__ledger_house__prepare_delegation') {
+      if (typeof result.wallet !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(result.wallet)) return;
+      this.wallet = result.wallet; mark(4, 'Delegate, amount, action and expiry prepared; KYC signing occurs in proof generation');
+    }
+    if (name === 'mcp__ledger_house__generate_proof') {
+      if (typeof result.fingerprint !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(result.fingerprint)) return;
+      this.proofFingerprint = result.fingerprint; mark(5, 'Paid GCP response received · proof generated');
+    }
+    if (name === 'mcp__ledger_house__stake') {
+      if (typeof result.txHash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(result.txHash)
+        || typeof result.wallet !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(result.wallet)
+        || typeof result.block !== 'number' || !Number.isSafeInteger(result.block) || result.block <= 0
+        || typeof result.amount !== 'string' || (result.chainId !== undefined && result.chainId !== 5042002)) return;
+      try { if (amountUnits(result.amount) !== amountUnits(this.amount)) return; } catch { return; }
+      if (this.wallet && this.wallet.toLowerCase() !== result.wallet.toLowerCase()) return;
+      this.wallet = result.wallet; this.txHash = result.txHash; this.sawResult = true;
+      mark(6, 'Arc transaction confirmed · USDC deposited in the staking gate');
+    }
   }
 
   startCli(service: string) {
@@ -45,7 +144,7 @@ export class RecordingRun {
   }
 
   observe(line: string) {
-    if (this.status !== 'running') return;
+    if (this.claude || this.status !== 'running') return;
     // Only exact, opt-in lifecycle events are accepted from the prover process.
     const trace = /^\[demo-cli\] (prove_spawn|mcp_start|mcp_connected|mcp_generate_proof|mcp_result)$/.exec(line.trim());
     if (trace) {
@@ -105,18 +204,19 @@ export class RecordingRun {
   finish(code: number | null, reason?: string) {
     if (this.status !== 'running') return;
     this.finishedAt = new Date().toISOString();
-    this.status = code === 0 && this.sawResult ? 'completed' : 'failed';
+    this.status = code === 0 && this.sawResult && (!this.claude || this.model !== null) ? 'completed' : 'failed';
     this.terminal(this.status === 'completed' ? 'Agent exited 0. Proof accepted and Arc stake confirmed.' : 'Agent stopped before confirmed completion. Check the local operator terminal.', 'system');
-    if (this.status === 'completed') this.steps.forEach(step => { step.status = 'done'; });
+    if (this.status === 'completed' && !this.claude) this.steps.forEach(step => { step.status = 'done'; });
     else {
-      this.error = reason ?? `Agent did not complete the flow (exit ${code ?? 'signal'}).`;
+      this.error = this.redact(reason ?? `Agent did not complete the flow (exit ${code ?? 'signal'}).`);
       this.steps.filter(step => step.status === 'active').forEach(step => { step.status = 'failed'; });
     }
   }
 
   snapshot() {
-    return { id: this.id, amount: this.amount, startedAt: this.startedAt, finishedAt: this.finishedAt,
+    const snapshot = { id: this.id, amount: this.amount, instruction: this.instruction, agent: this.claude ? {provider: 'Claude Code', model: this.model} : null, startedAt: this.startedAt, finishedAt: this.finishedAt,
       status: this.status, wallet: this.wallet, txHash:this.txHash,agentId:this.agentId,proofFingerprint:this.proofFingerprint,error: this.error, steps: this.steps.map(step => ({ ...step })),
       terminal: { command: this.command, lines: this.terminalLines.map(line => ({ ...line })) } };
+    return JSON.parse(this.redact(JSON.stringify(snapshot))) as typeof snapshot;
   }
 }
