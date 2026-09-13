@@ -35,6 +35,14 @@ describe('recording a real agent run', () => {
     expect(run.snapshot().status).toBe('failed');
   });
 
+  it('refuses an off-chain success line without a transaction hash', () => {
+    const run = new RecordingRun('1');
+    run.observe('[6] Staked 1 as 0x1111111111111111111111111111111111111111');
+    run.finish(0);
+    expect(run.snapshot().status).toBe('failed');
+    expect(run.snapshot().txHash).toBeNull();
+  });
+
   it('finishes only when the agent reports a result and exits successfully', () => {
     const run = new RecordingRun('25');
     run.observe('[2] Ledger House wants a Coinbase KYC proof (arc_eligibility)');

@@ -88,8 +88,9 @@ function runProver(proverUrl: string, actionFile: string, outFile: string, opts:
   const base = proverUrl.replace(/\/api\/v1\/prove$/, '');
   return new Promise((resolve, reject) => {
     const child = spawn(
-      proveJs,
+      proveJs.endsWith('.js') ? process.execPath : proveJs,
       [
+        ...(proveJs.endsWith('.js') ? [proveJs] : []),
         'arc_eligibility',
         '--action', actionFile,
         '--scope', 'ledger-house',
