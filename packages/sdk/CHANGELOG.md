@@ -1,5 +1,48 @@
 # Changelog
 
+## [0.2.13](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.2.12...sdk-v0.2.13) (2026-09-13)
+
+
+### Features
+
+* add circuit/proofType to SDK ProveResponse and ProofResult types ([ef8d551](https://github.com/zkproofport/proofport-ai/commit/ef8d551cbaa78b0183bf7fc727dbb176e77d4320))
+* add E2E encryption for TEE blind relay proof generation ([f358ac4](https://github.com/zkproofport/proofport-ai/commit/f358ac4454ebe609146f76d6893fff3b859d49f2))
+* add extractDomainFromPublicInputs, extractNullifierFromPublicInputs ([2243fd6](https://github.com/zkproofport/proofport-ai/commit/2243fd6ca7473cb1268fb5edb5b5205a6da04398))
+* add Google Workspace & Microsoft 365 provider support ([e3e4985](https://github.com/zkproofport/proofport-ai/commit/e3e4985e227b261d1ab40ac5905fdaf6091cf5c5))
+* add OIDC domain circuit support, simplify verify_proof API, add E2E tests ([33f7923](https://github.com/zkproofport/proofport-ai/commit/33f7923b78914eaab6354935ed45d5e94c9bc330))
+* **arc:** complete agent wallet staking and GCP prover discovery demo ([031afbf](https://github.com/zkproofport/proofport-ai/commit/031afbf13a670d48fc5d874aa061c0bdaa52388f))
+* multi-circuit extract functions, remove debug logs, fix errorReason check ([e4202bc](https://github.com/zkproofport/proofport-ai/commit/e4202bc2719b4b24a60be6b25281d081212e1be6))
+* support PAYMENT_MODE=disabled with requiresPayment flag in SDK and tests ([62706fb](https://github.com/zkproofport/proofport-ai/commit/62706fb8a244867fd94b937d3011c832b472ba94))
+* take circuit ids from the SDK, and fix two defects it surfaced ([3bcc063](https://github.com/zkproofport/proofport-ai/commit/3bcc0630a514c4d1a3bd146f6994f7f0314f9c92))
+
+
+### Bug Fixes
+
+* add payment verification retry logic and ensure Redis on deploy ([6b11c3a](https://github.com/zkproofport/proofport-ai/commit/6b11c3afa1d498a751b32e941a0828cc5806ff83))
+* bump MCP dependency to @zkproofport-ai/sdk@0.2.4 ([c2ae9a7](https://github.com/zkproofport/proofport-ai/commit/c2ae9a729ca2d95a1368c03369945dd88b4b85be))
+* check errorReason before txHash in x402 settle response ([4d3f796](https://github.com/zkproofport/proofport-ai/commit/4d3f7962ccc4076981f972085a1868d516d94640))
+* **mcp:** update sdk dependency to 0.2.4 for multi-circuit extract ([34969fd](https://github.com/zkproofport/proofport-ai/commit/34969fd65705727b20608bc79ed67c021a4aa4a2))
+* OIDC E2E test — remove provider for personal Gmail, add setup.ts symlink ([8245f7d](https://github.com/zkproofport/proofport-ai/commit/8245f7de75e4cb615809e70124b64265696cc1c9))
+* publish Arc SDK and MCP through synchronized releases ([51d0bc3](https://github.com/zkproofport/proofport-ai/commit/51d0bc38a7d65ed7684675b49fd1e039f9a3a738))
+* remove all payment/CDP code from SDK and MCP ([ee1c09d](https://github.com/zkproofport/proofport-ai/commit/ee1c09d23ac691f12f639ba5e9da9b44ebf52eb5))
+* replace hardcoded Sepolia references with paymentMode-driven chain config ([94461be](https://github.com/zkproofport/proofport-ai/commit/94461be703f267375852555556031d09b3aaec28))
+* **sdk/attestation:** retry tx-indexing race (public RPC 5-30s lag) ([57dde8d](https://github.com/zkproofport/proofport-ai/commit/57dde8d539aaf64cf496f29e775c042bade2b926))
+* **sdk:** use base.drpc.org instead of mainnet.base.org (full history) ([bb02518](https://github.com/zkproofport/proofport-ai/commit/bb02518c7597f848168e52c381f30409d319e43f))
+* **sdk:** validate exact actions before both proof paths sign ([119779d](https://github.com/zkproofport/proofport-ai/commit/119779d513cf98e3540e73be6001642aeb781286))
+* use Artifact Registry image for bb binary (GitHub nightly release deleted) ([1ed4890](https://github.com/zkproofport/proofport-ai/commit/1ed4890c9fd5acfbaf53ce53aa9f286fa6aa2753))
+* use canonical workspace lock and independent npm package versions ([c2b62fd](https://github.com/zkproofport/proofport-ai/commit/c2b62fd0da1c5422216cd5ec57e1845083e1fae5))
+* use mainnet-capable x402 facilitator (x402.org is testnet-only) ([5eb1426](https://github.com/zkproofport/proofport-ai/commit/5eb1426b0ed2afb95b79831f3a9674e72fb9fdc7))
+* use X-Payment-Nonce (not X-Payment-TX) for challenge/retry detection ([593d9fe](https://github.com/zkproofport/proofport-ai/commit/593d9fe5ea852566a6824d75637b8d71c682713f))
+
+
+### Refactoring
+
+* enforce TEE-only Prover.toml build, delete legacy code ([159bd1f](https://github.com/zkproofport/proofport-ai/commit/159bd1f0daef998802ece3a7089046619eaf06f9))
+* move JWT validation to TEE, SDK sends raw JWT + JWKS payload ([5ce0e7b](https://github.com/zkproofport/proofport-ai/commit/5ce0e7b2a344a3a6517fe0e9e192d48527c86539))
+* move OIDC input preparation to SDK, server as blind relay ([1376007](https://github.com/zkproofport/proofport-ai/commit/1376007a4879e79443e6444c968ddd61ae1fe4d1))
+* remove easRpcUrl/easGraphqlUrl from SDK config ([15b01c5](https://github.com/zkproofport/proofport-ai/commit/15b01c5203945a67beebd1d119461fc613558d3f))
+* rename packages/client to sdk, mcp-server to mcp ([fcf1e4b](https://github.com/zkproofport/proofport-ai/commit/fcf1e4b4834ee59e194416c7223dbc5ee7a92e4f))
+
 ## [0.2.12](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.2.11...sdk-v0.2.12) (2026-09-13)
 
 
