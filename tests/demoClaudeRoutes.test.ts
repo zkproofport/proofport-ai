@@ -33,6 +33,17 @@ afterEach(() => {
 });
 
 describe('Claude recording route', () => {
+  it.each([
+    [{status:'failed',registrations:[]},503,false],
+    [{status:'ready',registrations:[{chainId:84532,agentId:'894776'}]},200,false],
+    [{status:'ready',registrations:[{chainId:5042002,agentId:'894776'}]},200,true],
+  ])('reports ready only after actual Arc identity readiness',async(identity,status,ready)=>{
+    vi.stubGlobal('fetch',vi.fn().mockImplementation(async(url:string)=>new Response(JSON.stringify(
+      url.endsWith('/identity/status')?identity:{paymentMode:'testnet',paymentRequired:true,paymentNetworks:'arc-testnet-nano'}
+    ),{status:url.endsWith('/identity/status')?status:200})));
+    expect((await request(app).get('/demo/state')).body.prover.ready).toBe(ready);
+  });
+
   it('requires both an explicit instruction and validated amount before creating a process', async () => {
     for (const body of [{amount:'0.1'}, {amount:'0.1',instruction:' '}, {amount:'0.1',instruction:'x'.repeat(2001)}, {amount:'-1',instruction:'Stake'}]) {
       expect((await request(app).post('/demo/run').send(body)).status).toBe(400);

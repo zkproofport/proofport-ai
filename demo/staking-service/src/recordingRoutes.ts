@@ -37,9 +37,14 @@ export function installRecordingRoutes(app: Express, options: { proverUrl: strin
     try {
       const response = await fetch(`${options.proverUrl}/health`, { signal: AbortSignal.timeout(5000) });
       const data = await response.json() as { tee?: { mode?: string }; status?: string;paymentMode?:string;paymentRequired?:boolean;paymentNetworks?:string };
+      const identityResponse = await fetch(`${options.proverUrl}/identity/status`, {signal:AbortSignal.timeout(5000)});
+      const identity = await identityResponse.json() as {status?:string;registrations?:{chainId:number;agentId:string}[]};
+      const identityReady = identityResponse.ok && identity.status==='ready' && Array.isArray(identity.registrations)
+        && identity.registrations.some(row=>row.chainId===5042002 && /^(0|[1-9][0-9]*)$/.test(row.agentId));
+      const paymentReady=data.paymentMode==='testnet'&&data.paymentRequired===true&&Boolean(data.paymentNetworks?.split(',').includes('arc-testnet-nano'));
       value = { reachable: response.ok, teeMode: data.tee?.mode ?? 'unknown',host:'GCP Cloud Run',
-        paymentReady:data.paymentMode==='testnet'&&data.paymentRequired===true&&Boolean(data.paymentNetworks?.split(',').includes('arc-testnet-nano')) };
-    } catch { value = { reachable: false, teeMode: 'unknown' }; }
+        paymentReady,identityReady,ready:response.ok&&paymentReady&&identityReady };
+    } catch { value = { reachable: false, teeMode: 'unknown',ready:false }; }
     healthCache = { at: Date.now(), value };
     return value;
   }

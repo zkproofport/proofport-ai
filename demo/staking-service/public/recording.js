@@ -272,8 +272,8 @@ async function refresh() {
   try {
     const response = await fetch('/demo/state', {cache:'no-store'}); if (!response.ok) throw new Error('State unavailable');
     const data = await response.json(); renderRun(data.run); renderPositions(data.positions);
-    $('connection').textContent = data.prover.paymentReady ? 'Live · Prover ready' : data.prover.reachable ? 'Prover setup pending' : 'Prover unavailable';
-    $('connection-dot').className = data.prover.paymentReady ? 'online' : '';
+    $('connection').textContent = data.prover.ready ? 'Live · Prover ready' : data.prover.reachable ? 'Prover setup pending' : 'Prover unavailable';
+    $('connection-dot').className = data.prover.ready ? 'online' : '';
     $('tee-mode').textContent = 'ZKProofport prover';
     $('runtime-note').textContent = 'Private eligibility · Arc Testnet';
     if(!walletSnapshot)void refreshWallet();
