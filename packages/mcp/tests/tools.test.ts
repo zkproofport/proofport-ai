@@ -141,6 +141,12 @@ describe('get_supported_circuits', () => {
 });
 
 describe('generate_proof', () => {
+  it('preserves user-approved payment terms through the MCP to SDK boundary',async()=>{
+    mockGenerateProof.mockResolvedValue({proof:'0x'});
+    const approved={network:'eip155:5042002',scheme:'exact',amount:'1000',asset:'0x3600000000000000000000000000000000000000',payTo:'0x'+'11'.repeat(20),extra:{name:'GatewayWalletBatched',version:'1',verifyingContract:'0x'+'22'.repeat(20)}};
+    await callTool('generate_proof',{circuit:'arc_eligibility',pay_on:'arc-testnet-nano',max_payment:'0.001',approved_payment:approved});
+    expect(mockGenerateProof.mock.calls[0][2]).toMatchObject({payOn:'arc-testnet-nano',maxPayment:'0.001',approvedPayment:approved});
+  });
   it('calls generateProof with correct params', async () => {
     const mockResult = { proof: '0xabc', publicInputs: '0xdef' };
     mockGenerateProof.mockResolvedValue(mockResult);

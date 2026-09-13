@@ -19,10 +19,10 @@ Use Node 22.18+, existing Claude Code and Circle CLI logins, and the existing
 npm ci
 npm run build --workspace @zkproofport-ai/sdk
 npm run build --workspace @zkproofport-ai/mcp
-RECORDING_PORT=4109 bash demo/record.sh
+RECORDING_PORT=4111 bash demo/record.sh
 ```
 
-Open **http://localhost:4109**. If that page is already running, keep its process
+Open **http://localhost:4111**. If that page is already running, keep its process
 and use the existing page. The prover is GCP staging at
 `https://stg-ai.zkproofport.app`; the dApp runs locally.
 
@@ -32,8 +32,13 @@ Start recording before entering an instruction in **Your instruction**:
 > on Arc, read its instructions, and obtain the KYC and delegation proof this
 > dApp requires. Verify the proof on-chain before staking.
 
-Set **Authorized staking amount** to `0.1`, then click **Ask agent** once.
-Film the user input, **LIVE AGENT / Agent tools & results**, verification and
+Set **Requested staking amount** to `0.1`, then click **Ask agent** once.
+The instruction authorizes discovery and preparation only. Approve the actual
+**KYC delegation & 0.001 USDC proof payment** request in the dApp, then after
+verification separately confirm the **0.1 USDC stake**. The real MCP tool waits
+for each decision; Reject stops the corresponding action.
+
+Film both permission dialogs and user clicks, the user input, **LIVE AGENT / Agent tools & results**, verification and
 receipt, the increased on-chain position, and **Compare configured address**.
 Expand tool responses to inspect the fetched documents, MCP schema, selected
 proof arguments, verifier response and transaction hash.
@@ -73,18 +78,22 @@ mode and does not advertise hardware TEE attestation.
 
 ## Recorded real execution
 
-The latest retake was submitted at **2026-09-13 14:15:45 KST** from the
-actual dApp UI. Claude Code reported **claude-sonnet-5**, selected eight tools,
-and completed the new stake at **14:16:43 KST**. The session exited successfully
-at **14:16:50 KST**, with no completion error. Gateway decreased from 2.986 to
-2.985 USDC; the wallet decreased from 0.5 to 0.4 USDC; the position increased
-from 1.5 to 1.6 USDC. The 100-second video preserves actual capture intervals
-from empty user input through tools, verification, transaction and address audit.
+The latest interactive run began at **2026-09-13 14:27:49 KST**. The user
+approved proof/delegation at **14:28:30** and the verified stake at **14:29:38**.
+The new transaction completed at **14:29:56**, session exit at **14:30:01**.
+Claude selected ten tools, including two blocking permission requests. Gateway
+changed 2.985 → 2.984 USDC, wallet 0.4 → 0.3, position 1.6 → 1.7. A separate
+real rejection run produced no proof/payment/stake and no balance changes.
 
-- [Full dApp video](https://github.com/zkproofport/proofport-app-dev/blob/main/videos/arc-recording/ledger-house-cli-walkthrough.mp4)
-- [Retake tool events, balances and receipt](artifacts/agent-dapp-retake-verification.json)
-- [Retake public proof](artifacts/agent-dapp-retake-proof.json)
-- [New Arc staking transaction](https://testnet.arcscan.app/tx/0x44f7d3f750d541edfec1f3f9662e638f6f189e3f09dec129256f760ae1b6025f)
+- [Interactive video, 3m14s](https://github.com/zkproofport/proofport-app-dev/blob/main/videos/arc-recording/ledger-house-cli-walkthrough.mp4)
+- [Actual approval and transaction evidence](artifacts/interactive-verification.json)
+- [Actual rejection evidence](artifacts/interactive-rejection-verification.json)
+- [Public proof](artifacts/interactive-proof.json)
+- [New transaction](https://testnet.arcscan.app/tx/0x16eea46e81a904ba4f7504542264da65b3a462f16d8121919e38bfcaba0815e8)
+
+Exact approved payment terms are passed through MCP into SDK payment signing.
+If the final challenge changes amount, recipient, asset, chain or signing domain,
+the SDK refuses to sign. The model has no approval decision tool or browser access.
 
 The public nullifier supports checking a known candidate address. Hiding A in
 the interface is not an unlinkability guarantee; see the [audit guide](audit/README.md).

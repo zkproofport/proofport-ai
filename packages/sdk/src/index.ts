@@ -11,6 +11,7 @@ export type {
   EASAttestation,
   AttestationData,
   ProofParams,
+  ApprovedPayment,
   ProofResult,
   StepResult,
 } from './types.js';

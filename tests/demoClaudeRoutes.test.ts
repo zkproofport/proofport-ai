@@ -69,7 +69,7 @@ describe('Claude recording route', () => {
     expect(Object.keys(config.mcpServers)).toEqual(['ledger_house']);
     expect(config.mcpServers.ledger_house.command).toBe(process.execPath);
     expect(config.mcpServers.ledger_house.args[0]).toMatch(/\/demo\/user-agent\/src\/dapp-mcp\.ts$/);
-    expect(config.mcpServers.ledger_house.env).toEqual({DEMO_SERVICE:'http://localhost:4107', DEMO_AMOUNT:'0.1'});
+    expect(config.mcpServers.ledger_house.env).toEqual({DEMO_SERVICE:'http://localhost:4107', DEMO_AMOUNT:'0.1',DEMO_AGENT_TOKEN:expect.any(String)});
     expect((await stat(join(options.cwd, 'mcp.json'))).mode & 0o777).toBe(0o600);
     expect((await request(app).post('/demo/run').send({amount:'0.1',instruction:'Another run'})).status).toBe(409);
     children[0].stdout.write(JSON.stringify({type:'system',subtype:'init',model:'claude-actual-fixture'})+'\n');
@@ -88,6 +88,26 @@ describe('Claude recording route', () => {
     const state = (await request(app).get('/demo/state')).body.run;
     expect(state.status).toBe('failed');
     expect(process.kill).toHaveBeenCalledWith(-children[0].pid, 'SIGTERM');
+  });
+
+  it('does not start an agent on page state reads and requires a separate browser decision',async()=>{
+    expect((await request(app).get('/demo/state')).body.run).toBeNull();expect(spawn).not.toHaveBeenCalled();
+    await request(app).post('/demo/run').send({amount:'0.1',instruction:'Stake after asking me for permission.'});
+    const config=JSON.parse(await readFile(join(spawn.mock.calls[0][2].cwd,'mcp.json'),'utf8'));
+    const token=config.mcpServers.ledger_house.env.DEMO_AGENT_TOKEN;
+    const details={amount:'0.1',delegate:'B',fee:'0.001'};
+    expect((await request(app).post('/demo/permissions').send({kind:'proof',details})).status).toBe(403);
+    const p=(await request(app).post('/demo/permissions').set('Authorization',`Bearer ${token}`).send({kind:'proof',details})).body;
+    expect(p.status).toBe('pending');
+    const state=(await request(app).get('/demo/state')).body;
+    expect(state.run.permissions[0].status).toBe('pending');expect(JSON.stringify(state)).not.toContain(token);
+    expect((await request(app).post(`/demo/permissions/${p.id}/decision`).set('Authorization',`Bearer ${token}`).send({decision:'approve'})).status).toBe(403);
+    expect((await request(app).post(`/demo/permissions/${p.id}/decision`).set('Origin','https://attacker.invalid').set('X-Demo-User-Action','1').send({decision:'approve'})).status).toBe(403);
+    const approved=await request(app).post(`/demo/permissions/${p.id}/decision`).set('Origin','http://localhost:4107').set('X-Demo-User-Action','1').send({decision:'approve'});
+    expect(approved.body.status).toBe('approved');expect(approved.body.decidedAt).toEqual(expect.any(String));
+    expect((await request(app).post('/demo/permissions').set('Authorization',`Bearer ${token}`).send({kind:'proof',details:{...details,fee:'1'}})).status).toBe(409);
+    children[0].emit('close',0);
+    expect((await request(app).get(`/demo/permissions/${p.id}`).set('Authorization',`Bearer ${token}`)).status).toBe(403);
   });
 
   it('reports spawn failure and rejects a successful exit without stake evidence', async () => {

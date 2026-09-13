@@ -4,7 +4,8 @@ import {ActionGuard} from '../demo/user-agent/src/actionGuard.ts';
 import {Wallet} from 'ethers';
 describe('dApp agent authority boundaries',()=>{
  it('rejects spending before verified discovery, guide, delegation and proof',()=>{const g=new ActionGuard('0.1');expect(()=>g.proof()).toThrow();expect(()=>g.stake('0.1')).toThrow();});
- it('binds the approved amount and refuses repeated payment or stake',()=>{const g=new ActionGuard('0.1');g.discovered=true;g.guideRead=true;g.mcpConnected=true;g.delegated=true;g.proof();expect(()=>g.proof()).toThrow();g.verified=true;expect(()=>g.stake('1')).toThrow();g.stake('0.1');expect(()=>g.stake('0.1')).toThrow();});
+ it('requires user approval even after all agent prerequisites succeed',()=>{const g=new ActionGuard('0.1');g.discovered=true;g.guideRead=true;g.mcpConnected=true;g.delegated=true;expect(()=>g.proof()).toThrow('user');g.verified=true;expect(()=>g.stake('0.1')).toThrow('user');});
+ it('binds the approved amount and refuses repeated payment or stake',()=>{const g=new ActionGuard('0.1');g.discovered=true;g.guideRead=true;g.mcpConnected=true;g.delegated=true;g.proofApproved=true;g.proof();expect(()=>g.proof()).toThrow();g.verified=true;g.stakeApproved=true;expect(()=>g.stake('1')).toThrow();g.stake('0.1');expect(()=>g.stake('0.1')).toThrow();});
  it('masks configured secrets and the credential address, including case variants',()=>{const r=createRedactor({TOKEN:'private-token-123',E2E_ATTESTATION_WALLET_ADDRESS:'0x'+'a'.repeat(40)});expect(r('private-token-123 0x'+'A'.repeat(40))).toBe('**** ****');expect(r('public tool result')).toBe('public tool result');});
 });
 

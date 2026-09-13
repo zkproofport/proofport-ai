@@ -195,7 +195,7 @@ export async function generateProof(
       );
     }
     t = Date.now();
-    const paid = await signPayment(challenge as never, signers.payment, { network: params.payOn });
+    const paid = await signPayment(challenge as never, signers.payment, { network: params.payOn, maxPayment:params.maxPayment, approvedPayment:params.approvedPayment });
     paymentHeaders = paid.headers;
     recordStep(3.5, 'Sign Payment', { paidOn: paid.paidOn, amount: paid.amount, payer: paid.payer }, t);
   }

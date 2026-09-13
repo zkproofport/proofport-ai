@@ -17,7 +17,7 @@ export function parseInstruction(value: unknown): string {
 }
 
 export const CLAUDE_TOOLS = new Set(['read_dapp', 'discover_prover', 'read_prover_guide', 'connect_prover_mcp',
-  'prepare_delegation', 'generate_proof', 'verify_proof_on_arc', 'stake'].map(name => `mcp__ledger_house__${name}`));
+  'prepare_delegation', 'request_proof_permission', 'generate_proof', 'verify_proof_on_arc', 'request_stake_permission', 'stake'].map(name => `mcp__ledger_house__${name}`));
 type PublicToolResult = Record<string, unknown>;
 function record(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null && !Array.isArray(value); }
 function amountUnits(value: string) {

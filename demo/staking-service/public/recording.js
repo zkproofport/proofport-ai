@@ -7,6 +7,26 @@ let terminalRun = null;
 let streamConnected = false;
 let lastTerminalSignature = '';
 const expandedEvents = new Set();
+let shownPermission=null;
+function renderPermissions(run){
+  const permissions=Array.isArray(run?.permissions)?run.permissions:[];
+  const history=document.createDocumentFragment();
+  for(const permission of permissions){const row=document.createElement('p');const when=permission.decidedAt?new Date(permission.decidedAt).toLocaleTimeString('en-GB',{hour12:false}):'';row.textContent=`${permission.kind==='proof'?'Delegation & proof payment':'Staking transaction'} · ${permission.status}${when?' · '+when:''}`;history.append(row);}
+  $('permission-history').replaceChildren(history);
+  const pending=run?.status==='running'?permissions.find(p=>p.status==='pending'):null;
+  const dialog=$('permission-dialog');
+  if(!pending){if(dialog.open)dialog.close();shownPermission=null;return;}
+  if(shownPermission?.id===pending.id)return;
+  shownPermission=pending;const proof=pending.kind==='proof',d=pending.details;
+  $('permission-title').textContent=proof?'Approve KYC delegation & proof payment':'Confirm the verified stake';
+  $('permission-explanation').textContent=proof?'The agent is paused. Approving allows the local KYC signer (****) to authorize this delegate and pay for one proof. No signature or payment has been made yet.':'The proof is verified on Arc. The agent is paused before submitting the staking transaction.';
+  const facts=proof?[['Discovered prover',`#${d.proverId} · ${d.proverUrl}`],['Proof fee',`${d.fee} USDC · Arc nanopayments`],['Delegated action',`Stake ${d.amount} USDC · Arc Testnet`],['Delegate wallet B',d.delegate],['Staking contract',d.gate],['Delegation expires',new Date(Number(d.action?.message?.expiresAt)*1000).toLocaleString()]]:[['Transaction',`Stake ${d.amount} USDC · Arc Testnet`],['Agent Wallet',d.delegate],['Staking contract',d.gate],['Proof verification','Valid · Arc Testnet'],['Proof fingerprint',d.proofFingerprint]];
+  const fragment=document.createDocumentFragment();for(const [label,value] of facts){const dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=label;dd.textContent=String(value);fragment.append(dt,dd);}$('permission-facts').replaceChildren(fragment);
+  $('permission-details').textContent=JSON.stringify(d,null,2);
+  $('approve-permission').textContent=proof?`Approve delegation & ${d.fee} USDC`:`Confirm ${d.amount} USDC stake`;
+  $('permission-error').hidden=true;$('approve-permission').disabled=false;$('reject-permission').disabled=false;
+  if(!dialog.open)dialog.showModal();
+}
 function eventText(text) {
   try { return JSON.stringify(JSON.parse(text), null, 2); } catch { /* A tool label may precede its JSON. */ }
   for (const index of [text.indexOf('{'), text.indexOf('[')].filter(index => index > 0).sort((a, b) => a - b)) {
@@ -99,6 +119,7 @@ function renderRun(run) {
   $('run-error').hidden = run?.status !== 'failed';
   $('run-error').textContent = run?.error ?? '';
   renderTerminal(run);
+  renderPermissions(run);
 }
 function renderPositions(rows) {
   if(!rows?.length) {const p=document.createElement('p');p.className='empty';p.textContent="Your agent's verified position will appear here.";$('positions').replaceChildren(p);return;}
@@ -116,6 +137,12 @@ async function refresh(){
   }catch{$('connection').textContent='Reconnecting…';$('connection-dot').className='';}
 }
 $('stake-form').addEventListener('submit',async event=>{event.preventDefault();if(active)return;$('form-error').hidden=true;$('run-button').disabled=true;try{const instruction=$('instruction').value.trim();if(!instruction)throw new Error('Enter an instruction for the agent.');const response=await fetch('/demo/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:$('amount').value,instruction})});const data=await response.json();if(!response.ok)throw new Error(data.error ?? 'Could not start the agent');await refresh();}catch(error){$('form-error').textContent=error.message;$('form-error').hidden=false;$('run-button').disabled=false;}});
+$('permission-dialog').addEventListener('cancel',event=>event.preventDefault());
+for(const decision of ['approve','reject'])$(decision+'-permission').addEventListener('click',async()=>{
+ if(!shownPermission)return;const id=shownPermission.id;$('approve-permission').disabled=true;$('reject-permission').disabled=true;
+ try{const response=await fetch(`/demo/permissions/${id}/decision`,{method:'POST',headers:{'Content-Type':'application/json','X-Demo-User-Action':'1'},body:JSON.stringify({decision})});const value=await response.json();if(!response.ok)throw Error(value.error??'Decision failed');await refresh();}
+ catch(error){$('permission-error').textContent=error.message;$('permission-error').hidden=false;$('approve-permission').disabled=false;$('reject-permission').disabled=false;}
+});
 $('copy-command').addEventListener('click',async()=>{try{await navigator.clipboard.writeText($('cli-command').textContent);$('copy-command').textContent='Copied';setTimeout(()=>$('copy-command').textContent='Copy',1600);}catch{$('copy-command').textContent='Select below';const range=document.createRange();range.selectNodeContents($('cli-command'));const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);}});
 const events=new EventSource('/demo/events');events.onmessage=event=>{try{renderRun(JSON.parse(event.data));if(!active)refresh();}catch{}};
 events.onopen=()=>{streamConnected=true;renderTerminal(terminalRun);};

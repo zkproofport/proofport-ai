@@ -142,6 +142,8 @@ RETURNS: Full ProofResult with proof bytes, public inputs, and timing informatio
           'tool -- and is the right choice for an agent buying many proofs. "arc-testnet" settles each payment ' +
           'on chain immediately and costs gas every time.',
         ),
+      max_payment:z.string().regex(/^\d+(\.\d{1,6})?$/).optional().describe('Maximum USDC proof fee allowed by the user.'),
+      approved_payment:z.object({network:z.string(),scheme:z.string(),amount:z.string().regex(/^\d+$/),asset:z.string(),payTo:z.string(),extra:z.object({name:z.string(),version:z.string(),verifyingContract:z.string()})}).optional().describe('Exact user-approved terms. The SDK rejects any changed fee, recipient, token, chain or Gateway signing domain before signing the actual challenge.'),
     },
     async (params) => {
       try {
@@ -161,6 +163,8 @@ RETURNS: Full ProofResult with proof bytes, public inputs, and timing informatio
             isIncluded: params.is_included,
             ...(params.circuit === 'oidc_domain' && { jwt: params.jwt, provider: params.provider }),
             payOn: params.pay_on,
+            maxPayment:params.max_payment,
+            approvedPayment:params.approved_payment,
           },
           {
             onStep: (step) => {

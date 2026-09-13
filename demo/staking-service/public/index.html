@@ -17,11 +17,12 @@
         <div class="requirement"><span class="shield">◇</span><div><strong>One proof: KYC + delegation</strong><span>arc_eligibility binds Coinbase KYC to your EIP-712 staking authorization.</span></div></div>
         <form id="stake-form">
           <label for="instruction">Your instruction</label>
-          <textarea id="instruction" name="instruction" rows="5" maxlength="2000" required spellcheck="false">Stake 0.1 USDC in Ledger House. Find the registered prover, read its integration instructions, obtain the KYC and delegation proof, verify it on Arc, and stake with my Agent Wallet.</textarea>
-          <label for="amount">Authorized staking amount</label><div class="amount-input"><input id="amount" name="amount" value="0.1" inputmode="decimal" autocomplete="off" aria-describedby="amount-help" required><span>USDC</span></div><p id="amount-help" class="micro">Exact amount authorized for this request · Arc Testnet</p><button id="run-button" type="submit"><span>Ask agent</span><span>↗</span></button>
+          <textarea id="instruction" name="instruction" rows="5" maxlength="2000" required spellcheck="false" placeholder="Tell your agent what you want to do."></textarea>
+          <label for="amount">Requested staking amount</label><div class="amount-input"><input id="amount" name="amount" value="0.1" inputmode="decimal" autocomplete="off" aria-describedby="amount-help" required><span>USDC</span></div><p id="amount-help" class="micro">The agent must ask before signing, paying or submitting a stake.</p><button id="run-button" type="submit"><span>Ask agent</span><span>↗</span></button>
         </form>
         <p id="form-error" class="error" role="alert" hidden></p>
-        <p class="launch-note">The agent uses tools to discover the service, read instructions and complete your request.</p>
+        <p class="launch-note">Sending an instruction allows discovery and preparation. Review the agent's permission requests before anything is signed or spent.</p>
+        <div id="permission-history" class="permission-history" aria-live="polite"></div>
         <div class="powered"><span>Paid with <strong>Circle Agent Wallet</strong></span><span>Proof by <strong>ZKProofport</strong></span></div>
       </section>
       <section class="activity panel" aria-labelledby="activity-title">
@@ -49,5 +50,12 @@
     </div>
     <footer><span>Ledger House / ZKProofport</span><span id="runtime-note">Checking the live prover…</span></footer>
   </main>
+  <dialog id="permission-dialog" aria-labelledby="permission-title">
+    <p class="eyebrow">YOUR DECISION</p><h2 id="permission-title"></h2>
+    <p id="permission-explanation"></p><dl id="permission-facts"></dl>
+    <details><summary>Review exact request</summary><pre id="permission-details"></pre></details>
+    <p id="permission-error" class="error" hidden></p>
+    <div class="permission-actions"><button id="reject-permission" type="button" class="secondary">Reject</button><button id="approve-permission" type="button"></button></div>
+  </dialog>
   <script type="module" src="/recording.js"></script>
 </body></html>

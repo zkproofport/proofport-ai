@@ -8,7 +8,7 @@ import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {resolve} from 'node:path';
 import dotenv from 'dotenv';
-import {listArcAgentWallets} from '@zkproofport-ai/sdk';
+import {listArcAgentWallets,type ApprovedPayment} from '@zkproofport-ai/sdk';
 import {ethers,buildStakeDelegation,STAKING_ABI,ARC_CHAIN_ID} from '../../shared/flow.ts';
 import {selectAgentDelegate} from './wallet.ts';
 import {discoverProver} from '../../shared/discovery.ts';
@@ -38,6 +38,7 @@ let proof:{proof:string;publicInputs:string[]}|undefined;
 let mcp:Client|undefined,transport:StdioClientTransport|undefined;
 let connecting=false;
 let readService=false;
+let approvedPayment:ApprovedPayment|undefined;
 const result=(value:unknown)=>({content:[{type:'text' as const,text:redact(JSON.stringify(value))}]});
 function register(name:string,description:string,schema:Record<string,z.ZodTypeAny>,handler:(args:any)=>Promise<unknown>){
   server.tool(name,description,schema,async args=>{try{return result(await handler(args));}catch(error){return {...result({ok:false,error:redact(error instanceof Error?error.message:String(error)).slice(0,1200)}),isError:true};}});
@@ -47,6 +48,21 @@ async function http(url:string,body?:unknown){
   return {status:r.status,data:await r.json()};
 }
 function origin(){if(!prover)throw Error('Discover the registered prover first.');return new URL(prover.endpoint).origin;}
+async function userPermission(kind:'proof'|'stake',details:Record<string,unknown>){
+ const token=process.env.DEMO_AGENT_TOKEN;if(!token)throw Error('User permission channel is unavailable.');
+ const headers={Authorization:`Bearer ${token}`,'Content-Type':'application/json'};
+ const initial=await fetch(service.origin+'/demo/permissions',{method:'POST',headers,body:JSON.stringify({kind,details}),signal:AbortSignal.timeout(10000)});
+ if(!initial.ok)throw Error('Could not request user permission.');
+ let permission=await initial.json() as {id:string;status:string;decidedAt:string|null;expiresAt:string};
+ while(permission.status==='pending'){
+  if(Date.now()>Date.parse(permission.expiresAt))throw Error('User permission expired. Do not retry automatically.');
+  await new Promise(resolve=>setTimeout(resolve,750));
+  const response=await fetch(service.origin+'/demo/permissions/'+permission.id,{headers,signal:AbortSignal.timeout(10000)});
+  if(!response.ok)throw Error('User permission session ended.');permission=await response.json() as typeof permission;
+ }
+ if(permission.status!=='approved')throw Error('The user rejected or did not approve this action. Stop; do not retry or spend.');
+ return {ok:true,approved:true,kind,requestId:permission.id,decidedAt:permission.decidedAt,actor:'User decision in the dApp'};
+}
 register('read_dapp','Read the staking dApp policy and request access. Returns actual service manifest, KYC challenge, connected wallet and balance. No transaction.',{},async()=>{
  const manifest=await http(service.origin+'/.well-known/service.json');
  if(manifest.status!==200||JSON.stringify(manifest.data.chain)!==JSON.stringify(config))throw Error('Untrusted dApp deployment manifest.');
@@ -105,7 +121,8 @@ register('generate_proof','Call the connected prover MCP generate_proof tool wit
  if(challenge.status!==402||challenge.data.requiresPayment!==true||offers?.length!==1)throw Error('Expected one live Arc Gateway offer.');
  validateNanoOffer(offers[0],config.discovery.owner,config.usdc);
  guard.proof();
- const call={...args,action};
+ if(!approvedPayment)throw Error('Missing user-approved payment terms.');
+ const call={...args,action,approved_payment:approvedPayment,max_payment:'0.001'};
  const response=await mcp.callTool({name:'generate_proof',arguments:call},undefined,{timeout:240000});
  if(response.isError)throw Error('The prover MCP rejected the paid proof request. Automatic paid retry is disabled.');
  const content=response.content as {type:string;text?:string}[];
@@ -116,6 +133,16 @@ register('generate_proof','Call the connected prover MCP generate_proof tool wit
  const saved=await http(service.origin+'/demo/proof',{circuitId:'arc_eligibility',...proof});
  if(saved.status!==200)throw Error('Could not publish the public proof.');
  return {ok:true,step:5,source:'Actual prover MCP tools/call response',tool:'generate_proof',arguments:call,proofBytes:(proof.proof.length-2)/2,publicInputCount:proof.publicInputs.length,fingerprint:metadata.publicInputsFingerprint,actionHash:metadata.actionHash,credentialSigner:'****',claims:['Coinbase KYC','same credential holder signed EIP-712 delegation'],proofCount:1,offer:offers[0],payment:'Circle Agent Wallet / Arc Gateway nanopayment',proofUrl:service.origin+'/demo/proof'};
+});
+register('request_proof_permission','Ask the user in the dApp to approve the exact discovered prover, 0.001 USDC proof fee and KYC delegation to the Agent Wallet. Blocks until the user clicks approve or reject. Required before generate_proof. Never grants approval automatically.',{},async()=>{
+ if(!guard.guideRead||!guard.mcpConnected||!action||!wallet||!prover)throw Error('Read the guide, connect MCP and prepare the delegation first.');
+ const challenge=await http(origin()+'/api/v1/prove',{circuit:'arc_eligibility',inputs:{}});
+ const offers=challenge.data.accepts?.filter((offer:any)=>offer.network==='eip155:5042002'&&offer.extra?.name==='GatewayWalletBatched');
+ if(challenge.status!==402||offers?.length!==1)throw Error('Live proof price unavailable.');validateNanoOffer(offers[0],config.discovery.owner,config.usdc);
+ const offer=offers[0];
+ const terms:ApprovedPayment={network:offer.network,scheme:offer.scheme,amount:offer.amount,asset:offer.asset,payTo:offer.payTo,extra:{name:offer.extra.name,version:offer.extra.version,verifyingContract:offer.extra.verifyingContract}};
+ const approved=await userPermission('proof',{amount,delegate:wallet,credentialSigner:'****',proverId:prover.agentId,proverUrl:origin(),recipient:offer.payTo,fee:'0.001',payment:'Circle Agent Wallet · Arc nanopayments',chainId:ARC_CHAIN_ID,circuit:'arc_eligibility',scope:'ledger-house',gate:config.gate,action,approvedPayment:terms});
+ approvedPayment=terms;guard.proofApproved=true;return approved;
 });
 register('verify_proof_on_arc','Verify the actual proof with the deployed Arc verifier using eth_call. Staking still checks the delegation policy and verifies again atomically.',{},async()=>{
  if(!proof||!action)throw Error('Generate the actual proof first.');
@@ -140,5 +167,10 @@ register('stake','Execute the user-approved stake through the existing Circle Ag
  if(receipt.status!==1||!event||ethers.getAddress(event.args.delegate)!==wallet||event.args.amount!==units||event.args.actionHash.toLowerCase()!==extractArcPublicMetadata(proof.publicInputs).actionHash)throw Error('Staking receipt did not match the authorized action.');
  const accepted=await http(service.origin+'/stake',{txHash:receipt.hash});if(accepted.status!==200||accepted.data.ok!==true)throw Error('dApp rejected the receipt.');
  return {ok:true,step:6,amount,wallet,txHash:receipt.hash,block:receipt.blockNumber,approvalTx,verifiedOn:accepted.data.verifiedOn,receiptStatus:receipt.status};
+});
+register('request_stake_permission','Ask the user to confirm the exact requested USDC staking transaction after Arc proof verification. Displays the delegate, amount, contract and proof fingerprint. Blocks for a real dApp click; required before stake.',{},async()=>{
+ if(!guard.verified||!proof||!wallet)throw Error('Verify the proof on Arc first.');
+ const approved=await userPermission('stake',{amount,delegate:wallet,chainId:ARC_CHAIN_ID,gate:config.gate,verifier:config.verifier,proofFingerprint:extractArcPublicMetadata(proof.publicInputs).publicInputsFingerprint,verified:true,transaction:'USDC approval if needed, then stakePacked',payment:'Circle Agent Wallet'});
+ guard.stakeApproved=true;return approved;
 });
 await server.connect(new StdioServerTransport());

@@ -37,7 +37,7 @@
  * it.
  */
 
-import type { PaymentWallet, PaymentOffer, PaidRequest } from './types.js';
+import type { PaymentWallet, PaymentOffer, PaidRequest, ApprovedPayment } from './types.js';
 import { usdcSpendControls, isKnownUsdc, knownUsdc } from './usdc.js';
 
 /**
@@ -78,10 +78,20 @@ export function paymentOffers(challenge: {
  * ask for spends real money in the wrong place, and the caller who typed
  * `--network arc` would be told the payment succeeded.
  */
+export function assertApprovedPayment(offer:PaymentOffer,approved:ApprovedPayment){
+  const extra=offer.raw.extra as Record<string,unknown>|undefined;
+  const sameAddress=(a:unknown,b:string)=>typeof a==='string'&&/^0x[0-9a-fA-F]{40}$/.test(a)&&a.toLowerCase()===b.toLowerCase();
+  if(offer.network!==approved.network||offer.raw.scheme!==approved.scheme||offer.amount!==approved.amount||
+    !sameAddress(offer.asset,approved.asset)||!sameAddress(offer.payTo,approved.payTo)||
+    extra?.name!==approved.extra.name||extra?.version!==approved.extra.version||!sameAddress(extra?.verifyingContract,approved.extra.verifyingContract)){
+    throw Error('The actual payment offer differs from the user-approved amount, recipient, asset, network or signing domain. Refusing to sign.');
+  }
+}
+
 export async function signPayment(
   challenge: { accepts?: unknown[]; payment?: unknown; nonce?: string },
   wallet: PaymentWallet,
-  opts: { network?: string; maxPayment?: string } = {},
+  opts: { network?: string; maxPayment?: string; approvedPayment?:ApprovedPayment } = {},
 ): Promise<PaidRequest> {
   const offers = paymentOffers(challenge);
   if (offers.length === 0) {
@@ -103,6 +113,7 @@ export async function signPayment(
     offer = found;
   }
 
+  if(opts.approvedPayment)assertApprovedPayment(offer,opts.approvedPayment);
   // Checked here so the refusal names the token. @x402/core would also
   // refuse -- that is what spend controls are for -- but its message talks
   // about allowedAssets and does not say what was asked for.

@@ -199,6 +199,12 @@ export interface TypedAction {
   message: Record<string, unknown>;
 }
 
+/** Terms explicitly accepted by a user; nonce is intentionally not pinned. */
+export interface ApprovedPayment {
+  network:string;scheme:string;amount:string;asset:string;payTo:string;
+  extra:{name:string;version:string;verifyingContract:string};
+}
+
 export interface ProofParams {
   circuit: CircuitName;
   /**
@@ -211,6 +217,8 @@ export interface ProofParams {
    * choose and report success.
    */
   payOn?: string;
+  approvedPayment?: ApprovedPayment;
+  maxPayment?: string;
   /** Scope string for the proof (defaults to "proofport") */
   scope?: string;
   /** Country codes for the country circuit (e.g. ["US", "KR"]) */
