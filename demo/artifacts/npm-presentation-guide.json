@@ -1,0 +1,137 @@
+{
+  "observedAt": "2026-09-13T07:59:05.626Z",
+  "guide": {
+    "circuit_id": "arc_eligibility",
+    "display_name": "Arc Eligibility",
+    "description": "Prove a Coinbase KYC attestation AND that the same wallet signed one EIP-712 action. The wallet shows the person named fields instead of an opaque hash, and the verifying contract recomputes the same two hashes from the call it is about to run, so a proof made for one contract does not verify at another.",
+    "e2e_encryption": {
+      "enabled": false,
+      "description": "This deployment provides no hardware TEE attestation. HTTPS protects transport; the prover receives proof inputs.",
+      "sdk_usage": "generateProof checks the actual challenge for teePublicKey. Never infer TEE availability from a circuit name."
+    },
+    "local_mcp_server": {
+      "recommended": true,
+      "npm_package": "@zkproofport-ai/mcp",
+      "version": "0.2.11",
+      "install": "npm install -g @zkproofport-ai/mcp@latest",
+      "command": "zkproofport-mcp",
+      "transport": "stdio",
+      "discovery": "Connect to the local MCP server and call tools/list. Read generate_proof inputSchema before tools/call.",
+      "required_arguments": [
+        "circuit",
+        "action"
+      ],
+      "generate_proof": {
+        "circuit": "arc_eligibility",
+        "scope": "ledger-house",
+        "action": "<complete EIP-712 typed action prepared by the trusted application>",
+        "pay_with": "arc",
+        "pay_on": "arc-testnet-nano"
+      },
+      "verification": "After generate_proof, call verify_proof with its result. Verify on Arc Testnet before staking.",
+      "credentials": "ATTESTATION_KEY stays in the local signer process. Circle Agent Wallet signing uses the existing Circle CLI login. Do not put keys in model prompts or tool arguments."
+    },
+    "sdk": {
+      "package": "@zkproofport-ai/sdk",
+      "quick_start": "import { createConfig, generateProof, walletFromArcAgent } from '@zkproofport-ai/sdk';\nconst payment = await walletFromArcAgent({ address: agentWalletB, chain: 'ARC-TESTNET' });\nconst result = await generateProof(\n  createConfig({ baseUrl: 'https://stg-ai.zkproofport.app' }),\n  { attestation: existingKycSigner, payment },\n  { circuit: 'arc_eligibility', scope: 'ledger-house', action, payOn: 'arc-testnet-nano' },\n);",
+      "cli": "PROOFPORT_URL=https://stg-ai.zkproofport.app zkproofport-prove arc_eligibility --action action.json --scope ledger-house --pay-with arc --pay-on arc-testnet-nano --max-payment 0.001 --silent",
+      "payment_selection": "Explicitly choose an offered payment network and a funded payment wallet; no attestation-key payment fallback exists."
+    },
+    "constants": {
+      "eas": {
+        "graphql_endpoint": "https://base.easscan.org/graphql",
+        "schema_id": "0xf8b05c79f090979bf4a80270aba232dff11a10d9ca55c4f88de95317970f0de9",
+        "chain_id": 8453,
+        "note": "Coinbase KYC attestation data is read on Base Mainnet; proof verification is on Arc."
+      },
+      "contracts": {
+        "coinbase_attester": "0x357458739F90461b99789350868CD7CF330Dd7EE",
+        "verifier_address": "0xCbC8E63fF92659E8B44cFF117D33005Bb669a018",
+        "chain_id": 5042002
+      },
+      "authorized_signers": [
+        "0x952f32128AF084422539C4Ff96df5C525322E564",
+        "0x8844591D47F17bcA6F5dF8f6B64F4a739F1C0080",
+        "0x88fe64ea2e121f49bb77abea6c0a45e93638c3c5",
+        "0x44ace9abb148e8412ac4492e9a1ae6bd88226803"
+      ],
+      "payment": {
+        "required": true,
+        "recipient": "0x5A3E649208Ae15ec52496c1Ae23b2Ff89Ac02f0c",
+        "price": "$0.001",
+        "source": "Use the live 402 accepts list for amount, asset, recipient and payment domain."
+      },
+      "x402": {
+        "protocol": "x402 v2; use the selected live offer",
+        "chains": [
+          {
+            "network": "eip155:5042002",
+            "network_name": "arc-testnet-nano",
+            "asset": "0x3600000000000000000000000000000000000000",
+            "decimals": 6,
+            "settlement": "gateway",
+            "eip712_domain": {
+              "name": "GatewayWalletBatched",
+              "version": "1",
+              "chainId": 5042002,
+              "verifyingContract": "0x0077777d7EBA4688BDeF3E311b846F25870A19B9"
+            }
+          }
+        ],
+        "single_step_flow": "POST /api/v1/prove → 402 PAYMENT-REQUIRED and accepts → sign selected offer → retry with PAYMENT-SIGNATURE and X-Payment-Nonce.",
+        "nanopayments": "For arc-testnet-nano, use @circle-fin/x402-batching. Circle CLI signs GatewayWalletBatched typed data using the Agent Wallet backing EOA. Gateway verifies and settles against its deposited balance; each proof purchase requires no buyer transfer transaction."
+      },
+      "verification": {
+        "verifier_address": "0xCbC8E63fF92659E8B44cFF117D33005Bb669a018",
+        "chain_id": 5042002,
+        "chain_name": "Arc Testnet",
+        "rpc_url": "https://rpc.testnet.arc.io",
+        "function_signature": "verify(bytes proof, bytes32[] publicInputs) external view returns (bool)",
+        "public_input_count": 192,
+        "input_format": "192 bytes32 field words encoding six [u8;32] values. Keep the proof and publicInputs separate."
+      }
+    },
+    "action": {
+      "type": "EIP-712 TypedData",
+      "required_fields": [
+        "domain",
+        "types",
+        "primaryType",
+        "message"
+      ],
+      "domain": "Bind name, version, chainId and verifyingContract to the intended application.",
+      "message": "The staking application builds CredentialDelegation(delegate, action, amount, expiresAt, nonce). Never replace the application-provided action with a generic example.",
+      "security": "One circuit verifies both an authorized Coinbase attester transaction for wallet A and A's EIP-712 action signature. The application contract must match domain, action hash, trusted attester root, scope, expiry and replay protection before acting as delegate B."
+    },
+    "formulas": {
+      "signing_digest": "keccak256(0x1901 || domain_separator || action_hash)",
+      "domain_separator": "EIP-712 domain hash",
+      "action_hash": "EIP-712 hashStruct(primaryType, message)",
+      "scope": "keccak256(UTF8(scope))"
+    },
+    "input_schema": {
+      "preparation": "Use local MCP generate_proof with the typed action; the SDK prepares the private circuit witness locally.",
+      "public_fields": [
+        "signal_hash",
+        "domain_separator",
+        "action_hash",
+        "signer_list_merkle_root",
+        "scope",
+        "nullifier"
+      ],
+      "private_inputs": "KYC holder public key and EIP-712 signature, signed Coinbase attestation transaction and attester membership proof. Never send these through an LLM."
+    },
+    "endpoints": {
+      "prove": {
+        "method": "POST",
+        "url": "https://stg-ai.zkproofport.app/api/v1/prove",
+        "content_type": "application/json"
+      },
+      "guide": {
+        "method": "GET",
+        "url": "https://stg-ai.zkproofport.app/api/v1/guide/arc_eligibility"
+      }
+    }
+  },
+  "skill": "---\nname: zk-proof-generator\nversion: 1.0.0\ndescription: ZK proof generation for Coinbase KYC, country verification, OIDC domain verification, and Arc action eligibility. Provable circuits: coinbase_attestation, coinbase_country_attestation, oidc_domain_attestation, arc_eligibility. Noir circuits execute in the ZKProofport prover. Configured x402 USDC payment networks: arc-testnet-nano (eip155:5042002). See /identity/status for verified ERC-8004 registrations.\n---\n\n# ZKProofport prover\n\nProvable circuits: coinbase_attestation, coinbase_country_attestation, oidc_domain_attestation, arc_eligibility.\nExecution: the ZKProofport prover.\n\n## Discover and read the integration instructions\n\nValidate the ERC-8004 registration's current owner and active capability metadata.\nUse its x402 endpoint's origin to read this document and the circuit guide.\n- Arc action-bound KYC: https://stg-ai.zkproofport.app/api/v1/guide/arc_eligibility\n- Coinbase KYC: https://stg-ai.zkproofport.app/api/v1/guide/coinbase_kyc\n- Coinbase Country: https://stg-ai.zkproofport.app/api/v1/guide/coinbase_country\n- OIDC: https://stg-ai.zkproofport.app/api/v1/guide/oidc_domain\n\n## Local MCP for agents\n\nInstall with `npm install -g @zkproofport-ai/mcp@latest` (Arc support: 0.2.11+) and launch `zkproofport-mcp` over stdio.\nSet PROOFPORT_URL=https://stg-ai.zkproofport.app in that local process.\nLoad the existing ATTESTATION_KEY only into the local signer process; never send credentials to an LLM.\nConnect and call `tools/list`; use the returned inputSchema for `tools/call`.\n\nLocal tools: generate_proof, deposit_to_gateway, gateway_balance, get_supported_circuits,\nrequest_challenge, prepare_inputs, submit_proof, verify_proof.\nRead guides with HTTPS GET; get_guide is a remote service tool, not a local SDK tool.\n\nFor a single KYC + exact-action authorization proof, select `generate_proof` with:\n- circuit: `arc_eligibility`\n- action: the application's complete EIP-712 typed action (required)\n- scope: the application's scope, e.g. `ledger-house`\n- pay_with: `arc` for an existing Circle Agent Wallet\n- pay_on: `arc-testnet-nano` only when present in the live offered networks below\n\nCircle Agent Wallet uses an existing authenticated Circle CLI session and optional ARC_AGENT_WALLET.\nThe key-based adapter instead uses PAYMENT_PRIVATE_KEY with pay_with=key. These are separate choices;\nthere is no automatic payment fallback to the KYC signer's key.\nThe deposit_to_gateway and gateway_balance convenience tools use the key-based adapter;\nfor an Agent Wallet inspect its Gateway balance through the Circle CLI.\n\nAfter proof generation, call `verify_proof` with the proof result. The application must also bind\nits domain, delegate, amount, action, expiry, nonce, scope and trusted attester root before staking.\nArc Eligibility proves KYC and the same KYC wallet's authorization in one circuit.\n\n## x402 payment\n\nConfigured networks: arc-testnet-nano (eip155:5042002).\nConfigured proof price: $0.001 USDC.\nPOST https://stg-ai.zkproofport.app/api/v1/prove with circuit and prepared inputs to receive a 402 challenge.\nRead the live `accepts` list and `PAYMENT-REQUIRED` header; do not substitute a static payment domain.\nThe SDK signs the selected offer and retries with `PAYMENT-SIGNATURE` and `X-Payment-Nonce`.\n\nFor arc-testnet-nano, @circle-fin/x402-batching selects the GatewayWalletBatched domain.\nThe Circle Agent Wallet's backing EOA signs against its deposited Gateway balance; Gateway verifies\nand settles the payment. A proof purchase does not require a separate buyer transfer transaction.\nUSDC held in the Agent Wallet and USDC deposited in Gateway are different balances.\n\n## CLI equivalent\n\nWith the existing signer environment loaded and an offered Arc nanopayment network:\n\n`PROOFPORT_URL=https://stg-ai.zkproofport.app zkproofport-prove arc_eligibility --action action.json --scope ledger-house --pay-with arc --pay-on arc-testnet-nano --max-payment 0.001 --silent`\n\nThis CLI calls the local MCP generate_proof tool. An agent already connected to the local MCP\nserver can call that tool directly without spawning the prove CLI.\n\n## Protocols and identity\n\n- Remote MCP: https://stg-ai.zkproofport.app/mcp (tools: prove, get_supported_circuits, get_guide)\n- A2A: https://stg-ai.zkproofport.app/a2a\n- REST: https://stg-ai.zkproofport.app/api/v1/*\n- Verified ERC-8004 registrations: https://stg-ai.zkproofport.app/identity/status\n- Registration document: https://stg-ai.zkproofport.app/.well-known/agent-registration.json\n- Agent metadata: https://stg-ai.zkproofport.app/.well-known/agent.json\n- Agent card: https://stg-ai.zkproofport.app/.well-known/agent-card.json\n- MCP discovery: https://stg-ai.zkproofport.app/.well-known/mcp.json\n- OpenAPI: https://stg-ai.zkproofport.app/openapi.json\n"
+}

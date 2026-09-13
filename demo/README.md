@@ -16,16 +16,16 @@ Use Node 22.18+, existing Claude Code and Circle CLI logins, and the private
 ```bash
 npm ci
 npm ci --prefix demo/runtime --workspaces=false
-RECORDING_PORT=4115 bash demo/record.sh
+RECORDING_PORT=4116 bash demo/record.sh
 ```
 
 The `demo/runtime` npm install bootstraps the server and wallet observation. It is separate from the fresh per-run prover installation selected by the agent after reading the guide. Both use published npm packages; neither imports local workspace `packages/*/dist` output.
 
-Open **http://localhost:4115**. Keep any existing CLI/server running; choose another
+Open **http://localhost:4116**. Keep any existing CLI/server running; choose another
 unused port for a clean session. The remote prover is **staging** at
 `https://stg-ai.zkproofport.app`.
 
-Match the submitted presentation's **10 USDC** action. For the next recording, start with an empty instruction and zero events, then enter the complete prompt below. This is the proposed fresh-install prompt, not evidence of a completed new run. The textarea must expand so every sentence is visible.
+Match the submitted presentation's **10 USDC** action. Start with an empty instruction and zero events, then enter the complete prompt below. It was used in the successful fresh-install execution and capture on **2026-09-13 17:01–17:06 KST**. The textarea expands so every sentence is visible.
 
 > Stake 10 USDC with my Agent Wallet. Find a registered ZKProofport prover in the dApp Agent Marketplace and verify its ERC-8004 identity. Read its installation instructions, install the published SDK and MCP packages from npm, then connect and read the MCP tools. Ask me to approve the exact-action authorization and proof fee, then ask me again before submitting the verified stake.
 
@@ -44,7 +44,7 @@ this run invokes the actual prover MCP tool.
 - **Private Wallet A** has the Coinbase KYC credential and signs authorization for
   this exact action. Its address and key are masked as `****` in the dApp/model.
 - **Wallet B** is the existing **Circle Agent Wallet**. Its direct Coinbase KYC
-  query returned `NOT FOUND` in the historical run; show the current observed result. It pays the proof fee and executes the stake.
+  query returned `NOT FOUND` at **17:01:42 KST** in this run. It pays the proof fee and executes the stake.
 - The credential is not transferred to B. One `arc_eligibility` proof combines
   Coinbase KYC and the same holder's EIP-712 action signature. The gate checks B,
   policy, target/domain, stake amount, nonce and deadline before transfer.
@@ -99,29 +99,28 @@ A's KYC must be confirmed before the proof approval request; unknown query resul
 are never labeled as absence or valid KYC. Optional balance observations cannot
 turn a confirmed paid proof or stake into a request to repeat spending.
 
-## Historical presentation execution — 2026-09-13 16:05–16:07 KST
+## Actual fresh npm execution — 2026-09-13 17:01–17:06 KST
 
-This historical action was **0.1 USDC**, not the new 10 USDC presentation action. This is the earlier execution, before the new agent-selected fresh npm installation workflow. It is not evidence that the new workflow or recording has completed.
+- Provider discovery **17:01:45**, guide returned **17:01:48**, model-selected installation **17:01:49**.
+- Fresh npm installation completed **17:02:02**, installed **SDK 0.2.11 / MCP 0.2.11** handshake and schemas returned **17:02:04**.
+- Actual browser proof/action approval **17:02:26**, proof call **17:02:29**, proof returned **17:02:59**: **16,256 bytes / 192 public inputs**.
+- Arc preflight verified **17:03:02**, actual browser stake approval **17:04:57**.
+- Successful **10 USDC** stake result **17:05:16**, block **61867367**.
+- Gateway **2.983 → 2.982**, Wallet B **20.2 → 10.2**, position and vault custody **1.8 → 11.8 USDC**, balances observed **17:05:53 KST**.
+- Exactly one paid proof and one staking call, both after their browser approvals; receipt, event action binding and live verifier rechecked successfully.
 
-- Actual proof approval **16:05:52 KST**, proof returned **16:06:24**.
-- Arc preflight verified **16:06:26**, stake approved **16:06:35**.
-- Successful stake result **16:07:14**, block **61860540**.
-- Gateway **2.984 → 2.983**, Wallet B **0.3 → 0.2**, position **1.7 → 1.8 USDC**.
-- One paid proof and one staking call. Initial read-only RPC errors were retried
-  by the model and recovered before payment; raw evidence preserves them.
+[Presentation video](https://github.com/zkproofport/proofport-app-dev/blob/main/videos/arc-recording/ledger-house-cli-walkthrough.mp4)
+· [public execution evidence](artifacts/npm-presentation-verification.json)
+· [public proof](artifacts/npm-presentation-proof.json)
+· [Arc transaction](https://testnet.arcscan.app/tx/0x89b76904344e4930871230300ec0a982a503989a82774e1f7c112c0b958f9010).
 
-[Earlier 78-second presentation video](https://github.com/zkproofport/proofport-app-dev/blob/main/videos/arc-recording/ledger-house-cli-walkthrough.mp4)
-· [public execution evidence](artifacts/presentation-verification.json)
-· [public proof](artifacts/presentation-proof.json)
-· [Arc transaction](https://testnet.arcscan.app/tx/0x40d05805e2179291d0e24ff8c19f1bf190d240ac1d17b9360598d32dfd05c268).
-
-The linked historical video used actual browser captures with waiting-time cuts and crop/zoom. The next recording has not yet been completed and will follow the fixed-frame requirements below. Hiding A's literal address is not an
+Earlier **0.1 USDC** rehearsal evidence remains in `artifacts/presentation-verification.json`; it is separate from this **10 USDC** recording. Hiding A's literal address is not an
 unlinkability guarantee: the existing public nullifier supports checking a known
 candidate. That internal [security audit](audit/README.md) remains separate from
 this presentation.
 
-## Next recording: fixed frame and event-based cuts
+## Recording: fixed frame and event-based cuts
 
 Keep the complete browser frame fixed: **no zoom, pan or moving crop**. Show the whole instruction. Highlight important regions with an **amber outside border and black underlay**, without covering text or changing the UI palette. Include marketplace identity, guide reading, real npm installation, MCP connection/tools list, both approvals, x402 payment, proof verification, position change and Explorer.
 
-Trim waiting only at actual tool-call/result and approval/payment/receipt boundaries. Preserve the execution order and do not fabricate logs, status, results or cursor movement. Replace the historical timestamps, balances and links only after a fresh execution and recording provide actual evidence.
+Trim waiting only at actual tool-call/result and approval/payment/receipt boundaries. Preserve the execution order and do not fabricate logs, status, results or cursor movement. The raw capture records actual dApp input, both browser approvals, model-selected tools, npm installation, MCP calls, verification, confirmed stake and real Explorer pages.
