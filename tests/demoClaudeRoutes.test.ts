@@ -136,4 +136,18 @@ describe('Claude recording route', () => {
     expect((await decide(p.id)).status).toBe(409);
     expect((await request(app).post('/demo/permissions').set('Authorization',`Bearer ${oldToken}`).send({kind:'proof',details})).status).toBe(403);
   });
+
+  it('grants no payment authority from a read-only instruction or a model permission request',async()=>{
+    await request(app).post('/demo/run').send({amount:'0.1',instruction:'조회만 해 줘. 결제, 서명, 증명 구매, 스테이킹은 하지 마.'});
+    expect((await request(app).get('/demo/state')).body.run.permissions).toEqual([]);
+    const config=JSON.parse(await readFile(join(spawn.mock.calls[0][2].cwd,'mcp.json'),'utf8'));
+    const authorization=`Bearer ${config.mcpServers.ledger_house.env.DEMO_AGENT_TOKEN}`;
+    // Even if the model disregards the instruction, its own request cannot grant authority.
+    const p=(await request(app).post('/demo/permissions').set('Authorization',authorization).send({kind:'proof',details:{amount:'0.1'}})).body;
+    expect(p.status).toBe('pending');
+    expect((await request(app).post(`/demo/permissions/${p.id}/decision`).set('Authorization',authorization).send({decision:'approve'})).status).toBe(403);
+    const state=(await request(app).get('/demo/state')).body.run;
+    expect(state.permissions.every((permission:{status:string})=>permission.status!=='approved')).toBe(true);
+    expect(state.txHash).toBeNull();
+  });
 });
