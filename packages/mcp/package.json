@@ -1,6 +1,6 @@
 {
   "name": "@zkproofport-ai/mcp",
-  "version": "0.2.10",
+  "version": "0.2.11",
   "description": "MCP server for AI agents to generate zero-knowledge proofs of identity (Coinbase KYC, Country, Google OIDC, Workspace, MS 365) via ZKProofport. Server-side proving in AWS Nitro Enclave TEE, paid via x402 USDC on Base. ERC-8004 registered.",
   "keywords": [
     "mcp",
@@ -37,7 +37,7 @@
   "dependencies": {
     "@circle-fin/x402-batching": "^3.4.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "@zkproofport-ai/sdk": "^0.2.10",
+    "@zkproofport-ai/sdk": "^0.2.11",
     "zod": "^3.23.0"
   },
   "files": [

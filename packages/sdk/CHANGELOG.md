@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.2.11](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.2.10...sdk-v0.2.11) (2026-09-13)
+
+
+### Features
+
+* **arc:** complete agent wallet staking and GCP prover discovery demo ([031afbf](https://github.com/zkproofport/proofport-ai/commit/031afbf13a670d48fc5d874aa061c0bdaa52388f))
+* take circuit ids from the SDK, and fix two defects it surfaced ([3bcc063](https://github.com/zkproofport/proofport-ai/commit/3bcc0630a514c4d1a3bd146f6994f7f0314f9c92))
+
+
+### Bug Fixes
+
+* publish Arc SDK and MCP through synchronized releases ([51d0bc3](https://github.com/zkproofport/proofport-ai/commit/51d0bc38a7d65ed7684675b49fd1e039f9a3a738))
+* **sdk/attestation:** retry tx-indexing race (public RPC 5-30s lag) ([57dde8d](https://github.com/zkproofport/proofport-ai/commit/57dde8d539aaf64cf496f29e775c042bade2b926))
+* **sdk:** use base.drpc.org instead of mainnet.base.org (full history) ([bb02518](https://github.com/zkproofport/proofport-ai/commit/bb02518c7597f848168e52c381f30409d319e43f))
+* use canonical workspace lock and independent npm package versions ([c2b62fd](https://github.com/zkproofport/proofport-ai/commit/c2b62fd0da1c5422216cd5ec57e1845083e1fae5))
+
 ## [0.2.5](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.2.4...sdk-v0.2.5) (2026-03-24)
 
 
