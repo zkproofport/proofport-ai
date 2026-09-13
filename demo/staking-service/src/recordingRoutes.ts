@@ -52,7 +52,7 @@ export function installRecordingRoutes(app: Express, options: { proverUrl: strin
   });
   app.post('/demo/run', (req, res) => {
     if (!isLocalRecordingRequest(req,options.port)) return res.status(403).json({ error: 'Run this demo from this computer.' });
-    if (current?.snapshot().status === 'running') return res.status(409).json({ error: 'An agent is already running. Wait for its result.' });
+    if (terminateAgent || current?.snapshot().status === 'running') return res.status(409).json({ error: 'An agent is already running. Wait for its result.' });
     let amount: string;
     try { amount = parseStakeAmount(req.body?.amount); }
     catch (error) { return res.status(400).json({ error: (error as Error).message }); }
@@ -65,6 +65,7 @@ export function installRecordingRoutes(app: Express, options: { proverUrl: strin
     const child = spawn(process.execPath, [fileURLToPath(new URL('../../user-agent/src/stake.ts', import.meta.url)),
       '--service', `http://localhost:${options.port}`, '--amount', amount, '--pay-on', 'arc-testnet-nano', '--pay-with', 'arc'],
     { env: { ...process.env, CIRCLE_ACCEPT_TERMS: '1' }, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    child.on('spawn', () => { run.startCli(`http://localhost:${options.port}`); publish(); });
     const terminate = () => {
       if (!child.pid) return;
       try { process.kill(-child.pid, 'SIGTERM'); } catch { /* The process group already exited. */ }
@@ -76,7 +77,7 @@ export function installRecordingRoutes(app: Express, options: { proverUrl: strin
     child.stderr.on('data', chunk => process.stderr.write(chunk));
     child.on('error', () => { run.finish(1, 'The agent process could not start. Check the recording terminal.'); publish(); });
     const timeout = setTimeout(() => { terminate(); run.finish(1, 'The agent exceeded the 8 minute time limit. Check the recording terminal.'); publish(); }, 480000);
-    child.on('close', code => { clearTimeout(timeout); terminateAgent = null; output.close(); run.finish(code); publish(); });
+    child.on('close', code => { clearTimeout(timeout); if (terminateAgent === terminate) terminateAgent = null; output.close(); run.finish(code); publish(); });
     return res.status(202).json({ runId: run.id, state: '/demo/state', events: '/demo/events' });
   });
 }

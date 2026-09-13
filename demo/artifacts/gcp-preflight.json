@@ -1,0 +1,53 @@
+{
+  "kind": "gcp-paid-arc-staking-e2e",
+  "gcpEndToEnd": false,
+  "startedAt": "2026-09-13T04:16:12.032Z",
+  "workflowRun": "https://github.com/zkproofport/proofport-app-dev/actions/runs/34736913413",
+  "proverUrl": "https://stg-ai.zkproofport.app",
+  "chainId": 5042002,
+  "gate": "0xD0F3eE648386B59B484157332E736388Fcc41F47",
+  "verifier": "0xCbC8E63fF92659E8B44cFF117D33005Bb669a018",
+  "wallet": "0x06Ad6B4EEbcD486bE53d8a9dC760a67A5Bdf3F64",
+  "health": {
+    "observedAt": "2026-09-13T04:16:17.311Z",
+    "paymentMode": "testnet",
+    "paymentRequired": true,
+    "paymentNetworks": "arc-testnet-nano",
+    "tee": {
+      "mode": "local",
+      "attestationEnabled": false
+    }
+  },
+  "registry": {
+    "agentId": "894776",
+    "registry": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+    "owner": "0x5A3E649208Ae15ec52496c1Ae23b2Ff89Ac02f0c",
+    "endpoint": "https://stg-ai.zkproofport.app/api/v1/prove",
+    "name": "proveragent.arc"
+  },
+  "payment": {
+    "scheme": "exact",
+    "network": "eip155:5042002",
+    "amount": "1000",
+    "asset": "0x3600000000000000000000000000000000000000",
+    "payTo": "0x5A3E649208Ae15ec52496c1Ae23b2Ff89Ac02f0c",
+    "maxTimeoutSeconds": 345600,
+    "extra": {
+      "name": "GatewayWalletBatched",
+      "version": "1",
+      "verifyingContract": "0x0077777d7EBA4688BDeF3E311b846F25870A19B9"
+    },
+    "networkName": "arc-testnet-nano",
+    "resource": "https://stg-ai.zkproofport.app/api/v1/prove",
+    "description": "ZK proof generation fee (0.001 USDC on Arc, settled in a batch — no gas)",
+    "mimeType": "application/json"
+  },
+  "before": {
+    "observedAt": "2026-09-13T04:16:17.075Z",
+    "gatewayUnits": "2992000",
+    "walletUnits": "2000000",
+    "positionUnits": "0",
+    "custodyUnits": "0"
+  },
+  "status": "preflight-passed"
+}

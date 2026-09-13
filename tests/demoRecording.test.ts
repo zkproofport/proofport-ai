@@ -2,6 +2,24 @@ import { describe, expect, it } from 'vitest';
 import { RecordingRun, parseStakeAmount } from '../demo/staking-service/src/recording.js';
 
 describe('recording a real agent run', () => {
+  it('streams real CLI milestones while masking credentials and rejecting raw diagnostics', () => {
+    const run = new RecordingRun('0.1');
+    run.startCli('http://localhost:4102');
+    run.observe('[1] Told to stake 0.1 at http://localhost:4102');
+    run.observe('[demo-cli] prove_spawn');
+    run.observe('[demo-cli] mcp_connected');
+    run.observe('[demo-cli] mcp_generate_proof');
+    run.observe('[demo-cli] mcp_connected private-value-never-publish');
+    run.observe('ATTESTATION_KEY=private-value-never-publish');
+    const terminal = run.snapshot().terminal;
+    expect(terminal.command).toContain('--amount 0.1 --pay-on arc-testnet-nano --pay-with arc');
+    expect(terminal.lines.some(line => line.text.includes('prove.js arc_eligibility'))).toBe(true);
+    expect(terminal.lines.some(line => line.text.includes('generate_proof'))).toBe(true);
+    expect(JSON.stringify(terminal)).toContain('****');
+    expect(JSON.stringify(terminal)).not.toContain('private-value-never-publish');
+    expect(run.snapshot().status).toBe('running');
+    expect(terminal.lines.some(line => line.text.includes('Proof generated'))).toBe(false);
+  });
   it('accepts only positive USDC amounts with at most six decimal places', () => {
     expect(parseStakeAmount('25')).toBe('25');
     expect(parseStakeAmount('0.001')).toBe('0.001');
@@ -12,7 +30,8 @@ describe('recording a real agent run', () => {
 
   it('does not expose raw agent output or the credential wallet in the browser', () => {
     const run = new RecordingRun('25');
-    run.observe('[4] Wallet A authorises 0x1111111111111111111111111111111111111111 to stake — A itself stays hidden');
+    run.observe('[4] Wallet A authorises 0x1111111111111111111111111111111111111111 to stake 25 USDC; amount and expiry are bound');
+    run.observe('[4] Credential diagnostic for A: 0x2222222222222222222222222222222222222222');
     run.observe('Wallet A (the KYC): 0x2222222222222222222222222222222222222222 ← never sent');
     run.observe('ATTESTATION_KEY=not-for-the-browser');
     const json = JSON.stringify(run.snapshot());

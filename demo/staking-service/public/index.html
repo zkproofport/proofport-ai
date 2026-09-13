@@ -15,9 +15,9 @@
         <div class="section-top"><span class="eyebrow">THE VAULT</span><span class="tag">USDC</span></div>
         <div class="coin">$</div><h2 id="vault-title">Arc USDC Vault</h2><p class="muted">Access with a proof. Act through a delegate.</p>
         <div class="requirement"><span class="shield">◇</span><div><strong>Coinbase KYC required</strong><span>The service receives a proof and a delegation.</span></div><span class="lock">↗</span></div>
-        <form id="stake-form"><label for="amount">Amount</label><div class="amount-input"><input id="amount" name="amount" value="1" inputmode="decimal" autocomplete="off" aria-describedby="amount-help" required><span>USDC</span></div><p id="amount-help" class="micro">Arc Testnet · on-chain USDC</p><button id="run-button" type="submit"><span>Run agent</span><span>↗</span></button></form>
+        <form id="stake-form"><label for="amount">Amount</label><div class="amount-input"><input id="amount" name="amount" value="0.1" inputmode="decimal" autocomplete="off" aria-describedby="amount-help" required><span>USDC</span></div><p id="amount-help" class="micro">Arc Testnet · on-chain USDC</p><button id="run-button" type="submit"><span>Run CLI agent</span><span>↗</span></button></form>
         <p id="form-error" class="error" role="alert" hidden></p>
-        <div class="terminal"><div class="terminal-header"><span>OR IN YOUR TERMINAL</span><button id="copy-command" type="button">Copy</button></div><code id="command"></code></div>
+        <p class="launch-note">Starts the CLI agent on this computer. Follow its output in the live terminal.</p>
         <div class="powered"><span>Paid with <strong>Circle Agent Wallet</strong></span><span>Proof by <strong>ZKProofport</strong></span></div>
       </section>
       <section class="activity panel" aria-labelledby="activity-title">
@@ -27,9 +27,22 @@
         <div id="run-error" class="error run-error" role="alert" hidden></div>
         <div class="evidence"><div><span>Payment rail</span><strong>Arc nanopayments</strong></div><div><span>Proof host</span><strong id="tee-mode">GCP Cloud Run</strong></div><div><span>Verification</span><a href="https://testnet.arcscan.app/address/0xD0F3eE648386B59B484157332E736388Fcc41F47" target="_blank" rel="noreferrer">Staking contract ↗</a></div></div>
       </section>
+      <section class="cli-panel panel" aria-labelledby="cli-title">
+        <div class="section-top"><div><p class="eyebrow">LIVE CLI</p><h2 id="cli-title">Agent terminal</h2></div><span id="cli-stream-status" class="cli-status" role="status">Connecting</span></div>
+        <p class="cli-caption">Actual process output · credential values omitted</p>
+        <div class="cli-command-bar"><span id="cli-command-label">COMMAND PREVIEW</span><button id="copy-command" type="button">Copy</button></div>
+        <code id="cli-command"></code>
+        <div class="cli-log" id="cli-log" tabindex="0" aria-label="Live CLI output">
+          <p id="cli-empty">Run the CLI agent to see its process output here.</p>
+          <div id="cli-output" role="log" aria-live="polite" aria-relevant="additions" aria-label="Sanitized agent process output"></div>
+        </div>
+        <div class="cli-footer"><span>CLI → client MCP → staging prover → Arc</span><span id="cli-line-count">0 lines</span></div>
+      </section>
     </div>
+    <div class="lower-panels">
     <section class="positions panel"><div class="section-top"><div><span class="eyebrow">ON-CHAIN POSITIONS</span><h2>Positions</h2></div><span class="muted small">Read from the Arc staking contract</span></div><div id="positions"><p class="empty">Your agent's verified position will appear here.</p></div></section>
     <section class="audit panel"><div><p class="eyebrow">PUBLIC PROOF AUDIT</p><h2>Can a known address be matched?</h2><p class="muted small">Compare the configured KYC address with the public nullifier. The address stays off this screen.</p></div><div class="audit-actions"><button id="audit-proof" type="button" class="secondary">Compare configured address</button><a href="/demo/proof" target="_blank" class="small">View public proof ↗</a></div><p id="audit-result" role="status" hidden></p></section>
+    </div>
     <footer><span>Ledger House / ZKProofport</span><span id="runtime-note">Checking the live prover…</span></footer>
   </main>
   <script type="module" src="/recording.js"></script>

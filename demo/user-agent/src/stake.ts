@@ -2,6 +2,7 @@
 import { listArcAgentWallets } from '@zkproofport-ai/sdk';
 import { selectAgentDelegate } from './wallet.ts';
 import { spawn } from 'node:child_process';
+import { createInterface } from 'node:readline';
 import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -101,14 +102,20 @@ function runProver(proverUrl: string, actionFile: string, outFile: string, opts:
         '--pay-with', opts.payWith,
         '--silent',
       ],
-      { env: { ...process.env, PROOFPORT_URL: base, CIRCLE_ACCEPT_TERMS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] },
+      { env: { ...process.env, PROOFPORT_URL: base, CIRCLE_ACCEPT_TERMS: '1', ZKPROOFPORT_DEMO_TRACE: '1' }, stdio: ['ignore', 'pipe', 'pipe'] },
     );
+    child.on('spawn', () => console.log('[demo-cli] prove_spawn'));
     let out = '';
     child.stdout.on('data', (chunk) => { out += String(chunk); if(out.length>4*1024*1024){child.kill('SIGTERM');reject(new Error('The prover response exceeded the expected size.'));} });
     // Prover error text may contain the private credential address. Drain but do not print it.
-    child.stderr.on('data', () => {});
+    const diagnostics = createInterface({ input: child.stderr });
+    diagnostics.on('line', line => {
+      const trace = /^\[demo-cli\] (mcp_start|mcp_connected|mcp_generate_proof|mcp_result)$/.exec(line);
+      if (trace) console.log(`[demo-cli] ${trace[1]}`);
+    });
     child.on('error', () => reject(new Error('The prover CLI could not start.')));
     child.on('close', (code) => {
+      diagnostics.close();
       if (code !== 0) return reject(new Error(`The prover exited with ${code}.`));
       try {
         const answer = JSON.parse(out) as { proof?: string; publicInputs?: string[]; error?: string };

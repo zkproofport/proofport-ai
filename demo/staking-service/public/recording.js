@@ -3,15 +3,56 @@ const labels = ['Instruction received','Credential required','Prover discovered'
 const descriptions = ['Waiting for your instruction','The vault checks its access policy','Search the Arc ERC-8004 registry','Authorise a separate wallet to act','Pay with Arc nanopayments and request a proof','Deposit USDC from the agent wallet on Arc'];
 let active = false;
 let currentRunId = null;
+let terminalRun = null;
+let streamConnected = false;
+let lastTerminalSignature = '';
 function command() {
-  const amount = /^\d+(\.\d{1,6})?$/.test($('amount').value) ? $('amount').value : '1';
-  $('command').textContent = `curl -s ${location.origin}/demo/run -H 'Content-Type: application/json' -d '{"amount":"${amount}"}'`;
+  if (terminalRun) return;
+  const amount = $('amount').value;
+  const valid = /^\d{1,7}(\.\d{1,6})?$/.test(amount) && Number(amount) > 0 && Number(amount) <= 1000000;
+  $('cli-command').textContent = valid ? `node demo/user-agent/src/stake.ts --service ${location.origin} --amount ${amount} --pay-on arc-testnet-nano --pay-with arc` : 'Enter a valid USDC amount to preview the command.';
+  $('copy-command').disabled = !valid;
+}
+function renderTerminal(run) {
+  const changedRun = run?.id !== terminalRun?.id;
+  terminalRun = run;
+  const status = $('cli-stream-status');
+  status.textContent = streamConnected ? (run?.status === 'running' ? 'Streaming' : run?.status === 'completed' ? 'Exited · success' : run?.status === 'failed' ? 'Exited · stopped' : 'Connected · idle') : 'Reconnecting';
+  status.className = `cli-status ${streamConnected && run?.status === 'running' ? 'streaming' : ''}`;
+  $('cli-command-label').textContent = run ? 'PROCESS COMMAND' : 'COMMAND PREVIEW';
+  if (!run) command();
+  else {
+    $('cli-command').textContent = typeof run.terminal?.command === 'string' ? run.terminal.command : 'Waiting for the process command…';
+    $('copy-command').disabled = !run.terminal?.command;
+  }
+  const lines = Array.isArray(run?.terminal?.lines) ? run.terminal.lines.slice(-200) : [];
+  const signature = JSON.stringify([run?.id, lines]);
+  if (signature === lastTerminalSignature) return;
+  lastTerminalSignature = signature;
+  const viewport = $('cli-log');
+  const follow = changedRun || viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 60;
+  const fragment = document.createDocumentFragment();
+  for (const line of lines) {
+    if (typeof line.text !== 'string') continue;
+    const row = document.createElement('div'); row.className = 'cli-line';
+    if (['command', 'output', 'system'].includes(line.kind)) row.classList.add(`cli-${line.kind}`);
+    const time = document.createElement('time');
+    const date = new Date(line.at);
+    if (Number.isFinite(date.getTime())) { time.dateTime = date.toISOString(); time.textContent = date.toLocaleTimeString('en-GB', { hour12: false }); }
+    const text = document.createElement('span'); text.textContent = line.text.slice(0, 4000);
+    row.append(time, text); fragment.append(row);
+  }
+  $('cli-output').replaceChildren(fragment);
+  $('cli-empty').hidden = lines.length > 0;
+  $('cli-empty').textContent = run ? 'Waiting for process output…' : 'Run the CLI agent to see its process output here.';
+  $('cli-line-count').textContent = `${lines.length} lines`;
+  if (follow) viewport.scrollTop = viewport.scrollHeight;
 }
 function renderRun(run) {
   active = run?.status === 'running';
   $('run-button').disabled = active;
   $('amount').disabled = active;
-  $('run-button').firstElementChild.textContent = active ? 'Agent running…' : run ? 'Run again' : 'Run agent';
+  $('run-button').firstElementChild.textContent = active ? 'CLI agent running…' : run ? 'Run CLI agent again' : 'Run CLI agent';
   $('run-status').textContent = run ? ({running:'Running',completed:'Verified',failed:'Stopped'}[run.status] ?? 'Unknown') : 'Ready';
   $('run-status').className = `run-status ${run?.status ?? ''}`;
   if (run && currentRunId !== run.id) { $('amount').value = run.amount; currentRunId = run.id; command(); }
@@ -32,6 +73,7 @@ function renderRun(run) {
   if(run?.txHash) $('transaction-link').href=`https://testnet.arcscan.app/tx/${run.txHash}`;
   $('run-error').hidden = run?.status !== 'failed';
   $('run-error').textContent = run?.error ?? '';
+  renderTerminal(run);
 }
 function renderPositions(rows) {
   if(!rows?.length) {const p=document.createElement('p');p.className='empty';p.textContent="Your agent's verified position will appear here.";$('positions').replaceChildren(p);return;}
@@ -50,8 +92,10 @@ async function refresh(){
 }
 $('stake-form').addEventListener('submit',async event=>{event.preventDefault();if(active)return;$('form-error').hidden=true;$('run-button').disabled=true;try{const response=await fetch('/demo/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:$('amount').value})});const data=await response.json();if(!response.ok)throw new Error(data.error ?? 'Could not start the agent');await refresh();}catch(error){$('form-error').textContent=error.message;$('form-error').hidden=false;$('run-button').disabled=false;}});
 $('amount').addEventListener('input',command);
-$('copy-command').addEventListener('click',async()=>{try{await navigator.clipboard.writeText($('command').textContent);$('copy-command').textContent='Copied';setTimeout(()=>$('copy-command').textContent='Copy',1600);}catch{$('copy-command').textContent='Select below';const range=document.createRange();range.selectNodeContents($('command'));const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);}});
+$('copy-command').addEventListener('click',async()=>{try{await navigator.clipboard.writeText($('cli-command').textContent);$('copy-command').textContent='Copied';setTimeout(()=>$('copy-command').textContent='Copy',1600);}catch{$('copy-command').textContent='Select below';const range=document.createRange();range.selectNodeContents($('cli-command'));const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);}});
 const events=new EventSource('/demo/events');events.onmessage=event=>{try{renderRun(JSON.parse(event.data));if(!active)refresh();}catch{}};
+events.onopen=()=>{streamConnected=true;renderTerminal(terminalRun);};
+events.onerror=()=>{streamConnected=false;renderTerminal(terminalRun);};
 renderRun(null);command();refresh();setInterval(refresh,5000);
 
 $('find-prover').addEventListener('click',async()=>{

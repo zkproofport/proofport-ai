@@ -9,6 +9,10 @@ import { dirname, join } from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const serverPath = join(__dirname, 'index.js');
+// Opt-in lifecycle events contain no credential, witness, response body or address.
+function demoTrace(event: 'mcp_start' | 'mcp_connected' | 'mcp_generate_proof' | 'mcp_result') {
+  if (process.env.ZKPROOFPORT_DEMO_TRACE === '1') console.error(`[demo-cli] ${event}`);
+}
 
 // ─── Device Code Flow helpers ─────────────────────────────────────────
 
@@ -479,9 +483,12 @@ const transport = new StdioClientTransport({
 const client = new Client({ name: 'zkproofport-prove', version: '1.0.0' });
 
 try {
+  demoTrace('mcp_start');
   await client.connect(transport);
+  demoTrace('mcp_connected');
   log('[zkproofport-prove] Connected. Generating proof (30-90 seconds)...');
 
+  demoTrace('mcp_generate_proof');
   const result = await client.callTool({
     name: 'generate_proof',
     arguments: toolArgs,
@@ -494,6 +501,7 @@ try {
     console.error(output);
     process.exit(1);
   }
+  demoTrace('mcp_result');
   console.log(output);
 } catch (err) {
   const message = err instanceof Error ? err.message : String(err);

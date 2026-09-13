@@ -27,8 +27,8 @@ local prover. Ctrl-C stops this recording server; GCP keeps running.
 
 Wallet B is the connected Circle Agent Wallet
 `0x06Ad6B4EEbcD486bE53d8a9dC760a67A5Bdf3F64`. At the completed integration check
-on 2026-09-13 at 12:53:52 KST, it held 2 USDC with no open position. Use **1 USDC**
-for the recording. If several wallets are connected, set `ARC_AGENT_WALLET` to
+on 2026-09-13 at 12:53:52 KST, it held 2 USDC with no open position. Use **0.1 USDC**
+for repeated recordings and check the current balance before each run. If several wallets are connected, set `ARC_AGENT_WALLET` to
 the intended existing wallet; ambiguous or unknown selections are refused.
 
 ## Run the agent
@@ -36,10 +36,13 @@ the intended existing wallet; ambiguous or unknown selections are refused.
 Keep the page visible and run this in a second terminal:
 
 ```bash
-curl -s http://localhost:4100/demo/run -H 'Content-Type: application/json' -d '{"amount":"1"}'
+curl -s http://localhost:4100/demo/run -H 'Content-Type: application/json' -d '{"amount":"0.1"}'
 ```
 
-Use port 4101 for the preview. The Run agent button invokes the same endpoint.
+Use port 4101 for the preview. The **Run CLI agent** button invokes the same endpoint. The **LIVE CLI** panel
+shows the spawned agent command, prover CLI, local MCP connection and
+`generate_proof` lifecycle, and the final transaction. These come from actual
+process events; credential values and the temporary delegation path display as `****`.
 Concurrent runs are refused. The server launches the existing CLI agent with
 `--pay-on arc-testnet-nano --pay-with arc` and relays sanitized progress.
 
@@ -83,11 +86,20 @@ zero and wallet B retained 2 USDC. Evidence is in
 with public proof in
 [`artifacts/onchain-verification-proof.json`](artifacts/onchain-verification-proof.json).
 
-That run used `http://localhost:4002`; it is **not a completed GCP end-to-end run**.
-At this documentation update, deployment of the current GCP staging implementation
-and verification of its paid remote flow remain pending GCP authentication.
-The recording launcher targets GCP and refuses a service that does not advertise
-paid Arc Testnet nanopayments. It never falls back to the local prover.
+That earlier run used `http://localhost:4002`. A separate **paid GCP end-to-end
+run passed at 13:19:55 KST on 2026-09-13**, after the staging GitHub Actions
+[deployment succeeded](https://github.com/zkproofport/proofport-app-dev/actions/runs/34736913413).
+It discovered Arc agent `894776`, debited 0.001 USDC from Gateway, generated a
+remote proof, and staked 1 USDC. Evidence is retained in
+[`artifacts/gcp-verification.json`](artifacts/gcp-verification.json) and
+[`artifacts/gcp-verification-proof.json`](artifacts/gcp-verification-proof.json).
+
+The later integrated CLI-panel run also completed with a 0.1 USDC deposit and
+21 real, sanitized lifecycle log lines; see
+[`artifacts/cli-recording-verification.json`](artifacts/cli-recording-verification.json).
+The launcher targets GCP and requires paid Arc Testnet nanopayments.
+The team's [Korean filming guide](https://github.com/zkproofport/proofport-app-dev/blob/main/docs/ops/ai-usage.md)
+provides the single-page recording steps and explains the Agent Wallet/Gateway path.
 
 From the parent workspace, prepare the deployment context with:
 

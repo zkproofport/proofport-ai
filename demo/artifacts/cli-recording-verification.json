@@ -1,0 +1,213 @@
+{
+  "observedAt": "2026-09-13T04:36:30.252Z",
+  "service": "http://localhost:4105",
+  "gcpProver": "https://stg-ai.zkproofport.app",
+  "state": {
+    "run": {
+      "id": "fe2259ab-351a-4ef0-bb52-6be50354fb5b",
+      "amount": "0.1",
+      "startedAt": "2026-09-13T04:33:44.444Z",
+      "finishedAt": "2026-09-13T04:34:33.088Z",
+      "status": "completed",
+      "wallet": "0x06Ad6B4EEbcD486bE53d8a9dC760a67A5Bdf3F64",
+      "txHash": "0x211e25dc74fea66ed1f001c86d33f193d11cae7255cfae4d78360995b9858df4",
+      "agentId": "894776",
+      "proofFingerprint": "0xb95ed02cf2431d9faa148ab895e3aa36e392aa62bc604ead89a4ec35300d653b",
+      "error": null,
+      "steps": [
+        {
+          "number": 1,
+          "label": "Instruction received",
+          "status": "done",
+          "detail": "Stake 0.1 USDC at Ledger House",
+          "at": "2026-09-13T04:33:44.883Z"
+        },
+        {
+          "number": 2,
+          "label": "Credential required",
+          "status": "done",
+          "detail": "Coinbase KYC · arc_eligibility",
+          "at": "2026-09-13T04:33:46.792Z"
+        },
+        {
+          "number": 3,
+          "label": "Prover discovered",
+          "status": "done",
+          "detail": "Arc ERC-8004 agent #894776 · registered GCP endpoint",
+          "at": "2026-09-13T04:33:47.630Z"
+        },
+        {
+          "number": 4,
+          "label": "Delegation prepared",
+          "status": "done",
+          "detail": "KYC holder signs the delegate, amount, action and expiry",
+          "at": "2026-09-13T04:33:47.630Z"
+        },
+        {
+          "number": 5,
+          "label": "Payment & proof",
+          "status": "done",
+          "detail": "Paid GCP response received · proof generated",
+          "at": "2026-09-13T04:34:17.096Z"
+        },
+        {
+          "number": 6,
+          "label": "On-chain stake",
+          "status": "done",
+          "detail": "Arc transaction confirmed · USDC deposited in the staking gate",
+          "at": "2026-09-13T04:34:33.080Z"
+        }
+      ],
+      "terminal": {
+        "command": "node demo/user-agent/src/stake.ts --service http://localhost:4105 --amount 0.1 --pay-on arc-testnet-nano --pay-with arc",
+        "lines": [
+          {
+            "at": "2026-09-13T04:33:44.446Z",
+            "text": "node demo/user-agent/src/stake.ts --service http://localhost:4105 --amount 0.1 --pay-on arc-testnet-nano --pay-with arc",
+            "kind": "command"
+          },
+          {
+            "at": "2026-09-13T04:33:44.446Z",
+            "text": "KYC wallet A: **** | ATTESTATION_KEY: ****",
+            "kind": "system"
+          },
+          {
+            "at": "2026-09-13T04:33:44.446Z",
+            "text": "Payment route: Circle Agent Wallet / Arc Gateway. Private credentials stay local.",
+            "kind": "system"
+          },
+          {
+            "at": "2026-09-13T04:33:44.883Z",
+            "text": "[1/6] Stake 0.1 USDC at Ledger House",
+            "kind": "output"
+          },
+          {
+            "at": "2026-09-13T04:33:46.792Z",
+            "text": "[2/6] Coinbase KYC · arc_eligibility",
+            "kind": "output"
+          },
+          {
+            "at": "2026-09-13T04:33:47.630Z",
+            "text": "[3/6] Arc ERC-8004 agent #894776 · registered GCP endpoint",
+            "kind": "output"
+          },
+          {
+            "at": "2026-09-13T04:33:47.630Z",
+            "text": "Registry agent: 894776 | https://stg-ai.zkproofport.app",
+            "kind": "system"
+          },
+          {
+            "at": "2026-09-13T04:33:47.630Z",
+            "text": "[4/6] KYC holder signs the delegate, amount, action and expiry",
+            "kind": "output"
+          },
+          {
+            "at": "2026-09-13T04:33:47.630Z",
+            "text": "Delegate B: 0x06Ad6B4EEbcD486bE53d8a9dC760a67A5Bdf3F64 | Credential signer A: ****",
+            "kind": "system"
+          },
+          {
+            "at": "2026-09-13T04:33:47.630Z",
+            "text": "[5/6] Circle Agent Wallet · Arc Gateway nanopayment",
+            "kind": "output"
+          },
+          {
+            "at": "2026-09-13T04:33:47.631Z",
+            "text": "node packages/mcp/dist/prove.js arc_eligibility --action **** --scope ledger-house --pay-on arc-testnet-nano --pay-with arc --silent",
+            "kind": "command"
+          },
+          {
+            "at": "2026-09-13T04:33:47.886Z",
+            "text": "node packages/mcp/dist/index.js  # local MCP server / stdio",
+            "kind": "command"
+          },
+          {
+            "at": "2026-09-13T04:33:48.118Z",
+            "text": "MCP connection established over stdio.",
+            "kind": "output"
+          },
+          {
+            "at": "2026-09-13T04:33:48.118Z",
+            "text": "MCP call: generate_proof → GCP staging (arc_eligibility, arc-testnet-nano, arc)",
+            "kind": "output"
+          },
+          {
+            "at": "2026-09-13T04:34:17.060Z",
+            "text": "MCP generate_proof returned a successful response.",
+            "kind": "output"
+          },
+          {
+            "at": "2026-09-13T04:34:17.096Z",
+            "text": "[5/6] Paid GCP response received · proof generated",
+            "kind": "output"
+          },
+          {
+            "at": "2026-09-13T04:34:17.096Z",
+            "text": "Public proof fingerprint: 0xb95ed02cf2431d9faa148ab895e3aa36e392aa62bc604ead89a4ec35300d653b",
+            "kind": "system"
+          },
+          {
+            "at": "2026-09-13T04:34:17.096Z",
+            "text": "[6/6] Circle Agent Wallet authorises USDC and calls the staking gate",
+            "kind": "output"
+          },
+          {
+            "at": "2026-09-13T04:34:33.080Z",
+            "text": "[6/6] Arc transaction confirmed · USDC deposited in the staking gate",
+            "kind": "output"
+          },
+          {
+            "at": "2026-09-13T04:34:33.080Z",
+            "text": "Transaction: 0x211e25dc74fea66ed1f001c86d33f193d11cae7255cfae4d78360995b9858df4",
+            "kind": "system"
+          },
+          {
+            "at": "2026-09-13T04:34:33.088Z",
+            "text": "Agent exited 0. Proof accepted and Arc stake confirmed.",
+            "kind": "system"
+          }
+        ]
+      }
+    },
+    "prover": {
+      "reachable": true,
+      "teeMode": "local",
+      "host": "GCP Cloud Run",
+      "paymentReady": true
+    },
+    "positions": [
+      {
+        "wallet": "0x06Ad6B4EEbcD486bE53d8a9dC760a67A5Bdf3F64",
+        "amount": "1.3",
+        "txHash": "0x211e25dc74fea66ed1f001c86d33f193d11cae7255cfae4d78360995b9858df4",
+        "blockNumber": 61842687
+      }
+    ],
+    "chainId": 5042002,
+    "chain": {
+      "chainId": 5042002,
+      "rpcUrl": "https://rpc.testnet.arc.io",
+      "usdc": "0x3600000000000000000000000000000000000000",
+      "gate": "0xD0F3eE648386B59B484157332E736388Fcc41F47",
+      "verifier": "0xCbC8E63fF92659E8B44cFF117D33005Bb669a018",
+      "deploymentTx": "0x92f07f307b0b597b4786ca2f9c816297ad3db63694874842a213709f88ae4ba7",
+      "deploymentBlock": 61837155,
+      "discovery": {
+        "registry": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+        "owner": "0x5A3E649208Ae15ec52496c1Ae23b2Ff89Ac02f0c",
+        "fromBlock": 61836881,
+        "allowedOrigin": "https://stg-ai.zkproofport.app"
+      }
+    },
+    "execution": "onchain-stake",
+    "payment": "arc-testnet-nano"
+  },
+  "audit": {
+    "matches": true,
+    "proofVerified": true,
+    "fingerprint": "0xb95ed02cf2431d9faa148ab895e3aa36e392aa62bc604ead89a4ec35300d653b",
+    "explanation": "This checks a supplied candidate against the public nullifier. A match demonstrates linkability, not recovery of an unknown address."
+  },
+  "configuredPrivateValuesChecked": 8,
+  "privateLiteralMatches": 0
+}

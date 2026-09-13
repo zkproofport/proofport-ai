@@ -1,0 +1,89 @@
+{
+  "kind": "gcp-paid-arc-staking-e2e",
+  "gcpEndToEnd": true,
+  "startedAt": "2026-09-13T04:18:55.761Z",
+  "workflowRun": "https://github.com/zkproofport/proofport-app-dev/actions/runs/34736913413",
+  "proverUrl": "https://stg-ai.zkproofport.app",
+  "chainId": 5042002,
+  "gate": "0xD0F3eE648386B59B484157332E736388Fcc41F47",
+  "verifier": "0xCbC8E63fF92659E8B44cFF117D33005Bb669a018",
+  "wallet": "0x06Ad6B4EEbcD486bE53d8a9dC760a67A5Bdf3F64",
+  "health": {
+    "observedAt": "2026-09-13T04:19:00.601Z",
+    "paymentMode": "testnet",
+    "paymentRequired": true,
+    "paymentNetworks": "arc-testnet-nano",
+    "tee": {
+      "mode": "local",
+      "attestationEnabled": false
+    }
+  },
+  "registry": {
+    "agentId": "894776",
+    "registry": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+    "owner": "0x5A3E649208Ae15ec52496c1Ae23b2Ff89Ac02f0c",
+    "endpoint": "https://stg-ai.zkproofport.app/api/v1/prove",
+    "name": "proveragent.arc"
+  },
+  "payment": {
+    "scheme": "exact",
+    "network": "eip155:5042002",
+    "amount": "1000",
+    "asset": "0x3600000000000000000000000000000000000000",
+    "payTo": "0x5A3E649208Ae15ec52496c1Ae23b2Ff89Ac02f0c",
+    "maxTimeoutSeconds": 345600,
+    "extra": {
+      "name": "GatewayWalletBatched",
+      "version": "1",
+      "verifyingContract": "0x0077777d7EBA4688BDeF3E311b846F25870A19B9"
+    },
+    "networkName": "arc-testnet-nano",
+    "resource": "https://stg-ai.zkproofport.app/api/v1/prove",
+    "description": "ZK proof generation fee (0.001 USDC on Arc, settled in a batch — no gas)",
+    "mimeType": "application/json"
+  },
+  "before": {
+    "observedAt": "2026-09-13T04:19:00.365Z",
+    "gatewayUnits": "2992000",
+    "walletUnits": "2000000",
+    "positionUnits": "0",
+    "custodyUnits": "0"
+  },
+  "status": "passed",
+  "runId": "3ba74c83-b000-42a6-af8c-36b8728dbae3",
+  "stake": {
+    "wallet": "0x06Ad6B4EEbcD486bE53d8a9dC760a67A5Bdf3F64",
+    "amount": "1.0",
+    "actionHash": "0xdc9dae100ac9505347ea99142bf339203159251f5f542f6dcfc39ad6f86aecc9",
+    "txHash": "0x36984033e10730d2a47b6145d87d12ae5b20164017bd63db5d5996f8bbb07bb6",
+    "blockNumber": 61840961
+  },
+  "publicProofFile": "demo/artifacts/gcp-verification-proof.json",
+  "proofMetadata": {
+    "circuitId": "arc_eligibility",
+    "publicInputCount": 192,
+    "publicInputsFingerprint": "0xb480ee9546b76f9a6ea5faff72b4abf475bbbe357e98a62d8640aa5115655f1b",
+    "signalHash": "0x156da9cd49fb04e4b12b8fd789b3347d670c6dda33013afa27ecd15f7fc7a4c8",
+    "domainSeparator": "0x690922273390b31889bd58831eb6d10a9e88459f1208286785e4d0f38287aa27",
+    "actionHash": "0xdc9dae100ac9505347ea99142bf339203159251f5f542f6dcfc39ad6f86aecc9",
+    "signerRoot": "0xb60da9815c76261b61a1e91f199de5845fc171a6500e57c4240d2ac61d85e2bf",
+    "scope": "0xbf7ef228213a6406e50f2ed879372373cb519737595695c0a607cef49b4ae541",
+    "nullifier": "0xda6786cb0643be7455b46571a77ac175073b972fb781650499b294f633fbca90"
+  },
+  "audit": {
+    "observedAt": "2026-09-13T04:19:53.082Z",
+    "configuredCandidateMatches": true,
+    "wrongCandidateMatches": false,
+    "realVerifierAccepted": true,
+    "explanation": "This checks a supplied candidate against the public nullifier. A match demonstrates linkability, not recovery of an unknown address."
+  },
+  "after": {
+    "observedAt": "2026-09-13T04:19:54.938Z",
+    "gatewayUnits": "2991000",
+    "walletUnits": "1000000",
+    "positionUnits": "1000000",
+    "custodyUnits": "1000000"
+  },
+  "finishedAt": "2026-09-13T04:19:55.288Z",
+  "withdrawalPerformed": false
+}
