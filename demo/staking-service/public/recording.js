@@ -99,7 +99,7 @@ function renderEvidence(run, results) {
   if (verification?.gate) safeLink('gate-link', `https://testnet.arcscan.app/address/${verification.gate}`);
   if (verification?.verifier) safeLink('verifier-link', `https://testnet.arcscan.app/address/${verification.verifier}`);
   const found = results.discover_prover;
-  $('market-result').textContent = found ? `${found.name || 'ZKProofport'} · Agent #${found.agentId}` : 'dApp Agent Marketplace';
+  $('market-result').textContent = found ? `ZKProofport · ${found.name || 'Registered prover'} · #${found.agentId}` : 'Find a compatible prover';
   $('market-detail').textContent = found ? `Discovery: dApp Agent Marketplace · Identity: ${found.identity || 'ERC-8004'}` : 'Identity: ERC-8004 · prover discovery pending';
   $('market-capability').hidden = !found?.capability;
   $('market-capability').textContent = found ? `${found.capability || ''}${found.priceUSDC != null ? ' · ' + found.priceUSDC + ' USDC' : ''}` : '';
@@ -301,7 +301,7 @@ $('find-prover').addEventListener('click', async () => {
     const response = await fetch('/marketplace/agents'); const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Marketplace unavailable');
     const agent = data.agents?.[0]; if (!agent) throw new Error('No prover registration available');
-    $('market-result').textContent = `${agent.name} · Agent #${agent.agentId}`;
+    $('market-result').textContent = `ZKProofport · ${agent.name || 'Registered prover'} · #${agent.agentId}`;
     $('market-detail').textContent = 'Discovery: dApp Agent Marketplace · Identity: ERC-8004';
     $('market-capability').hidden = !agent.capability;
     $('market-capability').textContent = `${agent.capability || ''}${agent.priceUSDC != null ? ' · ' + agent.priceUSDC + ' USDC' : ''}`;

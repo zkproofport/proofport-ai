@@ -50,13 +50,12 @@ export async function installPublishedProver(execute:NpmExecutor=executeNpm) {
   const failed=lookups.find(result=>result.status==='rejected');
   if(failed?.status==='rejected')throw failed.reason;
   const versions=lookups.map(result=>result.status==='fulfilled'?stableVersion(result.value.stdout):null);
-  if(!versions[0]||versions[0]!==versions[1])throw Error('The registry must publish matching stable SDK/MCP versions >=0.2.11 before installation.');
-  const version=versions[0];
-  const args=['install','--save-exact',registry,'--ignore-scripts','--no-audit','--no-fund','--workspaces=false',...packages.map(name=>`${name}@${version}`)];
+  if(!versions[0]||!versions[1])throw Error('The registry must publish stable SDK and MCP versions each >=0.2.11 before installation.');
+  const args=['install','--save-exact',registry,'--ignore-scripts','--no-audit','--no-fund','--workspaces=false',...packages.map((name,index)=>`${name}@${versions[index]}`)];
   await run(args,'npm install');
   let installed:ReturnType<typeof publishedProverPackages>;
   try{installed=publishedProverPackages(runtimeDirectory);}catch{throw Error('Published prover package provenance validation failed. No package runtime was accepted.');}
-  if(installed.sdkVersion!==version||installed.mcpVersion!==version)throw Error('The installed versions differ from the resolved npm registry versions.');
+  if(installed.sdkVersion!==versions[0]||installed.mcpVersion!==versions[1])throw Error('The installed versions differ from the resolved npm registry versions.');
   if(Date.now()>deadline)throw Error('Published prover installation exceeded its 120-second deadline.');
   return {runtimeDirectory,...installed,npmCommand:['npm',...args].join(' '),durationMs:Date.now()-started,exitCode:0,observedAt:new Date().toISOString()};
  } catch(error) {

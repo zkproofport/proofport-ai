@@ -4,9 +4,10 @@ import {join} from 'node:path';
 import {installPublishedProver} from '../demo/shared/installProver.ts';
 const created:string[]=[];
 afterEach(async()=>{vi.unstubAllEnvs();await Promise.all(created.splice(0).map(path=>rm(path,{recursive:true,force:true})));});
-async function fixture(directory:string,version:string){
+async function fixture(directory:string,sdkVersion:string,mcpVersion=sdkVersion){
  const packages:Record<string,unknown>={};
  for(const name of ['sdk','mcp']){
+  const version=name==='sdk'?sdkVersion:mcpVersion;
   const path=join(directory,'node_modules','@zkproofport-ai',name);
   await mkdir(join(path,'dist'),{recursive:true});
   await writeFile(join(path,'package.json'),JSON.stringify({name:'@zkproofport-ai/'+name,version,exports:'./dist/index.js'}));
@@ -18,10 +19,10 @@ async function fixture(directory:string,version:string){
 function executor(sdk='0.2.11',mcp=sdk){return vi.fn(async(args:string[],options:any)=>{
  if(!created.includes(options.cwd))created.push(options.cwd);
  if(args[0]==='view')return {stdout:JSON.stringify(args[1].includes('/sdk@')?sdk:mcp),stderr:''};
- await fixture(options.cwd,sdk);return {stdout:'installed',stderr:''};
+ await fixture(options.cwd,sdk,mcp);return {stdout:'installed',stderr:''};
 });}
 describe('isolated published prover installation',()=>{
- it('installs matching versions into a fresh private runtime without inherited credentials',async()=>{
+ it('installs exact versions into a fresh private runtime without inherited credentials',async()=>{
   vi.stubEnv('ATTESTATION_KEY','secret-attestation');vi.stubEnv('NPM_TOKEN','secret-token');vi.stubEnv('NODE_OPTIONS','--require secret-script');
   const exec=executor();const result=await installPublishedProver(exec);
   expect(result.sdkVersion).toBe('0.2.11');expect(result.mcpVersion).toBe('0.2.11');expect(result.exitCode).toBe(0);expect(result.durationMs).toBeGreaterThanOrEqual(0);
@@ -34,9 +35,15 @@ describe('isolated published prover installation',()=>{
   expect(result.npmCommand).toContain('@zkproofport-ai/mcp@0.2.11');
   const second=await installPublishedProver(executor());expect(second.runtimeDirectory).not.toBe(result.runtimeDirectory);
  });
- it.each([['0.2.10','0.2.10'],['0.2.11','0.2.12'],['0.2.11-beta.1','0.2.11-beta.1'],['0.2.11; echo token','0.2.11; echo token']])('rejects invalid versions before install: %s/%s',async(sdk,mcp)=>{
-  const exec=executor(sdk,mcp);await expect(installPublishedProver(exec)).rejects.toThrow(/matching stable.*0\.2\.11/);
+ it.each([['0.2.10','0.2.10'],['0.2.11','0.2.10'],['0.2.10','0.2.12'],['0.2.11-beta.1','0.2.11-beta.1'],['0.2.11; echo token','0.2.11; echo token']])('rejects invalid versions before install: %s/%s',async(sdk,mcp)=>{
+  const exec=executor(sdk,mcp);await expect(installPublishedProver(exec)).rejects.toThrow(/stable.*0\.2\.11/);
   expect(exec.mock.calls.some(([args])=>args[0]==='install')).toBe(false);
+ });
+ it.each([['0.2.11','0.2.12'],['0.2.13','0.2.11']])('allows independent stable releases: SDK %s / MCP %s',async(sdk,mcp)=>{
+  const exec=executor(sdk,mcp);const result=await installPublishedProver(exec);
+  expect(result.sdkVersion).toBe(sdk);expect(result.mcpVersion).toBe(mcp);
+  const [args]=exec.mock.calls.find(([args])=>args[0]==='install')!;
+  expect(args).toContain('@zkproofport-ai/sdk@'+sdk);expect(args).toContain('@zkproofport-ai/mcp@'+mcp);
  });
  it('checks installed versions against the resolved registry versions',async()=>{
   const exec=executor();exec.mockImplementation(async(args,options)=>{
