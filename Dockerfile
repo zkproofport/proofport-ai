@@ -21,6 +21,8 @@ FROM node:20-slim AS builder
 WORKDIR /app
 
 COPY package*.json ./
+COPY packages/sdk/package.json ./packages/sdk/package.json
+COPY packages/mcp/package.json ./packages/mcp/package.json
 RUN npm ci --ignore-scripts
 
 COPY tsconfig.json ./
@@ -56,6 +58,8 @@ WORKDIR /app
 
 # Install production dependencies
 COPY package*.json ./
+COPY packages/sdk/package.json ./packages/sdk/package.json
+COPY packages/mcp/package.json ./packages/mcp/package.json
 RUN npm ci --omit=dev --ignore-scripts
 
 # Copy built JavaScript from builder stage
