@@ -14,6 +14,12 @@ const expandedEvents = new Set();
 let shownPermission = null;
 const shortAddress = value => typeof value === 'string' ? `${value.slice(0, 8)}…${value.slice(-6)}` : 'Wallet B';
 const deadline = value => { const date = new Date(Number(value) * 1000); return value && Number.isFinite(date.getTime()) ? date.toLocaleString('en-GB', {hour12:false, timeZone:'Asia/Seoul'}) + ' KST' : 'Not prepared'; };
+function fitInstruction() {
+  const field = $('instruction');
+  // Reset first so deleting text also reduces the height. The two pixels include its borders.
+  field.style.height = 'auto';
+  field.style.height = `${Math.max(104, field.scrollHeight + 2)}px`;
+}
 function observedResults(run) {
   const results = {};
   for (const line of run?.terminal?.lines ?? []) {
@@ -57,11 +63,16 @@ function renderProverMcp(run) {
   let endpoint = '';
   try { endpoint = mcp?.endpoint ? new URL(mcp.endpoint).hostname : ''; } catch { /* Never infer an endpoint from malformed evidence. */ }
   $('mcp-server').textContent = observed ? [mcp.serverName ? mcp.serverName + (mcp.version ? ' v' + mcp.version : '') : 'Server identity unavailable', mcp.transport, endpoint].filter(Boolean).join(' · ') : 'Awaiting the actual prover MCP handshake';
+  const npmObserved = observed && mcp.packageSource === 'npm';
+  $('mcp-packages').hidden = !npmObserved;
+  $('mcp-packages').textContent = npmObserved ? ['npm', mcp.mcpVersion ? `MCP ${mcp.mcpVersion}` : '', mcp.sdkVersion ? `SDK ${mcp.sdkVersion}` : ''].filter(Boolean).join(' · ') : '';
   $('mcp-call').textContent = observed && mcp.tool ? [mcp.tool, mcp.status === 'calling' ? 'actual tools/call in progress' : mcp.status === 'returned' ? 'actual tools/call response' : '', mcp.proofBytes != null ? `${mcp.proofBytes} proof bytes` : '', mcp.publicInputCount != null ? `${mcp.publicInputCount} public inputs` : ''].filter(Boolean).join(' · ') : observed ? 'Handshake observed · awaiting a prover tool call' : 'No prover MCP call observed yet';
-  $('mcp-details').textContent = observed ? JSON.stringify({serverName:mcp.serverName, version:mcp.version, endpoint:mcp.endpoint, transport:mcp.transport, status:mcp.status, tool:mcp.tool, arguments:mcp.arguments, proofBytes:mcp.proofBytes, publicInputCount:mcp.publicInputCount, observedAt:mcp.observedAt}, null, 2) : 'Actual connection and tool arguments appear here when observed.';
+  $('mcp-details').textContent = observed ? JSON.stringify({serverName:mcp.serverName, version:mcp.version, packageSource:mcp.packageSource, mcpVersion:mcp.mcpVersion, sdkVersion:mcp.sdkVersion, endpoint:mcp.endpoint, transport:mcp.transport, status:mcp.status, tool:mcp.tool, arguments:mcp.arguments, proofBytes:mcp.proofBytes, publicInputCount:mcp.publicInputCount, observedAt:mcp.observedAt}, null, 2) : 'Actual connection and tool arguments appear here when observed.';
 }
 function renderEvidence(run, results) {
   renderProverMcp(run);
+  const installation = results.install_prover_mcp;
+  $('mcp-installation').textContent = installation?.ok === true ? `✓ npm installed · MCP ${installation.mcpVersion} · SDK ${installation.sdkVersion}` : results.read_prover_guide ? 'Provider installation instructions read · awaiting npm install' : 'Install from npm after reading provider instructions';
   const payment = run?.protocol?.payment;
   const paid = payment?.status === 'confirmed';
   $('payment-status').textContent = paid ? `✓ ${payment.fee || '0.001'} USDC PAID` : payment?.status === 'pending' ? 'PROCESSING' : 'WAITING';
@@ -70,7 +81,7 @@ function renderEvidence(run, results) {
   const proof = results.generate_proof;
   $('proof-status').textContent = proof ? 'GENERATED' : pendingTool(run, 'generate_proof') ? 'GENERATING' : 'WAITING';
   $('proof-status').className = proof ? 'status-confirmed' : 'status-pending';
-  $('prover-detail').textContent = proof ? `${proof.proofCount ?? 1} proof · actual MCP response accepted` : pendingTool(run, 'generate_proof') ? 'Generating proof… · actual MCP request' : 'Nitro: separate implementation';
+  $('prover-detail').textContent = proof ? `${proof.proofCount ?? 1} proof · actual MCP response accepted` : pendingTool(run, 'generate_proof') ? 'Generating proof… · actual MCP request' : 'Awaiting proof request';
   const verification = results.verify_proof_on_arc;
   const verified = verification?.valid === true;
   $('verification-status').textContent = verified ? '· Proof verified' : '· Awaiting proof';
@@ -206,7 +217,7 @@ function renderRun(run) {
   const pendingPermission = run?.permissions?.some(p => p.status === 'pending');
   $('run-status').textContent = pendingPermission ? 'Your approval' : confirmed ? 'Staked' : run ? ({running:'Running',completed:'Finished',failed:'Stopped'}[run.status] ?? 'Unknown') : 'Ready';
   $('run-status').className = `run-status ${confirmed ? 'completed' : run?.status ?? ''}`;
-  if (run && currentRunId !== run.id) { $('amount').value = run.amount; if (typeof run.instruction === 'string') $('instruction').value = run.instruction; currentRunId = run.id; }
+  if (run && currentRunId !== run.id) { $('amount').value = run.amount; if (typeof run.instruction === 'string') { $('instruction').value = run.instruction; fitInstruction(); } currentRunId = run.id; }
   const called = new Set((run?.terminal?.lines ?? []).filter(line => line.kind === 'tool_call').map(line => /^mcp__ledger_house__(\w+)/.exec(line.text)?.[1]));
   const tools = [null, 'read_dapp', 'discover_prover', 'prepare_delegation', 'generate_proof', 'verify_proof_on_arc', 'stake'];
   const done = [Boolean(run?.instruction), Boolean(results.read_dapp), Boolean(results.discover_prover), Boolean(results.prepare_delegation), Boolean(results.generate_proof), results.verify_proof_on_arc?.valid === true, confirmed];
@@ -259,10 +270,10 @@ async function refresh() {
   try {
     const response = await fetch('/demo/state', {cache:'no-store'}); if (!response.ok) throw new Error('State unavailable');
     const data = await response.json(); renderRun(data.run); renderPositions(data.positions);
-    $('connection').textContent = data.prover.paymentReady ? 'Live · GCP prover ready' : data.prover.reachable ? 'GCP setup pending' : 'Prover unavailable';
+    $('connection').textContent = data.prover.paymentReady ? 'Live · Prover ready' : data.prover.reachable ? 'Prover setup pending' : 'Prover unavailable';
     $('connection-dot').className = data.prover.paymentReady ? 'online' : '';
-    $('tee-mode').textContent = data.prover.teeMode === 'nitro' ? 'AWS Nitro Enclave' : 'GCP Cloud Run';
-    $('runtime-note').textContent = data.prover.teeMode === 'nitro' ? 'AWS Nitro prover · Arc Testnet · Circle Agent Wallet' : 'GCP demo prover · Nitro is a separate implementation · Arc Testnet';
+    $('tee-mode').textContent = 'ZKProofport prover';
+    $('runtime-note').textContent = 'Private eligibility · Arc Testnet';
     if(!walletSnapshot)void refreshWallet();
   } catch { $('connection').textContent = 'Reconnecting…'; $('connection-dot').className = ''; }
   finally{refreshing=false;}
@@ -279,7 +290,10 @@ $('copy-command').addEventListener('click',async()=>{try{await navigator.clipboa
 const events=new EventSource('/demo/events');events.onmessage=event=>{try{renderRun(JSON.parse(event.data));if(!active)refresh();}catch{}};
 events.onopen=()=>{streamConnected=true;renderTerminal(terminalRun);};
 events.onerror=()=>{streamConnected=false;renderTerminal(terminalRun);};
-renderRun(null);refreshWallet();refresh();setInterval(()=>{if(!document.hidden)refresh();},5000);
+$('instruction').addEventListener('input', fitInstruction);
+globalThis.addEventListener?.('resize', fitInstruction);
+document.fonts?.ready.then(fitInstruction);
+renderRun(null);fitInstruction();refreshWallet();refresh();setInterval(()=>{if(!document.hidden)refresh();},5000);
 
 $('find-prover').addEventListener('click', async () => {
   $('find-prover').disabled = true;

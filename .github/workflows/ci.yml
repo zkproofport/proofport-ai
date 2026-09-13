@@ -60,10 +60,19 @@ jobs:
           npm ci
           npm run build
 
-      # npm-publish.yml deletes the lockfile before installing. This job keeps it
-      # so CI resolves the versions the repo actually pins.
+      # Resolve the same pinned dependencies used by the publication workflow.
       - name: Install dependencies
         run: npm ci
+
+      # ── packages/sdk ───────────────────────────────────────────────────────
+      # Must be BUILT before packages/mcp is built or typechecked: packages/mcp
+      # imports @zkproofport-ai/sdk and cannot resolve it until
+      # packages/sdk/dist exists. npm-publish.yml relies on the same ordering.
+      - name: Typecheck (packages/sdk)
+        run: npm run typecheck --workspace @zkproofport-ai/sdk
+
+      - name: Build (packages/sdk)
+        run: npm run build --workspace @zkproofport-ai/sdk
 
       # ── Root server ────────────────────────────────────────────────────────
       - name: Typecheck (root)
@@ -85,16 +94,6 @@ jobs:
         env:
           PROVER_PRIVATE_KEY: '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'
         run: npm run test:unit
-
-      # ── packages/sdk ───────────────────────────────────────────────────────
-      # Must be BUILT before packages/mcp is built or typechecked: packages/mcp
-      # imports @zkproofport-ai/sdk and cannot resolve it until
-      # packages/sdk/dist exists. npm-publish.yml relies on the same ordering.
-      - name: Typecheck (packages/sdk)
-        run: npm run typecheck --workspace @zkproofport-ai/sdk
-
-      - name: Build (packages/sdk)
-        run: npm run build --workspace @zkproofport-ai/sdk
 
       # ── packages/mcp ───────────────────────────────────────────────────────
       # `build` is `tsc`, so this typechecks packages/mcp as well as emitting.

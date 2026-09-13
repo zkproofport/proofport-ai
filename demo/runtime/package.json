@@ -1,0 +1,9 @@
+{
+  "name": "proofport-demo-published-runtime",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@zkproofport-ai/mcp": "0.2.11",
+    "@zkproofport-ai/sdk": "0.2.11"
+  }
+}

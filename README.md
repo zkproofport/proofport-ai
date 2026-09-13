@@ -1,8 +1,10 @@
 # proofport-ai
 
-Agent-native ZK proof infrastructure for ZKProofport. A standalone service that generates and verifies zero-knowledge proofs inside an AWS Nitro Enclave with end-to-end encryption — the server acts as a **blind relay** and never sees proof inputs.
+Agent-native ZK proof infrastructure for ZKProofport, with a TEE-based proving architecture, SDK and local MCP package. Supported Nitro deployments encrypt inputs to the enclave; encryption and hardware-attestation guarantees depend on the selected endpoint and actual returned evidence. Arc exact-action authorization remains **EXPERIMENTAL on Arc Testnet (5042002)**.
 
 ## Architecture
+
+The following diagram describes the Nitro deployment. Endpoints without an attested enclave key receive readable inputs over HTTPS; the current Arc staging demo uses that mode and does not supply hardware attestation. A valid proof alone is not evidence of enclave execution.
 
 ```
 Client (AI Agent / SDK)
@@ -33,9 +35,9 @@ Client (AI Agent / SDK)
 
 **Key properties:**
 - **E2E encryption** — X25519 ECDH + AES-256-GCM. In `nitro` mode, plaintext inputs are rejected.
-- **Blind relay** — The Node.js host cannot read proof inputs. Only the enclave decrypts.
+- **Blind relay in Nitro mode** — The host forwards enclave-encrypted inputs. This property does not apply to an endpoint accepting plaintext circuit inputs.
 - **x402 payment** — Single-step flow: 402 challenge → USDC payment → proof generation. No middleware.
-- **Hardware attestation** — NSM attestation document binds TEE public key to enclave measurement (PCRs).
+- **Hardware attestation in Nitro mode** — An actual validated NSM document binds the TEE key to enclave measurements (PCRs); do not infer it from proof validity.
 
 ## Directory Structure
 
@@ -162,7 +164,7 @@ docker compose down -v        # Reset data
 
 ## E2E Encryption (Blind Relay)
 
-Proof inputs are end-to-end encrypted between the client and the Nitro Enclave. The Node.js server passes the encrypted blob without reading it.
+For the supported Nitro deployment, proof inputs are encrypted between the client and the enclave. The host passes the encrypted blob without reading it. This section describes that protocol, not every endpoint.
 
 **Protocol:** X25519 ECDH + AES-256-GCM (ECIES pattern)
 
@@ -177,29 +179,11 @@ Proof inputs are end-to-end encrypted between the client and the Nitro Enclave. 
 
 ## x402 Payment Flow
 
-Single-step atomic flow — no middleware, no sessions:
+The live `402` challenge determines the offered routes, price, asset, recipient and signing domain. Select a compatible wallet and explicit route, obtain user approval, then sign the exact terms and retry the request using the SDK's payment headers. Do not assume every endpoint is free or that every wallet works on every offered chain.
 
-```
-POST /api/v1/prove { circuit, inputs }
-  ↓
-402 { nonce, price, payTo, teePublicKey }
-  ↓
-Client signs EIP-3009 TransferWithAuthorization (USDC)
-  ↓
-POST /api/v1/prove { circuit, encrypted_payload }
-  + X-Payment-TX: <txHash>
-  + X-Payment-Nonce: <nonce>
-  ↓
-200 { proof, publicInputs, proofWithInputs, attestation, timing, verification }
-```
+For Arc Gateway nanopayments, `pay_on: "arc-testnet-nano"` draws from an already funded Gateway balance. The initial direct deposit is an on-chain operation requiring gas; each proof payment signs an authorization against that balance. The demo proof fee is 0.001 USDC, but callers must validate the live offer rather than substitute a documentation price.
 
-**Payment modes:**
-
-| Mode | Network | Effect |
-|------|---------|--------|
-| `disabled` | None | All requests free |
-| `testnet` | Base Sepolia | Require USDC payment (testnet) |
-| `mainnet` | Base Mainnet | Require USDC payment (production) |
+Use `max_payment: "0.001"` and `approved_payment` in local MCP, or `maxPayment` and `approvedPayment` in the SDK. Exact approved terms include `network`, `scheme`, `amount` (USDC base units), `asset`, `payTo` and `extra: {name, version, verifyingContract}`. The SDK rejects a changed fee, recipient, asset, network or signing domain before signing. Proof payment and an eventual staking transaction require separate approvals.
 
 ## REST Endpoints
 
@@ -218,7 +202,7 @@ POST /api/v1/prove { circuit, encrypted_payload }
 
 ## MCP Tools
 
-Available via `/mcp` (StreamableHTTP) or the local `@zkproofport-ai/mcp` package (stdio):
+Remote `/mcp` and the local npm MCP server have separate tool surfaces. Consult each actual `tools/list` response. The local package includes:
 
 | Tool | Purpose |
 |------|---------|
@@ -226,9 +210,10 @@ Available via `/mcp` (StreamableHTTP) or the local `@zkproofport-ai/mcp` package
 | `verify_proof` | On-chain proof verification |
 | `get_supported_circuits` | List available circuits |
 | `request_challenge` | Request 402 challenge (step-by-step flow) |
-| `make_payment` | Make x402 USDC payment (step-by-step flow) |
 | `submit_proof` | Submit proof inputs (step-by-step flow) |
 | `prepare_inputs` | Prepare circuit inputs (step-by-step flow) |
+| `gateway_balance` | Read Gateway balance using `PAYMENT_PRIVATE_KEY` only |
+| `deposit_to_gateway` | Deposit to Gateway using `PAYMENT_PRIVATE_KEY` only; on-chain |
 
 ## npm Packages
 
@@ -240,9 +225,29 @@ Available via `/mcp` (StreamableHTTP) or the local `@zkproofport-ai/mcp` package
 Install the MCP server for local AI agent usage:
 
 ```bash
-npm install @zkproofport-ai/mcp
+npm install @zkproofport-ai/mcp@latest @zkproofport-ai/sdk@latest ethers
 npx zkproofport-mcp    # Starts stdio MCP server
 ```
+
+Arc support described here requires SDK/MCP **0.2.11 or later**. Install from npm and check the resolved version. Release Please manages package versions and the release workflow publishes them; repository source changes alone do not update `@latest`.
+
+### Circle Agent Wallet on Arc — EXPERIMENTAL
+
+Use the existing Circle CLI login and wallet. `walletFor('arc')` / `walletFromArcAgent` wraps that CLI; MCP selects it with `pay_with: "arc"`. This differs from `pay_with: "circle"`, which uses Circle developer-controlled wallet credentials. Keep credential keys and login secrets out of model prompts and logs.
+
+```bash
+# Inspect the existing wallet; do not replace it or create a new one.
+circle wallet list --chain ARC-TESTNET --type agent
+circle gateway balance --address "$ARC_AGENT_WALLET" --chain ARC-TESTNET --output json
+# Execute only after the user approves this funding amount:
+circle gateway deposit --amount 0.1 --address "$ARC_AGENT_WALLET" --chain ARC-TESTNET --method direct
+```
+
+The local `gateway_balance` and `deposit_to_gateway` tools remain **`PAYMENT_PRIVATE_KEY` only**. Use Circle CLI for the Circle Agent Wallet instead of substituting another wallet. Circle's backing EOA signs Gateway authorizations internally; the exact action still names the operational Wallet B.
+
+The supported flow is: discover the dApp policy and prover → prepare the exact action → approve the action and live payment terms → call `generate_proof` with `arc_eligibility`, `action`, `pay_with: "arc"`, `pay_on: "arc-testnet-nano"`, `max_payment` and `approved_payment` → verify the actual proof → obtain separate stake approval → submit from Wallet B and check the receipt. No all-chain wallet compatibility is implied.
+
+See the [SDK Arc example](packages/sdk/README.md#arc-circle-agent-wallet-path--experimental) and [MCP setup and arguments](packages/mcp/README.md#arc-testnet--experimental). User-facing **exact-action authorization** retains the existing `CredentialDelegation` / `delegate` wire fields.
 
 ## Guide System
 
@@ -325,13 +330,20 @@ over 32 opaque bytes shows a person a hex string.
   nullifier at 160–191, which is 64 further along than every other circuit here
 - **Nullifier:** Yes, derived from `signal_hash` exactly as on Base, so it stays
   one-per-person rather than one-per-action
-- **Verifier:** Arc Testnet (chain 5042002) only. `FALLBACK_VERIFIERS` has
-  `null` for it on every other chain, which is what "no verifier here" looks
-  like. Circle has published no mainnet chain id
+- **Verifier:** `0xCbC8E63fF92659E8B44cFF117D33005Bb669a018` on Arc Testnet (chain 5042002). No Arc mainnet support is claimed.
 - **Status:** `experimental` in `@zkproofport-app/sdk` — provable and
   verifiable, but the layout and the verifier address can still change
 
 ## Contract Addresses
+
+### Arc Testnet — EXPERIMENTAL (5042002)
+
+| Contract | Address |
+|---|---|
+| Arc eligibility verifier | `0xCbC8E63fF92659E8B44cFF117D33005Bb669a018` |
+| Ledger House EligibilityGate | `0xD0F3eE648386B59B484157332E736388Fcc41F47` |
+
+The gate checks the credential policy, authorized actor, exact action, unused nonce and deadline together with proof verification. Its deployed EIP-712 action shape is described in the package READMEs. The layout and deployments remain experimental; do not treat this as a mainnet guarantee.
 
 ### Base Sepolia (Testnet)
 

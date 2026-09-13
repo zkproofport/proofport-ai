@@ -14,13 +14,12 @@ Use Node 22.18+, existing Claude Code and Circle CLI logins, and the private
 
 ```bash
 npm ci
-npm run build --workspace @zkproofport-ai/sdk
-npm run build --workspace @zkproofport-ai/mcp
-RECORDING_PORT=4114 bash demo/record.sh
+npm ci --prefix demo/runtime --workspaces=false
+RECORDING_PORT=4115 bash demo/record.sh
 ```
 
-Open **http://localhost:4114**. Keep any existing CLI/server running; choose another
-unused port for a clean session. The remote prover is **GCP staging** at
+Open **http://localhost:4115**. Keep any existing CLI/server running; choose another
+unused port for a clean session. The remote prover is **staging** at
 `https://stg-ai.zkproofport.app`.
 
 Start recording with an empty instruction and zero events, then enter:
@@ -56,18 +55,15 @@ this run invokes the actual prover MCP tool.
   `pay_on: arc-testnet-nano`, proof fee **0.001 USDC**. The proof fee and **0.1 USDC**
   staking deposit are separate. SDK signing checks the exact approved payment
   terms before signing the final challenge.
-- **This execution uses GCP Cloud Run.** `tee.mode: local` names the in-process GCP
-  prover; hardware attestation is disabled for this execution. Coinbase KYC
-  attestation is still queried and validated. AWS Nitro Enclave is a separate
-  implementation, not the runtime that generated this recorded proof.
 
 ## Actual MCP path
 
 ```text
 Claude Code
   → ledger_house dApp authorization/execution adapter
-  → proofport-ai/packages/mcp (handshake: zkproofport-mcp)
-  → GCP staging prover
+  → discovered usage guide → real npm installation
+  → @zkproofport-ai/mcp (handshake: zkproofport-mcp)
+  → staging prover
 ```
 
 The native `mcp__ledger_house__*` names are preserved. The **INNER PROVER MCP**
@@ -75,11 +71,12 @@ panel separately shows the actual server handshake, `tools/call generate_proof`,
 and returned proof sizes. These are nested protocol observations, not invented
 additional model tool choices. Only public, whitelisted facts reach the page.
 
-The model selects among ten local capabilities under fixed dApp policy. The
+The model selects among the available local capabilities under fixed dApp policy. The
 published guide and tools/list schemas are returned to the model before it selects
 `generate_proof`. Some preparation calls are batched; the recording does not claim
-that every call was selected in a separate post-guide reasoning turn. Remote
-instructions cannot install arbitrary executables.
+that every call was selected in a separate post-guide reasoning turn. The model can select install_prover_mcp after reading the guide. It installs the trusted
+SDK/MCP npm latest release in an isolated directory and connects that installation;
+remote instructions cannot choose arbitrary executables.
 
 User decisions are bound to the run, amount, chain, wallet, target, complete action,
 nonce/deadline, and payment terms or proof fingerprint. The model has no decision
@@ -102,7 +99,7 @@ turn a confirmed paid proof or stake into a request to repeat spending.
 · [public proof](artifacts/presentation-proof.json)
 · [Arc transaction](https://testnet.arcscan.app/tx/0x40d05805e2179291d0e24ff8c19f1bf190d240ac1d17b9360598d32dfd05c268).
 
-The video uses fresh browser captures with waiting-time cuts and restrained crop/
+The earlier video uses fresh browser captures with waiting-time cuts and crop/
 zoom; no generated logs or cursor movement. Hiding A's literal address is not an
 unlinkability guarantee: the existing public nullifier supports checking a known
 candidate. That internal [security audit](audit/README.md) remains separate from

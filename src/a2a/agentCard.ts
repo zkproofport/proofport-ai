@@ -11,7 +11,7 @@ export type TokenIdRef = { chains: Map<number, bigint> };
 
 function executionDescription(config: Config): string {
   if (config.teeMode === 'nitro') return 'AWS Nitro Enclave';
-  return `deployed prover (${config.teeMode} mode, no hardware TEE attestation)`;
+  return 'the ZKProofport prover';
 }
 
 function paymentNetworks(config: Config): string {
@@ -541,7 +541,7 @@ Use its x402 endpoint's origin to read this document and the circuit guide.
 
 ## Local MCP for agents
 
-Install \`@zkproofport-ai/mcp\` and launch \`zkproofport-mcp\` over stdio.
+Install with \`npm install -g @zkproofport-ai/mcp@latest\` (Arc support: 0.2.11+) and launch \`zkproofport-mcp\` over stdio.
 Set PROOFPORT_URL=${config.a2aBaseUrl} in that local process.
 Load the existing ATTESTATION_KEY only into the local signer process; never send credentials to an LLM.
 Connect and call \`tools/list\`; use the returned inputSchema for \`tools/call\`.
@@ -550,7 +550,7 @@ Local tools: generate_proof, deposit_to_gateway, gateway_balance, get_supported_
 request_challenge, prepare_inputs, submit_proof, verify_proof.
 Read guides with HTTPS GET; get_guide is a remote service tool, not a local SDK tool.
 
-For a single KYC-and-delegation proof, select \`generate_proof\` with:
+For a single KYC + exact-action authorization proof, select \`generate_proof\` with:
 - circuit: \`arc_eligibility\`
 - action: the application's complete EIP-712 typed action (required)
 - scope: the application's scope, e.g. \`ledger-house\`
@@ -584,7 +584,7 @@ USDC held in the Agent Wallet and USDC deposited in Gateway are different balanc
 
 With the existing signer environment loaded and an offered Arc nanopayment network:
 
-\`PROOFPORT_URL=${config.a2aBaseUrl} zkproofport-prove arc_eligibility --action delegation.json --scope ledger-house --pay-with arc --pay-on arc-testnet-nano --silent\`
+\`PROOFPORT_URL=${config.a2aBaseUrl} zkproofport-prove arc_eligibility --action action.json --scope ledger-house --pay-with arc --pay-on arc-testnet-nano --max-payment 0.001 --silent\`
 
 This CLI calls the local MCP generate_proof tool. An agent already connected to the local MCP
 server can call that tool directly without spawning the prove CLI.

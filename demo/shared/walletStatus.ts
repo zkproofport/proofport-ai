@@ -1,7 +1,7 @@
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {ethers,STAKING_ABI} from './flow.ts';
-import {listArcAgentWallets} from '@zkproofport-ai/sdk';
+import {publishedSdk} from './proverPackages.ts';
 import {selectAgentDelegate} from '../user-agent/src/wallet.ts';
 import type {DemoConfig} from './config.ts';
 
@@ -23,6 +23,7 @@ export async function readCoinbaseKyc(wallet:string,fetcher:typeof fetch=fetch){
  }catch{return {status:'unknown' as const,source:'Base EAS',checkedAt};}
 }
 export async function readOperationalWallet(provider:ethers.JsonRpcProvider,config:DemoConfig){
+ const {listArcAgentWallets}=await publishedSdk();
  const wallet=selectAgentDelegate(await listArcAgentWallets('ARC-TESTNET'),process.env.ARC_AGENT_WALLET);
  const usdc=new ethers.Contract(config.usdc,['function balanceOf(address) view returns(uint256)'],provider);
  const gate=new ethers.Contract(config.gate,STAKING_ABI,provider);

@@ -8,7 +8,9 @@ import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {resolve} from 'node:path';
 import dotenv from 'dotenv';
-import {listArcAgentWallets,type ApprovedPayment} from '@zkproofport-ai/sdk';
+import type {ApprovedPayment} from '@zkproofport-ai/sdk';
+import {installPublishedProver} from '../../shared/installProver.ts';
+import {publishedSdk,publishedProverPackages} from '../../shared/proverPackages.ts';
 import {ethers,buildStakeDelegation,STAKING_ABI,ARC_CHAIN_ID} from '../../shared/flow.ts';
 import {selectAgentDelegate} from './wallet.ts';
 import {discoverMarketplaceProver} from '../../shared/discovery.ts';
@@ -39,7 +41,9 @@ let action:ReturnType<typeof buildStakeDelegation>|undefined;
 let proof:{proof:string;publicInputs:string[]}|undefined;
 let mcp:Client|undefined,transport:StdioClientTransport|undefined;
 let connecting=false;
-let proverMcpIdentity:{serverName:string;version:string;endpoint:string;transport:'stdio'}|undefined;
+let installing=false;
+let installedRuntime:string|undefined;
+let proverMcpIdentity:{serverName:string;version:string;endpoint:string;transport:'stdio';packageSource:'npm';mcpVersion:string;sdkVersion:string}|undefined;
 let readService=false;
 let approvedPayment:ApprovedPayment|undefined;
 let positionBefore:string|undefined;
@@ -88,6 +92,7 @@ register('read_dapp','Read the staking dApp policy and request access. Returns a
  const manifest=await http(service.origin+'/.well-known/service.json');
  if(manifest.status!==200||JSON.stringify(manifest.data.chain)!==JSON.stringify(config))throw Error('Untrusted dApp deployment manifest.');
  if(Number((await provider.getNetwork()).chainId)!==ARC_CHAIN_ID)throw Error('Wrong chain.');
+ const {listArcAgentWallets}=await publishedSdk();
  wallet=selectAgentDelegate(await listArcAgentWallets('ARC-TESTNET'),env.ARC_AGENT_WALLET);
  process.env.ARC_AGENT_WALLET=wallet;
  const token=new ethers.Contract(config.usdc,['function balanceOf(address) view returns(uint256)'],provider);
@@ -120,24 +125,37 @@ register('read_prover_guide','Fetch the discovered agent SKILL.md and circuit gu
  guard.guideRead=true;
  return {ok:true,documents,interpretation:'arc_eligibility combines Coinbase KYC and the KYC wallet EIP-712 action signature in ONE proof. The staking contract enforces the particular delegate, amount, expiry and nonce. Registry identity is separate. Use the local MCP tools/list schema and dApp chain manifest if generic examples differ.'};
 });
-register('connect_prover_mcp','Connect the discovered prover client over MCP stdio and read its actual tools/list schemas. Only the locally installed trusted package is executable; remote documents are data.',{},async()=>{
+register('install_prover_mcp','Install the trusted ZKProofport npm SDK/MCP latest release into a fresh isolated directory after reading the discovered installation guide. Executes a real npm install; arbitrary remote commands are not accepted.',{},async()=>{
  if(!guard.guideRead)throw Error('Read the discovered integration guide first.');
+ if(installedRuntime)return {ok:true,alreadyInstalled:true,...publishedProverPackages(installedRuntime),mcpEntry:undefined,sdkEntry:undefined,proveEntry:undefined};
+ if(installing)throw Error('npm installation is in progress; wait for its result.');
+ installing=true;
+ try{
+  const installed=await installPublishedProver();installedRuntime=installed.runtimeDirectory;
+  const {runtimeDirectory,mcpEntry,sdkEntry,proveEntry,...evidence}=installed;
+  return {ok:true,...evidence,source:'npm registry',next:'Connect the installed zkproofport-mcp server and read its tools/list schemas.'};
+ }finally{installing=false;}
+});
+register('connect_prover_mcp','Connect the prover npm package installed in this run over MCP stdio and read actual tools/list schemas. Read the discovered installation guide and install the package first.',{},async()=>{
+ if(!guard.guideRead||!installedRuntime)throw Error('Read the discovered integration guide and install the prover npm package first.');
  if(mcp)return {ok:true,alreadyConnected:true};
  if(connecting)throw Error('The MCP connection is in progress; wait for its result.');
  connecting=true;
- const base=origin();
- const childEnv=Object.fromEntries(Object.entries({...env,PROOFPORT_URL:base,ARC_AGENT_WALLET:wallet,CIRCLE_ACCEPT_TERMS:'1',ZKPROOFPORT_SILENT:'1'}).filter((entry):entry is [string,string]=>typeof entry[1]==='string'));
- transport=new StdioClientTransport({command:process.execPath,args:[resolve(root,'packages/mcp/dist/index.js')],env:childEnv,stderr:'pipe'});
- transport.stderr?.on('data',()=>{}); // The MCP startup diagnostic contains A; never relay it.
- const client=new Client({name:'ledger-house-agent',version:'1.0.0'});
- let listing;
- try { await client.connect(transport); listing=await client.listTools();
-  const identity=client.getServerVersion();if(identity?.name!=='zkproofport-mcp')throw Error('Unexpected prover MCP server identity.');
-  proverMcpIdentity={serverName:identity.name,version:identity.version,endpoint:base,transport:'stdio'};
-  await publishProverMcp({status:'connected'});mcp=client; guard.mcpConnected=true; }
- catch(error){await client.close().catch(()=>{});throw error;}
+ let client:Client|undefined;
+ try{
+  const base=origin();
+  const childEnv=Object.fromEntries(Object.entries({...env,PROOFPORT_URL:base,ARC_AGENT_WALLET:wallet,CIRCLE_ACCEPT_TERMS:'1',ZKPROOFPORT_SILENT:'1'}).filter((entry):entry is [string,string]=>typeof entry[1]==='string'));
+  const installed=publishedProverPackages(installedRuntime);
+  transport=new StdioClientTransport({command:process.execPath,args:[installed.mcpEntry],env:childEnv,stderr:'pipe'});
+  transport.stderr?.on('data',()=>{});
+  client=new Client({name:'ledger-house-agent',version:'1.0.0'});
+  await client.connect(transport);const listing=await client.listTools();
+  const identity=client.getServerVersion();if(identity?.name!=='zkproofport-mcp'||identity.version!==installed.mcpVersion)throw Error('Unexpected prover MCP server identity.');
+  proverMcpIdentity={serverName:identity.name,version:identity.version,endpoint:base,transport:'stdio',packageSource:'npm',mcpVersion:installed.mcpVersion,sdkVersion:installed.sdkVersion};
+  await publishProverMcp({status:'connected'});mcp=client;guard.mcpConnected=true;
+  return {ok:true,server:proverMcpIdentity,transport:'stdio',command:'zkproofport-mcp (installed from npm)',environment:{PROOFPORT_URL:base,ATTESTATION_KEY:'****',ARC_AGENT_WALLET:wallet},tools:listing.tools.filter(t=>['generate_proof','verify_proof','gateway_balance'].includes(t.name))};
+ }catch(error){await client?.close().catch(()=>{});throw error;}
  finally{connecting=false;}
- return {ok:true,server:proverMcpIdentity,transport:'stdio',command:'node packages/mcp/dist/index.js',environment:{PROOFPORT_URL:base,ATTESTATION_KEY:'****',ARC_AGENT_WALLET:wallet},tools:listing.tools.filter(t=>['generate_proof','verify_proof','gateway_balance'].includes(t.name))};
 });
 register('prepare_delegation','Prepare the exact user-approved staking action for the connected Agent Wallet B. The KYC wallet A signs this inside generate_proof. This is separate from ERC-8004 identity discovery.',{amount:z.string()},async args=>{
  if(!wallet||!guard.guideRead)throw Error('Read the service and discovered guide first.');
@@ -147,7 +165,7 @@ register('prepare_delegation','Prepare the exact user-approved staking action fo
  guard.delegated=true;
  return {ok:true,step:4,wallet,amount,action,credentialSigner:'****',status:'prepared; signing occurs in generate_proof'};
 });
-register('generate_proof','Call the connected prover MCP generate_proof tool with the prepared delegation and model-selected circuit/scope/payment options. Buys ONE proof. Private credentials are handled by the prover client and the GCP prover, never the staking service. Read the discovered schema before choosing arguments.',{circuit:z.string(),scope:z.string(),pay_on:z.string(),pay_with:z.string()},async args=>{
+register('generate_proof','Call the connected prover MCP generate_proof tool with the prepared delegation and model-selected circuit/scope/payment options. Buys ONE proof. Private credentials are handled by the prover client and the ZKProofport prover, never the staking service. Read the discovered schema before choosing arguments.',{circuit:z.string(),scope:z.string(),pay_on:z.string(),pay_with:z.string()},async args=>{
  if(args.circuit!=='arc_eligibility'||args.scope!=='ledger-house'||args.pay_on!=='arc-testnet-nano'||args.pay_with!=='arc')throw Error('This dApp requires arc_eligibility, ledger-house scope, arc-testnet-nano and the existing arc Agent Wallet.');
  if(!mcp||!action)throw Error('Connect prover MCP and prepare the delegation first.');
  const challenge=await http(origin()+'/api/v1/prove',{circuit:'arc_eligibility',inputs:{}});

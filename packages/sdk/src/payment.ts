@@ -38,7 +38,7 @@
  */
 
 import type { PaymentWallet, PaymentOffer, PaidRequest, ApprovedPayment } from './types.js';
-import { usdcSpendControls, isKnownUsdc, knownUsdc } from './usdc.js';
+import { usdcSpendControls, isKnownUsdc, knownUsdc, DEFAULT_MAX_PAYMENT } from './usdc.js';
 
 /**
  * The chains a 402 answer will take payment on, in the order offered.
@@ -125,6 +125,18 @@ export async function signPayment(
       `. Refusing to sign: a 402 answer names the token it wants, and signing whatever it names ` +
       `lets a service ask to be paid in anything.`,
     );
+  }
+
+  // x402's top-level USD cap does not cover custom allowed assets such as
+  // Arc USDC. Enforce the same six-decimal limit on the selected offer here,
+  // before invoking any signer, whether or not exact terms were supplied.
+  const maximum = opts.maxPayment ?? DEFAULT_MAX_PAYMENT;
+  const match = /^\$?(\d+)(?:\.(\d{1,6}))?$/.exec(maximum);
+  if (!match) throw new Error('Invalid maximum USDC payment: use a non-negative decimal with up to six places.');
+  const maximumUnits = BigInt(match[1]) * 1_000_000n + BigInt((match[2] ?? '').padEnd(6, '0'));
+  if (!/^\d+$/.test(offer.amount)) throw new Error('The USDC payment offer must use integer atomic units.');
+  if (BigInt(offer.amount) > maximumUnits) {
+    throw new Error(`The payment offer exceeds the maximum ${maximum} USDC payment. Refusing to sign.`);
   }
 
   const { x402Client, x402HTTPClient } = await import('@x402/core/client');

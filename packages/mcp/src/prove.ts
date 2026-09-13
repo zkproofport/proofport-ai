@@ -4,6 +4,25 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { fromPrivateKey } from '@zkproofport-ai/sdk';
+
+const privateValues = [process.env.ATTESTATION_KEY, process.env.E2E_ATTESTATION_WALLET_ADDRESS]
+  .filter((value): value is string => typeof value === 'string' && value.length >= 8);
+if (process.env.ATTESTATION_KEY) {
+  try { privateValues.push(await fromPrivateKey(process.env.ATTESTATION_KEY).getAddress()); }
+  catch { /* The MCP server validates credentials; never log invalid key contents. */ }
+}
+function safeText(value: unknown): string {
+  let text = String(value);
+  for (const secret of [...privateValues, ...(jwt ? [jwt] : [])]) {
+    for (const form of [secret, JSON.stringify(secret).slice(1, -1)]) {
+      text = text.replace(new RegExp(form.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '****');
+    }
+  }
+  return text;
+}
+const stderr = console.error.bind(console);
+function writeError(...values: unknown[]) { stderr(...values.map(safeText)); }
 
 // ─── Resolve path to index.js in the same dist/ directory ─────────────
 const __filename = fileURLToPath(import.meta.url);
@@ -11,7 +30,7 @@ const __dirname = dirname(__filename);
 const serverPath = join(__dirname, 'index.js');
 // Opt-in lifecycle events contain no credential, witness, response body or address.
 function demoTrace(event: 'mcp_start' | 'mcp_connected' | 'mcp_generate_proof' | 'mcp_result') {
-  if (process.env.ZKPROOFPORT_DEMO_TRACE === '1') console.error(`[demo-cli] ${event}`);
+  if (process.env.ZKPROOFPORT_DEMO_TRACE === '1') writeError(`[demo-cli] ${event}`);
 }
 
 // ─── Device Code Flow helpers ─────────────────────────────────────────
@@ -48,11 +67,11 @@ async function googleDeviceFlow(): Promise<DeviceFlowResult> {
     interval: number;
   };
 
-  console.error('');
-  console.error(`  Open: ${codeData.verification_url}`);
-  console.error(`  Code: ${codeData.user_code}`);
-  console.error('');
-  console.error('  Waiting for authorization...');
+  writeError('');
+  writeError(`  Open: ${codeData.verification_url}`);
+  writeError(`  Code: ${codeData.user_code}`);
+  writeError('');
+  writeError('  Waiting for authorization...');
 
   // 2. Poll for token
   const deadline = Date.now() + 5 * 60 * 1000; // 5 minute timeout
@@ -75,7 +94,7 @@ async function googleDeviceFlow(): Promise<DeviceFlowResult> {
     const tokenData = await tokenRes.json() as any;
 
     if (tokenRes.ok && tokenData.id_token) {
-      console.error('  Authorization successful!');
+      writeError('  Authorization successful!');
       return { idToken: tokenData.id_token };
     }
 
@@ -124,11 +143,11 @@ async function microsoftDeviceFlow(): Promise<DeviceFlowResult> {
     message: string;
   };
 
-  console.error('');
-  console.error(`  Open: ${codeData.verification_uri}`);
-  console.error(`  Code: ${codeData.user_code}`);
-  console.error('');
-  console.error('  Waiting for authorization...');
+  writeError('');
+  writeError(`  Open: ${codeData.verification_uri}`);
+  writeError(`  Code: ${codeData.user_code}`);
+  writeError('');
+  writeError('  Waiting for authorization...');
 
   // 2. Poll for token
   const deadline = Date.now() + 5 * 60 * 1000;
@@ -153,7 +172,7 @@ async function microsoftDeviceFlow(): Promise<DeviceFlowResult> {
     const tokenData = await tokenRes.json() as any;
 
     if (tokenRes.ok && tokenData.id_token) {
-      console.error('  Authorization successful!');
+      writeError('  Authorization successful!');
       return { idToken: tokenData.id_token };
     }
 
@@ -191,6 +210,7 @@ let jwt: string | undefined;
 let provider: string | undefined;
 let payWith: string | undefined;
 let payOn: string | undefined;
+let maxPayment: string | undefined;
 let loginGoogle = false;
 let loginGoogleWorkspace = false;
 let loginMicrosoft365 = false;
@@ -221,6 +241,8 @@ for (; i < args.length; i++) {
     payWith = args[++i];
   } else if (args[i] === '--pay-on' && args[i + 1]) {
     payOn = args[++i];
+  } else if (args[i] === '--max-payment') {
+    maxPayment = args[i + 1] && !args[i + 1].startsWith('--') ? args[++i] : '';
   } else if (args[i] === '--login-google') {
     loginGoogle = true;
   } else if (args[i] === '--login-google-workspace') {
@@ -231,49 +253,50 @@ for (; i < args.length; i++) {
 }
 
 // ─── Silent-aware log helper ───────────────────────────────────────────
-const log = silent ? (..._args: unknown[]) => {} : console.error.bind(console);
+const log = silent ? (..._args: unknown[]) => {} : writeError;
 
 function printUsage() {
-  console.error('Usage: ATTESTATION_KEY=0x... zkproofport-prove [circuit] [options]');
-  console.error('');
-  console.error('Environment variables:');
-  console.error('  ATTESTATION_KEY    (required) Private key of wallet with Coinbase EAS attestation');
-  console.error('');
-  console.error('Paying (only when the service charges — the wallet and the chain are separate choices):');
-  console.error('  --pay-with arc      an Arc agent wallet, signed by Circle CLI (no key here)');
-  console.error('                      optional: ARC_AGENT_WALLET picks one when several exist');
-  console.error('  --pay-with key      PAYMENT_PRIVATE_KEY');
-  console.error('  --pay-with cdp      CDP_API_KEY_ID, CDP_API_KEY_SECRET, CDP_WALLET_SECRET');
-  console.error('  --pay-with circle   CIRCLE_API_KEY, CIRCLE_ENTITY_SECRET, CIRCLE_WALLET_ID');
-  console.error('');
-  console.error('  The payer signs a USDC authorization and the service submits it, so no gas');
-  console.error('  and no native balance are needed on the paying chain — only USDC.');
-  console.error('');
-  console.error('Options:');
-  console.error('  --scope <scope>            Scope for nullifier (default: "proofport")');
-  console.error('  --countries <codes>         Comma-separated ISO codes (for coinbase_country)');
-  console.error('  --included <true|false>     Inclusion proof (for coinbase_country)');
-  console.error('  --silent                    Suppress all logs; output raw proof JSON only');
-  console.error('  --login-google             Login with Google account (device flow)');
-  console.error('  --login-google-workspace   Login with Google Workspace (device flow)');
-  console.error('  --login-microsoft-365      Login with Microsoft 365 (device flow)');
-  console.error('  --action <file.json>        EIP-712 action (for arc_eligibility)');
-  console.error('  --pay-with <key|cdp|circle|arc> Which wallet pays, when the service charges');
-  console.error('  --pay-on <chain>            Which chain to pay on (e.g. arc-testnet, base-sepolia)');
-  console.error('');
-  console.error('Circuits:');
-  console.error('  coinbase_kyc       Prove Coinbase KYC verification (requires ATTESTATION_KEY)');
-  console.error('  coinbase_country   Prove KYC country attestation (requires ATTESTATION_KEY)');
-  console.error('  oidc_domain        Prove email domain via OIDC JWT (--jwt required)');
-  console.error('');
-  console.error('Examples:');
-  console.error('  # pay on Arc from a Circle wallet');
-  console.error('  zkproofport-prove coinbase_kyc --pay-with circle --pay-on arc-testnet');
-  console.error('  # pay on Base Sepolia from a CDP wallet');
-  console.error('  zkproofport-prove coinbase_kyc --pay-with cdp --pay-on base-sepolia');
-  console.error('  ATTESTATION_KEY=0x... zkproofport-prove coinbase_kyc --scope my-app');
-  console.error('  ATTESTATION_KEY=0x... zkproofport-prove coinbase_country --countries US,KR --included true');
-  console.error('  zkproofport-prove oidc_domain --jwt eyJhbGciOi... --scope my-app');
+  writeError('Usage: ATTESTATION_KEY=0x... zkproofport-prove [circuit] [options]');
+  writeError('');
+  writeError('Environment variables:');
+  writeError('  ATTESTATION_KEY    (required) Private key of wallet with Coinbase EAS attestation');
+  writeError('');
+  writeError('Paying (only when the service charges — the wallet and the chain are separate choices):');
+  writeError('  --pay-with arc      an Arc agent wallet, signed by Circle CLI (no key here)');
+  writeError('                      optional: ARC_AGENT_WALLET picks one when several exist');
+  writeError('  --pay-with key      PAYMENT_PRIVATE_KEY');
+  writeError('  --pay-with cdp      CDP_API_KEY_ID, CDP_API_KEY_SECRET, CDP_WALLET_SECRET');
+  writeError('  --pay-with circle   CIRCLE_API_KEY, CIRCLE_ENTITY_SECRET, CIRCLE_WALLET_ID');
+  writeError('');
+  writeError('  The payer signs a USDC authorization and the service submits it, so no gas');
+  writeError('  and no native balance are needed on the paying chain — only USDC.');
+  writeError('');
+  writeError('Options:');
+  writeError('  --scope <scope>            Scope for nullifier (default: "proofport")');
+  writeError('  --countries <codes>         Comma-separated ISO codes (for coinbase_country)');
+  writeError('  --included <true|false>     Inclusion proof (for coinbase_country)');
+  writeError('  --silent                    Suppress all logs; output raw proof JSON only');
+  writeError('  --login-google             Login with Google account (device flow)');
+  writeError('  --login-google-workspace   Login with Google Workspace (device flow)');
+  writeError('  --login-microsoft-365      Login with Microsoft 365 (device flow)');
+  writeError('  --action <file.json>        EIP-712 action (for arc_eligibility)');
+  writeError('  --pay-with <key|cdp|circle|arc> Which wallet pays, when the service charges');
+  writeError('  --pay-on <chain>            Which chain to pay on (e.g. arc-testnet, base-sepolia)');
+  writeError('  --max-payment <USDC>        Maximum proof fee, up to six decimal places');
+  writeError('');
+  writeError('Circuits:');
+  writeError('  coinbase_kyc       Prove Coinbase KYC verification (requires ATTESTATION_KEY)');
+  writeError('  coinbase_country   Prove KYC country attestation (requires ATTESTATION_KEY)');
+  writeError('  oidc_domain        Prove email domain via OIDC JWT (--jwt required)');
+  writeError('');
+  writeError('Examples:');
+  writeError('  # pay on Arc from a Circle wallet');
+  writeError('  zkproofport-prove coinbase_kyc --pay-with circle --pay-on arc-testnet');
+  writeError('  # pay on Base Sepolia from a CDP wallet');
+  writeError('  zkproofport-prove coinbase_kyc --pay-with cdp --pay-on base-sepolia');
+  writeError('  ATTESTATION_KEY=0x... zkproofport-prove coinbase_kyc --scope my-app');
+  writeError('  ATTESTATION_KEY=0x... zkproofport-prove coinbase_country --countries US,KR --included true');
+  writeError('  zkproofport-prove oidc_domain --jwt eyJhbGciOi... --scope my-app');
 }
 
 /**
@@ -289,6 +312,12 @@ if (args.includes('--help') || args.includes('-h')) {
   process.exit(0);
 }
 
+if (maxPayment !== undefined && !/^\d+(\.\d{1,6})?$/.test(maxPayment)) {
+  const message = '--max-payment requires a non-negative USDC amount with up to six decimal places.';
+  writeError(silent ? JSON.stringify({error: message}) : `Error: ${message}`);
+  process.exit(1);
+}
+
 // ─── The circuit must be named ────────────────────────────────────────
 // Device-flow login sets it further down, so this only rejects a run that
 // names neither.
@@ -297,8 +326,8 @@ if (!circuit && !wantsDeviceFlow) {
   const msg =
     'A circuit is required. Pass one of: coinbase_kyc, coinbase_country, ' +
     'oidc_domain, arc_eligibility.';
-  if (silent) console.error(JSON.stringify({ error: msg }));
-  else console.error(`Error: ${msg}`);
+  if (silent) writeError(JSON.stringify({ error: msg }));
+  else writeError(`Error: ${msg}`);
   process.exit(1);
 }
 
@@ -315,10 +344,10 @@ const hasLoginFlag = loginGoogle || loginGoogleWorkspace || loginMicrosoft365;
 if (!isOidc && !hasLoginFlag) {
   if (!attestationKey) {
     if (silent) {
-      console.error(JSON.stringify({ error: 'ATTESTATION_KEY environment variable is required' }));
+      writeError(JSON.stringify({ error: 'ATTESTATION_KEY environment variable is required' }));
     } else {
-      console.error('Error: ATTESTATION_KEY environment variable is required');
-      console.error('');
+      writeError('Error: ATTESTATION_KEY environment variable is required');
+      writeError('');
       printUsage();
     }
     process.exit(1);
@@ -329,18 +358,18 @@ if (!isOidc && !hasLoginFlag) {
 if (circuit === 'coinbase_country') {
   if (!countries || countries.length === 0) {
     if (silent) {
-      console.error(JSON.stringify({ error: '--countries <codes> is required for coinbase_country circuit' }));
+      writeError(JSON.stringify({ error: '--countries <codes> is required for coinbase_country circuit' }));
     } else {
-      console.error('Error: --countries <codes> is required for coinbase_country circuit');
-      console.error('Example: --countries US,KR');
+      writeError('Error: --countries <codes> is required for coinbase_country circuit');
+      writeError('Example: --countries US,KR');
     }
     process.exit(1);
   }
   if (included === undefined) {
     if (silent) {
-      console.error(JSON.stringify({ error: '--included <true|false> is required for coinbase_country circuit' }));
+      writeError(JSON.stringify({ error: '--included <true|false> is required for coinbase_country circuit' }));
     } else {
-      console.error('Error: --included <true|false> is required for coinbase_country circuit');
+      writeError('Error: --included <true|false> is required for coinbase_country circuit');
     }
     process.exit(1);
   }
@@ -350,10 +379,10 @@ if (circuit === 'coinbase_country') {
 if (isOidc && !hasLoginFlag) {
   if (!jwt) {
     if (silent) {
-      console.error(JSON.stringify({ error: '--jwt <token> is required for oidc_domain circuit' }));
+      writeError(JSON.stringify({ error: '--jwt <token> is required for oidc_domain circuit' }));
     } else {
-      console.error('Error: --jwt <token> is required for oidc_domain circuit');
-      console.error('Obtain a JWT id_token via Google OAuth (see usage above)');
+      writeError('Error: --jwt <token> is required for oidc_domain circuit');
+      writeError('Obtain a JWT id_token via Google OAuth (see usage above)');
     }
     process.exit(1);
   }
@@ -362,11 +391,11 @@ if (isOidc && !hasLoginFlag) {
 // ─── Mutual exclusivity: --login-* vs --jwt ──────────────────────────
 const loginFlags = [loginGoogle, loginGoogleWorkspace, loginMicrosoft365].filter(Boolean);
 if (loginFlags.length > 1) {
-  console.error('Error: Only one --login-* flag can be specified at a time');
+  writeError('Error: Only one --login-* flag can be specified at a time');
   process.exit(1);
 }
 if (loginFlags.length === 1 && jwt) {
-  console.error('Error: --login-* and --jwt are mutually exclusive');
+  writeError('Error: --login-* and --jwt are mutually exclusive');
   process.exit(1);
 }
 
@@ -380,8 +409,8 @@ if (loginGoogle || loginGoogleWorkspace || loginMicrosoft365) {
     const msg =
       `--login-* signs in with an identity provider and proves oidc_domain, but '${circuit}' was requested. ` +
       'Drop the circuit argument, or drop the login flag.';
-    if (silent) console.error(JSON.stringify({ error: msg }));
-    else console.error(`Error: ${msg}`);
+    if (silent) writeError(JSON.stringify({ error: msg }));
+    else writeError(`Error: ${msg}`);
     process.exit(1);
   }
   circuit = 'oidc_domain';
@@ -406,9 +435,9 @@ if (loginGoogle || loginGoogleWorkspace || loginMicrosoft365) {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (silent) {
-      console.error(JSON.stringify({ error: message }));
+      writeError(JSON.stringify({ error: message }));
     } else {
-      console.error(`[zkproofport-prove] Login failed: ${message}`);
+      writeError(`[zkproofport-prove] Login failed: ${message}`);
     }
     process.exit(1);
   }
@@ -425,8 +454,8 @@ if (circuit === 'arc_eligibility') {
     const msg =
       '--action <file.json> is required for arc_eligibility. The file holds ' +
       'an EIP-712 structure: { domain, types, primaryType, message }.';
-    if (silent) console.error(JSON.stringify({ error: msg }));
-    else console.error(`Error: ${msg}`);
+    if (silent) writeError(JSON.stringify({ error: msg }));
+    else writeError(`Error: ${msg}`);
     process.exit(1);
   }
   const { readFileSync } = await import('node:fs');
@@ -434,8 +463,8 @@ if (circuit === 'arc_eligibility') {
     action = JSON.parse(readFileSync(actionFile, 'utf8'));
   } catch (err) {
     const msg = `--action file could not be read as JSON: ${(err as Error).message}`;
-    if (silent) console.error(JSON.stringify({ error: msg }));
-    else console.error(`Error: ${msg}`);
+    if (silent) writeError(JSON.stringify({ error: msg }));
+    else writeError(`Error: ${msg}`);
     process.exit(1);
   }
   // Valid JSON is not a valid action. The circuit hashes the structure without
@@ -445,8 +474,8 @@ if (circuit === 'arc_eligibility') {
   const { validateTypedAction } = await import('@zkproofport-ai/sdk');
   const actionProblem = validateTypedAction(action);
   if (actionProblem) {
-    if (silent) console.error(JSON.stringify({ error: actionProblem }));
-    else console.error(`Error: ${actionProblem}`);
+    if (silent) writeError(JSON.stringify({ error: actionProblem }));
+    else writeError(`Error: ${actionProblem}`);
     process.exit(1);
   }
 }
@@ -460,13 +489,14 @@ if (jwt !== undefined) toolArgs.jwt = jwt;
 if (provider !== undefined) toolArgs.provider = provider;
 if (payWith !== undefined) toolArgs.pay_with = payWith;
 if (payOn !== undefined) toolArgs.pay_on = payOn;
+if (maxPayment !== undefined) toolArgs.max_payment = maxPayment;
 
 // ─── Start MCP server and call generate_proof ──────────────────────────
 log(`[zkproofport-prove] Circuit: ${circuit}`);
 log(`[zkproofport-prove] Scope: ${scope}`);
 if (countries) log(`[zkproofport-prove] Countries: ${countries.join(', ')}`);
 if (included !== undefined) log(`[zkproofport-prove] Included: ${included}`);
-if (jwt) log(`[zkproofport-prove] JWT: ${jwt}`);
+if (jwt) log('[zkproofport-prove] OIDC token provided (hidden)');
 if (payWith) log(`[zkproofport-prove] Paying with: ${payWith}${payOn ? ` on ${payOn}` : ''}`);
 log('[zkproofport-prove] Starting MCP server...');
 
@@ -477,7 +507,8 @@ const transport = new StdioClientTransport({
   command: 'node',
   args: [serverPath],
   env: { ...serverEnv, ...(silent ? { ZKPROOFPORT_SILENT: '1' } : {}) },
-  ...(silent ? { stderr: 'ignore' as const } : {}),
+  // Never inherit provider diagnostics: they can contain the credential holder.
+  stderr: 'ignore',
 });
 
 const client = new Client({ name: 'zkproofport-prove', version: '1.0.0' });
@@ -492,23 +523,23 @@ try {
   const result = await client.callTool({
     name: 'generate_proof',
     arguments: toolArgs,
-  });
+  }, undefined, {timeout: 240000});
 
   const isError = (result as any).isError;
   const content = (result as any).content;
   const output = content?.[0]?.text ?? JSON.stringify(result, null, 2);
   if (isError) {
-    console.error(output);
+    writeError(output);
     process.exit(1);
   }
   demoTrace('mcp_result');
-  console.log(output);
+  console.log(safeText(output));
 } catch (err) {
   const message = err instanceof Error ? err.message : String(err);
   if (silent) {
-    console.error(JSON.stringify({ error: message }));
+    writeError(JSON.stringify({ error: message }));
   } else {
-    console.error(`[zkproofport-prove] Error: ${message}`);
+    writeError(`[zkproofport-prove] Error: ${message}`);
   }
   process.exit(1);
 } finally {

@@ -4,9 +4,11 @@ import { resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import dotenv from 'dotenv';
 import { loadDemoConfig } from './shared/config.ts';
+import {publishedProverPackages} from './shared/proverPackages.ts';
 
 const root=fileURLToPath(new URL('../',import.meta.url));
 const config=loadDemoConfig();
+const packages=publishedProverPackages();
 const env={};
 for(const name of ['.env.development','.env.test']){
   const path=resolve(root,name);
@@ -16,14 +18,14 @@ for(const name of ['.env.development','.env.test']){
 Object.assign(env,process.env);
 const port=Number(process.env.RECORDING_PORT ?? '4100');
 if(!Number.isInteger(port)||port<1024||port>65535)throw new Error('Invalid RECORDING_PORT.');
-Object.assign(env,{CIRCLE_ACCEPT_TERMS:'1',PROVE_COMMAND:resolve(root,'packages/mcp/dist/prove.js'),
+Object.assign(env,{CIRCLE_ACCEPT_TERMS:'1',PROVE_COMMAND:packages.proveEntry,
   PROVER_URL:config.discovery.allowedOrigin,PORT:String(port)});
 for(const name of ['CDP_API_KEY_ID','CDP_API_KEY_SECRET','CDP_WALLET_SECRET','ARC_WALLET_DEBUG'])delete env[name];
 if(!env.ATTESTATION_KEY)throw new Error('ATTESTATION_KEY is missing from the existing environment.');
-if(!existsSync(env.PROVE_COMMAND))throw new Error('Build packages/sdk and packages/mcp before recording.');
+console.log(`Published npm runtime: MCP ${packages.mcpVersion}, SDK ${packages.sdkVersion}`);
 let occupied=false;
 try{await fetch(`http://localhost:${port}/health`,{signal:AbortSignal.timeout(1500)});occupied=true;}catch{}
-if(occupied)throw new Error(`Port ${port} is occupied; stop that recording process before restarting.`);
+if(occupied)throw new Error(`Port ${port} is occupied; choose an unused RECORDING_PORT; keep the existing process running.`);
 const child=spawn(process.execPath,['demo/staking-service/src/server.ts'],{cwd:root,env,stdio:'inherit'});
 let stopping=false;
 function stop(){if(stopping)return;stopping=true;child.kill('SIGTERM');}

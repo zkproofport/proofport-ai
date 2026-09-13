@@ -16,7 +16,7 @@ export function parseInstruction(value: unknown): string {
   return value.trim();
 }
 
-export const CLAUDE_TOOLS = new Set(['read_dapp', 'discover_prover', 'read_prover_guide', 'connect_prover_mcp',
+export const CLAUDE_TOOLS = new Set(['read_dapp', 'discover_prover', 'read_prover_guide', 'install_prover_mcp', 'connect_prover_mcp',
   'prepare_delegation', 'request_proof_permission', 'generate_proof', 'verify_proof_on_arc', 'request_stake_permission', 'stake'].map(name => `mcp__ledger_house__${name}`));
 type PublicToolResult = Record<string, unknown>;
 function record(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null && !Array.isArray(value); }
@@ -69,9 +69,11 @@ export class RecordingRun {
 
   observeProverMcp(input:unknown){
     if(this.status!=='running'||!record(input)||input.serverName!=='zkproofport-mcp'||typeof input.version!=='string'||!/^[a-zA-Z0-9.+-]{1,64}$/.test(input.version)||input.endpoint!=='https://stg-ai.zkproofport.app'||input.transport!=='stdio')return false;
+    if(input.packageSource!==undefined&&(input.packageSource!=='npm'||input.mcpVersion!==input.version||typeof input.sdkVersion!=='string'||!/^\d+\.\d+\.\d+$/.test(input.sdkVersion)))return false;
     const previous=this.protocol.proverMcp?.status;
     if((!previous&&input.status!=='connected')||(previous==='connected'&&input.status!=='calling')||(previous==='calling'&&input.status!=='returned')||previous==='returned')return false;
     const value:Record<string,unknown>={serverName:input.serverName,version:input.version,endpoint:input.endpoint,transport:input.transport,status:input.status,observedAt:new Date().toISOString()};
+    if(input.packageSource==='npm')Object.assign(value,{packageSource:'npm',mcpVersion:input.mcpVersion,sdkVersion:input.sdkVersion});
     if(input.status!=='connected'){
       if(input.tool!=='generate_proof'||!record(input.arguments))return false;
       const expected={circuit:'arc_eligibility',scope:'ledger-house',pay_on:'arc-testnet-nano',pay_with:'arc',max_payment:'0.001'};
@@ -145,7 +147,7 @@ export class RecordingRun {
       if (typeof result.agentId !== 'string' && typeof result.agentId !== 'number') return;
       const id = String(result.agentId);
       if (!/^\d+$/.test(id)) return;
-      this.agentId = id; mark(3, `Arc ERC-8004 agent #${id} · registered GCP endpoint`);
+      this.agentId = id; mark(3, `Arc ERC-8004 agent #${id} · registered prover endpoint`);
     }
     if (name === 'mcp__ledger_house__prepare_delegation') {
       if (typeof result.wallet !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(result.wallet)) return;
@@ -153,7 +155,7 @@ export class RecordingRun {
     }
     if (name === 'mcp__ledger_house__generate_proof') {
       if (typeof result.fingerprint !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(result.fingerprint)) return;
-      this.proofFingerprint = result.fingerprint; mark(5, 'Paid GCP response received · proof generated');
+      this.proofFingerprint = result.fingerprint; mark(5, 'Paid prover response received · proof generated');
     }
     if (name === 'mcp__ledger_house__stake') {
       if (typeof result.txHash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(result.txHash)
@@ -205,7 +207,7 @@ export class RecordingRun {
     if (n === 2) step.detail = 'Coinbase KYC · arc_eligibility';
     if (n === 3) {
       this.agentId=/Registry agent (\d+)/.exec(text)?.[1] ?? null;
-      step.detail = this.agentId ? `Arc ERC-8004 agent #${this.agentId} · registered GCP endpoint` : 'Searching the Arc ERC-8004 registry';
+      step.detail = this.agentId ? `Arc ERC-8004 agent #${this.agentId} · registered prover endpoint` : 'Searching the Arc ERC-8004 registry';
     }
     if (n === 4) {
       const address = delegate?.[1];
@@ -213,7 +215,7 @@ export class RecordingRun {
       step.detail = 'KYC holder signs the delegate, amount, action and expiry';
     }
     if (n === 5) {
-      step.detail = text.startsWith('Proof in hand:') ? 'Paid GCP response received · proof generated' : 'Circle Agent Wallet · Arc Gateway nanopayment';
+      step.detail = text.startsWith('Proof in hand:') ? 'Paid prover response received · proof generated' : 'Circle Agent Wallet · Arc Gateway nanopayment';
       const fingerprint=/fingerprint=(0x[0-9a-fA-F]{64})/.exec(text)?.[1];
       if(fingerprint)this.proofFingerprint=fingerprint;
     }

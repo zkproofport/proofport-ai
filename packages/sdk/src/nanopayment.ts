@@ -64,13 +64,13 @@ export async function gatewayBalance(wallet: NanopaymentWallet): Promise<Gateway
  */
 export async function ensureGatewayBalance(
   wallet: NanopaymentWallet,
-  /** In USDC's smallest units, like the balance. */
-  atLeast: bigint,
+  /** In USDC's smallest units. Undefined requests an unconditional deposit. */
+  atLeast: bigint | undefined,
   /** In whole USDC, like everything the deposit call takes. */
   topUp: string,
 ): Promise<{ deposited: boolean; balance: GatewayBalances; depositTxHash?: string }> {
   const before = await gatewayBalance(wallet);
-  if (before.available >= atLeast) return { deposited: false, balance: before };
+  if (atLeast !== undefined && before.available >= atLeast) return { deposited: false, balance: before };
 
   const result = await client(wallet).deposit(topUp);
   return {

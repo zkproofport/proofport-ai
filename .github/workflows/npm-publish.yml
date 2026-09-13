@@ -38,9 +38,25 @@ jobs:
             exit 0
           fi
 
+      - name: Verify release tag matches package and manifest
+        if: steps.pkg.outputs.skip != 'true'
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          PACKAGE_PATH: ${{ steps.pkg.outputs.package }}
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const path = process.env.PACKAGE_PATH;
+          const version = JSON.parse(fs.readFileSync(`${path}/package.json`)).version;
+          const baseline = JSON.parse(fs.readFileSync('.release-please-manifest.json'))[path];
+          if (!process.env.RELEASE_TAG.endsWith(`-v${version}`) || baseline !== version) {
+            throw new Error('Release tag, package version and Release Please manifest must agree');
+          }
+          NODE
+
       - name: Install dependencies
         if: steps.pkg.outputs.skip != 'true'
-        run: rm -f package-lock.json && npm install
+        run: npm ci
 
       - name: Build SDK (always needed)
         if: steps.pkg.outputs.skip != 'true'
@@ -57,6 +73,18 @@ jobs:
       - name: Upgrade npm for OIDC trusted publishing
         if: steps.pkg.outputs.skip != 'true'
         run: npm install -g npm@latest
+
+      - name: Wait for the released SDK dependency
+        if: steps.pkg.outputs.skip != 'true' && steps.pkg.outputs.package == 'packages/mcp'
+        run: |
+          SDK_VERSION=$(node -p "require('./packages/sdk/package.json').version")
+          for attempt in {1..24}; do
+            PUBLISHED=$(npm view "@zkproofport-ai/sdk@$SDK_VERSION" version 2>/dev/null || true)
+            if [[ "$PUBLISHED" == "$SDK_VERSION" ]]; then exit 0; fi
+            sleep 10
+          done
+          echo "SDK $SDK_VERSION must be published before MCP can be installed by users"
+          exit 1
 
       - name: Publish to npm (OIDC trusted publisher)
         if: steps.pkg.outputs.skip != 'true'

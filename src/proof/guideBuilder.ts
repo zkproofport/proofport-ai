@@ -482,7 +482,7 @@ function buildArcGuide(config: Config) {
     },
     local_mcp_server: {
       recommended: true, npm_package: '@zkproofport-ai/mcp', version: mcpPkgVersion,
-      install: `npm install @zkproofport-ai/mcp${mcpPkgVersion ? '@' + mcpPkgVersion : ''}`,
+      install: `npm install -g @zkproofport-ai/mcp@latest`,
       command: 'zkproofport-mcp', transport: 'stdio',
       discovery: 'Connect to the local MCP server and call tools/list. Read generate_proof inputSchema before tools/call.',
       required_arguments: ['circuit', 'action'],
@@ -502,7 +502,7 @@ const result = await generateProof(
   { attestation: existingKycSigner, payment },
   { circuit: 'arc_eligibility', scope: 'ledger-house', action${nano ? ", payOn: 'arc-testnet-nano'" : ''} },
 );`,
-      cli: `PROOFPORT_URL=${config.a2aBaseUrl} zkproofport-prove arc_eligibility --action delegation.json --scope ledger-house${nano ? ' --pay-with arc --pay-on arc-testnet-nano' : ''} --silent`,
+      cli: `PROOFPORT_URL=${config.a2aBaseUrl} zkproofport-prove arc_eligibility --action action.json --scope ledger-house${nano ? ' --pay-with arc --pay-on arc-testnet-nano --max-payment 0.001' : ''} --silent`,
       payment_selection: 'Explicitly choose an offered payment network and a funded payment wallet; no attestation-key payment fallback exists.',
     },
     constants: {
@@ -581,7 +581,7 @@ export function buildGuide(circuitId: CircuitId, config: Config): object {
       sdk: {
         package: '@zkproofport-ai/sdk',
         repository: 'https://github.com/zkproofport/proofport-ai',
-        install: 'npm install @zkproofport-ai/sdk ethers',
+        install: 'npm install @zkproofport-ai/sdk@latest ethers',
         description: 'For OIDC proofs, the client only needs to provide the JWT and scope. The server handles all cryptographic computation.',
         quick_start: `\
 // OIDC Domain proof — client only sends JWT + scope
@@ -604,7 +604,7 @@ const response = await fetch('${config.a2aBaseUrl}/api/v1/prove', {
         recommended: true,
         npm_package: '@zkproofport-ai/mcp',
         version: mcpPkgVersion,
-        install: `npm install @zkproofport-ai/mcp${mcpPkgVersion ? '@' + mcpPkgVersion : ''}`,
+        install: `npm install -g @zkproofport-ai/mcp@latest`,
         readme: 'https://www.npmjs.com/package/@zkproofport-ai/mcp',
       },
 
@@ -635,7 +635,7 @@ const response = await fetch('${config.a2aBaseUrl}/api/v1/prove', {
       recommended: true,
       npm_package: '@zkproofport-ai/mcp',
       version: mcpPkgVersion,
-      install: `npm install @zkproofport-ai/mcp${mcpPkgVersion ? '@' + mcpPkgVersion : ''}`,
+      install: `npm install -g @zkproofport-ai/mcp@latest`,
       readme: 'https://www.npmjs.com/package/@zkproofport-ai/mcp',
     },
 
@@ -644,7 +644,7 @@ const response = await fetch('${config.a2aBaseUrl}/api/v1/prove', {
       package: '@zkproofport-ai/sdk',
       repository: 'https://github.com/zkproofport/proofport-ai',
       note: 'Install via npm or clone the repository.',
-      install: 'npm install @zkproofport-ai/sdk ethers',
+      install: 'npm install @zkproofport-ai/sdk@latest ethers',
       description:
         'Use the @zkproofport-ai/sdk SDK directly in your code for programmatic proof generation.',
       quick_start: `\

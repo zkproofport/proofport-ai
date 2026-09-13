@@ -23,7 +23,7 @@ describe('deployment discovery metadata', () => {
     const skill = buildSkillMd(current);
     for (const text of [JSON.stringify(card), JSON.stringify(mcp), JSON.stringify(oasf), skill]) {
       expect(text).not.toContain('AWS Nitro');
-      expect(text).toContain('deployed prover');
+      expect(text).toContain('ZKProofport prover');
       expect(text).toContain('arc_eligibility');
       expect(text).toContain('arc-testnet-nano');
     }

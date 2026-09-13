@@ -1,30 +1,30 @@
 # @zkproofport-ai/sdk
 
-Client SDK for ZKProofport zero-knowledge proof generation on Base Mainnet.
+Client SDK for ZKProofport zero-knowledge proofs, including experimental exact-action authorization on Arc Testnet.
 
 ## Overview
 
 @zkproofport-ai/sdk is a TypeScript SDK for generating privacy-preserving zero-knowledge proofs using Coinbase KYC attestations and OIDC JWT tokens. Generate a proof with a single function call, or fine-tune each step for custom workflows.
 
-Proofs are generated in trusted execution environments (Nitro Enclaves) with cryptographic attestation.
+ZKProofport has a TEE-based proving architecture. Enclave encryption and hardware attestation depend on the selected endpoint and its returned evidence; see the security requirements below.
 
 ## Paying for a proof
 
 A service tells you what it charges. Ask for a proof and the answer is either
 the proof or a `402` listing the chains it takes USDC on — you pick one.
 
-**You sign; you never send a transaction.** Payment is an EIP-3009 USDC
-authorization, and whoever collects it submits it. So a wallet needs USDC and
-nothing else: no gas, no native token on the chain being paid on.
+For supported x402 offers, the payer signs an authorization and the payment rail settles it. Arc Gateway nanopayments spend an already funded Gateway balance; its initial deposit is an on-chain transaction requiring gas. A USDC wallet balance alone is insufficient for nanopayments. Wallet, chain and signing-domain compatibility must match the actual offer.
 
-Three ways to hold that wallet:
+Supported payment-wallet adapters:
 
 ```ts
 import {
   generateProof,
   walletFromPrivateKey,   // a raw key
   walletFromCdp,          // a Coinbase CDP server wallet
-  walletFromCircle,       // a Circle developer-controlled wallet
+  walletFromCircle,      // a Circle developer-controlled wallet
+  walletFromArcAgent,    // an existing Circle Agent Wallet through Circle CLI
+  walletFor,            // walletFor('arc') selects the same adapter from environment
 } from '@zkproofport-ai/sdk';
 
 const proof = await generateProof(
@@ -67,32 +67,23 @@ zkproofport-prove coinbase_kyc --pay-with cdp
 `--pay-with cdp` needs `CDP_API_KEY_ID`, `CDP_API_KEY_SECRET` and
 `CDP_WALLET_SECRET`; `--pay-with circle` needs `CIRCLE_API_KEY`,
 `CIRCLE_ENTITY_SECRET` and `CIRCLE_WALLET_ID`; `--pay-with key` needs
-`PAYMENT_PRIVATE_KEY`. With exactly one of the three configured you can omit
+`PAYMENT_PRIVATE_KEY`. For the existing Circle Agent Wallet, explicitly select `--pay-with arc`; Circle CLI owns the login, and `ARC_AGENT_WALLET` selects its wallet. With exactly one key/CDP/developer-controlled wallet configured you can omit
 the flag. With more than one, naming it is required — a wallet is money, and
 guessing which account it leaves is not a default worth having.
 
-## E2E Encryption (TEE Blind Relay)
+## Encryption and attestation
 
-All proof inputs are **end-to-end encrypted** using X25519 ECDH + AES-256-GCM. The ZKProofport server acts as a **blind relay** — it cannot read your inputs, even during proof generation. Only the TEE (AWS Nitro Enclave) can decrypt.
+When the selected endpoint supplies a supported attested `teePublicKey`, the SDK encrypts inputs with X25519 ECDH + AES-256-GCM. The host relays ciphertext to the enclave; Nitro mode rejects plaintext inputs. Validate the returned attestation against the required trust policy.
 
-**How it works:**
-
-1. `generateProof()` contacts the server to obtain the TEE public key
-2. The response includes `teePublicKey` — the TEE's attested X25519 public key (cryptographically bound to the Nitro Enclave via COSE Sign1 attestation)
-3. The SDK generates an ephemeral X25519 keypair, performs ECDH key agreement, and encrypts all circuit inputs with AES-256-GCM
-4. The encrypted payload is sent to the server, which relays it blindly to the TEE
-5. The TEE decrypts, generates the ZK proof, and returns it
-
-**This is fully automatic.** `generateProof()` detects `teePublicKey` in the 402 response and applies E2E encryption when available. No additional configuration or code changes needed.
-
-- **TEE enabled (production):** Inputs are E2E encrypted. Server rejects plaintext (`PLAINTEXT_REJECTED`).
-- **TEE disabled (local dev):** Inputs are sent in plaintext. No encryption overhead.
+An endpoint without that key receives readable circuit inputs over HTTPS and provides no hardware-attestation guarantee. The current Arc staging demo uses that mode. HTTPS transport encryption does not make the prover a blind relay. A valid public proof can hide the credential-holder address from the relying dApp without establishing enclave execution. Only claim hardware-attested proving when the actual attestation supports it.
 
 ## Installation
 
 ```bash
-npm install @zkproofport-ai/sdk ethers
+npm install @zkproofport-ai/sdk@latest ethers
 ```
+
+Arc support described here requires SDK/MCP **0.2.11 or later**. Install from npm and check the resolved version. Release Please manages package versions and the release workflow publishes them; repository source changes alone do not update `@latest`.
 
 ## Prerequisites
 
@@ -100,7 +91,7 @@ npm install @zkproofport-ai/sdk ethers
 
 1. **Coinbase account with KYC verification** — Complete identity verification on [Coinbase](https://www.coinbase.com/)
 2. **Coinbase KYC EAS attestation on Base** — Obtain an attestation via [Coinbase Verifications](https://www.coinbase.com/onchain-verify). This creates an on-chain EAS attestation on Base linked to your wallet address.
-3. **Attestation wallet private key** (required) — The private key of the wallet that holds the EAS attestation. This is always a raw private key because the attestation is tied to a specific address.
+3. **Credential signer** (required) — A local signer for the wallet holding the EAS attestation. The CLI uses `ATTESTATION_KEY`; programmatic callers can supply a compatible `ProofportSigner`. Keep key material outside model context.
 
 **For OIDC circuits** (`oidc_domain`): No wallet or attestation needed — just a JWT `id_token` from your OIDC provider.
 
@@ -129,9 +120,7 @@ console.log('Valid:', verification.valid);
 
 > **Experimental. Testnet only.**
 >
-> `arc_eligibility` is not deployed on any mainnet, and no verifier contract
-> address exists for it yet. Its public-input layout may still change. Do not
-> put it in front of real funds. The circuits that are generally available are
+> `arc_eligibility` is deployed experimentally on **Arc Testnet, chain 5042002**, not mainnet. The verifier is `0xCbC8E63fF92659E8B44cFF117D33005Bb669a018`; the Ledger House EligibilityGate is `0xD0F3eE648386B59B484157332E736388Fcc41F47`. Its public-input layout and deployment may change. Do not put it in front of real funds. The circuits that are generally available are
 > `coinbase_kyc`, `coinbase_country` and `oidc_domain`.
 
 ### The problem it solves
@@ -177,7 +166,7 @@ const result = await generateProof(
         ],
       },
       primaryType: 'Deposit',
-      message: { amount: 10_000_000n, nonce: 1n, expiry: deadline },
+      message: { amount: 100_000n, nonce: 1n, expiry: deadline },
     },
   },
 );
@@ -193,7 +182,7 @@ it: a grant of authority or an agreement in prose works the same way.
 // Free-form text is a valid shape.
 types: { Agreement: [{ name: 'terms', type: 'string' }] },
 primaryType: 'Agreement',
-message: { terms: 'Deposit 10 USDC into the KYC-gated vault' },
+message: { terms: 'Deposit 0.1 USDC into the KYC-gated vault' },
 ```
 
 A contract cannot enforce prose, though. To check an amount on-chain, the
@@ -232,8 +221,53 @@ the one-per-person property it exists for.
 
 ### Omitting `action`
 
-Leave it out and nothing changes: the wallet signs `signal_hash` through
-`personal_sign` as before. Existing callers need no edit.
+`arc_eligibility` requires `action`; omitting it is rejected. Other circuits reject `action` and retain their existing `personal_sign` flow. The application must verify the exact target, operational wallet, amount, nonce and deadline as well as the proof.
+
+## Arc Circle Agent Wallet path — EXPERIMENTAL
+
+Use the existing Circle CLI login and selected Arc Agent Wallet; do not create or switch wallets as part of proof generation. Install the CLI if needed, then let the user complete any missing login locally. Keep `ATTESTATION_KEY` and login secrets outside prompts, model context, logs and committed configuration.
+
+```bash
+npm install -g @circle-fin/cli
+circle wallet list --chain ARC-TESTNET --type agent
+# Set ARC_AGENT_WALLET to the user's existing, approved wallet B address.
+circle gateway balance --address "$ARC_AGENT_WALLET" --chain ARC-TESTNET --output json
+# Only when the user has approved this funding amount:
+circle gateway deposit --amount 0.1 --address "$ARC_AGENT_WALLET" --chain ARC-TESTNET --method direct
+```
+
+The payment adapter resolves Circle's backing EOA for Gateway authorization. The operational smart-wallet address remains Wallet B for the action and stake; do not substitute the backing EOA into the action's `delegate` field. `walletFromArcAgent({address: process.env.ARC_AGENT_WALLET, chain: 'ARC-TESTNET'})` and `walletFor('arc')` provide the same payment path.
+
+After the user reviews the action and the live x402 offer, save those exact approved objects locally as `approved-action.json` and `approved-payment.json`:
+
+```typescript
+import { readFile } from 'node:fs/promises';
+import {
+  createConfig, fromPrivateKey, generateProof, verifyProof, walletFor,
+  type ProofParams, type ApprovedPayment,
+} from '@zkproofport-ai/sdk';
+
+const config = createConfig({baseUrl: 'https://stg-ai.zkproofport.app'});
+const action: NonNullable<ProofParams['action']> = JSON.parse(await readFile('approved-action.json', 'utf8'));
+const approvedPayment: ApprovedPayment = JSON.parse(await readFile('approved-payment.json', 'utf8'));
+const result = await generateProof(config, {
+  attestation: fromPrivateKey(process.env.ATTESTATION_KEY!), // local credential holder A
+  payment: await walletFor('arc'),                         // existing Circle wallet B
+}, {
+  circuit: 'arc_eligibility', scope: 'ledger-house', action,
+  payOn: 'arc-testnet-nano', maxPayment: '0.001', approvedPayment,
+});
+const verification = await verifyProof(result);
+if (!verification.valid) throw new Error('Arc verifier rejected the proof');
+```
+
+`approvedPayment` must pin the live offer's `network`, `scheme`, `amount`, `asset`, `payTo`, and `extra: {name, version, verifyingContract}`. `amount` is an integer string in USDC base units (`"1000"` is 0.001 USDC); `maxPayment` is a decimal USDC string (`"0.001"`). A changed fee, recipient, asset, network or Gateway signing domain is rejected before payment signing. Approve the actual offer; do not manufacture its recipient or domain from a documentation example.
+
+For the deployed Ledger House gate, use the dApp's exact EIP-712 shape: domain `Ledger House Staking`, version `1`, chain `5042002`, and the gate address above. Its `CredentialDelegation` type contains `delegate: address`, `action: string`, `amount: uint256`, `expiresAt: uint256`, `nonce: string`; the message uses Wallet B, `"stake"`, `"100000"` for 0.1 USDC, and the approved deadline and fresh nonce. **Exact-action authorization** is the user-facing term; existing wire keys and `CredentialDelegation` are unchanged.
+
+Generating and verifying a proof does not submit a stake. After a separate stake approval, the operational wallet calls the dApp gate, which verifies the proof and enforces its policy, exact action, unused nonce and deadline atomically. Check the receipt before reporting a position change.
+
+The MCP `gateway_balance` and `deposit_to_gateway` helpers currently require `PAYMENT_PRIVATE_KEY`; they do not operate the Circle Agent Wallet. Use the Circle CLI commands above for that wallet. SDK `gatewayBalance` / `ensureGatewayBalance` likewise accept the private-key `NanopaymentWallet` shape. This path documents the supported Arc Testnet offer, not a guarantee for every wallet on every chain.
 
 ## Configuration
 
@@ -301,7 +335,7 @@ if (result.attestation) {
 2. Fetch Coinbase KYC attestation from EAS
 3. Build circuit inputs (Merkle tree, hashes)
 4. **Auto-detect E2E encryption** — if `teePublicKey` is present in server response, encrypt inputs with X25519 ECDH + AES-256-GCM
-5. Generate proof in TEE (encrypted inputs if TEE enabled)
+5. Generate the proof on the configured prover (enclave-encrypted only for the supported Nitro deployment)
 
 **Result fields:**
 
@@ -493,8 +527,8 @@ The proof contains 148 public input fields (32 bytes each):
 **Circuit Types:**
 
 ```typescript
-type CircuitName = 'coinbase_kyc' | 'coinbase_country' | 'oidc_domain';
-type CircuitId = 'coinbase_attestation' | 'coinbase_country_attestation' | 'oidc_domain_attestation';
+type CircuitName = 'coinbase_kyc' | 'coinbase_country' | 'oidc_domain' | 'arc_eligibility';
+type CircuitId = 'coinbase_attestation' | 'coinbase_country_attestation' | 'oidc_domain_attestation' | 'arc_eligibility';
 ```
 
 **Configuration:**
@@ -527,6 +561,10 @@ function fromSigner(signer: ethers.Signer): ProofportSigner;
 ```typescript
 interface ProofParams {
   circuit: CircuitName;
+  action?: { domain: { name: string; version: string; chainId: number; verifyingContract: string }; types: Record<string, Array<{name: string; type: string}>>; primaryType: string; message: Record<string, unknown> }; // required only for arc_eligibility
+  payOn?: string;
+  maxPayment?: string; // decimal USDC
+  approvedPayment?: ApprovedPayment;
   scope?: string; // defaults to 'proofport'
   countryList?: string[]; // for coinbase_country only
   isIncluded?: boolean; // for coinbase_country only

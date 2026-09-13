@@ -229,7 +229,7 @@ RETURNS: whether a deposit was made, its transaction hash, and the Gateway balan
         };
         const result = await ensureGatewayBalance(
           wallet,
-          params.at_least ? BigInt(params.at_least) : 0n,
+          params.at_least !== undefined ? BigInt(params.at_least) : undefined,
           params.amount,
         );
         return {

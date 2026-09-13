@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import { randomBytes } from 'crypto';
+import {readFileSync} from 'node:fs';
+const packageVersion=JSON.parse(readFileSync(new URL('../package.json',import.meta.url),'utf8')).version as string;
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { fromPrivateKey, createConfig } from '@zkproofport-ai/sdk';
@@ -18,7 +20,7 @@ const config = createConfig({
 let attestationSigner;
 if (attestationKey) {
   attestationSigner = fromPrivateKey(attestationKey);
-  console.error(`[zkproofport-mcp] Attestation wallet: ${attestationSigner.getAddress()}`);
+  console.error('[zkproofport-mcp] Private credential signer: ****');
 } else {
   attestationSigner = fromPrivateKey('0x' + randomBytes(32).toString('hex'));
   console.error('[zkproofport-mcp] No ATTESTATION_KEY — using ephemeral key (login/OIDC mode)');
@@ -27,7 +29,7 @@ if (attestationKey) {
 // ─── Create MCP server ────────────────────────────────────────────────
 const server = new McpServer({
   name: 'zkproofport-mcp',
-  version: '0.1.0',
+  version: packageVersion,
 });
 
 registerTools(server, config, attestationSigner);

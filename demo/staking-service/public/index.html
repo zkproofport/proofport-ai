@@ -39,13 +39,14 @@
         <div class="section-top"><span class="eyebrow">RIGHT / PROTOCOL / TOOL CALLS</span><span id="cli-stream-status" class="cli-status" role="status">Connecting</span></div>
         <div class="protocol-cards">
           <article class="protocol-card"><div class="card-label">01 / PAYMENT <span id="payment-status" class="status-pending">WAITING</span></div><strong class="protocol-value">0.001 <small>USDC</small></strong><p>x402 / Gateway Nanopayment</p><span id="payment-detail">Circle Agent Wallet B · approval required</span></article>
-          <article class="protocol-card"><div class="card-label">02 / PROVER <span id="proof-status" class="status-pending">WAITING</span></div><strong class="protocol-value" id="tee-mode">GCP demo prover</strong><p>KYC + action authorization proof</p><span id="prover-detail">Nitro: separate implementation</span></article>
+          <article class="protocol-card"><div class="card-label">02 / PROVER <span id="proof-status" class="status-pending">WAITING</span></div><strong class="protocol-value" id="tee-mode">ZKProofport prover</strong><p>KYC + action authorization proof</p><span id="prover-detail">Awaiting proof request</span></article>
         </div>
         <article class="verification-card"><div class="section-top"><div><span class="micro-label">03 / VERIFICATION</span><strong>EligibilityGate <span id="verification-status">· Awaiting proof</span></strong></div><div class="contract-links"><a id="gate-link" href="https://testnet.arcscan.app/address/0xD0F3eE648386B59B484157332E736388Fcc41F47" target="_blank" rel="noreferrer">Gate ↗</a><a id="verifier-link" target="_blank" rel="noreferrer" hidden>Verifier ↗</a></div></div><div id="verification-checks" class="verification-checks"></div><p id="verification-detail">Eligibility, authorized wallet, exact action, nonce and deadline are checked before staking.</p></article>
         <article class="mcp-evidence" aria-label="ZKProofport MCP protocol evidence">
-          <p class="mcp-pipeline">Claude Code <span>→</span> dApp MCP adapter <span>→</span> <strong>ZKProofport MCP</strong> <span>→</span> GCP</p>
+          <p class="mcp-pipeline">Claude Code <span>→</span> dApp MCP adapter <span>→</span> <strong>ZKProofport MCP</strong> <span>→</span> prover</p>
           <div class="section-top"><span class="micro-label">INNER PROVER MCP · OBSERVED PROTOCOL</span><strong id="mcp-status" class="status-pending">WAITING</strong></div>
-          <p id="mcp-server">Awaiting the actual prover MCP handshake</p>
+          <p id="mcp-installation">Install from npm after reading provider instructions</p>
+          <p id="mcp-server">Awaiting the actual prover MCP handshake</p><p id="mcp-packages" hidden></p>
           <details id="mcp-request"><summary id="mcp-call">No prover MCP call observed yet</summary><pre id="mcp-details">Actual connection and tool arguments appear here when observed.</pre></details>
         </article>
         <div class="section-top tools-heading"><h2 id="cli-title">Native dApp adapter tools &amp; results</h2><span id="cli-line-count">0 events</span></div>
@@ -57,7 +58,7 @@
       </section>
     </div>
     <section id="positions-panel" class="positions panel" hidden><div class="section-top"><span class="eyebrow">CONFIRMED TRANSACTIONS</span><span class="muted small">Authorized operational wallet</span></div><div id="positions"></div></section>
-    <footer><span>Ledger House / ZKProofport</span><span id="runtime-note">GCP demo prover · Arc Testnet · Circle Agent Wallet</span></footer>
+    <footer><span>Ledger House / ZKProofport</span><span id="runtime-note">Private eligibility · Arc Testnet</span></footer>
   </main>
   <dialog id="permission-dialog" aria-labelledby="permission-title">
     <p class="eyebrow">YOUR DECISION</p><h2 id="permission-title"></h2>

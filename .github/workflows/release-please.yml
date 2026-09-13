@@ -5,6 +5,9 @@ on:
     branches:
       - main
     paths:
+      - '.github/workflows/release-please.yml'
+      - 'release-please-config.json'
+      - '.release-please-manifest.json'
       - 'src/**'
       - 'package.json'
       - 'packages/sdk/**'
