@@ -23,6 +23,11 @@ function fixture(version='0.2.11'){
 afterEach(()=>{for(const directory of directories.splice(0))rmSync(directory,{recursive:true,force:true});});
 
 describe('consumer-installed npm prover package resolution',()=>{
+ it('resolves the published SDK import-only export without requiring a CommonJS condition',()=>{
+  const f=fixture();const path=join(f.sdk,'package.json');
+  const pkg=JSON.parse(readFileSync(path,'utf8'));pkg.exports={'.':{import:'./dist/index.js',types:'./dist/index.d.ts'}};writeJson(path,pkg);
+  expect(publishedProverPackages(f.runtime).sdkEntry).toBe(join(f.sdk,'dist/index.js'));
+ });
  it.each(['0.2.11','0.2.100','0.3.0','1.0.0'])('accepts stable installed package version %s',version=>{
   const f=fixture(version);expect(publishedProverPackages(f.runtime)).toEqual({mcpEntry:join(f.mcp,'dist/index.js'),sdkEntry:join(f.sdk,'dist/index.js'),proveEntry:join(f.mcp,'dist/prove.js'),packageSource:'npm',mcpVersion:version,sdkVersion:version});
  });

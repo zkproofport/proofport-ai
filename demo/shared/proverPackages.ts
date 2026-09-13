@@ -1,8 +1,25 @@
 /** Resolve consumer-installed npm packages; never fall back to workspace builds. */
 import {createRequire} from 'node:module';
-import {readFileSync,realpathSync} from 'node:fs';
+import {existsSync,readFileSync,realpathSync} from 'node:fs';
 import {dirname,resolve,sep} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
+
+/** Locate the nearest package exactly as an ESM bare import does, then select import exports. */
+function esmPackageEntry(name:string,from:string){
+ let directory=dirname(from);
+ while(true){
+  const manifest=resolve(directory,'node_modules',name,'package.json');
+  if(existsSync(manifest)){
+   const packageRoot=dirname(realpathSync(manifest));
+   const pkg=JSON.parse(readFileSync(manifest,'utf8'));
+   const exports=pkg.exports?.['.']??pkg.exports;
+   const entry=typeof exports==='string'?exports:exports?.import??exports?.default??pkg.main;
+   if(typeof entry!=='string')throw Error('No ESM entry in installed package.');
+   return realpathSync(resolve(packageRoot,entry));
+  }
+  const parent=dirname(directory);if(parent===directory)throw Error('Missing installed ESM package.');directory=parent;
+ }
+}
 
 export function publishedProverPackages(runtimeDirectory=fileURLToPath(new URL('../runtime/',import.meta.url))){
  const hint='Run npm ci --prefix demo/runtime --workspaces=false to install the published SDK/MCP.';
@@ -10,8 +27,8 @@ export function publishedProverPackages(runtimeDirectory=fileURLToPath(new URL('
   const modules=realpathSync(resolve(runtimeDirectory,'node_modules'));
   const loader=createRequire(resolve(runtimeDirectory,'package.json'));
   const mcpEntry=realpathSync(loader.resolve('@zkproofport-ai/mcp'));
-  const sdkEntry=realpathSync(loader.resolve('@zkproofport-ai/sdk'));
-  const nestedSdk=realpathSync(createRequire(mcpEntry).resolve('@zkproofport-ai/sdk'));
+  const sdkEntry=esmPackageEntry('@zkproofport-ai/sdk',resolve(runtimeDirectory,'package.json'));
+  const nestedSdk=esmPackageEntry('@zkproofport-ai/sdk',mcpEntry);
   if([mcpEntry,sdkEntry,nestedSdk].some(path=>!path.startsWith(modules+sep))||nestedSdk!==sdkEntry)throw Error('Workspace links or mismatched SDK resolution are not allowed.');
   const mcp=JSON.parse(readFileSync(resolve(dirname(mcpEntry),'../package.json'),'utf8'));
   const sdk=JSON.parse(readFileSync(resolve(dirname(sdkEntry),'../package.json'),'utf8'));
