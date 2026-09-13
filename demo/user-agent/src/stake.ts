@@ -39,6 +39,9 @@ async function main(){
   const units=ethers.parseUnits(opts.amount,6);
   const available=await usdc.balanceOf(wallet) as bigint;
   if(available<units)throw new Error(`Connected wallet has ${ethers.formatUnits(available,6)} USDC; requested ${opts.amount}.`);
+  const accessResponse=await fetch(`${opts.service}/stake`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({amount:opts.amount,delegate:wallet})});
+  const access=await accessResponse.json() as {error?:string};
+  if(accessResponse.status!==402||access.error!=='PROOF_REQUIRED')throw new Error('The service did not return the required Coinbase KYC access challenge.');
   say('2',`${service.name} wants a Coinbase KYC proof (arc_eligibility)`);
   const prover=await discoverProver(provider,config.discovery);
   const health=await (await fetch(`${config.discovery.allowedOrigin}/health`,{signal:AbortSignal.timeout(10000)})).json() as {paymentMode?:string;paymentRequired?:boolean;paymentNetworks?:string};

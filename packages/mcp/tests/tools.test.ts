@@ -112,15 +112,11 @@ beforeEach(async () => {
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe('registerTools', () => {
-  it('registers all 6 tools', () => {
-    expect(mockServer.tool).toHaveBeenCalledTimes(6);
-    const registeredNames = Object.keys(toolHandlers);
-    expect(registeredNames).toContain('generate_proof');
-    expect(registeredNames).toContain('get_supported_circuits');
-    expect(registeredNames).toContain('request_challenge');
-    expect(registeredNames).toContain('prepare_inputs');
-    expect(registeredNames).toContain('submit_proof');
-    expect(registeredNames).toContain('verify_proof');
+  it('registers proof operations and both Gateway balance tools', () => {
+    const expected = ['generate_proof', 'get_supported_circuits', 'request_challenge',
+      'prepare_inputs', 'submit_proof', 'verify_proof', 'deposit_to_gateway', 'gateway_balance'];
+    expect(mockServer.tool).toHaveBeenCalledTimes(expected.length);
+    expect(Object.keys(toolHandlers).sort()).toEqual(expected.sort());
   });
 
   it('registers proofport://config resource', () => {
@@ -157,8 +153,8 @@ describe('generate_proof', () => {
     expect(mockGenerateProof).toHaveBeenCalledOnce();
     const [passedConfig, passedWallets, passedParams, passedOpts] = mockGenerateProof.mock.calls[0];
     expect(passedConfig).toEqual(testConfig);
-    // The SDK's generateProof takes only an attestation signer — payment was
-    // removed from the flow entirely, so no second wallet is passed.
+    // Without pay_with, this call passes only the credential signer.
+    // Paid orchestration supplies a separately selected payment wallet.
     expect(passedWallets).toEqual({ attestation: mockSigner });
     expect(passedParams.circuit).toBe('coinbase_kyc');
     expect(passedParams.scope).toBe('test-scope');
