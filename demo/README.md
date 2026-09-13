@@ -19,10 +19,10 @@ Use Node 22.18+, existing Claude Code and Circle CLI logins, and the existing
 npm ci
 npm run build --workspace @zkproofport-ai/sdk
 npm run build --workspace @zkproofport-ai/mcp
-RECORDING_PORT=4108 bash demo/record.sh
+RECORDING_PORT=4109 bash demo/record.sh
 ```
 
-Open **http://localhost:4108**. If that page is already running, keep its process
+Open **http://localhost:4109**. If that page is already running, keep its process
 and use the existing page. The prover is GCP staging at
 `https://stg-ai.zkproofport.app`; the dApp runs locally.
 
@@ -73,16 +73,18 @@ mode and does not advertise hardware TEE attestation.
 
 ## Recorded real execution
 
-The dApp instruction was submitted at **2026-09-13 14:04:57 KST**.
-Claude Code reported **claude-sonnet-5**, selected eight tools, and completed
-the actual stake at **14:05:58 KST**. The session exited at **14:06:05 KST**.
-Gateway decreased from 2.987 to 2.986 USDC; the wallet decreased from 0.6 to
-0.5 USDC; the position increased from 1.4 to 1.5 USDC.
+The latest retake was submitted at **2026-09-13 14:15:45 KST** from the
+actual dApp UI. Claude Code reported **claude-sonnet-5**, selected eight tools,
+and completed the new stake at **14:16:43 KST**. The session exited successfully
+at **14:16:50 KST**, with no completion error. Gateway decreased from 2.986 to
+2.985 USDC; the wallet decreased from 0.5 to 0.4 USDC; the position increased
+from 1.5 to 1.6 USDC. The 100-second video preserves actual capture intervals
+from empty user input through tools, verification, transaction and address audit.
 
 - [Full dApp video](https://github.com/zkproofport/proofport-app-dev/blob/main/videos/arc-recording/ledger-house-cli-walkthrough.mp4)
-- [Actual tool events, balances and receipt](artifacts/agent-dapp-verification.json)
-- [Public proof](artifacts/agent-dapp-proof.json)
-- [Arc staking transaction](https://testnet.arcscan.app/tx/0x535f62202a81c3f8a2cb725993102eeca901c0fb5c1c8d98bdd0b30cb1b8296a)
+- [Retake tool events, balances and receipt](artifacts/agent-dapp-retake-verification.json)
+- [Retake public proof](artifacts/agent-dapp-retake-proof.json)
+- [New Arc staking transaction](https://testnet.arcscan.app/tx/0x44f7d3f750d541edfec1f3f9662e638f6f189e3f09dec129256f760ae1b6025f)
 
 The public nullifier supports checking a known candidate address. Hiding A in
 the interface is not an unlinkability guarantee; see the [audit guide](audit/README.md).
