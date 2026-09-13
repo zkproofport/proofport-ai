@@ -38,7 +38,7 @@ export function publishedProverPackages(runtimeDirectory=fileURLToPath(new URL('
    const entry=lock.packages?.['node_modules/'+pkg.name];
    if(!entry||entry.link||entry.version!==pkg.version||!entry.resolved?.startsWith('https://registry.npmjs.org/')||!entry.integrity?.startsWith('sha512-'))throw Error('Published package lock does not match installed packages.');
    const stable=typeof pkg.version==='string'&&/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(pkg.version);
-   if(!stable||(BigInt(stable[1])===0n&&(BigInt(stable[2])<2n||(BigInt(stable[2])===2n&&BigInt(stable[3])<11n))))throw Error('This demo requires stable Arc-enabled SDK/MCP versions >=0.2.11.');
+   if(!stable||(BigInt(stable[1])===0n&&(BigInt(stable[2])<2n||(BigInt(stable[2])===2n&&BigInt(stable[3])<12n))))throw Error('This demo requires stable Arc-enabled SDK/MCP versions >=0.2.12.');
   }
   return {mcpEntry,sdkEntry,proveEntry:resolve(dirname(mcpEntry),'prove.js'),packageSource:'npm' as const,mcpVersion:mcp.version as string,sdkVersion:sdk.version as string};
  }catch(error){throw Error(`${hint} ${error instanceof Error?error.message:String(error)}`);}

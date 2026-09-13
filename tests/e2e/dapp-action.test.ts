@@ -16,7 +16,7 @@ import {assertUnusedStakeAction} from '../../demo/shared/userAction.ts';
 
 const enabled=process.env.ARC_DAPP_LIVE_E2E==='1';
 const reuse=process.env.ARC_DAPP_REUSE_COMPLETED==='1';
-const base=process.env.ARC_DAPP_URL??'http://localhost:4118';
+const base=process.env.ARC_DAPP_URL??'http://localhost:4119';
 const instruction='Stake 10 USDC with my Agent Wallet. Find a registered ZKProofport prover in the dApp Agent Marketplace and verify its ERC-8004 identity. Read its installation instructions, install the published SDK and MCP packages from npm, then connect and read the MCP tools. Ask me to approve the exact-action authorization and proof fee, then ask me again before submitting the verified stake. Use the EIP-712 action I submitted unchanged.';
 
 describe.skipIf(!enabled).sequential('live user-supplied action in the dApp',()=>{

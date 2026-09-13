@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@zkproofport-ai/mcp": "0.2.11",
-    "@zkproofport-ai/sdk": "0.2.11"
+    "@zkproofport-ai/mcp": "0.2.12",
+    "@zkproofport-ai/sdk": "0.2.12"
   }
 }

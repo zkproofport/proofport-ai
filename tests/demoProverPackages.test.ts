@@ -11,7 +11,7 @@ function installPackage(modules:string,name:string,version:string){
  writeJson(join(directory,'package.json'),{name,version,type:'module',main:'dist/index.js',exports:'./dist/index.js'});
  writeFileSync(join(directory,'dist/index.js'),'export {};');writeFileSync(join(directory,'dist/prove.js'),'export {};');return directory;
 }
-function fixture(version='0.2.11'){
+function fixture(version='0.2.12'){
  const root=realpathSync(mkdtempSync(join(tmpdir(),'published-prover-test-')));directories.push(root);
  const runtime=join(root,'runtime'),modules=join(runtime,'node_modules');
  writeJson(join(runtime,'package.json'),{name:'fixture',private:true});
@@ -23,32 +23,35 @@ function fixture(version='0.2.11'){
 afterEach(()=>{for(const directory of directories.splice(0))rmSync(directory,{recursive:true,force:true});});
 
 describe('consumer-installed npm prover package resolution',()=>{
+ it('rejects the old action-incomplete 0.2.11 installed runtime',()=>{
+  expect(()=>publishedProverPackages(fixture('0.2.11').runtime)).toThrow(/0\.2\.12/);
+ });
  it('resolves the published SDK import-only export without requiring a CommonJS condition',()=>{
   const f=fixture();const path=join(f.sdk,'package.json');
   const pkg=JSON.parse(readFileSync(path,'utf8'));pkg.exports={'.':{import:'./dist/index.js',types:'./dist/index.d.ts'}};writeJson(path,pkg);
   expect(publishedProverPackages(f.runtime).sdkEntry).toBe(join(f.sdk,'dist/index.js'));
  });
- it.each(['0.2.11','0.2.100','0.3.0','1.0.0'])('accepts stable installed package version %s',version=>{
+ it.each(['0.2.12','0.2.100','0.3.0','1.0.0'])('accepts stable installed package version %s',version=>{
   const f=fixture(version);expect(publishedProverPackages(f.runtime)).toEqual({mcpEntry:join(f.mcp,'dist/index.js'),sdkEntry:join(f.sdk,'dist/index.js'),proveEntry:join(f.mcp,'dist/prove.js'),packageSource:'npm',mcpVersion:version,sdkVersion:version});
  });
- it.each(['0.2.10','0.1.99','0.0.99','0.2.11-rc.1','1.0.0-beta.1','01.2.11'])('rejects old or nonstable version %s',version=>{
-  expect(()=>publishedProverPackages(fixture(version).runtime)).toThrow(/0\.2\.11/);
+ it.each(['0.2.10','0.1.99','0.0.99','0.2.12-rc.1','1.0.0-beta.1','01.2.11'])('rejects old or nonstable version %s',version=>{
+  expect(()=>publishedProverPackages(fixture(version).runtime)).toThrow(/0\.2\.12/);
  });
  it('refuses an SDK symlink to a workspace build',()=>{
-  const f=fixture(),workspace=installPackage(join(f.root,'workspace'),'@zkproofport-ai/sdk','0.2.11');
+  const f=fixture(),workspace=installPackage(join(f.root,'workspace'),'@zkproofport-ai/sdk','0.2.12');
   rmSync(f.sdk,{recursive:true});symlinkSync(workspace,f.sdk,'dir');
   expect(()=>publishedProverPackages(f.runtime)).toThrow(/Workspace/);
  });
  it('refuses ancestor node_modules fallback when the consumer install is missing',()=>{
   const f=fixture();rmSync(f.sdk,{recursive:true});rmSync(f.mcp,{recursive:true});
-  installPackage(join(f.root,'node_modules'),'@zkproofport-ai/sdk','0.2.11');installPackage(join(f.root,'node_modules'),'@zkproofport-ai/mcp','0.2.11');
+  installPackage(join(f.root,'node_modules'),'@zkproofport-ai/sdk','0.2.12');installPackage(join(f.root,'node_modules'),'@zkproofport-ai/mcp','0.2.12');
   expect(()=>publishedProverPackages(f.runtime)).toThrow(/Workspace/);
  });
  it('refuses an MCP nested SDK different from the consumer SDK',()=>{
-  const f=fixture();installPackage(join(f.mcp,'node_modules'),'@zkproofport-ai/sdk','0.2.12');
+  const f=fixture();installPackage(join(f.mcp,'node_modules'),'@zkproofport-ai/sdk','0.2.13');
   expect(()=>publishedProverPackages(f.runtime)).toThrow(/mismatched SDK/);
  });
- it.each([{version:'0.2.12'},{resolved:'file:../../packages/sdk'},{resolved:'https://registry.npmjs.org.attacker.invalid/sdk.tgz'},{integrity:''},{link:true}])('rejects mismatched or nonpublished lock provenance %j',change=>{
+ it.each([{version:'0.2.13'},{resolved:'file:../../packages/sdk'},{resolved:'https://registry.npmjs.org.attacker.invalid/sdk.tgz'},{integrity:''},{link:true}])('rejects mismatched or nonpublished lock provenance %j',change=>{
   const f=fixture(),lock=JSON.parse(readFileSync(f.lockPath,'utf8'));Object.assign(lock.packages['node_modules/@zkproofport-ai/sdk'],change);writeJson(f.lockPath,lock);
   expect(()=>publishedProverPackages(f.runtime)).toThrow(/lock/);
  });

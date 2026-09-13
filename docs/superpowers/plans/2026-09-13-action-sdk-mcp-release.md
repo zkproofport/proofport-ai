@@ -32,16 +32,18 @@
 
 **Files:** Release Please-managed manifests/changelogs/locks; `demo/runtime/package.json` and lock; demo unit install/version cases and guides.
 
-- [ ] Commit scoped SDK/MCP fixes and the completed dApp user-action changes; push main without staging old video files/artifacts.
-- [ ] Inspect Release Please PR, validate package/manifest/dependency versions and merge after required CI passes.
-- [ ] Observe existing SDK and MCP publish workflows; verify registry version, dependency and README content.
-- [ ] Update demo consumer pins using npm install exact versions; install fresh packages, verify actual handshake/types/schema and runtime provenance.
+- [x] Commit scoped SDK/MCP fixes and the completed dApp user-action changes; push main without staging old video files/artifacts.
+- [x] Inspect Release Please PR, validate package/manifest/dependency versions and merge after required CI passes.
+- [x] Observe existing SDK and MCP publish workflows; verify registry version, dependency and README content.
+- [x] Update demo consumer pins using npm install exact versions; install fresh packages, verify actual handshake/types/schema and runtime provenance.
 
 ### Task 3: Verify and publish actual demo evidence
 
 **Files:** `tests/e2e/dapp-action.test.ts`, `demo/artifacts/user-action-e2e.json`, `demo/README.md`, parent `docs/ops/ai-usage.md` and AI gitlink.
 
-- [ ] Verify adequate wallet/Gateway funds and clean public-service configuration.
-- [ ] Execute actual dApp action input, both approvals, discovered guide/npm install/MCP call, proof verification and one 10-USDC stake using newly released packages.
-- [ ] Recheck tampering, expiry and replay by eth_call; custom action fixture must fail KYC without payment.
-- [ ] Update sanitized evidence/docs with observation times, new versions and actual transaction. Commit/push AI and parent references, report URLs and test results.
+- [x] Verify adequate wallet/Gateway funds and clean public-service configuration.
+- [x] Execute actual dApp action input, both approvals, discovered guide/npm install/MCP call, proof verification and one 10-USDC stake using newly released packages.
+- [x] Recheck tampering, expiry and replay by eth_call; custom action fixture must fail KYC without payment.
+- [x] Update sanitized evidence/docs with observation times, new versions and actual transaction.
+
+**Integration:** Commit/push the reviewed consumer files and then the parent guide and AI reference; report the remote URLs and verified test results.

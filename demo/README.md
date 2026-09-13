@@ -11,23 +11,23 @@ tool calls and responses. It does not display private reasoning or replay a scri
 ## Run and film
 
 Use Node 22.18+, existing Claude Code and Circle CLI logins, and the private
-`.env.development` / `.env.test` files. First confirm that Release Please has published the Arc-enabled npm versions pinned by `demo/runtime/package-lock.json` (0.2.11 or newer). Do not report installation or the new recording as complete while publication is pending. From `proofport-ai`:
+`.env.development` / `.env.test` files. First confirm that Release Please has published the Arc-enabled npm versions pinned by `demo/runtime/package-lock.json` (0.2.12 or newer). Confirm publication before installing or reporting live verification. From `proofport-ai`:
 
 ```bash
 npm ci
 npm ci --prefix demo/runtime --workspaces=false
-RECORDING_PORT=4118 bash demo/record.sh
+RECORDING_PORT=4119 bash demo/record.sh
 ```
 
 The `demo/runtime` npm install bootstraps the server and wallet observation. It is separate from the fresh per-run prover installation selected by the agent after reading the guide. Both use published npm packages; neither imports local workspace `packages/*/dist` output.
 
-Open **http://localhost:4118**. Keep any existing CLI/server running; choose another
+Open **http://localhost:4119**. Keep any existing CLI/server running; choose another
 unused port for a clean session. The remote prover is **staging** at
 `https://stg-ai.zkproofport.app`.
 
-Match the submitted presentation's **10 USDC** action. Start with an empty instruction and zero events, then enter the complete prompt below. It was used in the successful fresh-install execution and capture on **2026-09-13 17:01–17:06 KST**. The textarea expands so every sentence is visible.
+Match the submitted presentation's **10 USDC** action. Start with an empty instruction and zero events, then enter the complete prompt below. The latest live E2E used it on **2026-09-13 18:25–18:26 KST**, with the final sentence preserving the user-submitted action. The textarea expands so every sentence is visible.
 
-> Stake 10 USDC with my Agent Wallet. Find a registered ZKProofport prover in the dApp Agent Marketplace and verify its ERC-8004 identity. Read its installation instructions, install the published SDK and MCP packages from npm, then connect and read the MCP tools. Ask me to approve the exact-action authorization and proof fee, then ask me again before submitting the verified stake.
+> Stake 10 USDC with my Agent Wallet. Find a registered ZKProofport prover in the dApp Agent Marketplace and verify its ERC-8004 identity. Read its installation instructions, install the published SDK and MCP packages from npm, then connect and read the MCP tools. Ask me to approve the exact-action authorization and proof fee, then ask me again before submitting the verified stake. Use the EIP-712 action I submitted unchanged.
 
 Set amount `10`. Open **Exact action · review or edit EIP-712** and review or edit
 the complete `action` JSON before submitting. Its `domain`, `types`, `primaryType`
@@ -43,10 +43,10 @@ candidate-address audit.
 
 ### Test the user-supplied action without recording
 
-Start a fresh local dApp on an unused port; keep existing sessions running:
+The verified run is completed on **4119**. For another fresh E2E in this workspace, start a new local dApp on an unused port (for example **4120**); keep existing sessions running:
 
 ```bash
-RECORDING_PORT=4118 bash demo/record.sh
+RECORDING_PORT=4120 bash demo/record.sh
 ```
 
 The launcher passes only runtime/Claude login settings and public Wallet B
@@ -58,7 +58,7 @@ Run the focused unit tests and the opt-in live browser E2E (Google Chrome requir
 
 ```bash
 npx vitest run --project unit tests/demoUserAction.test.ts tests/demoClaudeRoutes.test.ts tests/dappAgent.test.ts tests/dappPolicy.test.ts
-ARC_DAPP_LIVE_E2E=1 ARC_DAPP_URL=http://localhost:4118 npm run test:demo:e2e
+ARC_DAPP_LIVE_E2E=1 ARC_DAPP_URL=http://localhost:4120 npm run test:demo:e2e
 ```
 
 The live test operates the real form and both approval buttons, uses actual
@@ -68,23 +68,24 @@ There are no automatic paid retries. Without `ARC_DAPP_LIVE_E2E=1`, live tests s
 The submitted user nonce/deadline must equal the approval and actual MCP arguments;
 the proof hash must equal the deployed Gate's hash. Altered amount, actor, nonce,
 domain, deadline and replay are rejected by real `eth_call`. A separate custom-type
-MCP test signs with an ephemeral non-KYC fixture and confirms refusal before payment.
+MCP test signs custom fields with an ephemeral non-KYC fixture through both `generate_proof` and `prepare_inputs`, and confirms KYC refusal before payment.
 
 After a successful run, recheck its proof and rejected mutations without another
 purchase or stake. Use the port containing that completed run (the execution
-below remains on 4117; the clean current service is 4118):
+below is completed on 4119):
 
 ```bash
-ARC_DAPP_LIVE_E2E=1 ARC_DAPP_REUSE_COMPLETED=1 ARC_DAPP_URL=http://localhost:4117 npm run test:demo:e2e
+ARC_DAPP_LIVE_E2E=1 ARC_DAPP_REUSE_COMPLETED=1 ARC_DAPP_URL=http://localhost:4119 npm run test:demo:e2e
 ```
 
-Real successful execution on **2026-09-13 17:38–17:40 KST**:
-position **11.8 → 21.8 USDC**, Gateway **2.982 → 2.981 USDC**;
-[Arc transaction](https://testnet.arcscan.app/tx/0xde06a71e275700a6a404a7c1d285885c015f48aa66ef73b4e6cc13d573855a47).
+Real successful execution using npm **SDK 0.2.12 / MCP 0.2.12** on **2026-09-13 18:25–18:26 KST**, balances observed **18:26:44 KST**:
+position **21.8 → 31.8 USDC**, Gateway **2.981 → 2.980 USDC**;
+[Arc transaction](https://testnet.arcscan.app/tx/0x7692f7a4efb45daa590637362bbc3f0e7f40e9525bf5f3ba63f5d5ddc4bb453b).
+All **4 live E2E tests**, **1,049 root unit tests** and **41 MCP unit tests** passed. No new video was recorded for this verification.
 Public evidence: [`artifacts/user-action-e2e.json`](artifacts/user-action-e2e.json).
 
 The [Korean team guide](https://github.com/zkproofport/proofport-app-dev/blob/main/docs/ops/ai-usage.md)
-provides the full filming procedure. No separate prove CLI command is needed:
+provides the full execution, verification and optional filming procedure. No separate prove CLI command is needed:
 this run invokes the actual prover MCP tool.
 
 ## Wallets and protocol boundaries
@@ -92,7 +93,7 @@ this run invokes the actual prover MCP tool.
 - **Private Wallet A** has the Coinbase KYC credential and signs authorization for
   this exact action. Its address and key are masked as `****` in the dApp/model.
 - **Wallet B** is the existing **Circle Agent Wallet**. Its direct Coinbase KYC
-  query returned `NOT FOUND` at **17:01:42 KST** in this run. It pays the proof fee and executes the stake.
+  query returned `NOT FOUND` in the latest live E2E (**18:25–18:26 KST**). It pays the proof fee and executes the stake.
 - The credential is not transferred to B. One `arc_eligibility` proof combines
   Coinbase KYC and the same holder's EIP-712 action signature. The gate checks B,
   policy, target/domain, stake amount, nonce and deadline before transfer.
@@ -123,7 +124,7 @@ additional model tool choices. Only public, whitelisted facts reach the page.
 The model selects among **11 allowed tools** under fixed dApp policy. The
 published guide and tools/list schemas are returned to the model before it selects
 `generate_proof`. Some preparation calls are batched; the recording does not claim
-that every call was selected in a separate post-guide reasoning turn. After reading the guide, the model selects `install_prover_mcp`, which queries npm registry `latest` independently for `@zkproofport-ai/sdk` and `@zkproofport-ai/mcp`. Each must be a stable version at least 0.2.11; they need not have equal version numbers. The helper installs each resolved version exactly into a fresh private temporary directory with:
+that every call was selected in a separate post-guide reasoning turn. After reading the guide, the model selects `install_prover_mcp`, which queries npm registry `latest` independently for `@zkproofport-ai/sdk` and `@zkproofport-ai/mcp`. Each must be a stable version at least 0.2.12; they need not have equal version numbers. The helper installs each resolved version exactly into a fresh private temporary directory with:
 
 ```text
 --save-exact --registry=https://registry.npmjs.org --ignore-scripts
@@ -147,7 +148,7 @@ A's KYC must be confirmed before the proof approval request; unknown query resul
 are never labeled as absence or valid KYC. Optional balance observations cannot
 turn a confirmed paid proof or stake into a request to repeat spending.
 
-## Actual fresh npm execution — 2026-09-13 17:01–17:06 KST
+## Earlier recorded npm execution — 2026-09-13 17:01–17:06 KST
 
 - Provider discovery **17:01:45**, guide returned **17:01:48**, model-selected installation **17:01:49**.
 - Fresh npm installation completed **17:02:02**, installed **SDK 0.2.11 / MCP 0.2.11** handshake and schemas returned **17:02:04**.

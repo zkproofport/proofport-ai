@@ -1,5 +1,5 @@
 {
-  "observedAt": "2026-09-13T08:40:04.966Z",
+  "observedAt": "2026-09-13T09:26:44.039Z",
   "source": "Real Playwright dApp interaction; actual Claude, npm MCP/SDK, staging prover and Arc calls",
   "action": {
     "domain": {
@@ -37,40 +37,40 @@
       "delegate": "0x06Ad6B4EEbcD486bE53d8a9dC760a67A5Bdf3F64",
       "action": "stake",
       "amount": "10000000",
-      "expiresAt": "1789291402",
-      "nonce": "user-e2e-2daa5582-2343-43f6-953e-b4a97ed4dc00"
+      "expiresAt": "1789294201",
+      "nonce": "user-e2e-a439ba01-694e-47ca-899a-6c123401ecf1"
     }
   },
   "before": {
-    "positionUSDC": "11.8",
-    "gatewayUSDC": "2.982"
-  },
-  "after": {
     "positionUSDC": "21.8",
     "gatewayUSDC": "2.981"
+  },
+  "after": {
+    "positionUSDC": "31.8",
+    "gatewayUSDC": "2.98"
   },
   "proof": {
     "bytes": 16256,
     "publicInputCount": 192,
     "circuitId": "arc_eligibility",
-    "publicInputsFingerprint": "0xcb9ed527407e95baa3ce7e553c1d4a79f9ea7a6360131147077afa632f4a9b2d",
+    "publicInputsFingerprint": "0x50c303d16cd2c6e1fb1e68eeaa4eaac26a659a68a8fac846c4709d0ebeaf2873",
     "signalHash": "0x156da9cd49fb04e4b12b8fd789b3347d670c6dda33013afa27ecd15f7fc7a4c8",
     "domainSeparator": "0x690922273390b31889bd58831eb6d10a9e88459f1208286785e4d0f38287aa27",
-    "actionHash": "0xbe713262faa6184b394f0b52b90975162bd7c83efe537599714384c487bdd333",
+    "actionHash": "0xc9204d3ecceae783ed0c16323a1e8f14a54a879aa9dfbc5c1e82631ceb08d888",
     "signerRoot": "0xb60da9815c76261b61a1e91f199de5845fc171a6500e57c4240d2ac61d85e2bf",
     "scope": "0xbf7ef228213a6406e50f2ed879372373cb519737595695c0a607cef49b4ae541",
     "nullifier": "0xda6786cb0643be7455b46571a77ac175073b972fb781650499b294f633fbca90"
   },
   "proverMcp": {
     "serverName": "zkproofport-mcp",
-    "version": "0.2.11",
+    "version": "0.2.12",
     "endpoint": "https://stg-ai.zkproofport.app",
     "transport": "stdio",
     "status": "returned",
-    "observedAt": "2026-09-13T08:39:28.635Z",
+    "observedAt": "2026-09-13T09:26:08.468Z",
     "packageSource": "npm",
-    "mcpVersion": "0.2.11",
-    "sdkVersion": "0.2.11",
+    "mcpVersion": "0.2.12",
+    "sdkVersion": "0.2.12",
     "tool": "generate_proof",
     "arguments": {
       "circuit": "arc_eligibility",
@@ -114,8 +114,8 @@
           "delegate": "0x06Ad6B4EEbcD486bE53d8a9dC760a67A5Bdf3F64",
           "action": "stake",
           "amount": "10000000",
-          "expiresAt": "1789291402",
-          "nonce": "user-e2e-2daa5582-2343-43f6-953e-b4a97ed4dc00"
+          "expiresAt": "1789294201",
+          "nonce": "user-e2e-a439ba01-694e-47ca-899a-6c123401ecf1"
         }
       }
     },
@@ -124,12 +124,12 @@
   },
   "permissions": [
     {
-      "id": "a4a90118-4417-4aab-b414-51e662a1f717",
+      "id": "a79ea29d-8ec0-48a1-85b7-9d38608e22a8",
       "kind": "proof",
       "status": "approved",
-      "requestedAt": "2026-09-13T08:38:54.052Z",
-      "expiresAt": "2026-09-13T08:43:54.052Z",
-      "decidedAt": "2026-09-13T08:38:56.551Z",
+      "requestedAt": "2026-09-13T09:25:34.767Z",
+      "expiresAt": "2026-09-13T09:30:34.767Z",
+      "decidedAt": "2026-09-13T09:25:36.944Z",
       "details": {
         "amount": "10",
         "delegate": "0x06Ad6B4EEbcD486bE53d8a9dC760a67A5Bdf3F64",
@@ -179,8 +179,8 @@
             "delegate": "0x06Ad6B4EEbcD486bE53d8a9dC760a67A5Bdf3F64",
             "action": "stake",
             "amount": "10000000",
-            "expiresAt": "1789291402",
-            "nonce": "user-e2e-2daa5582-2343-43f6-953e-b4a97ed4dc00"
+            "expiresAt": "1789294201",
+            "nonce": "user-e2e-a439ba01-694e-47ca-899a-6c123401ecf1"
           }
         },
         "approvedPayment": {
@@ -198,19 +198,19 @@
       }
     },
     {
-      "id": "a87e7a35-8161-49c2-a171-49c510c08a21",
+      "id": "fdbaaf8b-b0d2-491e-ace2-5b34af4afa61",
       "kind": "stake",
       "status": "approved",
-      "requestedAt": "2026-09-13T08:39:32.774Z",
-      "expiresAt": "2026-09-13T08:44:32.774Z",
-      "decidedAt": "2026-09-13T08:39:33.565Z",
+      "requestedAt": "2026-09-13T09:26:13.097Z",
+      "expiresAt": "2026-09-13T09:31:13.097Z",
+      "decidedAt": "2026-09-13T09:26:13.986Z",
       "details": {
         "amount": "10",
         "delegate": "0x06Ad6B4EEbcD486bE53d8a9dC760a67A5Bdf3F64",
         "chainId": 5042002,
         "gate": "0xD0F3eE648386B59B484157332E736388Fcc41F47",
         "verifier": "0xCbC8E63fF92659E8B44cFF117D33005Bb669a018",
-        "proofFingerprint": "0xcb9ed527407e95baa3ce7e553c1d4a79f9ea7a6360131147077afa632f4a9b2d",
+        "proofFingerprint": "0x50c303d16cd2c6e1fb1e68eeaa4eaac26a659a68a8fac846c4709d0ebeaf2873",
         "verified": true,
         "transaction": "USDC approval if needed, then stakePacked",
         "payment": "Circle Agent Wallet",
@@ -250,8 +250,8 @@
             "delegate": "0x06Ad6B4EEbcD486bE53d8a9dC760a67A5Bdf3F64",
             "action": "stake",
             "amount": "10000000",
-            "expiresAt": "1789291402",
-            "nonce": "user-e2e-2daa5582-2343-43f6-953e-b4a97ed4dc00"
+            "expiresAt": "1789294201",
+            "nonce": "user-e2e-a439ba01-694e-47ca-899a-6c123401ecf1"
           }
         }
       }
@@ -272,28 +272,28 @@
       "nonceUnused": true,
       "deadlineValid": true
     },
-    "checkedBlock": 61871395,
-    "deadline": "1789291402",
-    "nonce": "user-e2e-2daa5582-2343-43f6-953e-b4a97ed4dc00",
+    "checkedBlock": 61876895,
+    "deadline": "1789294201",
+    "nonce": "user-e2e-a439ba01-694e-47ca-899a-6c123401ecf1",
     "actionAuthorizationMatched": true,
-    "fingerprint": "0xcb9ed527407e95baa3ce7e553c1d4a79f9ea7a6360131147077afa632f4a9b2d"
+    "fingerprint": "0x50c303d16cd2c6e1fb1e68eeaa4eaac26a659a68a8fac846c4709d0ebeaf2873"
   },
   "stake": {
     "ok": true,
     "step": 6,
     "amount": "10",
     "wallet": "0x06Ad6B4EEbcD486bE53d8a9dC760a67A5Bdf3F64",
-    "txHash": "0xde06a71e275700a6a404a7c1d285885c015f48aa66ef73b4e6cc13d573855a47",
-    "block": 61871427,
-    "approvalTx": "0xfad6ffc904a9b38a3e94e3068bce85e363a542bef1a70ad597a004df12fe03b7",
+    "txHash": "0x7692f7a4efb45daa590637362bbc3f0e7f40e9525bf5f3ba63f5d5ddc4bb453b",
+    "block": 61876930,
+    "approvalTx": "0x072de436c60d7a953ea096688c1d848e786945c6a153d83d3464054a128f9293",
     "verifiedOn": {
       "chainId": 5042002,
       "gate": "0xD0F3eE648386B59B484157332E736388Fcc41F47",
       "verifier": "0xCbC8E63fF92659E8B44cFF117D33005Bb669a018"
     },
     "receiptStatus": 1,
-    "positionBefore": "11.8",
-    "positionAfter": "21.8"
+    "positionBefore": "21.8",
+    "positionAfter": "31.8"
   },
-  "explorer": "https://testnet.arcscan.app/tx/0xde06a71e275700a6a404a7c1d285885c015f48aa66ef73b4e6cc13d573855a47"
+  "explorer": "https://testnet.arcscan.app/tx/0x7692f7a4efb45daa590637362bbc3f0e7f40e9525bf5f3ba63f5d5ddc4bb453b"
 }

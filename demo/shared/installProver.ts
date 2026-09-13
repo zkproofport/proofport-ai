@@ -21,7 +21,7 @@ function stableVersion(stdout:string):string|null {
  if(typeof value!=='string'||!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(value))return null;
  const [major,minor,patch]=value.split('.').map(Number);
  if(![major,minor,patch].every(Number.isSafeInteger))return null;
- return major>0||minor>2||(minor===2&&patch>=11)?value:null;
+ return major>0||minor>2||(minor===2&&patch>=12)?value:null;
 }
 
 /** The executor argument is a test seam, never an argument of the agent-facing tool. */
@@ -50,7 +50,7 @@ export async function installPublishedProver(execute:NpmExecutor=executeNpm) {
   const failed=lookups.find(result=>result.status==='rejected');
   if(failed?.status==='rejected')throw failed.reason;
   const versions=lookups.map(result=>result.status==='fulfilled'?stableVersion(result.value.stdout):null);
-  if(!versions[0]||!versions[1])throw Error('The registry must publish stable SDK and MCP versions each >=0.2.11 before installation.');
+  if(!versions[0]||!versions[1])throw Error('The registry must publish stable SDK and MCP versions each >=0.2.12 before installation.');
   const args=['install','--save-exact',registry,'--ignore-scripts','--no-audit','--no-fund','--workspaces=false',...packages.map((name,index)=>`${name}@${versions[index]}`)];
   await run(args,'npm install');
   let installed:ReturnType<typeof publishedProverPackages>;
