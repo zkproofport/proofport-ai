@@ -158,6 +158,8 @@ turn a confirmed paid proof or stake into a request to repeat spending.
 - Gateway **2.983 → 2.982**, Wallet B **20.2 → 10.2**, position and vault custody **1.8 → 11.8 USDC**, balances observed **17:05:53 KST**.
 - Exactly one paid proof and one staking call, both after their browser approvals; receipt, event action binding and live verifier rechecked successfully.
 
+The published video records the earlier **0.2.11** execution above. The current **0.2.12** action-input E2E was verified separately without a new recording. See the [parent video index](https://github.com/zkproofport/proofport-app-dev/blob/main/videos/arc-recording/README.md) for the final MP4, edit metadata and version distinction.
+
 [Presentation video](https://github.com/zkproofport/proofport-app-dev/blob/main/videos/arc-recording/ledger-house-cli-walkthrough.mp4)
 · [public execution evidence](artifacts/npm-presentation-verification.json)
 · [public proof](artifacts/npm-presentation-proof.json)
