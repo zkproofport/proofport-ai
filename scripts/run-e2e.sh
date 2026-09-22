@@ -184,6 +184,43 @@ check_prover() {
   return 1
 }
 
+# The published MCP and SDK, installed from the registry into a scratch
+# directory, for the suites that must not measure this workspace.
+#
+# node_modules/@zkproofport-ai/* here are symlinks to packages/*, so a suite
+# importing them by name tests the working tree. The published step-flow suite
+# refuses to run without these two paths rather than quietly doing that, and
+# this is what supplies them.
+ensure_published_packages() {
+  if [ -n "${E2E_MCP_ENTRY:-}" ] && [ -n "${E2E_PUBLISHED_SDK_ENTRY:-}" ]; then
+    ok "Published package entries taken from the environment"
+    return 0
+  fi
+  local ver dir
+  ver="$(node -p "require('./packages/mcp/package.json').version")"
+  dir="${TMPDIR:-/tmp}/proofport-published-$ver"
+  if [ ! -f "$dir/node_modules/@zkproofport-ai/mcp/dist/index.js" ]; then
+    log "Installing @zkproofport-ai/mcp@$ver and sdk@$ver from the registry into $dir"
+    mkdir -p "$dir"
+    # The optional wallet peers come too. The SDK leaves CDP and Circle support
+    # to the consumer so nobody pulls Coinbase's or Circle's SDK to pay with a
+    # private key -- and a fixture without them fails as "Could not load the CDP
+    # wallet support", which reads like a broken published package.
+    if ! (cd "$dir" && npm init -y >/dev/null 2>&1 && npm install --silent \
+      "@zkproofport-ai/mcp@$ver" "@zkproofport-ai/sdk@$ver" \
+      "@coinbase/cdp-sdk@>=1.55.0" "@x402/extensions@>=2.25.0" \
+      "@x402/core@>=2.25.0" "@x402/evm@>=2.25.0" "@x402/svm@>=2.25.0" \
+      "@circle-fin/developer-controlled-wallets@>=10.0.0" >/dev/null 2>&1); then
+      warn "Could not install version $ver from the registry — is it published yet?"
+      warn "The published MCP step-flow suite will refuse to run, which is the honest outcome."
+      return 0
+    fi
+  fi
+  export E2E_MCP_ENTRY="$dir/node_modules/@zkproofport-ai/mcp/dist/index.js"
+  export E2E_PUBLISHED_SDK_ENTRY="$dir/node_modules/@zkproofport-ai/sdk/dist/index.js"
+  ok "Published packages $ver from the registry: $dir"
+}
+
 run_suites() {
   local mode="$1"; shift
   [ $# -eq 0 ] && { warn "no suites to run in the $mode phase"; return 0; }
@@ -261,6 +298,8 @@ else
   wait_for_mode disabled || exit 1
   check_prover || exit 1
 fi
+
+ensure_published_packages
 
 FREE_RESULT=0
 run_suites disabled "${FREE_SUITES[@]}" || FREE_RESULT=$?
