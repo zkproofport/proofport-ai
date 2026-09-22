@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.17](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.2.16...mcp-v0.2.17) (2026-09-22)
+
+
+### Bug Fixes
+
+* validate approved payments against actual signing domains ([72ca4d3](https://github.com/zkproofport/proofport-ai/commit/72ca4d361cb67c69a06b55e8d5246a782d952618))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @zkproofport-ai/sdk bumped from ^0.2.16 to ^0.2.17
+
 ## [0.2.16](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.2.15...mcp-v0.2.16) (2026-09-22)
 
 
