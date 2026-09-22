@@ -26,7 +26,9 @@ import {
   CIRCUITS,
   type ClientConfig,
   type ProofportSigner,
+  type PaymentWallet,
 } from '@zkproofport-ai/sdk';
+import { planPayment, unfundedReason } from './payer.js';
 
 const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:4002';
 const ATTESTATION_KEY = process.env.ATTESTATION_KEY;
@@ -55,7 +57,8 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
   let config: ClientConfig;
   let attestationSigner: ProofportSigner;
   let giwaSigner: ProofportSigner | undefined;
-  let paymentSigner: ProofportSigner;
+  let paymentWallet: PaymentWallet | undefined;
+  let payOn: string | undefined;
 
   beforeAll(async () => {
     if (!ATTESTATION_KEY) throw new Error('ATTESTATION_KEY required in .env.test');
@@ -67,7 +70,16 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
 
     attestationSigner = fromPrivateKey(ATTESTATION_KEY);
     giwaSigner = GIWA_KEY ? fromPrivateKey(GIWA_KEY) : undefined;
-    paymentSigner = fromPrivateKey(PAYER_KEY);
+    /*
+     * A payment wallet, not a signer. `fromPrivateKey` makes an attestation
+     * signer whose address is behind `getAddress()`; the payment path reads
+     * `.address` and got undefined, which viem reported as an invalid address.
+     * The chain comes from what the service offers — a test does not decide
+     * which chains a deployment takes money on.
+     */
+    const plan = await planPayment(config, 'coinbase_kyc', PAYER_KEY);
+    paymentWallet = plan.wallet;
+    payOn = plan.payOn;
 
     // Health check
     const res = await fetch(`${BASE_URL}/health`);
@@ -106,7 +118,7 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
     it('coinbase_kyc: full E2E proof generation', async () => {
       const result = await generateProof(
         config,
-        { attestation: attestationSigner, payment: paymentSigner },
+        { attestation: attestationSigner, payment: paymentWallet },
         { circuit: 'coinbase_kyc', scope: 'e2e-test:npm-sdk-kyc' },
       );
 
@@ -122,15 +134,11 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
     it.skipIf(!GIWA_KEY)('giwa_attestation: full E2E proof generation, no action', async () => {
       const result = await generateProof(
         config,
-        { attestation: giwaSigner!, payment: paymentSigner },
+        { attestation: giwaSigner!, payment: paymentWallet },
         {
           circuit: 'giwa_attestation',
           scope: 'e2e-test:npm-sdk-giwa',
-          // Named, not left to the SDK's first offer: the payer holds USDC on
-          // Base Sepolia and none on Arc testnet, and an unfunded chain fails
-          // at settlement with a message about the gateway rather than the
-          // proof.
-          payOn: 'base-sepolia',
+          payOn,
         },
       );
 
@@ -153,11 +161,11 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
     it.skipIf(!GIWA_KEY)('giwa_attestation: full E2E proof generation, with an action', async () => {
       const result = await generateProof(
         config,
-        { attestation: giwaSigner!, payment: paymentSigner },
+        { attestation: giwaSigner!, payment: paymentWallet },
         {
           circuit: 'giwa_attestation',
           scope: 'e2e-test:npm-sdk-giwa-action',
-          payOn: 'base-sepolia',
+          payOn,
           action: {
             domain: {
               name: 'GIWA E2E',
@@ -190,16 +198,16 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
       const scope = 'e2e-test:npm-sdk-giwa-nullifier';
       const plain = await generateProof(
         config,
-        { attestation: giwaSigner!, payment: paymentSigner },
-        { circuit: 'giwa_attestation', scope, payOn: 'base-sepolia' },
+        { attestation: giwaSigner!, payment: paymentWallet },
+        { circuit: 'giwa_attestation', scope, payOn },
       );
       const bound = await generateProof(
         config,
-        { attestation: giwaSigner!, payment: paymentSigner },
+        { attestation: giwaSigner!, payment: paymentWallet },
         {
           circuit: 'giwa_attestation',
           scope,
-          payOn: 'base-sepolia',
+          payOn,
           action: {
             domain: { name: 'GIWA E2E', version: '1', chainId: 91342, verifyingContract: '0x6646d970499BBeD728636823A5A7e551E811b414' },
             types: { Deposit: [{ name: 'amount', type: 'uint256' }] },
@@ -220,7 +228,7 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
     it('coinbase_country: full E2E proof generation', async () => {
       const result = await generateProof(
         config,
-        { attestation: attestationSigner, payment: paymentSigner },
+        { attestation: attestationSigner, payment: paymentWallet },
         {
           circuit: 'coinbase_country',
           scope: 'e2e-test:npm-sdk-country',
@@ -237,7 +245,7 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
     it.skipIf(!OIDC_JWT)('oidc_domain: full E2E proof generation', async () => {
       const result = await generateProof(
         config,
-        { attestation: attestationSigner, payment: paymentSigner },
+        { attestation: attestationSigner, payment: paymentWallet },
         {
           circuit: 'oidc_domain',
           scope: 'e2e-test:npm-sdk-oidc',
@@ -255,7 +263,7 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
     it('should verify a generated proof on-chain', async () => {
       const proofResult = await generateProof(
         config,
-        { attestation: attestationSigner, payment: paymentSigner },
+        { attestation: attestationSigner, payment: paymentWallet },
         { circuit: 'coinbase_kyc', scope: 'e2e-test:npm-sdk-verify' },
       );
 

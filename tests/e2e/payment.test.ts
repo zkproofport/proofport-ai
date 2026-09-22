@@ -131,8 +131,8 @@ describe('what the service offers', () => {
 
   it('prices Arc in 6 decimals, not 18', () => {
     if (!reachable) return expect.soft(reachable, `${BASE_URL} unreachable`).toBe(true);
-    const arc = paymentOffers(challenge!).find((o) => o.networkName === 'arc-testnet');
-    if (!arc) return console.warn('  SKIP: this deployment does not offer arc-testnet');
+    const arc = paymentOffers(challenge!).find((o) => o.networkName?.startsWith('arc-testnet'));
+    if (!arc) return console.warn('  SKIP: this deployment offers no Arc chain');
     if (!challenge!.requiresPayment) return console.warn('  SKIP: payment disabled, every price is 0');
     // 0.01 USDC is 10000 in 6 decimals and 10000000000000000 in 18. Quoting
     // the 18-decimal figure would ask for a ten-trillionth of the intended
@@ -192,11 +192,24 @@ async function paysAndProves(wallet: PaymentWallet, network: string) {
   return { status: res.status, body, paid };
 }
 
+/**
+ * The payer's key, under the name the rest of the suite uses.
+ *
+ * This file read `PAYMENT_PRIVATE_KEY`, which is in no env file here, so every
+ * paying case skipped and the run still reported eight passed — a green over a
+ * suite that had not paid for anything. `.env.test` carries the payer as
+ * `E2E_PAYER_WALLET_KEY`; both names are accepted so an existing environment
+ * keeps working, and the absence of both is still a stated skip.
+ */
+function payerKey(): string | undefined {
+  return process.env.PAYMENT_PRIVATE_KEY || process.env.E2E_PAYER_WALLET_KEY;
+}
+
 describe('paying from a private key', () => {
   it('buys a proof on the first chain offered', async () => {
     if (!reachable) return expect.soft(reachable, `${BASE_URL} unreachable`).toBe(true);
     if (!challenge!.requiresPayment) return console.warn('  SKIP: this deployment is not charging');
-    const key = process.env.PAYMENT_PRIVATE_KEY;
+    const key = payerKey();
     if (!key) return console.warn('  SKIP: PAYMENT_PRIVATE_KEY not set');
     const wallet = await walletFromPrivateKey(key);
     const network = paymentOffers(challenge!)[0].networkName;
@@ -208,17 +221,20 @@ describe('paying on a chain this service settles itself', () => {
   it('buys a proof on Arc, where no public facilitator will submit', async () => {
     if (!reachable) return expect.soft(reachable, `${BASE_URL} unreachable`).toBe(true);
     if (!challenge!.requiresPayment) return console.warn('  SKIP: this deployment is not charging');
-    const key = process.env.PAYMENT_PRIVATE_KEY;
+    const key = payerKey();
     if (!key) return console.warn('  SKIP: PAYMENT_PRIVATE_KEY not set');
-    const arc = paymentOffers(challenge!).find((o) => o.networkName === 'arc-testnet');
-    if (!arc) return console.warn('  SKIP: this deployment does not offer arc-testnet');
+    // Either Arc offer: `arc-testnet` settles from this service's own wallet,
+    // `arc-testnet-nano` batches through Circle Gateway. Naming only the first
+    // made this skip silently on a deployment that offers the second.
+    const arc = paymentOffers(challenge!).find((o) => o.networkName?.startsWith('arc-testnet'));
+    if (!arc) return console.warn('  SKIP: this deployment offers no Arc chain');
 
     // The other paying cases go through Base, where x402.dexter.cash submits.
     // This one goes through the OTHER settlement route: no facilitator serves
     // Arc, so the service submits the authorization from its own wallet. The
     // route is the whole difference and it is only exercised here.
     const wallet = await walletFromPrivateKey(key);
-    await paysAndProves(wallet, 'arc-testnet');
+    await paysAndProves(wallet, arc.networkName!);
   }, 180_000);
 });
 
@@ -260,16 +276,16 @@ describe('paying from a Circle wallet on Arc', () => {
       walletId: CIRCLE_WALLET_ID,
       address: process.env.CIRCLE_WALLET_ADDRESS,
     });
-    const arc = paymentOffers(challenge!).find((o) => o.networkName === 'arc-testnet');
-    if (!arc) return console.warn('  SKIP: this deployment does not offer arc-testnet');
-    await paysAndProves(wallet, 'arc-testnet');
+    const arc = paymentOffers(challenge!).find((o) => o.networkName?.startsWith('arc-testnet'));
+    if (!arc) return console.warn('  SKIP: this deployment offers no Arc chain');
+    await paysAndProves(wallet, arc.networkName!);
   }, 180_000);
 });
 
 describe('what the service refuses', () => {
   it('refuses a chain it does not take payment on, rather than picking one', async () => {
     if (!reachable) return expect.soft(reachable, `${BASE_URL} unreachable`).toBe(true);
-    const key = process.env.PAYMENT_PRIVATE_KEY;
+    const key = payerKey();
     if (!key) return console.warn('  SKIP: PAYMENT_PRIVATE_KEY not set');
     const wallet = await walletFromPrivateKey(key);
     // Checked client-side: the SDK must not quietly pay on the first chain
@@ -284,7 +300,7 @@ describe('what the service refuses', () => {
   it('refuses a second proof for the same payment', async () => {
     if (!reachable) return expect.soft(reachable, `${BASE_URL} unreachable`).toBe(true);
     if (!challenge!.requiresPayment) return console.warn('  SKIP: this deployment is not charging');
-    const key = process.env.PAYMENT_PRIVATE_KEY;
+    const key = payerKey();
     if (!key) return console.warn('  SKIP: PAYMENT_PRIVATE_KEY not set');
     const wallet = await walletFromPrivateKey(key);
     const network = paymentOffers(challenge!)[0].networkName;

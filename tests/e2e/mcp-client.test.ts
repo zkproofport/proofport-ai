@@ -96,7 +96,10 @@ describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
       const text = (result.content as any[])[0]?.text;
       const data = JSON.parse(text);
 
-      expect(result.isError).toBeFalsy();
+      // Say WHAT the tool answered. `expected true to be falsy` hid
+      // "Circle Gateway failed to settle arc-testnet-nano:
+      // insufficient_balance" behind a boolean for a whole staging run.
+      expect(result.isError, `generate_proof failed: ${text}`).toBeFalsy();
       expect(data.proof).toBeTruthy();
       expect(data.proof.startsWith('0x')).toBe(true);
       expect(data.publicInputs).toBeTruthy();
@@ -117,7 +120,10 @@ describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
       const text = (result.content as any[])[0]?.text;
       const data = JSON.parse(text);
 
-      expect(result.isError).toBeFalsy();
+      // Say WHAT the tool answered. `expected true to be falsy` hid
+      // "Circle Gateway failed to settle arc-testnet-nano:
+      // insufficient_balance" behind a boolean for a whole staging run.
+      expect(result.isError, `generate_proof failed: ${text}`).toBeFalsy();
       expect(data.proof).toBeTruthy();
     }, 120_000);
 
@@ -133,7 +139,10 @@ describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
       const text = (result.content as any[])[0]?.text;
       const data = JSON.parse(text);
 
-      expect(result.isError).toBeFalsy();
+      // Say WHAT the tool answered. `expected true to be falsy` hid
+      // "Circle Gateway failed to settle arc-testnet-nano:
+      // insufficient_balance" behind a boolean for a whole staging run.
+      expect(result.isError, `generate_proof failed: ${text}`).toBeFalsy();
       expect(data.proof).toBeTruthy();
       expect(data.proof.startsWith('0x')).toBe(true);
     }, 120_000);

@@ -78,6 +78,14 @@ if [ -z "$WANT_PAYMENT" ]; then
   WANT_PAYMENT=$REMOTE
 fi
 
+# --remote with no URL would quietly measure localhost, which is the exact
+# mistake this script was rewritten to stop making.
+if [ "$REMOTE" = true ] && [ -z "${E2E_BASE_URL:-}" ]; then
+  err "--remote needs E2E_BASE_URL. Example:"
+  echo "        E2E_BASE_URL=https://stg-ai.zkproofport.app $0 --remote"
+  exit 1
+fi
+
 # Same Docker target as ai-dev.sh, chosen for this process only.
 #
 # These were plain `docker compose`, which uses whatever context is current.
