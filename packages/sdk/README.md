@@ -101,6 +101,8 @@ Corrected Arc stepwise support and shared action hashing require SDK/MCP **0.2.1
 
 **For the circuits that can bind an action** (`arc_eligibility`, `giwa_attestation`): the attestation above for whichever one you ask for. What differs is what the wallet signs, and the action is **optional** — see below.
 
+**One wallet has a different nullifier per circuit, and for the circuits above it does not depend on what you signed.** `arc_eligibility` and `giwa_attestation` derive it from your address, the circuit's own identifier and the scope, so the same wallet in the same scope gives the same nullifier whether or not you bind an action. The Coinbase circuits derive theirs from the signed challenge instead. Nothing to configure — the SDK picks the rule the circuit expects, and refuses a circuit it has no rule for rather than guessing one. Requires **0.2.14 or later**; earlier versions sent the Coinbase rule for every circuit, which a GIWA proof rejects as a nullifier mismatch.
+
 ## Quick Start
 
 ```typescript
