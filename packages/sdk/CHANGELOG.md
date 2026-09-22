@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.17](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.2.16...sdk-v0.2.17) (2026-09-22)
+
+
+### Bug Fixes
+
+* validate approved payments against actual signing domains ([72ca4d3](https://github.com/zkproofport/proofport-ai/commit/72ca4d361cb67c69a06b55e8d5246a782d952618))
+
 ## [0.2.16](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.2.15...sdk-v0.2.16) (2026-09-22)
 
 
