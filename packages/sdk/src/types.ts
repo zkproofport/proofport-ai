@@ -206,6 +206,7 @@ export interface TypedAction {
 /** Terms explicitly accepted by a user; nonce is intentionally not pinned. */
 export interface ApprovedPayment {
   network:string;scheme:string;amount:string;asset:string;payTo:string;
+  /** Exact EIP-3009: verifyingContract = asset. Gateway: use offer.extra.verifyingContract. */
   extra:{name:string;version:string;verifyingContract:string};
 }
 

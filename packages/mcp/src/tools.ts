@@ -146,7 +146,7 @@ RETURNS: Full ProofResult with proof bytes, public inputs, and timing informatio
           'on chain immediately and costs gas every time.',
         ),
       max_payment:z.string().regex(/^\d+(\.\d{1,6})?$/).optional().describe('Maximum USDC proof fee allowed by the user.'),
-      approved_payment:z.object({network:z.string(),scheme:z.string(),amount:z.string().regex(/^\d+$/),asset:z.string(),payTo:z.string(),extra:z.object({name:z.string(),version:z.string(),verifyingContract:z.string()})}).optional().describe('Exact user-approved terms. The SDK rejects any changed fee, recipient, token, chain or Gateway signing domain before signing the actual challenge.'),
+      approved_payment:z.object({network:z.string(),scheme:z.string(),amount:z.string().regex(/^\d+$/),asset:z.string(),payTo:z.string(),extra:z.object({name:z.string(),version:z.string(),verifyingContract:z.string()})}).optional().describe('Exact user-approved terms. For direct EIP-3009 set extra.verifyingContract to the offer asset; for Gateway copy its required extra.verifyingContract. Changed fee, recipient, token, chain or signing domain is rejected before signing.'),
     },
     async (params) => {
       try {

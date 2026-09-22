@@ -37,6 +37,7 @@
  * it.
  */
 
+import { supportsBatching } from '@circle-fin/x402-batching';
 import type { PaymentWallet, PaymentOffer, PaidRequest, ApprovedPayment } from './types.js';
 import { usdcSpendControls, isKnownUsdc, knownUsdc, DEFAULT_MAX_PAYMENT } from './usdc.js';
 
@@ -78,13 +79,29 @@ export function paymentOffers(challenge: {
  * ask for spends real money in the wrong place, and the caller who typed
  * `--network arc` would be told the payment succeeded.
  */
-export function assertApprovedPayment(offer:PaymentOffer,approved:ApprovedPayment){
-  const extra=offer.raw.extra as Record<string,unknown>|undefined;
-  const sameAddress=(a:unknown,b:string)=>typeof a==='string'&&/^0x[0-9a-fA-F]{40}$/.test(a)&&a.toLowerCase()===b.toLowerCase();
-  if(offer.network!==approved.network||offer.raw.scheme!==approved.scheme||offer.amount!==approved.amount||
-    !sameAddress(offer.asset,approved.asset)||!sameAddress(offer.payTo,approved.payTo)||
-    extra?.name!==approved.extra.name||extra?.version!==approved.extra.version||!sameAddress(extra?.verifyingContract,approved.extra.verifyingContract)){
-    throw Error('The actual payment offer differs from the user-approved amount, recipient, asset, network or signing domain. Refusing to sign.');
+export function assertApprovedPayment(offer: PaymentOffer, approved: ApprovedPayment): void {
+  const extra = offer.raw.extra as Record<string, unknown> | undefined;
+  const isAddress = (value: unknown): value is string =>
+    typeof value === 'string' && /^0x[0-9a-fA-F]{40}$/.test(value);
+  const sameAddress = (a: unknown, b: unknown) =>
+    isAddress(a) && isAddress(b) && a.toLowerCase() === b.toLowerCase();
+  const batched = supportsBatching(offer.raw as { extra?: Record<string, unknown> });
+  // Match the signing libraries, not an optional hint in the 402 response:
+  // exact EIP-3009 uses the token asset; Circle Gateway requires its own
+  // explicit contract. Permit2 has another domain and is not approved here.
+  const verifyingContract = batched ? extra?.verifyingContract : offer.asset;
+  const supportedDomain = offer.raw.scheme === 'exact' && /^eip155:[1-9]\d*$/.test(offer.network) &&
+    typeof extra?.name === 'string' && extra.name.length > 0 &&
+    typeof extra?.version === 'string' && extra.version.length > 0 &&
+    (extra.assetTransferMethod === undefined || extra.assetTransferMethod === 'eip3009') &&
+    (batched || extra.name !== 'GatewayWalletBatched') &&
+    isAddress(verifyingContract) &&
+    (batched || extra.verifyingContract === undefined || sameAddress(extra.verifyingContract, offer.asset));
+  if (!supportedDomain || offer.network !== approved.network || offer.raw.scheme !== approved.scheme ||
+      offer.amount !== approved.amount || !sameAddress(offer.asset, approved.asset) ||
+      !sameAddress(offer.payTo, approved.payTo) || extra?.name !== approved.extra.name ||
+      extra?.version !== approved.extra.version || !sameAddress(verifyingContract, approved.extra.verifyingContract)) {
+    throw new Error('The actual payment offer differs from the user-approved amount, recipient, asset, network or signing domain, or uses an unsupported signing domain. Refusing to sign.');
   }
 }
 
@@ -141,7 +158,6 @@ export async function signPayment(
 
   const { x402Client, x402HTTPClient } = await import('@x402/core/client');
   const { registerExactEvmScheme } = await import('@x402/evm/exact/client');
-  const { supportsBatching } = await import('@circle-fin/x402-batching');
   const { registerBatchScheme } = await import('@circle-fin/x402-batching/client');
 
   // Spend controls stay ON. Arc's USDC is not among the library's default

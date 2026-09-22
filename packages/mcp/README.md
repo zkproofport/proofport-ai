@@ -169,7 +169,7 @@ The exported SDK `buildDelegationAction` helper is a legacy generic four-field s
 
 With `pay_with: "arc"`, `pay_on: "arc-testnet"` pays directly from the agent smart wallet (ERC-1271), while `pay_on: "arc-testnet-nano"` uses its backing EOA and Gateway deposit. The SDK selects the authorization owner from the chosen offer; the action's `delegate` remains the operational smart-wallet address.
 
-`approvedPayment` pins these fields from the selected live x402 offer:
+`approvedPayment` pins these fields from the selected live x402 offer and its actual signing domain:
 
 ```typescript
 interface ApprovedPayment {
@@ -182,7 +182,9 @@ interface ApprovedPayment {
 }
 ```
 
-`max_payment` is decimal USDC, so `"0.001"` caps the proof fee at 0.001 USDC. The SDK rejects changes to fee, recipient, asset, network or Gateway signing domain before signing the actual challenge. A new nonce is not pinned as a payment term. If the service offers no compatible Arc nanopayment option, stop instead of falling back to another chain.
+For direct `exact` EIP-3009 payments on Base, Ethereum or Arc, set approved `extra.verifyingContract` to the offer's `asset` (the USDC token); a standard direct offer does not need an `extra.verifyingContract` field. For Circle Gateway (`GatewayWalletBatched`, version `1`), use the offer's required `extra.verifyingContract`, not `asset`. Missing or conflicting domain information and unsupported transfer methods such as Permit2 are rejected before signing.
+
+`max_payment` is decimal USDC, so `"0.001"` caps the proof fee at 0.001 USDC. The SDK rejects changes to fee, recipient, asset, network or signing domain before signing the actual challenge. A new nonce is not pinned as a payment term. If the service offers no compatible Arc nanopayment option, stop instead of falling back to another chain.
 
 After proof generation, use `verify_proof`. Separately obtain approval for the staking transaction; the operational wallet then submits to EligibilityGate, which checks the proof, credential policy, exact actor/action, nonce and deadline atomically. Report success only after the actual receipt and position change are confirmed.
 

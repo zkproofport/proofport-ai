@@ -279,7 +279,7 @@ const verification = await verifyProof(result);
 if (!verification.valid) throw new Error('Arc verifier rejected the proof');
 ```
 
-`approvedPayment` must pin the live offer's `network`, `scheme`, `amount`, `asset`, `payTo`, and `extra: {name, version, verifyingContract}`. `amount` is an integer string in USDC base units (`"1000"` is 0.001 USDC); `maxPayment` is a decimal USDC string (`"0.001"`). A changed fee, recipient, asset, network or Gateway signing domain is rejected before payment signing. Approve the actual offer; do not manufacture its recipient or domain from a documentation example.
+`approvedPayment` pins the selected live offer's `network`, `scheme`, `amount`, `asset`, `payTo`, and signing domain `extra: {name, version, verifyingContract}`. For direct `exact` EIP-3009 payments (Base, Ethereum and Arc), set the approved `extra.verifyingContract` to the offer's `asset`: the standard offer may omit `extra.verifyingContract` because the token is the signing contract. For Circle Gateway (`GatewayWalletBatched`, version `1`), copy the required `extra.verifyingContract` from the offer; never substitute the token address. Missing or conflicting domain information and unsupported transfer methods such as Permit2 are rejected. `amount` is an integer string in USDC base units (`"1000"` is 0.001 USDC); `maxPayment` is a decimal USDC string (`"0.001"`). A changed fee, recipient, asset, network or signing domain is rejected before payment signing. Approve the actual offer; do not manufacture its recipient or domain from a documentation example.
 
 ### Action object: caller-owned types, keys and values
 
