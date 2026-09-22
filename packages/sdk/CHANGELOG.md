@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.14](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.2.13...sdk-v0.2.14) (2026-09-22)
+
+
+### Bug Fixes
+
+* **sdk:** ship the per-circuit attester and nullifier tables ([816fbb6](https://github.com/zkproofport/proofport-ai/commit/816fbb677a95a335c87ae45aa772710df8fbe892))
+
 ## [0.2.13](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.2.12...sdk-v0.2.13) (2026-09-22)
 
 
