@@ -164,7 +164,7 @@ export interface MerkleData {
  */
 export function buildSignerMerkleTree(
   signerIndex: number,
-  signers: readonly string[] = AUTHORIZED_SIGNERS,
+  signers: readonly string[],
 ): MerkleData {
   const tree = new SimpleMerkleTree([...signers]);
   const root = tree.getRoot();
@@ -178,7 +178,13 @@ export function buildSignerMerkleTree(
  */
 export function findSignerIndex(
   signerAddress: string,
-  signers: readonly string[] = AUTHORIZED_SIGNERS,
+  /*
+   * Required, with no default. Defaulting to Coinbase's four signers meant a
+   * caller that forgot to pass GIWA's single signer was told "not in the
+   * authorized signers list" about an address that IS authorized, on the chain
+   * the call was about.
+   */
+  signers: readonly string[],
 ): number {
   const index = signers.findIndex(
     addr => addr.toLowerCase() === signerAddress.toLowerCase(),

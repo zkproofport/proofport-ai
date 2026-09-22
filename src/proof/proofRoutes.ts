@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import type { RedisClient } from '../redis/client.js';
 import type { Config } from '../config/index.js';
 import type { TeeProvider } from '../tee/types.js';
-import { CIRCUIT_IDS } from '../config/circuitIds.js';
+import { PROVABLE_CIRCUIT_IDS, CIRCUIT_IDS } from '../config/circuitIds.js';
 import type { CircuitId } from '../config/circuitIds.js';
 import { verifyPaymentOnChain } from './paymentVerifier.js';
 import { settlePayment } from '../payment/settle.js';
@@ -28,19 +28,25 @@ const log = createLogger('ProofRoutes');
 // Map client-friendly circuit names to canonical IDs.
 // The canonical ids come from config/circuitIds.ts; only the friendly aliases
 // on the left are this route's own vocabulary.
+/**
+ * Friendly names a caller may send instead of a canonical id.
+ *
+ * Only the aliases live here. Every canonical id this server can prove is
+ * accepted automatically below, which is the part that used to be typed out:
+ * the map listed four circuits by hand, its key type is `string` so nothing
+ * checked it, and `giwa_attestation` became provable while this table quietly
+ * answered "Unknown circuit". Measured 2026-09-22, against a server that had
+ * the circuit, its artifacts and its verifier.
+ */
+const CIRCUIT_ALIASES: Record<string, CircuitId> = {
+  coinbase_kyc: CIRCUIT_IDS.COINBASE_ATTESTATION,
+  coinbase_country: CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION,
+  oidc_domain: CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION,
+};
+
 const CIRCUIT_MAP: Record<string, CircuitId> = {
-  'coinbase_kyc': CIRCUIT_IDS.COINBASE_ATTESTATION,
-  'coinbase_country': CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION,
-  // Also accept canonical IDs directly
-  [CIRCUIT_IDS.COINBASE_ATTESTATION]: CIRCUIT_IDS.COINBASE_ATTESTATION,
-  [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION,
-  // OIDC Domain
-  'oidc_domain': CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION,
-  [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION,
-  // Arc eligibility: the signature is bound to one EIP-712 action. It
-  // needs no friendly alias -- the canonical id is what callers type,
-  // so a second entry here would be the same key twice.
-  [CIRCUIT_IDS.ARC_ELIGIBILITY]: CIRCUIT_IDS.ARC_ELIGIBILITY,
+  ...CIRCUIT_ALIASES,
+  ...Object.fromEntries(PROVABLE_CIRCUIT_IDS.map((id) => [id, id])),
 };
 
 export interface ProofRoutesDeps {

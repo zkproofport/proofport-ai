@@ -30,7 +30,7 @@ vi.mock('@noir-lang/noir_js', () => ({
 
 // Mock inputFormatter
 vi.mock('../src/prover/inputFormatter.js', () => ({
-  formatCoinbaseInputs: vi.fn().mockReturnValue({ mock: 'inputs' }),
+  formatAttestationInputs: vi.fn().mockReturnValue({ mock: 'inputs' }),
   formatOidcInputs: vi.fn().mockReturnValue({ mock: 'oidc_inputs' }),
 }));
 
@@ -98,7 +98,7 @@ describe('BbProver', () => {
       execute: vi.fn().mockResolvedValue({ witness: new Uint8Array([1, 2, 3]) }),
     }));
 
-    vi.mocked(inputFormatter.formatCoinbaseInputs).mockReturnValue({ mock: 'inputs' } as any);
+    vi.mocked(inputFormatter.formatAttestationInputs).mockReturnValue({ mock: 'inputs' } as any);
     vi.mocked(inputFormatter.formatOidcInputs).mockReturnValue({ mock: 'oidc_inputs' } as any);
 
     setupSuccessFsMocks();
@@ -128,7 +128,7 @@ describe('BbProver', () => {
     it('formats coinbase inputs via inputFormatter', async () => {
       await prover.prove('coinbase_attestation', mockCircuitParams);
 
-      expect(inputFormatter.formatCoinbaseInputs).toHaveBeenCalledWith(
+      expect(inputFormatter.formatAttestationInputs).toHaveBeenCalledWith(
         'coinbase_attestation',
         mockCircuitParams
       );
@@ -141,7 +141,7 @@ describe('BbProver', () => {
       const { prepareOidcCircuitInputs } = await import('../src/prover/oidcProver.js');
       expect(prepareOidcCircuitInputs).toHaveBeenCalledWith(oidcPayload);
       expect(inputFormatter.formatOidcInputs).toHaveBeenCalledWith({ mock: 'oidc_circuit_inputs' });
-      expect(inputFormatter.formatCoinbaseInputs).not.toHaveBeenCalled();
+      expect(inputFormatter.formatAttestationInputs).not.toHaveBeenCalled();
     });
 
     it('calls noir_js Noir.execute() with formatted inputs', async () => {
@@ -337,7 +337,7 @@ describe('BbProver', () => {
     it('handles coinbase_country_attestation circuit', async () => {
       await prover.prove('coinbase_country_attestation', mockCircuitParams);
 
-      expect(inputFormatter.formatCoinbaseInputs).toHaveBeenCalledWith(
+      expect(inputFormatter.formatAttestationInputs).toHaveBeenCalledWith(
         'coinbase_country_attestation',
         mockCircuitParams
       );

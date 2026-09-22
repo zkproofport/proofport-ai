@@ -228,3 +228,89 @@ it('hashes and signs actual booleans in arbitrary nested structs and arrays', as
   const { hashTypedAction } = await import('../packages/sdk/src/index.js');
   expect(hashTypedAction(BOOLEAN_ACTION).actionHash).toBe(ethers.TypedDataEncoder.hashStruct('Instruction', BOOLEAN_ACTION.types, BOOLEAN_ACTION.message));
 });
+
+/**
+ * The same rule, one layer down: what the server hands to noir_js.
+ *
+ * The flow above decides what the WALLET signs. This decides what the PROVER
+ * receives, and the two were out of step: the formatter added the action pair
+ * only when the circuit id was `arc_eligibility`, and required one there.
+ * `giwa_attestation` takes the same two parameters, so every GIWA request died
+ * inside noir_js with "Expected argument `action_hash`, but none was found" —
+ * a message that names a circuit input and not the missing branch. Arc, for
+ * its part, could no longer be proved WITHOUT an action, months after the
+ * circuit made it optional.
+ */
+describe('what the prover hands to noir_js', () => {
+  const ZERO_32 = Array(32).fill('0x00');
+
+  /** Enough of a CircuitParams to format; the values are shapes, not real proofs. */
+  function params(extra: Record<string, unknown> = {}) {
+    return {
+      signalHash: new Uint8Array(32).fill(0xab),
+      merkleRoot: '0x' + 'cd'.repeat(32),
+      scopeBytes: new Uint8Array(32).fill(0xef),
+      nullifierBytes: new Uint8Array(32).fill(0x12),
+      userAddress: '0x' + '34'.repeat(20),
+      userSignature: '0x' + '56'.repeat(32) + '78'.repeat(32) + '1b',
+      userPubkeyX: '0x' + '9a'.repeat(32),
+      userPubkeyY: '0x' + 'bc'.repeat(32),
+      rawTxBytes: Array(120).fill(7),
+      txLength: 120,
+      attesterPubkeyX: '0x' + 'de'.repeat(32),
+      attesterPubkeyY: '0x' + 'f0'.repeat(32),
+      merkleProof: ['0x' + '01'.repeat(32), '0x' + '02'.repeat(32)],
+      merkleLeafIndex: 0,
+      merkleDepth: 2,
+      ...extra,
+    } as never;
+  }
+
+  async function format(circuitId: string, extra: Record<string, unknown> = {}) {
+    const { formatAttestationInputs } = await import('../src/prover/inputFormatter.js');
+    return formatAttestationInputs(circuitId as never, params(extra));
+  }
+
+  const ACTION_PAIR = {
+    domainSeparator: '0x' + 'aa'.repeat(32),
+    actionHash: '0x' + 'bb'.repeat(32),
+  };
+
+  for (const circuitId of [CIRCUIT_IDS.ARC_ELIGIBILITY, CIRCUIT_IDS.GIWA_ATTESTATION]) {
+    it(`sends ${circuitId} an empty action pair when no action was bound`, async () => {
+      const inputs = await format(circuitId);
+      expect(inputs.domain_separator).toEqual(ZERO_32);
+      expect(inputs.action_hash).toEqual(ZERO_32);
+      // The challenge is what was signed, so it must arrive filled.
+      expect(inputs.signal_hash).not.toEqual(ZERO_32);
+    });
+
+    it(`empties ${circuitId}'s signal hash when an action was bound`, async () => {
+      const inputs = await format(circuitId, ACTION_PAIR);
+      expect(inputs.signal_hash).toEqual(ZERO_32);
+      expect(inputs.domain_separator).toEqual(Array(32).fill('0xaa'));
+      expect(inputs.action_hash).toEqual(Array(32).fill('0xbb'));
+    });
+
+    it(`refuses ${circuitId} half an action`, async () => {
+      await expect(format(circuitId, { domainSeparator: ACTION_PAIR.domainSeparator }))
+        .rejects.toThrow(/both domain_separator and action_hash/);
+    });
+  }
+
+  for (const circuitId of [CIRCUIT_IDS.COINBASE_ATTESTATION, CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]) {
+    it(`gives ${circuitId} no action parameters at all`, async () => {
+      const extra = circuitId === CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION
+        ? { countryList: ['US'], countryListLength: 1, isIncluded: true }
+        : {};
+      const inputs = await format(circuitId, extra);
+      expect('domain_separator' in inputs).toBe(false);
+      expect('action_hash' in inputs).toBe(false);
+      expect(inputs.signal_hash).not.toEqual(ZERO_32);
+    });
+
+    it(`refuses an action on ${circuitId} instead of dropping it`, async () => {
+      await expect(format(circuitId, ACTION_PAIR)).rejects.toThrow(/has no inputs for one/);
+    });
+  }
+});

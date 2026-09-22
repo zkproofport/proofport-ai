@@ -29,7 +29,7 @@ import { promisify } from 'node:util';
 
 // noir_js for witness generation
 import { Noir } from '@noir-lang/noir_js';
-import { formatCoinbaseInputs, formatOidcInputs } from '../prover/inputFormatter.js';
+import { formatAttestationInputs, formatOidcInputs, type AttestationCircuitId } from '../prover/inputFormatter.js';
 import type { OidcCircuitInputs } from '../prover/inputFormatter.js';
 import type { CircuitParams } from '../input/inputBuilder.js';
 import { CIRCUIT_IDS } from '../config/circuitIds.js';
@@ -287,7 +287,7 @@ function normalizeToCircuitParams(circuitId: string, inputs: Record<string, any>
     return converted;
   }
 
-  // Unknown format — pass through and let formatCoinbaseInputs handle the error
+  // Unknown format — pass through and let formatAttestationInputs handle the error
   logError('Unknown input format', { action: 'enclave.inputs.unknown', keys: Object.keys(inputs) });
   return inputs;
 }
@@ -335,8 +335,8 @@ async function generateProof(
       noirInputs = formatOidcInputs(oidcInputs);
     } else {
       const normalized = normalizeToCircuitParams(circuitId, inputs);
-      noirInputs = formatCoinbaseInputs(
-        circuitId as typeof CIRCUIT_IDS.COINBASE_ATTESTATION | typeof CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION,
+      noirInputs = formatAttestationInputs(
+        circuitId as AttestationCircuitId,
         normalized as CircuitParams,
       );
     }

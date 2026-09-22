@@ -592,7 +592,7 @@ export function buildSwaggerSpec(baseUrl: string) {
                 properties: {
                   circuit: {
                     type: 'string',
-                    enum: ['coinbase_kyc', 'coinbase_country'],
+                    enum: ['coinbase_kyc', 'coinbase_country', 'oidc_domain', 'arc_eligibility', 'giwa_attestation'],
                     description: 'Which circuit to use',
                   },
                   inputs: {
@@ -697,7 +697,7 @@ export function buildSwaggerSpec(baseUrl: string) {
           name: 'circuit',
           in: 'path',
           required: true,
-          schema: { type: 'string', enum: ['coinbase_kyc', 'coinbase_country'] },
+          schema: { type: 'string', enum: ['coinbase_kyc', 'coinbase_country', 'oidc_domain', 'arc_eligibility', 'giwa_attestation'] },
           description: 'Circuit alias name',
         }],
         responses: {

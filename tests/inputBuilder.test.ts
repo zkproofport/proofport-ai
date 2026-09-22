@@ -365,17 +365,17 @@ describe('computeNullifier', () => {
 describe('findSignerIndex', () => {
   it('should find each authorized signer', () => {
     for (let i = 0; i < AUTHORIZED_SIGNERS.length; i++) {
-      expect(findSignerIndex(AUTHORIZED_SIGNERS[i])).toBe(i);
+      expect(findSignerIndex(AUTHORIZED_SIGNERS[i], AUTHORIZED_SIGNERS)).toBe(i);
     }
   });
 
   it('should be case-insensitive', () => {
-    expect(findSignerIndex(AUTHORIZED_SIGNERS[0].toLowerCase())).toBe(0);
-    expect(findSignerIndex(AUTHORIZED_SIGNERS[0].toUpperCase())).toBe(0);
+    expect(findSignerIndex(AUTHORIZED_SIGNERS[0].toLowerCase(), AUTHORIZED_SIGNERS)).toBe(0);
+    expect(findSignerIndex(AUTHORIZED_SIGNERS[0].toUpperCase(), AUTHORIZED_SIGNERS)).toBe(0);
   });
 
   it('should throw for unknown signer', () => {
-    expect(() => findSignerIndex('0x0000000000000000000000000000000000000000')).toThrow(
+    expect(() => findSignerIndex('0x0000000000000000000000000000000000000000', AUTHORIZED_SIGNERS)).toThrow(
       'not in the authorized signers list'
     );
   });
@@ -385,7 +385,7 @@ describe('findSignerIndex', () => {
 
 describe('buildSignerMerkleTree', () => {
   it('should return root, proof, leafIndex, and depth', () => {
-    const data = buildSignerMerkleTree(0);
+    const data = buildSignerMerkleTree(0, AUTHORIZED_SIGNERS);
     expect(data.root).toMatch(/^0x[0-9a-f]{64}$/);
     expect(data.leafIndex).toBe(0);
     expect(data.depth).toBeGreaterThan(0);
@@ -393,7 +393,7 @@ describe('buildSignerMerkleTree', () => {
   });
 
   it('should return same root for all signer indices', () => {
-    const roots = AUTHORIZED_SIGNERS.map((_, i) => buildSignerMerkleTree(i).root);
+    const roots = AUTHORIZED_SIGNERS.map((_, i) => buildSignerMerkleTree(i, AUTHORIZED_SIGNERS).root);
     expect(new Set(roots).size).toBe(1);
   });
 });
@@ -490,7 +490,7 @@ describe('assembleKycInputs', () => {
     const { x: pubX, y: pubY } = extractPubkeyCoordinates(userPubkey);
     const scopeBytes = computeScope(TEST_SCOPE);
     const nullifierBytes = computeNullifier(TEST_ADDRESS, signalHash, scopeBytes);
-    const merkleData = buildSignerMerkleTree(0);
+    const merkleData = buildSignerMerkleTree(0, AUTHORIZED_SIGNERS);
 
     // Fake raw TX bytes (200 bytes)
     const rawTxBytes = new Array(200).fill(0).map((_, i) => i % 256);
@@ -524,7 +524,7 @@ describe('assembleKycInputs', () => {
     const { x: pubX, y: pubY } = extractPubkeyCoordinates(userPubkey);
     const scopeBytes = computeScope(TEST_SCOPE);
     const nullifierBytes = computeNullifier(TEST_ADDRESS, signalHash, scopeBytes);
-    const merkleData = buildSignerMerkleTree(0);
+    const merkleData = buildSignerMerkleTree(0, AUTHORIZED_SIGNERS);
     const rawTxBytes = new Array(150).fill(42);
 
     const inputs = assembleKycInputs({
@@ -557,7 +557,7 @@ describe('assembleKycInputs', () => {
     const { x: pubX, y: pubY } = extractPubkeyCoordinates(userPubkey);
     const scopeBytes = computeScope(TEST_SCOPE);
     const nullifierBytes = computeNullifier(TEST_ADDRESS, signalHash, scopeBytes);
-    const merkleData = buildSignerMerkleTree(0);
+    const merkleData = buildSignerMerkleTree(0, AUTHORIZED_SIGNERS);
     const rawTxBytes = new Array(200).fill(0);
 
     const inputs = assembleKycInputs({
@@ -628,7 +628,7 @@ describe('assembleCountryInputs', () => {
     const { x: pubX, y: pubY } = extractPubkeyCoordinates(userPubkey);
     const scopeBytes = computeScope(TEST_SCOPE);
     const nullifierBytes = computeNullifier(TEST_ADDRESS, signalHash, scopeBytes);
-    const merkleData = buildSignerMerkleTree(0);
+    const merkleData = buildSignerMerkleTree(0, AUTHORIZED_SIGNERS);
     const rawTxBytes = new Array(200).fill(0);
 
     const inputs = assembleCountryInputs({
@@ -662,7 +662,7 @@ describe('assembleCountryInputs', () => {
     const { x: pubX, y: pubY } = extractPubkeyCoordinates(userPubkey);
     const scopeBytes = computeScope(TEST_SCOPE);
     const nullifierBytes = computeNullifier(TEST_ADDRESS, signalHash, scopeBytes);
-    const merkleData = buildSignerMerkleTree(0);
+    const merkleData = buildSignerMerkleTree(0, AUTHORIZED_SIGNERS);
     const rawTxBytes = new Array(200).fill(0);
 
     const inputs = assembleCountryInputs({
@@ -718,7 +718,7 @@ describe('assembleCountryInputs', () => {
     const { x: pubX, y: pubY } = extractPubkeyCoordinates(userPubkey);
     const scopeBytes = computeScope(TEST_SCOPE);
     const nullifierBytes = computeNullifier(TEST_ADDRESS, signalHash, scopeBytes);
-    const merkleData = buildSignerMerkleTree(0);
+    const merkleData = buildSignerMerkleTree(0, AUTHORIZED_SIGNERS);
     const rawTxBytes = new Array(100).fill(7);
 
     const inputs = assembleCountryInputs({

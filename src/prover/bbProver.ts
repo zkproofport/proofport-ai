@@ -7,7 +7,7 @@ import * as crypto from 'node:crypto';
 import { Noir } from '@noir-lang/noir_js';
 import type { CircuitParams } from '../input/inputBuilder.js';
 import type { OidcCircuitInputs } from './inputFormatter.js';
-import { formatCoinbaseInputs, formatOidcInputs } from './inputFormatter.js';
+import { formatAttestationInputs, formatOidcInputs, type AttestationCircuitId } from './inputFormatter.js';
 import { CIRCUIT_IDS, CIRCUIT_DIRS } from '../config/circuitIds.js';
 import type { CircuitId } from '../config/circuitIds.js';
 import { createLogger } from '../logger.js';
@@ -76,8 +76,8 @@ export class BbProver {
         const oidcInputs = prepareOidcCircuitInputs(inputs as any);
         noirInputs = formatOidcInputs(oidcInputs);
       } else {
-        noirInputs = formatCoinbaseInputs(
-          circuitId as typeof CIRCUIT_IDS.COINBASE_ATTESTATION | typeof CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION,
+        noirInputs = formatAttestationInputs(
+          circuitId as AttestationCircuitId,
           inputs as CircuitParams,
         );
       }

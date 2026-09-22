@@ -6,17 +6,20 @@
  */
 
 import type { CircuitParams } from '../input/inputBuilder.js';
-import { CIRCUIT_IDS } from '../config/circuitIds.js';
+import { CIRCUIT_IDS, type CircuitId } from '../config/circuitIds.js';
+import { circuitActionBinding } from '@zkproofport-app/sdk/circuits';
 
 /**
- * The circuits built from a Coinbase EAS attestation. They share the wallet,
- * the attester Merkle proof and the RLP transaction; they differ in which
- * extra public inputs ride along.
+ * The circuits built from an on-chain attestation: everything this server can
+ * prove except OIDC, which starts from a JWT and has its own formatter.
+ *
+ * Written as an exclusion rather than a list of three, because it WAS a list
+ * of three -- coinbase, country, arc -- and giwa_attestation was added to the
+ * server without being added here. The circuit takes `action_hash`, the list
+ * did not know giwa existed, and every GIWA request died inside noir_js with
+ * "Expected argument `action_hash`, but none was found".
  */
-type CoinbaseCircuitId =
-  | typeof CIRCUIT_IDS.COINBASE_ATTESTATION
-  | typeof CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION
-  | typeof CIRCUIT_IDS.ARC_ELIGIBILITY;
+export type AttestationCircuitId = Exclude<CircuitId, typeof CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION>;
 
 // ─── OIDC Circuit Inputs ────────────────────────────────────────────────
 
@@ -113,17 +116,67 @@ function formatCountryListArray(countries: string[], maxEntries: number): string
 // ─── Public API ─────────────────────────────────────────────────────────
 
 /**
- * Convert CircuitParams to a noir_js-compatible input object for coinbase circuits.
+ * Convert CircuitParams to a noir_js-compatible input object for the circuits
+ * built from an on-chain attestation.
  *
  * Field names match the circuit's main() parameter names exactly.
+ *
+ * It was `formatCoinbaseInputs` until 2026-09-22. The name is why GIWA was
+ * never added to it: a function called "coinbase" reads as somebody else's
+ * problem, and the GIWA attester is ours, on GIWA Sepolia, not Coinbase's.
  */
-export function formatCoinbaseInputs(
-  circuitId: CoinbaseCircuitId,
+export function formatAttestationInputs(
+  circuitId: AttestationCircuitId,
   params: CircuitParams,
 ): Record<string, unknown> {
   const inputs: Record<string, unknown> = {};
 
-  inputs.signal_hash = toHexArray(params.signalHash);
+  /*
+   * Is an action bound, and may this circuit carry one?
+   *
+   * The answer comes from the customer SDK's table rather than from an `if`
+   * on a circuit id here: it already says, per circuit, whether an action is
+   * impossible ('none') or allowed ('optional'), and every layer reads that
+   * same table. A test here would be a second copy, and the copy is what was
+   * wrong -- it named arc_eligibility and required an action there, months
+   * after arc made it optional and while giwa_attestation had the same two
+   * parameters and no way to fill them.
+   */
+  const binding = circuitActionBinding(circuitId);
+  const bound = Boolean(params.domainSeparator) && Boolean(params.actionHash);
+
+  if (Boolean(params.domainSeparator) !== Boolean(params.actionHash)) {
+    throw new Error(
+      'Half an action: send both domain_separator and action_hash, or neither. ' +
+      `Got domain_separator=${Boolean(params.domainSeparator)}, action_hash=${Boolean(params.actionHash)}.`,
+    );
+  }
+  if (bound && binding === 'none') {
+    throw new Error(
+      `An EIP-712 action was given but '${circuitId}' has no inputs for one. ` +
+      'Its wallet signs signal_hash with personal_sign.',
+    );
+  }
+
+  /*
+   * In action mode the wallet signed the typed data, not the challenge, and
+   * the circuit asserts signal_hash is empty -- filling both is the shape it
+   * refuses. Out of action mode the pair is empty instead.
+   */
+  inputs.signal_hash = bound ? toHexArray(new Uint8Array(32)) : toHexArray(params.signalHash);
+  if (binding !== 'none') {
+    // Parameter order in the circuit is signal_hash, domain_separator,
+    // action_hash, signer_list_merkle_root, scope, nullifier. noir_js takes a
+    // named object so the key order here does not matter, but the public
+    // inputs come out in that order and anything reading them by offset --
+    // the app, the demo, the verifier contract -- depends on it.
+    inputs.domain_separator = bound
+      ? toHexArray(hexStringToBytes(params.domainSeparator!))
+      : toHexArray(new Uint8Array(32));
+    inputs.action_hash = bound
+      ? toHexArray(hexStringToBytes(params.actionHash!))
+      : toHexArray(new Uint8Array(32));
+  }
   inputs.signer_list_merkle_root = toHexArray(hexStringToBytes(params.merkleRoot));
 
   if (circuitId === CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION) {
@@ -133,23 +186,6 @@ export function formatCoinbaseInputs(
     inputs.country_list = formatCountryListArray(params.countryList, 10);
     inputs.country_list_length = params.countryListLength.toString();
     inputs.is_included = params.isIncluded;
-  }
-
-  if (circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY) {
-    // The action the wallet signed, as EIP-712's two hashes. They sit between
-    // the signer Merkle root and the scope, matching the parameter order in
-    // arc-eligibility/src/main.nr -- noir_js takes an object, but the circuit
-    // reads its public inputs positionally, and a field in the wrong place
-    // produces a proof that fails to verify with nothing naming the cause.
-    if (!params.domainSeparator || !params.actionHash) {
-      throw new Error(
-        'arc_eligibility requires domain_separator and action_hash. The caller ' +
-        'must sign an EIP-712 typed action; personal_sign over signal_hash is ' +
-        'the coinbase_attestation flow.',
-      );
-    }
-    inputs.domain_separator = toHexArray(hexStringToBytes(params.domainSeparator));
-    inputs.action_hash = toHexArray(hexStringToBytes(params.actionHash));
   }
 
   inputs.scope = toHexArray(params.scopeBytes);

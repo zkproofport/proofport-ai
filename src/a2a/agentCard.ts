@@ -367,7 +367,7 @@ export function buildOasfAgent(config: Config, tokenId?: bigint | null) {
       },
       {
         name: 'DID',
-        endpoint: `did:web:${new URL(config.a2aBaseUrl).hostname}`,
+        endpoint: `did:web:${didWebHost(config.a2aBaseUrl)}`,
       },
       {
         name: 'agentWallet',
@@ -483,11 +483,26 @@ export function getAgentRegistrationHandler(config: Config, tokenIdRef: TokenIdR
 }
 
 /**
+ * The did:web identifier for a base URL — the host, and the port when there is
+ * one.
+ *
+ * did:web encodes a port as `%3A` (W3C did:web, "The Method Specific
+ * Identifier"). Dropping it, which this did until 2026-09-22, makes a service
+ * on a port publish `did:web:localhost`, which resolves to
+ * `https://localhost/.well-known/did.json` — a different place entirely.
+ * Deployments carry no port, so their documents do not change.
+ */
+export function didWebHost(baseUrl: string): string {
+  const url = new URL(baseUrl);
+  return url.port ? `${url.hostname}%3A${url.port}` : url.hostname;
+}
+
+/**
  * Express handler for GET /.well-known/did.json
  * W3C DID Document for did:web resolution
  */
 export function getDidHandler(config: Config): (req: Request, res: Response) => void {
-  const hostname = new URL(config.a2aBaseUrl).hostname;
+  const hostname = didWebHost(config.a2aBaseUrl);
   const agentAddress = new ethers.Wallet(config.proverPrivateKey).address;
 
   return (_req: Request, res: Response) => {

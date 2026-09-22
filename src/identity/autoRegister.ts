@@ -11,7 +11,8 @@ import { getChainIdentities } from '../config/index.js';
 import type { AgentMetadata } from './types.js';
 import type { TeeProvider } from '../tee/types.js';
 import { createLogger } from '../logger.js';
-import { CIRCUIT_IDS } from '../config/circuitIds.js';
+import { PROVABLE_CIRCUIT_IDS, CIRCUIT_IDS } from '../config/circuitIds.js';
+import { didWebHost } from '../a2a/agentCard.js';
 
 const log = createLogger('AutoRegister');
 
@@ -50,14 +51,15 @@ function buildAgentMetadata(
     capabilities: [
       'proof_generation',
       'proof_verification',
-      'coinbase_kyc',
-      'coinbase_country',
-      'arc_eligibility',
+      // The circuits this agent advertises, from the list it can actually
+      // prove. Typed out, this said three while the server proved five --
+      // an agent that under-reports is found by nobody looking for GIWA.
+      ...PROVABLE_CIRCUIT_IDS,
       'streaming',
       'x402_payment',
     ],
     protocols: ['mcp', 'a2a', 'x402'],
-    circuits: [CIRCUIT_IDS.COINBASE_ATTESTATION, CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION, CIRCUIT_IDS.ARC_ELIGIBILITY],
+    circuits: [...PROVABLE_CIRCUIT_IDS],
     tags: ['ZK', 'Privacy', 'Proof', 'Coinbase', 'KYC', 'Attestation', 'x402', 'Identity', 'Country', 'Verification', 'Base', 'USDC', 'Arc', ...(config.teeMode === 'nitro' ? ['TEE'] : []), 'Noir', 'EAS', 'Zero-Knowledge'],
     ...(config.teeMode === 'nitro' && { tee: 'nitro' }),
     x402Support: true,
@@ -74,7 +76,7 @@ function buildAgentMetadata(
       { name: 'A2A', endpoint: `${config.a2aBaseUrl}/.well-known/agent-card.json`, version: '0.3.0', a2aSkills: ['prove', 'get_supported_circuits', 'get_guide'] },
       { name: 'OASF', endpoint: `${config.a2aBaseUrl}`, version: 'v0.8.0', skills: ['security_privacy/privacy_risk_assessment', 'security_privacy/threat_detection'], domains: ['technology/blockchain', 'technology/security', 'trust_and_safety/data_privacy'] },
       { name: 'x402', endpoint: `${config.a2aBaseUrl}/api/v1/prove` },
-      { name: 'DID', endpoint: `did:web:${new URL(config.a2aBaseUrl).hostname}` },
+      { name: 'DID', endpoint: `did:web:${didWebHost(config.a2aBaseUrl)}` },
       { name: 'agentWallet', endpoint: `eip155:${chain.chainId}:${agentAddress}` },
     ],
     categories: ['privacy', 'security', 'verification', 'identity'],
