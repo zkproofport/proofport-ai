@@ -28,7 +28,30 @@ import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
-const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:4002';
+const BASE_URL = (process.env.E2E_BASE_URL || 'http://localhost:4002').replace(/\/$/, '');
+// Expectations come from the selected deployment, never from the server's response.
+// Set E2E_DEPLOYMENT_ENVIRONMENT for a run.app/local URL with a production config.
+const deploymentEnvironment = process.env.E2E_DEPLOYMENT_ENVIRONMENT
+  || (new URL(BASE_URL).hostname === 'ai.zkproofport.app' ? 'production' : 'staging');
+if (!['staging', 'production'].includes(deploymentEnvironment)) {
+  throw new Error('E2E_DEPLOYMENT_ENVIRONMENT must be staging or production');
+}
+const expectedIdentities = deploymentEnvironment === 'production'
+  ? [{ chainId: 1, agentId: 31921 }, { chainId: 8453, agentId: 25331 }]
+  : [{ chainId: 11155111, agentId: 3288 }, { chainId: 84532, agentId: 592 }, { chainId: 5042002, agentId: 894776 }];
+const primaryIdentity = expectedIdentities[0];
+const canonicalCircuits = ['coinbase_attestation', 'coinbase_country_attestation', 'oidc_domain_attestation', 'arc_eligibility', 'giwa_attestation'];
+
+function assertCompleteRegistrations(registrations: any[]) {
+  expect(Array.isArray(registrations)).toBe(true);
+  expect(registrations).toHaveLength(expectedIdentities.length);
+  const identities = registrations.map(registration => {
+    expect(registration.agentRegistry).toMatch(/^eip155:\d+:0x[0-9a-fA-F]{40}$/);
+    return { chainId: Number(registration.agentRegistry.split(':')[1]), agentId: registration.agentId };
+  });
+  expect(identities.sort((a, b) => a.chainId - b.chainId))
+    .toEqual([...expectedIdentities].sort((a, b) => a.chainId - b.chainId));
+}
 
 // Detect payment mode from server health endpoint (cached)
 let _paymentRequired: boolean | null = null;
@@ -208,29 +231,27 @@ describe('Discovery Endpoints', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Dual-Chain Identity & Verification (Ethereum + Base)
+// Deployment Identity & Verification (all configured chains)
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('Dual-Chain Identity & Verification', () => {
-  it('agent card uses Ethereum chain ID (1 or 11155111), not Base', async () => {
-    const { json } = await jsonGet('/.well-known/agent-card.json');
-    const identity = json.identity?.erc8004;
-    if (identity) {
-      // Primary chain should be Ethereum (1 for production, 11155111 for testnet)
-      expect([1, 11155111]).toContain(identity.chainId);
-      // Should NOT be Base chain IDs
-      expect(identity.chainId).not.toBe(8453);
-      expect(identity.chainId).not.toBe(84532);
-    }
+describe('Deployment Identity & Verification', () => {
+  it('agent card requires the selected environment’s Ethereum identity', async () => {
+    const { status, json } = await jsonGet('/.well-known/agent-card.json');
+    expect(status).toBe(200);
+    expect(json.identity?.erc8004).toMatchObject({
+      chainId: primaryIdentity.chainId,
+      tokenId: String(primaryIdentity.agentId),
+    });
+    expect(json.identity.erc8004.contractAddress).toMatch(/^0x[0-9a-fA-F]{40}$/);
   });
 
-  it('OASF agent agentWallet uses Ethereum chain ID', async () => {
-    const { json } = await jsonGet('/.well-known/agent.json');
+  it('OASF requires the Ethereum wallet and every environment-specific registration', async () => {
+    const { status, json } = await jsonGet('/.well-known/agent.json');
+    expect(status).toBe(200);
     const walletService = json.services?.find((s: any) => s.name === 'agentWallet');
-    if (walletService) {
-      // Should be eip155:1:0x... or eip155:11155111:0x...
-      expect(walletService.endpoint).toMatch(/^eip155:(1|11155111):0x/);
-    }
+    expect(walletService).toBeDefined();
+    expect(walletService.endpoint).toMatch(new RegExp(`^eip155:${primaryIdentity.chainId}:0x[0-9a-fA-F]{40}$`));
+    assertCompleteRegistrations(json.registrations);
   });
 
   it('OASF agent x402Support is always true', async () => {
@@ -238,35 +259,45 @@ describe('Dual-Chain Identity & Verification', () => {
     expect(json.x402Support).toBe(true);
   });
 
-  it('agent-registration.json includes registrations', async () => {
+  it('agent-registration.json includes exactly all identities for the selected environment', async () => {
     const { status, json } = await jsonGet('/.well-known/agent-registration.json');
     expect(status).toBe(200);
-    expect(json.registrations).toBeDefined();
-    expect(Array.isArray(json.registrations)).toBe(true);
-    expect(json.registrations.length).toBeGreaterThanOrEqual(1);
-    // Each registration should have agentRegistry with chain ID
-    for (const reg of json.registrations) {
-      expect(reg.agentRegistry).toMatch(/^eip155:\d+:0x/);
-    }
+    assertCompleteRegistrations(json.registrations);
   });
 
-  it('MCP discovery uses Ethereum chain verifier addresses', async () => {
-    const { json } = await jsonGet('/.well-known/mcp.json');
-    const description = JSON.stringify(json);
-    // Should reference Ethereum chain ID (1 or 11155111), not Base (8453 or 84532)
-    expect(description).toMatch(/chainId=(1|11155111)/);
+  it('ready identity status requires all identities, including Base and staging Arc', async () => {
+    const { status, json } = await jsonGet('/identity/status');
+    expect(status).toBe(200);
+    expect(json.status).toBe('ready');
+    expect(json.registrations).toHaveLength(expectedIdentities.length);
+    expect(json.registrations.map((identity: any) => ({ chainId: identity.chainId, agentId: String(identity.agentId) }))
+      .sort((a: any, b: any) => a.chainId - b.chainId))
+      .toEqual(expectedIdentities.map(identity => ({ ...identity, agentId: String(identity.agentId) }))
+        .sort((a, b) => a.chainId - b.chainId));
   });
 
-  it('get_supported_circuits returns Ethereum chain verifiers by default', async () => {
+  it('MCP discovery names the selected environment’s Ethereum verification chain', async () => {
+    const { status, json } = await jsonGet('/.well-known/mcp.json');
+    expect(status).toBe(200);
+    expect(JSON.stringify(json)).toMatch(new RegExp(`chainId=${primaryIdentity.chainId}(?![0-9])`));
+  });
+
+  it('get_supported_circuits requires all five circuits and the selected Ethereum chain', async () => {
     const task = await a2aClient.sendMessage({
       message: makeDataPartMessage({ skill: 'get_supported_circuits' }).message,
     }) as Task;
+    expect(task.status.state).toBe('completed');
     const data = extractDataFromArtifacts(task.artifacts);
+    expect(String(data.chainId)).toBe(String(primaryIdentity.chainId));
     const circuits = data.circuits as any[];
-    if (circuits && circuits.length > 0 && circuits[0].verifierAddress) {
-      // Verifier address should be for Ethereum chain, not Base
-      // Just verify it's a valid address
-      expect(circuits[0].verifierAddress).toMatch(/^0x[0-9a-fA-F]{40}$/);
+    expect(Array.isArray(circuits)).toBe(true);
+    expect(circuits.map(circuit => circuit.id).sort()).toEqual([...canonicalCircuits].sort());
+    for (const id of canonicalCircuits.slice(0, 3)) {
+      expect(circuits.find(circuit => circuit.id === id).verifierAddress).toMatch(/^0x[0-9a-fA-F]{40}$/);
+    }
+    // Arc/GIWA use dedicated networks, not the default Ethereum verifier map.
+    for (const id of canonicalCircuits.slice(3)) {
+      expect(circuits.find(circuit => circuit.id === id).guide_url).toBe(`${BASE_URL}/api/v1/guide/${id}`);
     }
   });
 });
@@ -857,7 +888,7 @@ describe(
         expect(textContent).toBeDefined();
         const parsed = JSON.parse((textContent as any).text);
         // Should contain redirect message with REST endpoint
-        expect(parsed.rest_endpoint).toBe('POST /api/v1/prove');
+        expect(parsed.rest_endpoint).toBe(`POST ${BASE_URL}/api/v1/prove`);
         expect(parsed.message).toContain('REST endpoint');
       } finally {
         await transport.close();

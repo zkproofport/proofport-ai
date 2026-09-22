@@ -29,7 +29,7 @@ function validateTeeMode(value: string): 'disabled' | 'local' | 'nitro' {
 export function loadConfig() {
   const paymentMode = validatePaymentMode(getRequiredEnv('PAYMENT_MODE'));
 
-  return {
+  const config = {
     port: parseInt(process.env.PORT || '4002', 10),
     nodeEnv: process.env.NODE_ENV || 'development',
     proverUrl: process.env.PROVER_URL || '',
@@ -114,6 +114,11 @@ export function loadConfig() {
     giwaRpcUrl: process.env.GIWA_RPC_URL || '',
     giwaExplorerUrl: process.env.GIWA_EXPLORER_URL || '',
 
+    // Proof verification does not opt this service into Arc identity publication.
+    // Preserve undefined: a partially configured explicit pair must not fall back.
+    arcVerificationRpcUrl: process.env.ARC_VERIFICATION_RPC_URL,
+    arcVerificationChainId: process.env.ARC_VERIFICATION_CHAIN_ID === undefined
+      ? undefined : Number(process.env.ARC_VERIFICATION_CHAIN_ID),
     arcRpcUrl: process.env.ARC_RPC_URL || '',
     arcChainId: process.env.ARC_CHAIN_ID ? Number(process.env.ARC_CHAIN_ID) : 0,
     arcIdentityAddress: process.env.ARC_IDENTITY_ADDRESS || '',
@@ -132,9 +137,38 @@ export function loadConfig() {
     virtualsEntityId: process.env.VIRTUALS_ENTITY_ID ? parseInt(process.env.VIRTUALS_ENTITY_ID, 10) : 0,
     virtualsAgentWallet: process.env.VIRTUALS_AGENT_WALLET || '',
   };
+  if (config.arcVerificationRpcUrl !== undefined || config.arcVerificationChainId !== undefined) {
+    getArcVerificationConfig(config);
+  }
+  return config;
 }
 
 export type Config = ReturnType<typeof loadConfig>;
+
+/** Resolve Arc proof verification without changing ERC-8004 identity selection. */
+export function getArcVerificationConfig(config: {
+  arcVerificationRpcUrl?: string; arcVerificationChainId?: number;
+  arcRpcUrl?: string; arcChainId?: number;
+}): { rpcUrl: string; chainId: number } {
+  const explicit = config.arcVerificationRpcUrl !== undefined || config.arcVerificationChainId !== undefined;
+  const rpcUrl = explicit ? config.arcVerificationRpcUrl : config.arcRpcUrl;
+  const chainId = explicit ? config.arcVerificationChainId : config.arcChainId;
+  if (!explicit && !rpcUrl && !chainId) return { rpcUrl: '', chainId: 0 };
+  if (!Number.isSafeInteger(chainId) || (chainId ?? 0) <= 0) {
+    throw new Error(explicit
+      ? 'ARC_VERIFICATION_RPC_URL and ARC_VERIFICATION_CHAIN_ID require a complete valid pair'
+      : 'Invalid verification chain for arc_eligibility');
+  }
+  try {
+    const url = new URL(rpcUrl ?? '');
+    if (!['https:', 'http:'].includes(url.protocol) || !url.hostname) throw new Error('Invalid RPC');
+  } catch {
+    throw new Error(explicit
+      ? 'ARC_VERIFICATION_RPC_URL must be a valid HTTP(S) URL paired with ARC_VERIFICATION_CHAIN_ID'
+      : 'ARC_RPC_URL must be a valid HTTP(S) URL paired with ARC_CHAIN_ID');
+  }
+  return { rpcUrl: rpcUrl!, chainId: chainId! };
+}
 
 /** Chain registration config for ERC-8004 dual identity */
 export interface ChainIdentity {

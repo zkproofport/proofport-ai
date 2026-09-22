@@ -4,7 +4,7 @@ import { CIRCUIT_IDS } from '../config/circuitIds.js';
 import { AUTHORIZED_SIGNERS, COINBASE_ATTESTER_CONTRACT, ATTESTATION_SOURCES, GIWA_CHAIN_ID } from '../config/contracts.js';
 import { getChainVerifiers } from '../config/deployments.js';
 import { resolvePaymentNetworks, type PaymentNetwork } from '../payment/networks.js';
-import { type Config, getPaymentChainId, isTestnet } from '../config/index.js';
+import { type Config, getPaymentChainId, isTestnet, getArcVerificationConfig } from '../config/index.js';
 import { parseUnits } from 'ethers';
 
 const require = createRequire(import.meta.url);
@@ -352,8 +352,9 @@ function buildActionGuide(circuitId: CircuitId, config: Config) {
   const circuit = CIRCUITS[circuitId];
   const source = ATTESTATION_SOURCES[circuitId];
   if (!source) throw new Error(`No attestation source for ${circuitId}`);
+  const arc = circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY ? getArcVerificationConfig(config) : undefined;
   const targets: Partial<Record<CircuitId, { chainId: number; name: string; rpc: string }>> = {
-    [CIRCUIT_IDS.ARC_ELIGIBILITY]: { chainId: config.arcChainId, name: `Arc (${config.arcChainId})`, rpc: config.arcRpcUrl },
+    [CIRCUIT_IDS.ARC_ELIGIBILITY]: arc ? { chainId: arc.chainId, name: `Arc (${arc.chainId})`, rpc: arc.rpcUrl } : undefined,
     [CIRCUIT_IDS.GIWA_ATTESTATION]: { chainId: GIWA_CHAIN_ID, name: 'GIWA Sepolia', rpc: config.giwaRpcUrl },
   };
   const target = targets[circuitId];

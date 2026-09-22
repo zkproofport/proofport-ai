@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import { circuitActionBinding } from '@zkproofport-app/sdk/circuits';
 import type { RedisClient } from '../redis/client.js';
-import type { Config } from '../config/index.js';
+import { type Config, getArcVerificationConfig } from '../config/index.js';
 import type { TeeProvider } from '../tee/types.js';
 import { PROVABLE_CIRCUIT_IDS, CIRCUIT_IDS } from '../config/circuitIds.js';
 import type { CircuitId } from '../config/circuitIds.js';
@@ -94,7 +94,7 @@ export function chooseVerificationTarget(
   testnet: boolean,
 ): ProveResponse['verification'] {
   const dedicated: Partial<Record<CircuitId, { chainId: number; rpcUrl: string }>> = {
-    [CIRCUIT_IDS.ARC_ELIGIBILITY]: { chainId: config.arcChainId, rpcUrl: config.arcRpcUrl },
+    [CIRCUIT_IDS.ARC_ELIGIBILITY]: circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY ? getArcVerificationConfig(config) : undefined,
     [CIRCUIT_IDS.GIWA_ATTESTATION]: { chainId: GIWA_CHAIN_ID, rpcUrl: config.giwaRpcUrl },
   };
   const target = dedicated[circuitId];

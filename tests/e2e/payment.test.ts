@@ -46,6 +46,7 @@ import {
   createConfig, generateProof, fromPrivateKey, verifyProof, gatewayBalance, walletFromArcAgent,
 } from '@zkproofport-ai/sdk';
 import type { PaymentWallet } from '@zkproofport-ai/sdk';
+import { createPublicClient, http, parseAbi, parseSignature, recoverTypedDataAddress } from 'viem';
 
 const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:4002';
 const CIRCUIT = 'coinbase_kyc';
@@ -306,4 +307,51 @@ describe('what the service refuses', () => {
     const body = (await res.json()) as { error?: string };
     expect(body.error).toBe('INVALID_NONCE');
   }, 240_000);
+});
+
+
+// Signature and eth_call only: these never submit a paid proof or transaction.
+describe('Circle agent payment signing preflight', () => {
+  for (const network of ['arc-testnet', 'arc-testnet-nano']) it(`verifies ${network} against its actual owner without settlement`, async context => {
+    if (!process.env.E2E_ARC_AGENT_ADDRESS) {
+      console.warn('SKIP: E2E_ARC_AGENT_ADDRESS and an existing Circle CLI login are required');
+      return context.skip();
+    }
+    expect(reachable, `${BASE_URL} unreachable`).toBe(true);
+    expect(challenge?.requiresPayment, 'staging must advertise payment offers').toBe(true);
+    const wallet = await walletFromArcAgent({ address: process.env.E2E_ARC_AGENT_ADDRESS });
+    let typed: Parameters<PaymentWallet['signTypedData']>[0] | undefined;
+    let signature: `0x${string}` | undefined;
+    const sign = wallet.signTypedData.bind(wallet);
+    wallet.signTypedData = async message => {
+      typed = message;
+      signature = await sign(message);
+      return signature;
+    };
+    const paid = await signPayment(challenge!, wallet, { network });
+    expect(typed).toBeDefined();
+    expect(signature).toBeDefined();
+    expect(String(typed!.message.from).toLowerCase()).toBe(paid.payer.toLowerCase());
+    if (network.endsWith('-nano')) {
+      const recovered = await recoverTypedDataAddress({ ...typed!, signature: signature! } as Parameters<typeof recoverTypedDataAddress>[0]);
+      expect(recovered.toLowerCase()).toBe(paid.payer.toLowerCase());
+      expect(paid.payer.toLowerCase()).not.toBe(process.env.E2E_ARC_AGENT_ADDRESS.toLowerCase());
+    } else {
+      expect(paid.payer.toLowerCase()).toBe(process.env.E2E_ARC_AGENT_ADDRESS.toLowerCase());
+      const rpc = createPublicClient({ transport: http(RPC_BY_CAIP2['eip155:5042002']) });
+      expect(await rpc.verifyTypedData({ ...typed!, address: paid.payer, signature: signature! } as Parameters<typeof rpc.verifyTypedData>[0])).toBe(true);
+      const m = typed!.message;
+      const args = [m.from as `0x${string}`, m.to as `0x${string}`, BigInt(String(m.value)), BigInt(String(m.validAfter)), BigInt(String(m.validBefore)), m.nonce as `0x${string}`] as const;
+      const parsed = parseSignature(signature!);
+      // The pinned x402 facilitator uses v/r/s for a 65-byte Circle signature.
+      // Check that actual overload too, not only the ERC-1271 bytes overload.
+      await rpc.simulateContract({
+        address: typed!.domain.verifyingContract as `0x${string}`,
+        abi: parseAbi(['function transferWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce,uint8 v,bytes32 r,bytes32 s)']),
+        functionName: 'transferWithAuthorization',
+        args: [...args, Number(parsed.v ?? (BigInt(parsed.yParity!) + 27n)), parsed.r, parsed.s],
+        account: m.to as `0x${string}`,
+      });
+    }
+  }, 30_000);
 });

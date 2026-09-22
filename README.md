@@ -482,6 +482,11 @@ npm run test:e2e:published
 
 This installs the exact SDK/MCP versions from their package manifests into an
 isolated temporary directory, together with the supported Circle CLI **1.1.4**.
+It also installs the SDK's optional wallet adapters: CDP and x402 extensions
+use the tested versions in the root lockfile, and Circle developer-controlled
+wallets uses the exact test pin 10.8.1. All adapter modules are imported from the
+isolated installation before any paid test begins. Missing or newly added
+optional peers fail this preflight instead of failing after a proof starts.
 It verifies those versions and gives every test subprocess that CLI through its
 PATH; the global installation is neither used nor changed. SDK imports and the
 MCP process use the installed registry artifacts, not workspace links. The

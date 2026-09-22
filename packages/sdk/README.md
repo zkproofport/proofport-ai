@@ -254,7 +254,7 @@ circle gateway balance --address "$ARC_AGENT_WALLET" --chain ARC-TESTNET --outpu
 circle gateway deposit --amount 0.1 --address "$ARC_AGENT_WALLET" --chain ARC-TESTNET --method direct
 ```
 
-For the live Gateway batched offer, SDK `signPayment` uses `@circle-fin/x402-batching` and the Circle CLI wallet adapter. It signs the Gateway authorization against the offer’s Gateway signing domain and spends the existing funded Gateway balance. The payment adapter resolves Circle's backing EOA for Gateway authorization. The operational smart-wallet address remains Wallet B for the action and stake; do not substitute the backing EOA into the action's `delegate` field. `walletFromArcAgent({address: process.env.ARC_AGENT_WALLET, chain: 'ARC-TESTNET'})` and `walletFor('arc')` provide the same payment path.
+For the live Gateway batched offer, SDK `signPayment` uses `@circle-fin/x402-batching` and the Circle CLI wallet adapter. It signs the Gateway authorization against the offer’s Gateway signing domain and spends the existing funded Gateway balance. The payment adapter uses the agent smart-wallet address for direct USDC payments (`arc-testnet`, verified through ERC-1271) and Circle's backing EOA for Gateway authorization (`arc-testnet-nano`). `wallet.address` is the on-chain owner; `wallet.gatewayAddress` identifies the separate Gateway depositor, and `signPayment` selects the correct owner for the chosen offer. The operational smart-wallet address remains Wallet B for the action and stake; do not substitute the backing EOA into the action's `delegate` field. `walletFromArcAgent({address: process.env.ARC_AGENT_WALLET, chain: 'ARC-TESTNET'})` and `walletFor('arc')` provide the same payment path.
 
 After the user reviews the action and the live x402 offer, save those exact approved objects locally as `approved-action.json` and `approved-payment.json`:
 
@@ -756,13 +756,15 @@ From the `proofport-ai` repository root, use the isolated registry runner:
 ```bash
 E2E_BASE_URL=https://stg-ai.zkproofport.app \
 E2E_PAYMENT_NETWORK=base-sepolia \
-npm run test:e2e:published -- --sdk-version 0.2.14 --mcp-version 0.2.15
+npm run test:e2e:published -- --sdk-version 0.2.15 --mcp-version 0.2.15
 ```
 
 It installs those exact npm versions outside the workspace, resolves SDK imports
 and the MCP process to that installation, and removes it afterwards. The runner
 also installs and verifies Circle CLI 1.1.4, automatically putting it on the test
-subprocess PATH without changing the global installation. A normal
+subprocess PATH without changing the global installation. Optional CDP/x402 and
+Circle developer wallet dependencies are installed at tested exact versions,
+and their imports are verified before paid tests start. A normal
 workspace test run exercises local packages and is not published-package evidence.
 The full suite creates paid testnet proofs. It requires the attestation and payer
 credentials loaded by `tests/setup.ts`; GIWA uses `GIWA_ATTESTATION_KEY`, and OIDC

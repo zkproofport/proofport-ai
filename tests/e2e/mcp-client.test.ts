@@ -15,6 +15,7 @@
  */
 
 import { execSync } from 'child_process';
+import { verifyProof } from '@zkproofport-ai/sdk';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -54,7 +55,7 @@ describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
         ...process.env,
         PROOFPORT_URL: BASE_URL,
         ATTESTATION_KEY: ATTESTATION_KEY!,
-        PAYMENT_KEY: PAYER_KEY!,
+        PAYMENT_PRIVATE_KEY: PAYER_KEY!,
       },
     });
 
@@ -93,6 +94,7 @@ describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
         name: 'generate_proof',
         arguments: {
           circuit: 'coinbase_kyc',
+          pay_with: 'key',
           pay_on: process.env.E2E_PAYMENT_NETWORK,
           scope: 'e2e-test:npm-mcp-kyc',
         },
@@ -105,6 +107,8 @@ describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
       // insufficient_balance" behind a boolean for a whole staging run.
       expect(result.isError, `generate_proof failed: ${text}`).toBeFalsy();
       expect(data.proof).toBeTruthy();
+      const verified = await verifyProof(data);
+      expect(verified.valid, verified.error).toBe(true);
       expect(data.proof.startsWith('0x')).toBe(true);
       expect(data.publicInputs).toBeTruthy();
       // paymentTxHash only present when payment is required (not in free tier)
@@ -116,6 +120,7 @@ describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
         name: 'generate_proof',
         arguments: {
           circuit: 'coinbase_country',
+          pay_with: 'key',
           pay_on: process.env.E2E_PAYMENT_NETWORK,
           scope: 'e2e-test:npm-mcp-country',
           country_list: ['US', 'KR'],
@@ -130,6 +135,8 @@ describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
       // insufficient_balance" behind a boolean for a whole staging run.
       expect(result.isError, `generate_proof failed: ${text}`).toBeFalsy();
       expect(data.proof).toBeTruthy();
+      const verified = await verifyProof(data);
+      expect(verified.valid, verified.error).toBe(true);
     }, 120_000);
 
     it.skipIf(!OIDC_JWT)('oidc_domain: full E2E proof generation', async () => {
@@ -137,6 +144,7 @@ describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
         name: 'generate_proof',
         arguments: {
           circuit: 'oidc_domain',
+          pay_with: 'key',
           pay_on: process.env.E2E_PAYMENT_NETWORK,
           scope: 'e2e-test:npm-mcp-oidc',
           jwt: OIDC_JWT,
@@ -150,6 +158,8 @@ describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
       // insufficient_balance" behind a boolean for a whole staging run.
       expect(result.isError, `generate_proof failed: ${text}`).toBeFalsy();
       expect(data.proof).toBeTruthy();
+      const verified = await verifyProof(data);
+      expect(verified.valid, verified.error).toBe(true);
       expect(data.proof.startsWith('0x')).toBe(true);
     }, 120_000);
   });
@@ -161,6 +171,7 @@ describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
         name: 'prepare_inputs',
         arguments: {
           circuit: 'coinbase_kyc',
+          pay_with: 'key',
           pay_on: process.env.E2E_PAYMENT_NETWORK,
           scope: 'e2e-test:npm-mcp-steps',
         },

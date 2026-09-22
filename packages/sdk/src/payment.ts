@@ -158,14 +158,19 @@ export async function signPayment(
   // signing, which Gateway rejects as `unauthorized` -- a valid signature over
   // the wrong thing. Circle's own way is to hand the ordinary scheme in as the
   // fallback, so ONE composite scheme picks per offer.
-  if (supportsBatching(offer.raw as { extra?: Record<string, unknown> })) {
+  const batched = supportsBatching(offer.raw as { extra?: Record<string, unknown> });
+  const signer = {
+    address: batched ? (wallet.gatewayAddress ?? wallet.address) : wallet.address,
+    signTypedData: wallet.signTypedData.bind(wallet),
+  };
+  if (batched) {
     const { ExactEvmScheme } = await import('@x402/evm/exact/client');
     registerBatchScheme(client as never, {
-      signer: wallet as never,
+      signer: signer as never,
       fallbackScheme: new (ExactEvmScheme as never as new (s: unknown) => unknown)(wallet) as never,
     } as never);
   } else {
-    registerExactEvmScheme(client, { signer: wallet as never });
+    registerExactEvmScheme(client, { signer: signer as never });
   }
   const http = new x402HTTPClient(client);
 
@@ -186,6 +191,6 @@ export async function signPayment(
     },
     paidOn: offer.networkName,
     amount: offer.amount,
-    payer: wallet.address,
+    payer: signer.address,
   };
 }

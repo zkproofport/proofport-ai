@@ -89,7 +89,8 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
   });
 
   describe('CIRCUITS constant', () => {
-    it('should export all 3 circuits', () => {
+    it('should export all 5 circuits', () => {
+      expect(Object.keys(CIRCUITS).sort()).toEqual(['arc_eligibility', 'coinbase_attestation', 'coinbase_country_attestation', 'giwa_attestation', 'oidc_domain_attestation']);
       expect(CIRCUITS.coinbase_attestation).toBeDefined();
       expect(CIRCUITS.coinbase_country_attestation).toBeDefined();
       expect(CIRCUITS.oidc_domain_attestation).toBeDefined();
@@ -124,6 +125,8 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
         { circuit: 'coinbase_kyc', scope: 'e2e-test:npm-sdk-kyc', payOn },
       );
 
+      const verified = await verifyProof(result);
+      expect(verified.valid, verified.error).toBe(true);
       expect(result.proof).toBeTruthy();
       expect(result.proof.startsWith('0x')).toBe(true);
       expect(result.publicInputs).toBeTruthy();
@@ -144,6 +147,8 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
         },
       );
 
+      const verified = await verifyProof(result);
+      expect(verified.valid, verified.error).toBe(true);
       expect(result.proof).toBeTruthy();
       expect(result.proof.startsWith('0x')).toBe(true);
       expect(result.publicInputs).toBeTruthy();
@@ -189,6 +194,8 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
         },
       );
 
+      const verified = await verifyProof(result);
+      expect(verified.valid, verified.error).toBe(true);
       expect(result.proof).toBeTruthy();
       expect((result.publicInputs.length - 2) / 2).toBe(192 * 32);
     }, 180_000);
@@ -218,6 +225,10 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
           },
         },
       );
+      for (const proof of [plain, bound]) {
+        const verified = await verifyProof(proof);
+        expect(verified.valid, verified.error).toBe(true);
+      }
       // ProofResult carries no nullifier field, so it is read from the public
       // inputs with the SDK's own per-circuit layout -- the same reader a
       // consumer would use.
@@ -240,6 +251,8 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
         },
       );
 
+      const verified = await verifyProof(result);
+      expect(verified.valid, verified.error).toBe(true);
       expect(result.proof).toBeTruthy();
       expect(result.publicInputs).toBeTruthy();
       if (result.paymentTxHash) expect(result.paymentTxHash).toMatch(/^0x/);
@@ -257,6 +270,8 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
         },
       );
 
+      const verified = await verifyProof(result);
+      expect(verified.valid, verified.error).toBe(true);
       expect(result.proof).toBeTruthy();
       expect(result.proof.startsWith('0x')).toBe(true);
       expect(result.publicInputs).toBeTruthy();

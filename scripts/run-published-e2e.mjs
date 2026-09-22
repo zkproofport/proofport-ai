@@ -12,12 +12,16 @@ import { join, dirname, resolve, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { publishedWalletDependencies, walletImportPreflight } from './published-wallet-dependencies.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 // Circle rejects older CLI wallet operations. Pin the supported version here
 // so an operator's global installation cannot silently break Arc E2E.
 const circleCliVersion = '1.1.4';
-let sdkVersion = JSON.parse(await readFile(join(root, 'packages/sdk/package.json'), 'utf8')).version;
+const sdkManifest = JSON.parse(await readFile(join(root, 'packages/sdk/package.json'), 'utf8'));
+const rootLock = JSON.parse(await readFile(join(root, 'package-lock.json'), 'utf8'));
+const walletDependencies = publishedWalletDependencies(rootLock, sdkManifest);
+let sdkVersion = sdkManifest.version;
 let mcpVersion = JSON.parse(await readFile(join(root, 'packages/mcp/package.json'), 'utf8')).version;
 const extra = [];
 for (let i = 0; i < args.length; i++) {
@@ -42,11 +46,18 @@ const install = await mkdtemp(join(tmpdir(), 'proofport-ai-published-e2e-'));
 try {
   await writeFile(join(install, 'package.json'), JSON.stringify({
     private: true, type: 'module',
-    dependencies: { '@zkproofport-ai/sdk': sdkVersion, '@zkproofport-ai/mcp': mcpVersion, '@circle-fin/cli': circleCliVersion },
+    dependencies: { '@zkproofport-ai/sdk': sdkVersion, '@zkproofport-ai/mcp': mcpVersion, '@circle-fin/cli': circleCliVersion, ...walletDependencies },
     overrides: { '@zkproofport-ai/sdk': sdkVersion },
   }, null, 2));
   const status = await run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund'], install);
   if (status) throw new Error(`Published package install failed (${status})`);
+  for (const [name, version] of Object.entries(walletDependencies)) {
+    const manifest = JSON.parse(await readFile(join(install, 'node_modules', name, 'package.json'), 'utf8'));
+    if (manifest.version !== version) throw new Error(`${name} wallet dependency version mismatch`);
+    console.log(`[published E2E] ${name}@${version}`);
+  }
+  const preflightStatus = await run(process.execPath, ['--input-type=module', '--eval', walletImportPreflight], install);
+  if (preflightStatus) throw new Error('Optional wallet adapter import preflight failed before proof tests');
   const entries = {};
   for (const [name, version] of [['sdk', sdkVersion], ['mcp', mcpVersion]]) {
     const packageRoot = await realpath(join(install, 'node_modules', '@zkproofport-ai', name));

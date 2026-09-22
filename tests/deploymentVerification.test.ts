@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { validateDeploymentSnapshot } from '../scripts/verify-deployment.js';
+import { validateDeploymentSnapshot, verificationChains } from '../scripts/verify-deployment.js';
+import { getVerifierAddress } from '../src/config/deployments.js';
 import { PROVABLE_CIRCUIT_IDS } from '../src/config/circuitIds.js';
 import { buildPaymentRequirements, resolvePaymentNetworks } from '../src/payment/networks.js';
 import { parseUnits } from 'ethers';
 
 const registry = '0x8004A818BFB912233c491871b3d84c89A494BD9e';
 const expected = {
+  environment: 'staging',
   version: '0.2.9',
   baseUrl: 'https://stg-ai.zkproofport.app',
   paymentNetworks: 'base-sepolia,arc-testnet,ethereum-sepolia,arc-testnet-nano',
@@ -20,10 +22,25 @@ function snapshot() {
     identity: { status: 'ready', registrations: expected.identities.map(({ chainId, agentId }) => ({ chainId, agentId })) },
     registration: { registrations: expected.identities.map(({ chainId, agentId, registry }) => ({ agentId: Number(agentId), agentRegistry: `eip155:${chainId}:${registry}` })) },
     card: { version: expected.version, url: expected.baseUrl + '/a2a', skills: [{ id: 'prove', description: PROVABLE_CIRCUIT_IDS.join(', ') }] },
+    guides: Object.fromEntries(PROVABLE_CIRCUIT_IDS.map(id => [id, { constants: { verification: { chain_id: verificationChains(expected.environment)[id], verifier_address: getVerifierAddress(id, String(verificationChains(expected.environment)[id]))!, rpc_url: 'https://sepolia-rpc.giwa.io/' } } }])),
     challenges: Object.fromEntries(PROVABLE_CIRCUIT_IDS.map(id => [id, { status: 402, body: { requiresPayment: true, accepts: structuredClone(offers) } }])),
   };
 }
 describe('deployment verifies the entire configured service', () => {
+  it.each(['', 'not-a-url', 'https://?', 'ftp://rpc.example'])('rejects an unusable GIWA verification RPC: %s', rpc => {
+    const value = snapshot();
+    value.guides.giwa_attestation.constants.verification.rpc_url = rpc;
+    expect(() => validateDeploymentSnapshot(expected, value)).toThrow(/verification RPC/i);
+  });
+  it('rejects valid-shaped but incorrect chain or contract', () => {
+    const chain = snapshot();
+    chain.guides.giwa_attestation.constants.verification.chain_id = 84532;
+    expect(() => validateDeploymentSnapshot(expected, chain)).toThrow(/verification chain/i);
+    const contract = snapshot();
+    contract.guides.giwa_attestation.constants.verification.verifier_address = '0x1111111111111111111111111111111111111111';
+    expect(() => validateDeploymentSnapshot(expected, contract)).toThrow(/verification contract/i);
+    expect(() => verificationChains('preview')).toThrow('Unknown deployment environment');
+  });
   it('rejects an old server package or stale advertised agent version', () => {
     for (const field of ['health', 'card'] as const) {
       const value = snapshot();

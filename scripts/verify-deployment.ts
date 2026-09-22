@@ -2,19 +2,28 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { parseUnits } from 'ethers';
+import { getVerifierAddress } from '../src/config/deployments.js';
 import { PROVABLE_CIRCUIT_IDS } from '../src/config/circuitIds.js';
 import { buildPaymentRequirements, resolvePaymentNetworks } from '../src/payment/networks.js';
 
 type Identity = { chainId: number; agentId: string; registry: string };
 export type DeploymentExpectation = {
-  version: string; baseUrl: string; paymentNetworks: string; payTo: string; price: string; identities: Identity[];
+  environment: string; version: string; baseUrl: string; paymentNetworks: string; payTo: string; price: string; identities: Identity[];
 };
 type Json = Record<string, any>;
 export type DeploymentSnapshot = {
   health: Json; identity: Json; registration: Json; card: Json;
+  guides: Record<string, Json>;
   challenges: Record<string, { status: number; body: Json }>;
 };
 const sorted = (rows: unknown[]) => rows.map(row => JSON.stringify(row)).sort();
+
+export function verificationChains(environment: string): Record<string, number> {
+  const coreChains: Record<string, number> = { staging: 84532, production: 8453 };
+  const core = coreChains[environment];
+  if (!core) throw new Error(`Unknown deployment environment: ${environment}`);
+  return { coinbase_attestation: core, coinbase_country_attestation: core, oidc_domain_attestation: core, arc_eligibility: 5042002, giwa_attestation: 91342 };
+}
 
 export function validateDeploymentSnapshot(expected: DeploymentExpectation, value: DeploymentSnapshot): void {
   assert.equal(value.health.version, expected.version, 'Deployed server package version differs');
@@ -32,8 +41,18 @@ export function validateDeploymentSnapshot(expected: DeploymentExpectation, valu
   // Arc exact and Arc Gateway share a chain ID. Compare their signing domains
   // too, otherwise replacing one with a duplicate of the other passes.
   const paymentShape = (r: Json) => [r.scheme, r.network, r.asset.toLowerCase(), r.payTo.toLowerCase(), r.amount, r.extra?.name, r.extra?.version, r.extra?.verifyingContract?.toLowerCase() ?? null];
+  const chains = verificationChains(expected.environment);
   for (const circuit of PROVABLE_CIRCUIT_IDS) {
     assert.ok(proofSkill?.description?.includes(circuit), `Missing advertised circuit: ${circuit}`);
+    const verification = value.guides[circuit]?.constants?.verification;
+    assert.ok(verification && Number.isSafeInteger(verification.chain_id) && verification.chain_id > 0, `Missing verification chain for ${circuit}`);
+    assert.equal(verification.chain_id, chains[circuit], `Incorrect verification chain for ${circuit}`);
+    const verifier = getVerifierAddress(circuit, String(chains[circuit]));
+    assert.ok(verifier, `No configured verification contract for ${circuit}`);
+    assert.equal(verification.verifier_address?.toLowerCase(), verifier.toLowerCase(), `Incorrect verification contract for ${circuit}`);
+    let rpc: URL | undefined;
+    try { rpc = new URL(verification.rpc_url); } catch { /* assertion below names the circuit */ }
+    assert.ok(rpc && ['http:', 'https:'].includes(rpc.protocol), `Missing or invalid verification RPC for ${circuit}`);
     const challenge = value.challenges[circuit];
     assert.equal(challenge?.status, 402, `Circuit ${circuit} did not return a payment challenge`);
     assert.equal(challenge.body.requiresPayment, true, `Circuit ${circuit} bypassed payment`);
@@ -51,14 +70,16 @@ export async function verifyDeployment(expected: DeploymentExpectation): Promise
   const [health, identity, registration, card] = await Promise.all([
     '/health', '/identity/status', '/.well-known/agent-registration.json', '/.well-known/agent-card.json',
   ].map(path => readJson(expected.baseUrl + path)));
+  const guides: DeploymentSnapshot['guides'] = {};
   const challenges: DeploymentSnapshot['challenges'] = {};
   for (const circuit of PROVABLE_CIRCUIT_IDS) {
+    guides[circuit] = await readJson(expected.baseUrl + '/api/v1/guide/' + circuit);
     const response = await fetch(expected.baseUrl + '/api/v1/prove', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ circuit, inputs: {} }), signal: AbortSignal.timeout(30000),
     });
     challenges[circuit] = { status: response.status, body: await response.json() };
   }
-  validateDeploymentSnapshot(expected, { health, identity, registration, card, challenges });
+  validateDeploymentSnapshot(expected, { health, identity, registration, card, challenges, guides });
   console.log(JSON.stringify({ verified: true, url: expected.baseUrl, circuits: PROVABLE_CIRCUIT_IDS, paymentNetworks: expected.paymentNetworks, identities: expected.identities.map(({ chainId, agentId }) => ({ chainId, agentId })) }));
 }
 
@@ -69,6 +90,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     return value;
   };
   const expected: DeploymentExpectation = {
+    environment: required('TARGET_ENVIRONMENT'),
     version: createRequire(import.meta.url)('../package.json').version,
     baseUrl: required('VERIFY_SERVICE_URL').replace(/\/$/, ''),
     paymentNetworks: required('VERIFY_PAYMENT_NETWORKS'), payTo: required('VERIFY_PAYMENT_PAY_TO'),

@@ -167,7 +167,7 @@ This valid JSON shows the Gate's exact five-field schema. The example delegate i
 
 The exported SDK `buildDelegationAction` helper is a legacy generic four-field schema (`delegate`, `action`, `expiresAt`, `nonce`). It **does not include `amount` and is not compatible with this staking Gate**. Its existing wire hash remains unchanged. Build the explicit five-field `TypedAction` above for the Gate; arbitrary custom actions remain valid SDK inputs but require a verifier that understands them.
 
-Circle's backing EOA is used internally for Gateway payment signatures; the action's `delegate` remains the operational smart-wallet address.
+With `pay_with: "arc"`, `pay_on: "arc-testnet"` pays directly from the agent smart wallet (ERC-1271), while `pay_on: "arc-testnet-nano"` uses its backing EOA and Gateway deposit. The SDK selects the authorization owner from the chosen offer; the action's `delegate` remains the operational smart-wallet address.
 
 `approvedPayment` pins these fields from the selected live x402 offer:
 
@@ -188,7 +188,7 @@ After proof generation, use `verify_proof`. Separately obtain approval for the s
 
 ### Stepwise Arc flow in trusted local code
 
-The corrected `prepare_inputs` path validates the complete action and encodes its values before asking local A to sign EIP-712. It passes both hashes into SDK key recovery and returns `domain_separator` and `action_hash` with the prepared witness. Missing or malformed Arc actions and actions supplied for Coinbase/OIDC are rejected before signing. Coinbase continues to sign `signal_hash`; OIDC uses the JWT path without wallet signing.
+The corrected `prepare_inputs` path validates the complete action and encodes its values before asking local A to sign EIP-712. It passes both hashes into SDK key recovery and returns `domain_separator` and `action_hash` with the prepared witness. Malformed Arc/GIWA actions and actions supplied for Coinbase/OIDC are rejected before signing. Omitting the optional action on Arc/GIWA signs `signal_hash` and proves the credential without action binding. Coinbase continues to sign `signal_hash`; OIDC uses the JWT path without wallet signing.
 
 **Prepared inputs are private witness data**, including A's public key, signature and attestation data. Run this orchestration inside a trusted local MCP client; do not pass tool responses through model context, the dApp, UI or logs. Share the public `generate_proof` result instead. `proofport://config` also exposes A's address and stays local.
 
@@ -282,13 +282,15 @@ From the `proofport-ai` repository root, use the isolated registry runner:
 ```bash
 E2E_BASE_URL=https://stg-ai.zkproofport.app \
 E2E_PAYMENT_NETWORK=base-sepolia \
-npm run test:e2e:published -- --sdk-version 0.2.14 --mcp-version 0.2.15
+npm run test:e2e:published -- --sdk-version 0.2.15 --mcp-version 0.2.15
 ```
 
 It installs those exact npm versions outside the workspace, resolves SDK imports
 and the MCP process to that installation, and removes it afterwards. The runner
 also installs and verifies Circle CLI 1.1.4, automatically putting it on the test
-subprocess PATH without changing the global installation. A normal
+subprocess PATH without changing the global installation. Optional CDP/x402 and
+Circle developer wallet dependencies are installed at tested exact versions,
+and their imports are verified before paid tests start. A normal
 workspace test run exercises local packages and is not published-package evidence.
 The full suite creates paid testnet proofs. It requires the attestation and payer
 credentials loaded by `tests/setup.ts`; GIWA uses `GIWA_ATTESTATION_KEY`, and OIDC

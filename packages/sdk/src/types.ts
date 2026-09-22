@@ -275,7 +275,10 @@ export interface StepResult<T = unknown> {
  * Coinbase's `fromCdpEvmAccount` result satisfies it as-is.
  */
 export interface PaymentWallet {
+  /** On-chain USDC owner (an EOA or an ERC-1271 smart wallet). */
   address: `0x${string}`;
+  /** Separate Circle Gateway depositor, when it differs from the on-chain owner. */
+  gatewayAddress?: `0x${string}`;
   signTypedData(message: {
     domain: Record<string, unknown>;
     types: Record<string, unknown>;

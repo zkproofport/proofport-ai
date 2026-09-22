@@ -135,18 +135,15 @@ export async function walletFromArcAgent(opts: {
     address = wallets[0];
   }
 
-  // Which address signs, and therefore which address an authorization must
-  // name.
-  //
-  // An agent wallet is a smart contract; the key that signs for it is a
-  // separate address Circle calls the backing EOA, and Gateway holds the
-  // deposited balance under THAT one. An authorization whose `from` is the
-  // contract address is refused as `invalid_signature`, because the signature
-  // recovers to the backer and not to the address the message names.
+  // Circle uses the smart wallet for direct USDC authorizations (ERC-1271),
+  // but its backing EOA owns the Gateway deposit. Signing always goes through
+  // the same Circle agent wallet; signPayment chooses the authorization owner
+  // for the selected offer without changing this wallet's identity.
   const signer = await backingEoa(address, chain);
 
   return {
-    address: signer,
+    address: address as `0x${string}`,
+    gatewayAddress: signer,
     signTypedData: async (message) => {
       // EIP-712 amounts arrive as BigInt and `JSON.stringify` refuses them
       // outright — "Do not know how to serialize a BigInt". They go over as
@@ -181,6 +178,6 @@ export async function walletFromArcAgent(opts: {
       if (!signature) throw new Error('Circle CLI signed nothing: no signature in its answer.');
       return signature as `0x${string}`;
     },
-    describe: () => `Arc agent wallet ${address} on ${chain}, signing as ${signer}`,
+    describe: () => `Arc agent wallet ${address} on ${chain}, Gateway depositor ${signer}`,
   };
 }
