@@ -21,7 +21,7 @@ import { RateLimiter } from './redis/rateLimiter.js';
 import { ProofCache } from './redis/proofCache.js';
 import { PROOF_CACHE_TTL } from './redis/constants.js';
 import { CleanupWorker } from './redis/cleanupWorker.js';
-import { getAgentCardHandler, getMcpDiscoveryHandler, getOasfAgentHandler, getSkillMdHandler, getAgentRegistrationHandler, getDidHandler } from './a2a/agentCard.js';
+import { getAgentCardHandler, getMcpDiscoveryHandler, getOasfAgentHandler, getSkillMdHandler, getAgentRegistrationHandler, getDidHandler, discoveryName } from './a2a/agentCard.js';
 import type { TokenIdRef } from './a2a/agentCard.js';
 import { DefaultRequestHandler } from '@a2a-js/sdk/server';
 import { jsonRpcHandler, UserBuilder } from '@a2a-js/sdk/server/express';
@@ -72,7 +72,7 @@ function createApp(config: Config) {
   const app = express();
 
   // Build swagger spec with dynamic base URL
-  const swaggerSpec = buildSwaggerSpec(config.a2aBaseUrl);
+  const swaggerSpec = buildSwaggerSpec(config.a2aBaseUrl, discoveryName(config));
 
   // Redis setup
   const redis = createRedisClient(config.redisUrl);
@@ -158,7 +158,7 @@ function createApp(config: Config) {
 
   app.get('/', (_req, res) => {
     res.json({
-      name: 'proveragent.base.eth',
+      name: discoveryName(config),
       description: 'ZK proof generation agent. ERC-8004 identity. x402 payments.',
       endpoints: {
         a2a: '/a2a',

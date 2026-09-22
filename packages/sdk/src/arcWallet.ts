@@ -49,7 +49,7 @@ async function circle(args: string[]): Promise<unknown> {
     if (err.code === 'ENOENT') {
       throw new Error(
         'Circle CLI is not installed, so an Arc agent wallet cannot sign. Install it with ' +
-        '`npm install -g @circle-fin/cli`, then `circle wallet login <email> --testnet`.',
+        '`npm install -g @circle-fin/cli@>=1.1.4`, then `circle wallet login <email> --testnet`.',
       );
     }
     // The CLI prints a JSON error on stdout even when it exits non-zero.
@@ -61,6 +61,14 @@ async function circle(args: string[]): Promise<unknown> {
       }
     } catch {
       // stdout was not JSON; the stderr text above is the best there is.
+    }
+    if (/no longer supported/i.test(reason)) {
+      throw new Error(
+        `Circle CLI is too old: ${reason} Update it with \`circle update\` or ` +
+        '`npm install -g @circle-fin/cli@latest`. Circle disables wallet operations on ' +
+        'versions it has retired, so the pin cannot be held here — 1.0.0 stopped working ' +
+        'for wallet commands and 1.1.4 was current on 2026-09-22.',
+      );
     }
     if (/AUTH_REQUIRED|Not logged in/i.test(reason)) {
       throw new Error(

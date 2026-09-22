@@ -1,8 +1,10 @@
-export function buildSwaggerSpec(baseUrl: string) {
+export function buildSwaggerSpec(baseUrl: string, agentName = 'ZKProofport prover') {
   return {
     openapi: '3.0.3',
     info: {
-      title: 'proveragent.base.eth - ZK Proof Generation Agent',
+      // The deployment's own name, not the mainnet one. This said
+      // `proveragent.base.eth` on every environment.
+      title: `${agentName} - ZK Proof Generation Agent`,
       version: '0.1.0',
       description:
         'Agent-native ZK proof infrastructure. Provides MCP (Model Context Protocol) tools for zero-knowledge proof generation and verification using Noir circuits + bb CLI.',

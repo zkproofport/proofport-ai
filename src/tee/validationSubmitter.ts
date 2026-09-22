@@ -13,6 +13,7 @@
  */
 
 import { ethers } from 'ethers';
+import { discoveryName } from '../a2a/agentCard.js';
 import type { Config } from '../config/index.js';
 import type { TeeProvider } from './types.js';
 import { AgentRegistration } from '../identity/register.js';
@@ -126,7 +127,7 @@ async function doValidation(
       }
     } else {
       const result = await validationRegistration.register({
-        name: 'proveragent.base.eth',
+        name: discoveryName(config),
         image: `${config.a2aBaseUrl}/icon.png`,
         description: 'Autonomous ZK proof generation. ERC-8004 identity. x402 payments. Powered by ZKProofport',
         agentUrl: config.a2aBaseUrl,

@@ -1168,10 +1168,15 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
     expect(parsed.proof).toMatch(/^0x/);
     expect(parsed.publicInputs).toBeDefined();
     expect(parsed.publicInputs).toMatch(/^0x/);
-    if (await isPaymentRequired()) {
-      expect(parsed.paymentTxHash).toBeDefined();
-      if (parsed.paymentTxHash) expect(parsed.paymentTxHash).toMatch(/^0x/);
-    }
+    /*
+     * A settlement hash comes back only when the BUYER submitted its own
+     * transaction: the response echoes the `X-Payment-TX` header it was given.
+     * The ordinary path signs an authorization and sends no transaction, so
+     * there is no hash to echo — that is what makes paying gasless. Asserting
+     * one whenever the service charges failed three cases on staging for a
+     * payment that had gone through.
+     */
+    if (parsed.paymentTxHash) expect(parsed.paymentTxHash).toMatch(/^0x/);
 
     generatedProof = { circuit: parsed.circuit, proofType: parsed.proofType, proof: parsed.proof, publicInputs: parsed.publicInputs, verification: parsed.verification };
 
@@ -1271,10 +1276,15 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
     expect(parsed.proof).toMatch(/^0x/);
     expect(parsed.publicInputs).toBeDefined();
     expect(parsed.publicInputs).toMatch(/^0x/);
-    if (await isPaymentRequired()) {
-      expect(parsed.paymentTxHash).toBeDefined();
-      if (parsed.paymentTxHash) expect(parsed.paymentTxHash).toMatch(/^0x/);
-    }
+    /*
+     * A settlement hash comes back only when the BUYER submitted its own
+     * transaction: the response echoes the `X-Payment-TX` header it was given.
+     * The ordinary path signs an authorization and sends no transaction, so
+     * there is no hash to echo — that is what makes paying gasless. Asserting
+     * one whenever the service charges failed three cases on staging for a
+     * payment that had gone through.
+     */
+    if (parsed.paymentTxHash) expect(parsed.paymentTxHash).toMatch(/^0x/);
 
     generatedCountryProof = { circuit: parsed.circuit, proofType: parsed.proofType, proof: parsed.proof, publicInputs: parsed.publicInputs, verification: parsed.verification };
 
@@ -1377,10 +1387,15 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
     expect(parsed.proof).toMatch(/^0x/);
     expect(parsed.publicInputs).toBeDefined();
     expect(parsed.publicInputs).toMatch(/^0x/);
-    if (await isPaymentRequired()) {
-      expect(parsed.paymentTxHash).toBeDefined();
-      if (parsed.paymentTxHash) expect(parsed.paymentTxHash).toMatch(/^0x/);
-    }
+    /*
+     * A settlement hash comes back only when the BUYER submitted its own
+     * transaction: the response echoes the `X-Payment-TX` header it was given.
+     * The ordinary path signs an authorization and sends no transaction, so
+     * there is no hash to echo — that is what makes paying gasless. Asserting
+     * one whenever the service charges failed three cases on staging for a
+     * payment that had gone through.
+     */
+    if (parsed.paymentTxHash) expect(parsed.paymentTxHash).toMatch(/^0x/);
 
     generatedOidcProof = { circuit: parsed.circuit, proofType: parsed.proofType, proof: parsed.proof, publicInputs: parsed.publicInputs, verification: parsed.verification };
 

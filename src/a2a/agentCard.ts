@@ -24,7 +24,16 @@ function serviceDescription(config: Config): string {
     `Configured x402 USDC payment networks: ${paymentNetworks(config)}. See /identity/status for verified ERC-8004 registrations.`;
 }
 
-function discoveryName(config: Config): string {
+/**
+ * The name this deployment publishes: the primary chain identity's name.
+ *
+ * Exported because the literal `proveragent.base.eth` was typed out in the
+ * index route, the OpenAPI title, the traces, the A2A prompt and the
+ * validation registration — the MAINNET name, served by a testnet deployment,
+ * so staging introduced itself as two different agents depending on which
+ * document you read.
+ */
+export function discoveryName(config: Config): string {
   const primary = getChainIdentities(config).find(identity => identity.chainId === getChainId(config));
   return primary?.agentName ?? 'ZKProofport prover';
 }
