@@ -12,6 +12,7 @@ import { join, dirname, resolve, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { installPublishedPackages } from './install-published-packages.mjs';
 import { publishedWalletDependencies, walletImportPreflight } from './published-wallet-dependencies.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -49,8 +50,10 @@ try {
     dependencies: { '@zkproofport-ai/sdk': sdkVersion, '@zkproofport-ai/mcp': mcpVersion, '@circle-fin/cli': circleCliVersion, ...walletDependencies },
     overrides: { '@zkproofport-ai/sdk': sdkVersion },
   }, null, 2));
-  const status = await run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund'], install);
-  if (status) throw new Error(`Published package install failed (${status})`);
+  console.log(`[published E2E] Installing SDK ${sdkVersion} and MCP ${mcpVersion} from npm`);
+  const installed = await installPublishedPackages(install, { '@zkproofport-ai/sdk': sdkVersion, '@zkproofport-ai/mcp': mcpVersion });
+  if (installed.stdout) process.stdout.write(installed.stdout);
+  if (installed.stderr) process.stderr.write(installed.stderr);
   for (const [name, version] of Object.entries(walletDependencies)) {
     const manifest = JSON.parse(await readFile(join(install, 'node_modules', name, 'package.json'), 'utf8'));
     if (manifest.version !== version) throw new Error(`${name} wallet dependency version mismatch`);

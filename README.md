@@ -508,6 +508,27 @@ for both Arc cases. Immediate settlement needs on-chain USDC; nano needs Gateway
 USDC. The runner never derives a payer from the prover key, transfers funds,
 or deposits automatically.
 
+For an existing Base Sepolia or Ethereum Sepolia payer that lacks USDC, use the
+explicit faucet helper below. Put `CDP_API_KEY_ID` and `CDP_API_KEY_SECRET` in the
+untracked `.env.test`; no wallet secret or payer private key is needed for this
+request. Set `E2E_PAYER_ADDRESS` to the public address of the wallet already used
+by your test fixture, then run:
+
+```bash
+node --env-file=.env.test --import tsx scripts/request-testnet-usdc.ts \
+  --network ethereum-sepolia --address "$E2E_PAYER_ADDRESS" --min-usdc 0.01
+# Use --network base-sepolia for that testnet instead.
+```
+
+The helper checks the USDC balance first and requests faucet funds only below
+the minimum. It accepts only those two testnets and USDC, creates no wallet,
+and spends no real assets. `requested` includes the public transaction hash;
+wait for confirmation and rerun until the status is `adequate` before E2E.
+`rate_limited`, `missing_credentials`, `balance_unavailable`, or `faucet_failed`
+returns a failing exit status and a sanitized message, without automatic retry
+or printing provider errors. Funding is a separate explicit action; the E2E
+runner never invokes this helper automatically.
+
 A free package/discovery check is:
 
 ```bash
