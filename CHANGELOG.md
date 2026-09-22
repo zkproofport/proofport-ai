@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.2.9](https://github.com/zkproofport/proofport-ai/compare/server-v0.2.8...server-v0.2.9) (2026-09-22)
+
+
+### Bug Fixes
+
+* prove and advertise every circuit this server supports ([95667a1](https://github.com/zkproofport/proofport-ai/commit/95667a16a4175010678cc5bcab09b910ecad0dfa))
+* **sdk:** ship the per-circuit attester and nullifier tables ([816fbb6](https://github.com/zkproofport/proofport-ai/commit/816fbb677a95a335c87ae45aa772710df8fbe892))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @zkproofport-ai/mcp bumped from ^0.2.13 to ^0.2.14
+    * @zkproofport-ai/sdk bumped from ^0.2.13 to ^0.2.14
+
 ## [0.2.8](https://github.com/zkproofport/proofport-ai/compare/server-v0.2.7...server-v0.2.8) (2026-09-22)
 
 

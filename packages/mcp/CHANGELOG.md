@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.14](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.2.13...mcp-v0.2.14) (2026-09-22)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @zkproofport-ai/sdk bumped from ^0.2.13 to ^0.2.14
+
 ## [0.2.13](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.2.12...mcp-v0.2.13) (2026-09-22)
 
 
