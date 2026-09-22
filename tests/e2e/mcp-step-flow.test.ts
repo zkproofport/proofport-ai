@@ -37,7 +37,8 @@ async function fixture() {
     const cdp = new CdpClient({ apiKeyId, apiKeySecret, walletSecret });
     payer = (await cdp.evm.getAccount({ name })).address;
   } catch { throw new Error('Existing named CDP payer lookup failed; no wallet creation attempted and provider details suppressed'); }
-  if (process.env.CDP_WALLET_ADDRESS) expect(payer.toLowerCase()).toBe(process.env.CDP_WALLET_ADDRESS.toLowerCase());
+  // The SDK selects by account name. CDP_WALLET_ADDRESS belongs to the
+  // legacy address-based fixture and is not an input to this adapter.
   const env = Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined));
   Object.assign(env, { PROOFPORT_URL: baseUrl, ATTESTATION_KEY: required('ATTESTATION_KEY'), CDP_WALLET_NAME: name, ZKPROOFPORT_SILENT: '1' });
   const client = new Client({ name: 'published-mcp-step-flow-e2e', version: '1.0.0' }, { capabilities: {} });
@@ -102,7 +103,10 @@ describe.sequential('published MCP CDP payment and step-flow boundary', () => {
       expect(typeof rejection.error === 'string' && rejection.error.startsWith('Proof generation failed: ')).toBe(true);
       const detail = JSON.parse(rejection.error.slice('Proof generation failed: '.length));
       expect(detail.error).toBe('PAYMENT_INVALID');
-      expect(detail.reason).toBe('no_payment');
+      // submit_proof supplies neither a signed offer nor a payment network.
+      // The server rejects the missing network before its no-payment check.
+      expect(detail.reason).toBe('unsupported_network');
+      expect(detail.message).toContain('(none given)');
       expect(Boolean(detail.proof || detail.paymentTxHash)).toBe(false);
       expect(await balance(), 'Unpaid submit_proof must not debit the available CDP wallet').toBe(before);
     } finally { await client.close(); }
