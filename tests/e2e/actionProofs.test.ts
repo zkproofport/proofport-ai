@@ -9,6 +9,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { createConfig, generateProof, fromPrivateKey, verifyProof, extractNullifierFromPublicInputs, type ProofResult } from '@zkproofport-ai/sdk';
 import { planPayment } from './payer.js';
+import { TypedDataEncoder, keccak256, toUtf8Bytes } from 'ethers';
 
 const baseUrl = process.env.E2E_BASE_URL || 'http://localhost:4002';
 const payerKey = process.env.E2E_PAYER_WALLET_KEY;
@@ -23,6 +24,26 @@ for (const protocol of ['sdk', 'mcp'] as const) {
     for (const row of rows) {
       it.skipIf(!row.key)(`${row.circuit}: both modes verify and preserve the nullifier`, async () => {
         if (!payerKey) throw new Error('E2E_PAYER_WALLET_KEY is required for a paid proof run');
+        // The deployed canonical guide declares field order and encoding.
+        // Read it before paying; no guessed offsets for either circuit.
+        const guideResponse = await fetch(`${baseUrl}/api/v1/guide/${row.circuit}`);
+        expect(guideResponse.ok).toBe(true);
+        const guide = await guideResponse.json();
+        const fields = guide.input_schema.public_fields as string[];
+        expect(fields).toEqual(['signal_hash', 'domain_separator', 'action_hash', 'signer_list_merkle_root', 'scope', 'nullifier']);
+        const wordCount = guide.constants.verification.public_input_count as number;
+        expect(wordCount).toBe(fields.length * 32);
+        const decode = (proof: ProofResult): Record<string, string> => {
+          expect(proof.publicInputs).toMatch(/^0x[0-9a-f]+$/i);
+          const words = proof.publicInputs.slice(2).match(/.{64}/g)!;
+          expect(proof.publicInputs.length).toBe(2 + wordCount * 64);
+          expect(words).toHaveLength(wordCount);
+          const bytes = words.map(word => {
+            expect(BigInt(`0x${word}`)).toBeLessThanOrEqual(255n);
+            return Number(BigInt(`0x${word}`)).toString(16).padStart(2, '0');
+          });
+          return Object.fromEntries(fields.map((name, index) => [name, '0x' + bytes.slice(index * 32, (index + 1) * 32).join('')]));
+        };
         const config = createConfig({ baseUrl });
         const plan = await planPayment(config, row.circuit, payerKey);
         const scope = `e2e:${protocol}:${row.circuit}:action-parity`;
@@ -58,10 +79,23 @@ for (const protocol of ['sdk', 'mcp'] as const) {
           const bound = await prove(true);
           for (const proof of [plain, bound]) {
             expect(proof.proof).toMatch(/^0x[0-9a-f]+$/i);
-            expect(proof.verification.chainId).toBe(row.chainId);
+            expect(proof.verification?.chainId).toBe(row.chainId);
+            expect(proof.verification?.verifierAddress.toLowerCase()).toBe(guide.constants.verification.verifier_address.toLowerCase());
             const verified = await verifyProof(proof);
             expect(verified.valid, verified.error).toBe(true);
           }
+          const identityInputs = decode(plain);
+          const actionInputs = decode(bound);
+          const zero = '0x' + '00'.repeat(32);
+          expect(identityInputs.domain_separator).toBe(zero);
+          expect(identityInputs.action_hash).toBe(zero);
+          expect(identityInputs.signal_hash).not.toBe(zero);
+          expect(actionInputs.signal_hash).toBe(zero);
+          expect(actionInputs.domain_separator).toBe(TypedDataEncoder.hashDomain(action.domain).toLowerCase());
+          expect(actionInputs.action_hash).toBe(TypedDataEncoder.from(action.types).hash(action.message).toLowerCase());
+          for (const inputs of [identityInputs, actionInputs]) expect(inputs.scope).toBe(keccak256(toUtf8Bytes(scope)));
+          expect(actionInputs.signer_list_merkle_root).toBe(identityInputs.signer_list_merkle_root);
+          expect(actionInputs.signer_list_merkle_root).not.toBe(zero);
           expect(bound.publicInputs).not.toBe(plain.publicInputs);
           const plainNullifier = extractNullifierFromPublicInputs(plain.publicInputs, row.circuit);
           expect(plainNullifier).toMatch(/^0x[0-9a-f]{64}$/i);

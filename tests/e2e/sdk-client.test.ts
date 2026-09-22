@@ -1,17 +1,10 @@
 /**
- * SDK Client E2E Tests — npm Package
- *
- * Tests the published @zkproofport-ai/sdk npm package against a real backend.
- * Verifies that the npm-published SDK correctly integrates with the backend
- * for all supported circuits.
- *
- * Prerequisites:
- *   - `npm install @zkproofport-ai/sdk` in proofport-ai root
- *   - Backend running at E2E_BASE_URL (default: http://localhost:4002)
- *   - .env.test with ATTESTATION_KEY, E2E_PAYER_WALLET_KEY
- *   - For OIDC: E2E_OIDC_JWT
- *
- * Run: npx vitest run --project e2e tests/e2e/sdk-client.test.ts
+ * SDK client proofs against a real backend.
+ * Direct Vitest runs resolve workspace packages. To verify exact npm artifacts:
+ * E2E_BASE_URL=https://stg-ai.zkproofport.app npm run test:e2e:published
+ * The isolated runner supplies published SDK/MCP entry paths and wallet peers.
+ * Requires .env.test attestation/payer keys, GIWA_ATTESTATION_KEY for GIWA,
+ * and E2E_OIDC_JWT or a valid gcloud identity token for OIDC.
  */
 
 import { execSync } from 'child_process';
