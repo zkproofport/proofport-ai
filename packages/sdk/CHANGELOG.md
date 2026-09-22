@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.16](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.2.15...sdk-v0.2.16) (2026-09-22)
+
+
+### Bug Fixes
+
+* separate payment owners and complete proof verification targets ([7ef4e18](https://github.com/zkproofport/proofport-ai/commit/7ef4e1863536ef30bebf2d923a975511d49f96ce))
+
 ## [0.2.15](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.2.14...sdk-v0.2.15) (2026-09-22)
 
 

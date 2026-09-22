@@ -386,15 +386,16 @@ The agent auto-registers on-chain at startup via the ERC-8004 Identity contract.
 | `PORT` | `4002` | Express server port |
 | `NODE_ENV` | `development` | Node environment |
 | `BB_PATH` | `bb` | Barretenberg CLI path |
-| `NARGO_PATH` | `nargo` | Nargo CLI path |
 | `CIRCUITS_DIR` | `/app/circuits` | Circuit artifacts directory |
 | `CIRCUITS_REPO_URL` | (GitHub raw URL) | Circuit artifacts download URL |
-| `TEE_MODE` | `disabled` | `disabled` / `nitro` |
+| `TEE_MODE` | `disabled` | `disabled` / `local` / `nitro`; GCP uses `local` without hardware attestation |
 | `ENCLAVE_CID` | — | Nitro Enclave CID (required when `TEE_MODE=nitro`) |
 | `ENCLAVE_PORT` | `5000` | Nitro Enclave port |
 | `TEE_ATTESTATION` | `false` | Enable attestation verification |
 | `PAYMENT_PAY_TO` | — | Payment recipient (required when payment enabled); must match the prover wallet when direct settlement is offered |
 | `PAYMENT_PROOF_PRICE` | `$0.10` | Price per proof (USD) |
+| `ARC_VERIFICATION_RPC_URL`, `ARC_VERIFICATION_CHAIN_ID` | Legacy Arc pair only when both absent | Arc proof verification RPC/chain; independent of identity registration; partial pairs are errors |
+| `GIWA_RPC_URL`, `GIWA_EXPLORER_URL` | — | GIWA Sepolia input source and proof verification endpoints |
 | `ERC8004_IDENTITY_ADDRESS` | — | ERC-8004 Identity contract |
 | `ERC8004_REPUTATION_ADDRESS` | — | ERC-8004 Reputation contract |
 | `GEMINI_API_KEY` | — | Gemini API key for chat |

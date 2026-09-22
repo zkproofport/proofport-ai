@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.16](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.2.15...mcp-v0.2.16) (2026-09-22)
+
+
+### Bug Fixes
+
+* separate payment owners and complete proof verification targets ([7ef4e18](https://github.com/zkproofport/proofport-ai/commit/7ef4e1863536ef30bebf2d923a975511d49f96ce))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @zkproofport-ai/sdk bumped from ^0.2.15 to ^0.2.16
+
 ## [0.2.15](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.2.14...mcp-v0.2.15) (2026-09-22)
 
 

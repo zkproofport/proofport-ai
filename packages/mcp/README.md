@@ -282,7 +282,7 @@ From the `proofport-ai` repository root, use the isolated registry runner:
 ```bash
 E2E_BASE_URL=https://stg-ai.zkproofport.app \
 E2E_PAYMENT_NETWORK=base-sepolia \
-npm run test:e2e:published -- --sdk-version 0.2.15 --mcp-version 0.2.15
+npm run test:e2e:published -- --sdk-version 0.2.16 --mcp-version 0.2.16
 ```
 
 It installs those exact npm versions outside the workspace, resolves SDK imports
