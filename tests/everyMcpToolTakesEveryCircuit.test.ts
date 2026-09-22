@@ -37,6 +37,6 @@ describe('every MCP tool takes every circuit', () => {
   });
 
   it('describes the action as something the agent supplies, not a default', () => {
-    expect(source).toMatch(/Required for arc_eligibility and rejected for every other circuit/);
+    expect(source).toMatch(/Optional for arc_eligibility and giwa_attestation; rejected for other circuits/);
   });
 });

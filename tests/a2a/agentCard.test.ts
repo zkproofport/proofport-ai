@@ -68,7 +68,7 @@ describe('A2A Agent Card', () => {
       const { buildAgentCard } = await import('../../src/a2a/agentCard');
       const card = buildAgentCard(mockConfig);
 
-      expect(card.name).toBe('proveragent.base.eth');
+      expect(card.name).toBe('ZKProofport prover');
     });
 
     it('should have provider with organization and url', async () => {

@@ -9,6 +9,8 @@ vi.mock('ethers', () => {
     tokenURI: vi.fn(),
     ownerOf: vi.fn(),
     setAgentURI: vi.fn(),
+    getMetadata: vi.fn(),
+    setMetadata: vi.fn(),
     filters: {
       Transfer: vi.fn().mockReturnValue('transfer-filter'),
     },
@@ -39,6 +41,8 @@ vi.mock('ethers', () => {
       JsonRpcProvider: vi.fn(() => mockProvider),
       Wallet: vi.fn(() => mockWallet),
       Contract: vi.fn(() => mockContract),
+      toUtf8String: (value: string) => value,
+      toUtf8Bytes: (value: string) => value,
       zeroPadValue: vi.fn((addr: string) => addr.padEnd(66, '0')),
     },
   };
@@ -117,7 +121,7 @@ describe('AgentRegistration', () => {
 
       // Mock transaction receipt with logs
       const mockReceipt = {
-        logs: [
+        status: 1, blockNumber: 10, logs: [
           {
             address: validConfig.identityContractAddress,
             topics: ['0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef', '0x' + '0'.repeat(64), '0x' + '0'.repeat(24) + '1234567890123456789012345678901234567890', '0x0000000000000000000000000000000000000000000000000000000000000001'],
@@ -149,7 +153,7 @@ describe('AgentRegistration', () => {
 
       mockContract.register.mockResolvedValue({
         wait: vi.fn().mockResolvedValue({
-          logs: [{ address: validConfig.identityContractAddress,
+          status: 1, blockNumber: 10, logs: [{ address: validConfig.identityContractAddress,
             topics: ['0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef', '0x' + '0'.repeat(64), '0x' + '0'.repeat(24) + '1234567890123456789012345678901234567890', '0x' + '0'.repeat(63) + '1'], data: '0x' }],
           hash: '0xtxhash',
         }),
@@ -170,7 +174,7 @@ describe('AgentRegistration', () => {
       const registration = new AgentRegistration(validConfig);
 
       const mockReceipt = {
-        logs: [
+        status: 1, blockNumber: 10, logs: [
           {
             address: validConfig.identityContractAddress,
             topics: ['0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef', '0x' + '0'.repeat(64), '0x' + '0'.repeat(24) + '1234567890123456789012345678901234567890', '0x000000000000000000000000000000000000000000000000000000000000002a'],
@@ -191,7 +195,7 @@ describe('AgentRegistration', () => {
     it('uses RPC gas estimation for Arc metadata storage instead of a guessed limit', async () => {
       mockProvider.getNetwork.mockResolvedValue({ chainId: 5042002n });
       mockContract.register.mockResolvedValue({ wait: vi.fn().mockResolvedValue({
-        logs: [{ address: validConfig.identityContractAddress, topics: ['0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef', '0x' + '0'.repeat(64), '0x' + '0'.repeat(24) + '1234567890123456789012345678901234567890', '0x2a'] }], hash: '0xtx',
+        status: 1, blockNumber: 10, logs: [{ address: validConfig.identityContractAddress, topics: ['0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef', '0x' + '0'.repeat(64), '0x' + '0'.repeat(24) + '1234567890123456789012345678901234567890', '0x2a'] }], hash: '0xtx',
       }) });
       await new AgentRegistration(validConfig).register(validMetadata);
       expect(mockContract.register.mock.calls[0][1]).toEqual({ nonce: 0 });
@@ -200,7 +204,7 @@ describe('AgentRegistration', () => {
 
     it('finds the registry mint after an unrelated receipt log', async () => {
       mockContract.register.mockResolvedValue({ wait: vi.fn().mockResolvedValue({
-        logs: [
+        status: 1, blockNumber: 10, logs: [
           { address: '0x9999999999999999999999999999999999999999', topics: ['0xother'] },
           { address: validConfig.identityContractAddress, topics: ['0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef', '0x' + '0'.repeat(64), '0x' + '0'.repeat(24) + '1234567890123456789012345678901234567890', '0x2a'] },
         ], hash: '0xtx',
@@ -220,7 +224,7 @@ describe('AgentRegistration', () => {
       const registration = new AgentRegistration(validConfig);
 
       const mockReceipt = {
-        logs: [],
+        status: 1, blockNumber: 10, logs: [],
         hash: '0xtxhash',
       };
 
@@ -308,6 +312,50 @@ describe('AgentRegistration', () => {
       mockContract.balanceOf.mockRejectedValue(new Error('Contract error'));
 
       await expect(registration.getRegistration()).rejects.toThrow('Contract error');
+    });
+  });
+
+  it('verifies a newly minted owner at the mint block while latest has no token yet', async () => {
+    const registration = new AgentRegistration(validConfig);
+    mockContract.register.mockResolvedValue({ wait: async () => ({ status: 1, blockNumber: 42, hash: '0xmint', logs: [{
+      address: validConfig.identityContractAddress,
+      topics: ['0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef', '0x' + '0'.repeat(64), '0x' + '0'.repeat(24) + '1234567890123456789012345678901234567890', '0x2a'],
+    }] }) });
+    mockContract.ownerOf.mockImplementation(async (_id: bigint, overrides?: { blockTag?: number }) => {
+      if (overrides?.blockTag !== 42) throw new Error('token does not exist at stale latest');
+      return '0x1234567890123456789012345678901234567890';
+    });
+    const result = await registration.register(validMetadata);
+    await expect(registration.assertTokenOwner(result.tokenId)).resolves.toBeUndefined();
+    expect(mockContract.ownerOf).toHaveBeenLastCalledWith(42n, { blockTag: 42 });
+  });
+
+  describe('confirmed registration reads', () => {
+    it('reads metadata at its mined update block even while latest still serves the old URI', async () => {
+      const registration = new AgentRegistration(validConfig);
+      const expected = createMetadataUri(validMetadata);
+      mockContract.setAgentURI.mockResolvedValue({ hash: '0xupdate', wait: async () => ({ status: 1, blockNumber: 47143095 }) });
+      mockContract.tokenURI.mockImplementation(async (_id: bigint, overrides?: { blockTag?: number }) => overrides?.blockTag === 47143095 ? expected : 'old URI');
+      await registration.updateMetadata(592n, validMetadata);
+      expect(await registration.getTokenMetadata(592n)).toBe(expected);
+      expect(mockContract.tokenURI).toHaveBeenLastCalledWith(592n, { blockTag: 47143095 });
+    });
+
+    it('advances the read block after setting active metadata', async () => {
+      const registration = new AgentRegistration(validConfig);
+      mockContract.setAgentURI.mockResolvedValue({ hash: '0xupdate', wait: async () => ({ status: 1, blockNumber: 10 }) });
+      mockContract.setMetadata.mockResolvedValue({ hash: '0xactive', wait: async () => ({ status: 1, blockNumber: 11 }) });
+      mockContract.getMetadata.mockImplementation(async (_id: bigint, _key: string, overrides?: { blockTag?: number }) => overrides?.blockTag === 11 ? 'true' : 'false');
+      await registration.updateMetadata(592n, validMetadata);
+      await registration.setOnchainMetadata(592n, 'active', 'true');
+      expect(await registration.getOnchainMetadata(592n, 'active')).toBe('true');
+      expect(mockContract.getMetadata).toHaveBeenLastCalledWith(592n, 'active', { blockTag: 11 });
+    });
+
+    it.each([null, { status: 0, blockNumber: 10 }, { status: 1 }])('refuses unconfirmed or reverted write receipts %j', async receipt => {
+      const registration = new AgentRegistration(validConfig);
+      mockContract.setAgentURI.mockResolvedValue({ hash: '0xupdate', wait: async () => receipt });
+      await expect(registration.updateMetadata(592n, validMetadata)).rejects.toThrow('confirmed registration transaction');
     });
   });
 

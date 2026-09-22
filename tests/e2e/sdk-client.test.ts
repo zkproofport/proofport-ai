@@ -52,6 +52,8 @@ function getOidcJwt(): string | undefined {
   }
 }
 const OIDC_JWT = getOidcJwt();
+if (!OIDC_JWT) console.warn('SKIP OIDC proof: E2E_OIDC_JWT absent and gcloud identity token unavailable');
+if (!GIWA_KEY) console.warn('SKIP GIWA proofs: GIWA_ATTESTATION_KEY missing');
 
 describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
   let config: ClientConfig;
@@ -119,7 +121,7 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
       const result = await generateProof(
         config,
         { attestation: attestationSigner, payment: paymentWallet },
-        { circuit: 'coinbase_kyc', scope: 'e2e-test:npm-sdk-kyc' },
+        { circuit: 'coinbase_kyc', scope: 'e2e-test:npm-sdk-kyc', payOn },
       );
 
       expect(result.proof).toBeTruthy();
@@ -232,6 +234,7 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
         {
           circuit: 'coinbase_country',
           scope: 'e2e-test:npm-sdk-country',
+          payOn,
           countryList: ['US', 'KR'],
           isIncluded: true,
         },
@@ -249,6 +252,7 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
         {
           circuit: 'oidc_domain',
           scope: 'e2e-test:npm-sdk-oidc',
+          payOn,
           jwt: OIDC_JWT,
         },
       );
@@ -264,7 +268,7 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
       const proofResult = await generateProof(
         config,
         { attestation: attestationSigner, payment: paymentWallet },
-        { circuit: 'coinbase_kyc', scope: 'e2e-test:npm-sdk-verify' },
+        { circuit: 'coinbase_kyc', scope: 'e2e-test:npm-sdk-verify', payOn },
       );
 
       const verifyResult = await verifyProof(proofResult);

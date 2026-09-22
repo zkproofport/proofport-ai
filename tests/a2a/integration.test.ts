@@ -116,7 +116,7 @@ describe('A2A Integration Tests', () => {
       expect(response.status).toBe(200);
       expect(response.headers['content-type']).toMatch(/application\/json/);
       expect(response.body).toMatchObject({
-        name: 'proveragent.base.eth',
+        name: 'ZKProofport prover',
         description: expect.any(String),
         url: 'https://test.example.com/a2a',
         version: '1.0.0',
@@ -261,7 +261,7 @@ describe('A2A Integration Tests', () => {
       const agentCardResponse = await request(server).get('/.well-known/agent-card.json');
 
       expect(agentCardResponse.status).toBe(200);
-      expect(agentCardResponse.body.name).toBe('proveragent.base.eth');
+      expect(agentCardResponse.body.name).toBe('ZKProofport prover');
 
       // Test A2A JSON-RPC route (use tasks/get which is non-blocking)
       const taskId = 'coexistence-task-001';

@@ -81,8 +81,8 @@ if grep -q 'multiplicative_constant' "$LOG"; then
   echo "     Run it on x86 -- CI or the AWS instance -- to check the proof itself."
   rm -f "$LOG"; exit 0
 fi
-if grep -q 'PAYMENT_SETTLER_PRIVATE_KEY' "$LOG"; then
-  echo "[!] Paying on Arc needs PAYMENT_SETTLER_PRIVATE_KEY: no public facilitator"
+if grep -Eq 'PROVER_PRIVATE_KEY|PAYMENT_PAY_TO' "$LOG"; then
+  echo "[!] Paying on Arc needs the PROVER_PRIVATE_KEY wallet to match PAYMENT_PAY_TO; no facilitator"
   echo "    settles Arc, so the service submits the authorization itself and needs"
   echo "    a wallet holding USDC on Arc Testnet (which is also its gas asset)."
   rm -f "$LOG"; exit 1

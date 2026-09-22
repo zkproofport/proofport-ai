@@ -42,12 +42,13 @@
  *                         On arc-testnet this is the wallet Arc's faucet
  *                         funded; `circuits/.env.development` PRIVATE_KEY was
  *                         that wallet on 2026-09-09.
- *   PAYMENT_SETTLER_PRIVATE_KEY   the wallet that submits. Funded from the
+ *   PROVER_PRIVATE_KEY   the wallet that submits. Funded from the
  *                         buyer by step 1 when it is empty.
+ *   PAYMENT_PAY_TO       the prover wallet address for direct settlement.
  *
  * ## Usage
  *
- *   PAYMENT_BUYER_KEY=0x... PAYMENT_SETTLER_PRIVATE_KEY=0x... \
+ *   PAYMENT_BUYER_KEY=0x... PROVER_PRIVATE_KEY=0x... PAYMENT_PAY_TO=0x... \
  *     npx tsx scripts/verify-payment.ts arc-testnet [price]
  */
 
@@ -56,6 +57,7 @@ import { privateKeyToAccount, generatePrivateKey } from 'viem/accounts';
 import * as viemChains from 'viem/chains';
 import { getPaymentNetwork, allPaymentNetworkIds, buildPaymentRequirements } from '../src/payment/networks.js';
 import { settlePayment } from '../src/payment/settle.js';
+import { getSettlementAccount } from '../src/payment/settlementAccount.js';
 import { signPayment } from '../packages/sdk/src/payment.js';
 import { walletFromPrivateKey } from '../packages/sdk/src/wallets.js';
 
@@ -117,18 +119,21 @@ async function main() {
   // very route that needs no wallet.
   const needsSettler = net.settlement === 'payee';
   const settler = needsSettler
-    ? privateKeyToAccount(need('PAYMENT_SETTLER_PRIVATE_KEY') as `0x${string}`)
+    ? getSettlementAccount(need('PROVER_PRIVATE_KEY'), process.env.PAYMENT_PAY_TO || '')
     : null;
-  // A fresh address each run, so a stale balance cannot be mistaken for a
-  // payment that arrived.
-  const recipient = privateKeyToAccount(generatePrivateKey()).address;
+  // Direct settlement must target the submitting prover wallet (Arc enforces
+  // this). Facilitator settlement can still measure a fresh recipient.
+  const recipient = settler ? settler.address : privateKeyToAccount(generatePrivateKey()).address;
+  if (buyer.address.toLowerCase() === recipient.toLowerCase()) {
+    throw new Error("PAYMENT_BUYER_KEY must differ from the prover recipient for the balance measurement.");
+  }
 
   console.log(`\n  chain      ${net.id} (${net.chainId}) via ${rpc}`);
   console.log(`  buyer      ${buyer.address}`);
   console.log(
     `  settler    ${settler ? settler.address : `(none — ${net.facilitatorUrl} settles this chain and pays the gas)`}`,
   );
-  console.log(`  recipient  ${recipient} (fresh)`);
+  console.log(`  recipient  ${recipient}`);
 
   // The contract's own answers, not this table's. A mismatch here is the
   // difference between a valid signature and a valid signature over the wrong
@@ -202,7 +207,7 @@ async function main() {
     buyerUsdc: await usdcOf(buyer.address, blockBefore),
     buyerNative: await pub.getBalance({ address: buyer.address, blockNumber: blockBefore }),
     recipientUsdc: await usdcOf(recipient, blockBefore),
-    settlerNative,
+    settlerNative: settler ? await pub.getBalance({ address: settler.address, blockNumber: blockBefore }) : 0n,
   };
   console.log(`\n  before`);
   console.log(`    buyer      ${fmt(before.buyerUsdc)}`);
@@ -237,7 +242,6 @@ async function main() {
 
   // Step 3: this service settles it, through the same function the route uses.
   const payload = JSON.parse(Buffer.from(header, 'base64').toString('utf8'));
-  if (needsSettler) process.env.PAYMENT_SETTLER_PRIVATE_KEY = need('PAYMENT_SETTLER_PRIVATE_KEY');
   const settled = await settlePayment({
     payload: payload.paymentPayload ?? payload,
     requirements: requirement,
@@ -261,7 +265,11 @@ async function main() {
   };
   const recipientGain = after.recipientUsdc - before.recipientUsdc;
   const buyerSpent = before.buyerUsdc - after.buyerUsdc;
-  const settlerSpent = before.settlerNative - after.settlerNative;
+  const gasCost = receipt.gasUsed * receipt.effectiveGasPrice;
+  // Arc pays gas and receives payment in the same asset. The native balance
+  // delta is therefore gas minus payment, not gas alone.
+  const nativePayment = settler && net.nativeUsdc ? parseUnits(price, net.nativeDecimals ?? 18) : 0n;
+  const settlerSpent = before.settlerNative + nativePayment - after.settlerNative;
 
   console.log(`\n  after (block ${settledAt}, before was ${blockBefore})`);
   console.log(`    recipient received  ${fmt(recipientGain)}`);
@@ -273,7 +281,11 @@ async function main() {
   );
 
   const problems: string[] = [];
-  if (recipientGain !== amount) problems.push(`recipient received ${fmt(recipientGain)}, expected ${fmt(amount)}`);
+  if (settler && net.nativeUsdc) {
+    if (settlerSpent !== gasCost) problems.push(`recipient native balance does not equal prior balance plus payment minus receipt gas`);
+  } else if (recipientGain !== amount) {
+    problems.push(`recipient received ${fmt(recipientGain)}, expected ${fmt(amount)}`);
+  }
   if (buyerSpent !== amount) {
     problems.push(
       `buyer's balance fell by ${fmt(buyerSpent)}, expected exactly ${fmt(amount)} -- ` +

@@ -17,7 +17,8 @@
  * |---|---|
  * | a raw private key | the baseline; signs locally with no service in the middle |
  * | a Coinbase CDP wallet | the key never exists locally -- signing is an API call, and CDP's own x402 adapter does the signing, so a change on their side breaks here first |
- * | a Circle wallet | same, and it is the only way to pay on Arc; also the only path whose module is declared rather than installed, so a signature change shows up as a runtime failure and nowhere else |
+ * | a Circle developer wallet | remote signing is a separate integration from a locally held key |
+ * | a Circle Agent Wallet | optional E2E_ARC_AGENT_ADDRESS selects CLI-backed signing for both Arc payment cases |
  *
  * The claim they share -- the buyer signs and never sends a transaction, so it
  * needs no gas -- is checked directly on chain by
@@ -42,8 +43,9 @@ import {
   walletFromCircle,
   signPayment,
   paymentOffers,
-} from '../../packages/sdk/src/index.js';
-import type { PaymentWallet } from '../../packages/sdk/src/types.js';
+  createConfig, generateProof, fromPrivateKey, verifyProof, gatewayBalance, walletFromArcAgent,
+} from '@zkproofport-ai/sdk';
+import type { PaymentWallet } from '@zkproofport-ai/sdk';
 
 const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:4002';
 const CIRCUIT = 'coinbase_kyc';
@@ -129,11 +131,11 @@ describe('what the service offers', () => {
     }
   });
 
-  it('prices Arc in 6 decimals, not 18', () => {
+  it('prices Arc in 6 decimals, not 18', (context) => {
     if (!reachable) return expect.soft(reachable, `${BASE_URL} unreachable`).toBe(true);
-    const arc = paymentOffers(challenge!).find((o) => o.networkName?.startsWith('arc-testnet'));
-    if (!arc) return console.warn('  SKIP: this deployment offers no Arc chain');
-    if (!challenge!.requiresPayment) return console.warn('  SKIP: payment disabled, every price is 0');
+    const arc = paymentOffers(challenge!).find((o) => o.networkName === 'arc-testnet');
+    if (!arc) { console.warn('  SKIP: this deployment offers no Arc chain'); return context.skip(); }
+    if (!challenge!.requiresPayment) { console.warn('  SKIP: payment disabled, every price is 0'); return context.skip(); }
     // 0.01 USDC is 10000 in 6 decimals and 10000000000000000 in 18. Quoting
     // the 18-decimal figure would ask for a ten-trillionth of the intended
     // price while still passing a minimum-amount check.
@@ -158,38 +160,30 @@ async function paysAndProves(wallet: PaymentWallet, network: string) {
   // says so, instead of failing several seconds later as a facilitator's
   // "ERC20: transfer amount exceeds balance" buried in a settle error — which
   // reads like the payment code is broken when the only thing missing is money.
-  const held = await usdcBalance(wanted!.asset, wallet.address, wanted!.network);
+  // Nano spends Gateway balance, not the wallet's on-chain USDC balance.
+  let held: bigint | null = null;
+  if (network === 'arc-testnet-nano') {
+    const key = networkPayerKey(network);
+    if (key && wallet.address.toLowerCase() === (await walletFromPrivateKey(key)).address.toLowerCase()) {
+      held = (await gatewayBalance({ privateKey: key as `0x${string}`, rpcUrl: process.env.ARC_RPC_URL || 'https://rpc.testnet.arc.io' })).available;
+    }
+  } else {
+    held = await usdcBalance(wanted!.asset, wallet.address, wanted!.network);
+  }
   if (held !== null && held < BigInt(wanted!.amount)) {
-    throw new Error(
-      `${wallet.describe()} holds ${held} of ${wanted!.asset} on ${network} and the price is ` +
-      `${wanted!.amount}. Fund it:\n` +
-      `  cast send ${wanted!.asset} 'transfer(address,uint256)' ${wallet.address} ${wanted!.amount} \\\n` +
-      `    --private-key $PAYMENT_PRIVATE_KEY --rpc-url <rpc for ${network}>`,
-    );
+    throw new Error(`${wallet.describe()} has ${held} atomic USDC on ${network}; price ${wanted!.amount}. ` +
+      (network === 'arc-testnet-nano' ? 'Fund its Circle Gateway balance.' : 'Fund its USDC token balance on this network.'));
   }
 
-  const paid = await signPayment(fresh!, wallet, { network });
-  expect(paid.headers['PAYMENT-SIGNATURE'], 'x402 v2 names the header PAYMENT-SIGNATURE').toBeTruthy();
-  expect(paid.paidOn).toBe(network);
-  expect(paid.payer.toLowerCase()).toBe(wallet.address.toLowerCase());
-
-  // No X-Payment-Network header. The signed payload names the chain it was
-  // signed for, and the service reads it from there -- sending a header too
-  // would give two sources for one fact and hide a disagreement between them.
-  const res = await fetch(`${BASE_URL}/api/v1/prove`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...paid.headers },
-    body: JSON.stringify({ circuit: CIRCUIT, inputs: {} }),
-  });
-  const body = (await res.json()) as Record<string, unknown>;
-  // A 400 for missing inputs means the payment was accepted and settled --
-  // the request got past the paywall, which is what this test is about.
-  // Anything 402 means it did not.
-  expect(
-    res.status,
-    `paying from ${wallet.describe()} on ${network} was rejected: ${JSON.stringify(body)}`,
-  ).not.toBe(402);
-  return { status: res.status, body, paid };
+  const attestationKey = process.env.ATTESTATION_KEY;
+  if (!attestationKey) throw new Error('ATTESTATION_KEY required: payment verification must produce a real proof');
+  const result = await generateProof(createConfig({ baseUrl: BASE_URL }), {
+    attestation: fromPrivateKey(attestationKey), payment: wallet,
+  }, { circuit: CIRCUIT, scope: `e2e:payment:${network}`, payOn: network });
+  expect(result.proof).toMatch(/^0x[0-9a-f]+$/i);
+  const verified = await verifyProof(result);
+  expect(verified.valid, verified.error).toBe(true);
+  return result;
 }
 
 /**
@@ -205,46 +199,35 @@ function payerKey(): string | undefined {
   return process.env.PAYMENT_PRIVATE_KEY || process.env.E2E_PAYER_WALLET_KEY;
 }
 
-describe('paying from a private key', () => {
-  it('buys a proof on the first chain offered', async () => {
-    if (!reachable) return expect.soft(reachable, `${BASE_URL} unreachable`).toBe(true);
-    if (!challenge!.requiresPayment) return console.warn('  SKIP: this deployment is not charging');
-    const key = payerKey();
-    if (!key) return console.warn('  SKIP: PAYMENT_PRIVATE_KEY not set');
-    const wallet = await walletFromPrivateKey(key);
-    const network = paymentOffers(challenge!)[0].networkName;
-    await paysAndProves(wallet, network);
-  }, 180_000);
-});
+function networkPayerKey(network: string): string | undefined {
+  const name = `E2E_PAYER_KEY_${network.toUpperCase().replace(/-/g, '_')}`;
+  return process.env[name] || payerKey();
+}
 
-describe('paying on a chain this service settles itself', () => {
-  it('buys a proof on Arc, where no public facilitator will submit', async () => {
-    if (!reachable) return expect.soft(reachable, `${BASE_URL} unreachable`).toBe(true);
-    if (!challenge!.requiresPayment) return console.warn('  SKIP: this deployment is not charging');
-    const key = payerKey();
-    if (!key) return console.warn('  SKIP: PAYMENT_PRIVATE_KEY not set');
-    // Either Arc offer: `arc-testnet` settles from this service's own wallet,
-    // `arc-testnet-nano` batches through Circle Gateway. Naming only the first
-    // made this skip silently on a deployment that offers the second.
-    const arc = paymentOffers(challenge!).find((o) => o.networkName?.startsWith('arc-testnet'));
-    if (!arc) return console.warn('  SKIP: this deployment offers no Arc chain');
-
-    // The other paying cases go through Base, where x402.dexter.cash submits.
-    // This one goes through the OTHER settlement route: no facilitator serves
-    // Arc, so the service submits the authorization from its own wallet. The
-    // route is the whole difference and it is only exercised here.
-    const wallet = await walletFromPrivateKey(key);
-    await paysAndProves(wallet, arc.networkName!);
-  }, 180_000);
+describe('each staging payment network independently', () => {
+  for (const network of ['base-sepolia', 'arc-testnet', 'ethereum-sepolia', 'arc-testnet-nano']) {
+    it(`settles ${network} and returns an on-chain-verifiable proof`, async (context) => {
+      expect(reachable, `${BASE_URL} unreachable`).toBe(true);
+      if (!challenge!.requiresPayment) { console.warn('SKIP: payment disabled'); return context.skip(); }
+      expect(paymentOffers(challenge!).some(o => o.networkName === network), `Required staging network ${network} not offered`).toBe(true);
+      if ((network === 'arc-testnet' || network === 'arc-testnet-nano') && process.env.E2E_ARC_AGENT_ADDRESS) {
+        await paysAndProves(await walletFromArcAgent({ address: process.env.E2E_ARC_AGENT_ADDRESS }), network);
+      } else {
+        const key = networkPayerKey(network);
+        if (!key) throw new Error(`Missing payer key for ${network}`);
+        await paysAndProves(await walletFromPrivateKey(key), network);
+      }
+    }, 180_000);
+  }
 });
 
 describe('paying from a Coinbase CDP wallet', () => {
-  it('signs through CDP and buys a proof', async () => {
+  it('signs through CDP and buys a proof', async (context) => {
     if (!reachable) return expect.soft(reachable, `${BASE_URL} unreachable`).toBe(true);
-    if (!challenge!.requiresPayment) return console.warn('  SKIP: this deployment is not charging');
+    if (!challenge!.requiresPayment) { console.warn('  SKIP: this deployment is not charging'); return context.skip(); }
     const { CDP_API_KEY_ID, CDP_API_KEY_SECRET, CDP_WALLET_SECRET } = process.env;
     if (!CDP_API_KEY_ID || !CDP_API_KEY_SECRET || !CDP_WALLET_SECRET) {
-      return console.warn('  SKIP: CDP_API_KEY_ID / CDP_API_KEY_SECRET / CDP_WALLET_SECRET not set');
+      { console.warn('  SKIP: CDP_API_KEY_ID / CDP_API_KEY_SECRET / CDP_WALLET_SECRET not set'); return context.skip(); }
     }
     const wallet = await walletFromCdp({
       apiKeyId: CDP_API_KEY_ID,
@@ -257,18 +240,18 @@ describe('paying from a Coinbase CDP wallet', () => {
     const network =
       offers.find((o) => o.networkName === 'base-sepolia')?.networkName ??
       offers.find((o) => o.networkName === 'base')?.networkName;
-    if (!network) return console.warn('  SKIP: this deployment offers no Base chain for the CDP wallet');
+    if (!network) { console.warn('  SKIP: this deployment offers no Base chain for the CDP wallet'); return context.skip(); }
     await paysAndProves(wallet, network);
   }, 180_000);
 });
 
 describe('paying from a Circle wallet on Arc', () => {
-  it('signs through Circle and buys a proof', async () => {
+  it('signs through Circle and buys a proof', async (context) => {
     if (!reachable) return expect.soft(reachable, `${BASE_URL} unreachable`).toBe(true);
-    if (!challenge!.requiresPayment) return console.warn('  SKIP: this deployment is not charging');
+    if (!challenge!.requiresPayment) { console.warn('  SKIP: this deployment is not charging'); return context.skip(); }
     const { CIRCLE_API_KEY, CIRCLE_ENTITY_SECRET, CIRCLE_WALLET_ID } = process.env;
     if (!CIRCLE_API_KEY || !CIRCLE_ENTITY_SECRET || !CIRCLE_WALLET_ID) {
-      return console.warn('  SKIP: CIRCLE_API_KEY / CIRCLE_ENTITY_SECRET / CIRCLE_WALLET_ID not set');
+      { console.warn('  SKIP: CIRCLE_API_KEY / CIRCLE_ENTITY_SECRET / CIRCLE_WALLET_ID not set'); return context.skip(); }
     }
     const wallet = await walletFromCircle({
       apiKey: CIRCLE_API_KEY,
@@ -276,17 +259,17 @@ describe('paying from a Circle wallet on Arc', () => {
       walletId: CIRCLE_WALLET_ID,
       address: process.env.CIRCLE_WALLET_ADDRESS,
     });
-    const arc = paymentOffers(challenge!).find((o) => o.networkName?.startsWith('arc-testnet'));
-    if (!arc) return console.warn('  SKIP: this deployment offers no Arc chain');
+    const arc = paymentOffers(challenge!).find((o) => o.networkName === 'arc-testnet');
+    if (!arc) { console.warn('  SKIP: this deployment offers no Arc chain'); return context.skip(); }
     await paysAndProves(wallet, arc.networkName!);
   }, 180_000);
 });
 
 describe('what the service refuses', () => {
-  it('refuses a chain it does not take payment on, rather than picking one', async () => {
+  it('refuses a chain it does not take payment on, rather than picking one', async (context) => {
     if (!reachable) return expect.soft(reachable, `${BASE_URL} unreachable`).toBe(true);
     const key = payerKey();
-    if (!key) return console.warn('  SKIP: PAYMENT_PRIVATE_KEY not set');
+    if (!key) { console.warn('  SKIP: PAYMENT_PRIVATE_KEY not set'); return context.skip(); }
     const wallet = await walletFromPrivateKey(key);
     // Checked client-side: the SDK must not quietly pay on the first chain
     // when the caller named a different one. Spending money somewhere the
@@ -297,20 +280,26 @@ describe('what the service refuses', () => {
     );
   });
 
-  it('refuses a second proof for the same payment', async () => {
+  it('refuses reuse of a consumed request nonce', async (context) => {
     if (!reachable) return expect.soft(reachable, `${BASE_URL} unreachable`).toBe(true);
-    if (!challenge!.requiresPayment) return console.warn('  SKIP: this deployment is not charging');
+    if (!challenge!.requiresPayment) { console.warn('  SKIP: this deployment is not charging'); return context.skip(); }
     const key = payerKey();
-    if (!key) return console.warn('  SKIP: PAYMENT_PRIVATE_KEY not set');
+    if (!key) { console.warn('  SKIP: PAYMENT_PRIVATE_KEY not set'); return context.skip(); }
     const wallet = await walletFromPrivateKey(key);
     const network = paymentOffers(challenge!)[0].networkName;
-    const first = await paysAndProves(wallet, network);
+    const fresh = await freshChallenge();
+    const paid = await signPayment(fresh!, wallet, { network });
+    // Consume the request nonce using an explicitly invalid request. This
+    // is nonce replay coverage, not a claim that payment settled.
+    const initial = await fetch(`${BASE_URL}/api/v1/prove`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...paid.headers }, body: JSON.stringify({ circuit: CIRCUIT }) });
+    expect(initial.status).toBe(400);
+    expect((await initial.json()).error).toBe('INVALID_REQUEST');
 
     // The same headers again. The nonce is consumed with GETDEL, so the
     // service must not honour it twice -- one payment, one proof.
     const res = await fetch(`${BASE_URL}/api/v1/prove`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...first.paid.headers },
+      headers: { 'Content-Type': 'application/json', ...paid.headers },
       body: JSON.stringify({ circuit: CIRCUIT, inputs: {} }),
     });
     expect(res.status).toBe(400);

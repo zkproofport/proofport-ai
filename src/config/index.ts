@@ -1,3 +1,7 @@
+import { createRequire } from 'node:module';
+
+const serverVersion: string = createRequire(import.meta.url)('../../package.json').version;
+
 function getRequiredEnv(key: string): string {
   const value = process.env[key];
   if (!value) {
@@ -41,7 +45,7 @@ export function loadConfig() {
     paymentMode,
     a2aBaseUrl: getRequiredEnv('A2A_BASE_URL'),
     websiteUrl: process.env.WEBSITE_URL || 'https://zkproofport.com',
-    agentVersion: process.env.AGENT_VERSION || '1.0.0',
+    agentVersion: process.env.AGENT_VERSION || serverVersion,
 
     // Payment (required when paymentMode !== 'disabled')
     paymentPayTo: process.env.PAYMENT_PAY_TO || '',

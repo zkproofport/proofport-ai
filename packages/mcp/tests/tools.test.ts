@@ -29,10 +29,13 @@ vi.mock('@zkproofport-ai/sdk', async () => ({
     coinbase_attestation: { displayName: 'Coinbase KYC', easSchemaId: '0xschema1', functionSelector: '0xfunc1' },
     coinbase_country_attestation: { displayName: 'Coinbase Country', easSchemaId: '0xschema2', functionSelector: '0xfunc2' },
     oidc_domain_attestation: { displayName: 'OIDC Domain', inputType: 'oidc' },
+    arc_eligibility: { displayName: 'Arc Eligibility', inputType: 'eas' },
+    giwa_attestation: { displayName: 'GIWA Attestation', inputType: 'eas' },
   },
   AUTHORIZED_SIGNERS: ['0x952f32128AF084422539C4Ff96df5C525322E564'],
   CIRCUIT_NAME_MAP: {
     arc_eligibility: 'arc_eligibility',
+    giwa_attestation: 'giwa_attestation',
     coinbase_kyc: 'coinbase_attestation',
     coinbase_country: 'coinbase_country_attestation',
     oidc_domain: 'oidc_domain_attestation',
@@ -514,9 +517,9 @@ const CUSTOM_ACTION = {
 };
 
 describe('prepare_inputs action authorization', () => {
-  it('signs exactly the custom nested action and returns both hashes used for key recovery', async () => {
+  it.each(['arc_eligibility', 'giwa_attestation'])('%s signs exactly the custom nested action and returns both hashes used for key recovery', async (circuit) => {
     mockPrepareInputs.mockResolvedValue({ field: 'prepared' });
-    const params = { circuit: 'arc_eligibility', action: CUSTOM_ACTION };
+    const params = { circuit, action: CUSTOM_ACTION };
     const schema = z.object(toolHandlers.prepare_inputs.schema as z.ZodRawShape);
     expect(schema.parse(params)).toEqual(params);
     const result = await callTool('prepare_inputs', schema.parse(params));
@@ -526,13 +529,29 @@ describe('prepare_inputs action authorization', () => {
     const domainSeparator = ethers.TypedDataEncoder.hashDomain(CUSTOM_ACTION.domain);
     const actionHash = ethers.TypedDataEncoder.hashStruct('Instruction', CUSTOM_ACTION.types, CUSTOM_ACTION.message);
     expect(mockPrepareInputs).toHaveBeenCalledWith(testConfig, expect.objectContaining({
-      circuitId: 'arc_eligibility', userSignature: '0xmocktypeddata', domainSeparator, actionHash,
+      circuitId: circuit, userSignature: '0xmocktypeddata', domainSeparator, actionHash,
     }));
     expect(parseToolResult(result)).toEqual({ field: 'prepared', domain_separator: domainSeparator, action_hash: actionHash });
   });
 
+  it.each(['arc_eligibility', 'giwa_attestation'])('%s without action signs only the request signal hash', async (circuit) => {
+    mockPrepareInputs.mockResolvedValue({ field: 'prepared' });
+    const schema = z.object(toolHandlers.prepare_inputs.schema as z.ZodRawShape);
+    const params = schema.parse({ circuit, scope: 'optional-action-scope' });
+    const result = await callTool('prepare_inputs', params);
+    expect(result.isError).toBeUndefined();
+    expect(mockComputeSignalHash).toHaveBeenCalledWith('0xMockAttestationAddress', 'optional-action-scope', circuit);
+    expect(mockSigner.signMessage).toHaveBeenCalledWith('0xsignalhash');
+    expect(mockSigner.signTypedData).not.toHaveBeenCalled();
+    expect(mockPrepareInputs).toHaveBeenCalledWith(testConfig, expect.objectContaining({ circuitId: circuit, userSignature: '0xmocksignature' }));
+    expect(mockPrepareInputs.mock.calls[0][1]).not.toHaveProperty('actionHash');
+    expect(mockPrepareInputs.mock.calls[0][1]).not.toHaveProperty('domainSeparator');
+    expect(parseToolResult(result)).toEqual({ field: 'prepared' });
+    expect(() => schema.parse({ circuit, action: null })).toThrow();
+  });
+
   it.each([
-    ['missing action', 'arc_eligibility', undefined, /action is required|no action was given/],
+    ['GIWA missing field', 'giwa_attestation', { ...CUSTOM_ACTION, message: {} }, /missing/],
     ['missing field', 'arc_eligibility', { ...CUSTOM_ACTION, message: {} }, /missing/],
     ['malformed value', 'arc_eligibility', { ...CUSTOM_ACTION, message: { ...CUSTOM_ACTION.message, terms: { quantity: 'bad', description: 'bad' } } }, /./],
     ['wrong root', 'arc_eligibility', { ...CUSTOM_ACTION, primaryType: 'Terms', message: { quantity: '1', description: 'bad' } }, /primaryType.*root|root.*primaryType/],

@@ -35,8 +35,8 @@
  * integration tests, and imported by no source file. This file uses them.
  */
 
-import { createPublicClient, createWalletClient, http, publicActions } from 'viem';
-import { privateKeyToAccount } from 'viem/accounts';
+import { createWalletClient, http, publicActions } from 'viem';
+import { getSettlementAccount } from './settlementAccount.js';
 import * as chains from 'viem/chains';
 import { toFacilitatorEvmSigner } from '@x402/evm';
 import { ExactEvmScheme } from '@x402/evm/exact/facilitator';
@@ -63,35 +63,10 @@ function rpcFor(net: PaymentNetwork): string {
   return process.env[net.rpcEnv] || net.defaultRpc;
 }
 
-/**
- * The wallet that submits authorizations for `settlement: 'payee'` chains.
- *
- * Deliberately its own key rather than `PROVER_PRIVATE_KEY`. That key signs
- * this agent's identity and attestations; a key that moves money is a
- * different job with a different blast radius, and sharing one means an
- * identity key has to sit on every chain the service takes payment on.
- *
- * Required -- not defaulted -- whenever a payee-settled chain is offered. The
- * error names the variable and the chains that need it, because the failure
- * would otherwise appear as a payment that verifies and never arrives.
- */
-function settlerAccount(nets: PaymentNetwork[]) {
-  const key = process.env.PAYMENT_SETTLER_PRIVATE_KEY;
-  if (!key) {
-    const which = nets.filter((n) => n.settlement === 'payee').map((n) => n.id).join(', ');
-    throw new Error(
-      `PAYMENT_SETTLER_PRIVATE_KEY is required: no public x402 facilitator settles ${which}, ` +
-      `so this service submits the buyer's authorization itself and needs a funded wallet ` +
-      `on those chains. Set it, or remove those chains from PAYMENT_NETWORKS.`,
-    );
-  }
-  return privateKeyToAccount(key.startsWith('0x') ? (key as `0x${string}`) : (`0x${key}` as `0x${string}`));
-}
-
 /** A facilitator that settles one chain, built from that chain's own values. */
-function facilitatorFor(net: PaymentNetwork, nets: PaymentNetwork[]) {
+function facilitatorFor(net: PaymentNetwork) {
   const chain = viemChain(net);
-  const account = settlerAccount(nets);
+  const account = getSettlementAccount(process.env.PROVER_PRIVATE_KEY || '', process.env.PAYMENT_PAY_TO || '');
   const wallet = createWalletClient({ account, chain, transport: http(rpcFor(net)) }).extend(publicActions);
   // One argument on the pinned @x402/evm 2.3.0. Later versions take a
   // `confirmationTimeoutMs` that bounds the receipt wait, which is worth having
@@ -145,7 +120,7 @@ export async function settlePayment(params: {
   network: PaymentNetwork;
   networks: PaymentNetwork[];
 }): Promise<SettleOutcome> {
-  const { payload, requirements, network, networks } = params;
+  const { payload, requirements, network } = params;
 
   // Circle Gateway's batched settlement -- what Arc calls nanopayments. The
   // authorization is handed to Gateway's off-chain ledger, which verifies it
@@ -244,7 +219,7 @@ export async function settlePayment(params: {
     return { txHash, via: 'facilitator', facilitatorUrl: url };
   }
 
-  const facilitator = facilitatorFor(network, networks);
+  const facilitator = facilitatorFor(network);
   const result = (await facilitator.settle(
     payload as Parameters<typeof facilitator.settle>[0],
     requirements as Parameters<typeof facilitator.settle>[1],

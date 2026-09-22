@@ -4,30 +4,40 @@ import type { Config } from '../../src/config/index.js';
 const state = vi.hoisted(() => ({
   instances: [] as any[], registered: false, fail: '' as string,
   metadata: new Map<string, any>(),
+  failedRpcUrls: new Set<string>(), lockFailure: '' as string, staleReadbacks: 0, activeReadErrors: 0, ownerReadErrors: 0,
 }));
 vi.mock('../../src/identity/register.js', () => {
   class AgentRegistration {
     agentAddress = '0x1234567890123456789012345678901234567890';
     constructor(public config: any) { state.instances.push(this); }
-    isRegistered = vi.fn(async () => { if (state.fail === 'rpc') throw new Error('RPC down'); return state.registered; });
+    isRegistered = vi.fn(async () => { if (state.fail === 'rpc' || state.failedRpcUrls.has(this.config.chainRpcUrl)) throw new Error('RPC down'); return state.registered; });
     getRegistration = vi.fn(async (cached?: bigint) => {
       if (state.fail === 'unresolved') throw new Error('token unresolved');
       if (state.fail === 'null') return null;
       return { tokenId: cached ?? 42n, owner: this.agentAddress, isRegistered: true, metadataUri: JSON.stringify(state.metadata.get(this.config.chainRpcUrl) ?? {}) };
     });
-    assertTokenOwner = vi.fn(async () => { if (state.fail === 'owner') throw new Error('wrong owner'); });
+    assertTokenOwner = vi.fn(async () => { if (state.ownerReadErrors > 0) { state.ownerReadErrors--; throw new Error('mint block not readable yet'); } if (state.fail === 'owner') throw new Error('wrong owner'); });
     register = vi.fn(async () => ({ tokenId: 42n, transactionHash: '0xmint', agentAddress: this.agentAddress }));
     updateMetadata = vi.fn(async (_: bigint, metadata: any) => {
       if (state.fail === 'write') throw new Error('write reverted');
       state.metadata.set(this.config.chainRpcUrl, metadata); return '0xupdate';
     });
-    getTokenMetadata = vi.fn(async () => JSON.stringify(state.fail === 'readback' ? {} : state.metadata.get(this.config.chainRpcUrl)));
-    getOnchainMetadata = vi.fn(async () => state.fail === 'active' ? 'false' : 'true');
+    getTokenMetadata = vi.fn(async () => {
+      if (state.staleReadbacks > 0) { state.staleReadbacks--; return '{}'; }
+      return JSON.stringify(state.fail === 'readback' ? {} : state.metadata.get(this.config.chainRpcUrl));
+    });
+    getOnchainMetadata = vi.fn(async () => {
+      if (state.activeReadErrors > 0) { state.activeReadErrors--; throw new Error('confirmed block not available yet'); }
+      return state.fail === 'active' ? 'false' : 'true';
+    });
     setOnchainMetadata = vi.fn(async () => { throw new Error('active reverted'); });
   }
   return { AgentRegistration, parseMetadataUri: (uri: string) => JSON.parse(uri) };
 });
-vi.mock('../../src/identity/registrationLock.js', () => ({ withRegistrationLock: (_url: string, _key: string, run: () => Promise<unknown>) => run() }));
+vi.mock('../../src/identity/registrationLock.js', () => ({ withRegistrationLock: async (_url: string, key: string, run: () => Promise<unknown>) => {
+  if (state.lockFailure && key.includes(`:${state.lockFailure}:`)) throw new Error('Redis lock unavailable');
+  return run();
+} }));
 import { ensureAgentRegistered } from '../../src/identity/autoRegister.js';
 import { getChainIdentities } from '../../src/config/index.js';
 
@@ -39,7 +49,7 @@ const config = {
   arcIdentityAddress: '0x8004A818BFB912233c491871b3d84c89A494BD9e', arcAgentTokenId: '',
 } as Config;
 
-beforeEach(() => { state.instances.length = 0; state.registered = false; state.fail = ''; state.metadata.clear(); });
+beforeEach(() => { state.instances.length = 0; state.registered = false; state.fail = ''; state.metadata.clear(); state.failedRpcUrls.clear(); state.lockFailure = ''; state.staleReadbacks = 0; state.activeReadErrors = 0; state.ownerReadErrors = 0; });
 
 describe('Arc deployment registration', () => {
   it('registers Arc without unrelated Base or reputation registry configuration', async () => {
@@ -74,7 +84,7 @@ describe('Arc deployment registration', () => {
 
   it.each(['rpc', 'unresolved', 'null', 'owner', 'write', 'readback', 'active'])('fails visibly on %s instead of publishing readiness', async fail => {
     state.registered = true; state.fail = fail;
-    await expect(ensureAgentRegistered(config)).rejects.toThrow('Required Arc ERC-8004 registration failed');
+    await expect(ensureAgentRegistered(config)).rejects.toThrow('Required ERC-8004 registration failed');
     expect(state.instances[0].register).not.toHaveBeenCalled();
   });
 
@@ -86,7 +96,7 @@ describe('Arc deployment registration', () => {
 
   it.each([' ', '-1', '1junk', '1e2', '0x2', '한글', '😀', '<script>', '1\n', String(BigInt(Number.MAX_SAFE_INTEGER) + 1n)])('rejects invalid or unsafe cached id %j', async tokenId => {
     state.registered = true;
-    await expect(ensureAgentRegistered({ ...config, arcAgentTokenId: tokenId })).rejects.toThrow('Required Arc');
+    await expect(ensureAgentRegistered({ ...config, arcAgentTokenId: tokenId })).rejects.toThrow('Required ERC-8004');
     expect(state.instances[0].updateMetadata).not.toHaveBeenCalled();
   });
 
@@ -112,4 +122,73 @@ describe('Arc deployment registration', () => {
   it('rejects missing Arc registry instead of borrowing a Base address', () => {
     expect(() => getChainIdentities({ ...config, arcIdentityAddress: '' })).toThrow('ARC_IDENTITY_ADDRESS');
   });
+});
+
+
+describe('complete configured identity set', () => {
+  const allChains = { ...config, erc8004IdentityAddress: config.arcIdentityAddress, ethereumRpcUrl: 'https://ethereum-sepolia.example' };
+
+  it.each([
+    [11155111, allChains.ethereumRpcUrl],
+    [84532, allChains.chainRpcUrl],
+    [5042002, allChains.arcRpcUrl],
+  ])('fails readiness when chain %s fails, while checking every other configured chain', async (chainId, rpcUrl) => {
+    state.failedRpcUrls.add(String(rpcUrl));
+    await expect(ensureAgentRegistered(allChains)).rejects.toThrow(`Required ERC-8004 registration failed on chain(s): ${chainId}`);
+    expect(state.instances).toHaveLength(3);
+    expect(state.metadata.size).toBe(2);
+  });
+
+  it('reports every failed chain rather than only the first one', async () => {
+    state.failedRpcUrls.add(allChains.ethereumRpcUrl);
+    state.failedRpcUrls.add(allChains.chainRpcUrl);
+    await expect(ensureAgentRegistered(allChains)).rejects.toThrow('11155111, 84532');
+    expect(state.metadata.size).toBe(1);
+  });
+
+  it('does not require Arc to detect an incomplete Base/Ethereum registration', async () => {
+    state.failedRpcUrls.add(allChains.chainRpcUrl);
+    await expect(ensureAgentRegistered({ ...allChains, arcRpcUrl: '' })).rejects.toThrow('84532');
+  });
+
+  it('attributes lock errors to the chain and continues verifying the remaining chains', async () => {
+    state.lockFailure = '11155111';
+    await expect(ensureAgentRegistered(allChains)).rejects.toThrow('Required ERC-8004 registration failed on chain(s): 11155111');
+    expect(state.instances).toHaveLength(2);
+    expect(state.metadata.size).toBe(2);
+  });
+
+  it('returns all configured verified identities', async () => {
+    expect(await ensureAgentRegistered(allChains)).toEqual(new Map([[11155111, 42n], [84532, 42n], [5042002, 42n]]));
+  });
+
+  it.each(['0', '592'])('verifies cached token %s directly even when balanceOf RPC is unavailable', async cachedTokenId => {
+    state.fail = 'rpc';
+    expect(await ensureAgentRegistered({ ...config, arcAgentTokenId: cachedTokenId })).toEqual(new Map([[5042002, BigInt(cachedTokenId)]]));
+    expect(state.instances[0].isRegistered).not.toHaveBeenCalled();
+    expect(state.instances[0].getRegistration).toHaveBeenCalledWith(BigInt(cachedTokenId));
+    expect(state.instances[0].assertTokenOwner).toHaveBeenCalledWith(BigInt(cachedTokenId));
+    expect(state.instances[0].register).not.toHaveBeenCalled();
+  });
+});
+
+it('retries delayed confirmed metadata visibility without resubmitting a transaction', async () => {
+  state.staleReadbacks = 1;
+  expect(await ensureAgentRegistered(config)).toEqual(new Map([[5042002, 42n]]));
+  expect(state.instances[0].updateMetadata).toHaveBeenCalledOnce();
+  expect(state.instances[0].getTokenMetadata).toHaveBeenCalledTimes(2);
+});
+
+it('waits for the confirmed block before deciding whether active metadata needs a write', async () => {
+  state.activeReadErrors = 1;
+  expect(await ensureAgentRegistered(config)).toEqual(new Map([[5042002, 42n]]));
+  expect(state.instances[0].updateMetadata).toHaveBeenCalledOnce();
+  expect(state.instances[0].setOnchainMetadata).not.toHaveBeenCalled();
+});
+
+it('retries a lagging owner read after minting without minting another token', async () => {
+  state.ownerReadErrors = 1;
+  expect(await ensureAgentRegistered(config)).toEqual(new Map([[5042002, 42n]]));
+  expect(state.instances[0].register).toHaveBeenCalledOnce();
+  expect(state.instances[0].assertTokenOwner).toHaveBeenCalledTimes(2);
 });

@@ -22,10 +22,10 @@ describe('Arc discovery integration instructions', () => {
         verifyingContract: '0x0077777d7EBA4688BDeF3E311b846F25870A19B9'}, settlement: 'gateway'});
     expect(guide.endpoints.guide.url).toBe(config.a2aBaseUrl + '/api/v1/guide/arc_eligibility');
     expect(guide.local_mcp_server.generate_proof).toMatchObject({circuit:'arc_eligibility',pay_with:'arc',pay_on:'arc-testnet-nano'});
-    expect(guide.local_mcp_server.required_arguments).toContain('action');
+    expect(guide.local_mcp_server.optional_arguments).toContain('action');
     expect(guide.sdk.quick_start).toContain('walletFromArcAgent');
     expect(guide.sdk.quick_start).toContain('action');
-    expect(JSON.stringify(guide)).not.toMatch(/personal_sign|coinbase_country|NOT_DEPLOYED|PAYMENT_KEY/);
+    expect(JSON.stringify(guide)).not.toMatch(/coinbase_country|NOT_DEPLOYED|PAYMENT_KEY/);
   });
 
   it('requires encryption in Nitro even when optional attestation output is disabled', () => {

@@ -237,7 +237,7 @@ describe('A2A Endpoint E2E', () => {
       expect(response.headers['content-type']).toMatch(/application\/json/);
       // /.well-known/agent.json is the OASF endpoint, not A2A agent card
       expect(response.body).toMatchObject({
-        name: 'proveragent.base.eth',
+        name: 'proveragent.sepolia',
         type: expect.any(String),
         agentType: expect.any(String),
         active: true,
@@ -458,13 +458,13 @@ describe('A2A Endpoint E2E', () => {
       // Test OASF agent descriptor at standard URL
       const oasfResponse = await request(server).get('/.well-known/agent.json');
       expect(oasfResponse.status).toBe(200);
-      expect(oasfResponse.body.name).toBe('proveragent.base.eth');
+      expect(oasfResponse.body.name).toBe('proveragent.sepolia');
       expect(oasfResponse.body.active).toBe(true);
 
       // Test A2A Agent Card at alias URL
       const agentCardResponse = await request(server).get('/.well-known/agent-card.json');
       expect(agentCardResponse.status).toBe(200);
-      expect(agentCardResponse.body.name).toBe('proveragent.base.eth');
+      expect(agentCardResponse.body.name).toBe('proveragent.sepolia');
 
       // Test A2A JSON-RPC (use tasks/get which is non-blocking)
       const a2aResponse = await request(server)

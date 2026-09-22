@@ -37,7 +37,10 @@ export async function planPayment(
     return { wallet: undefined, payOn: undefined, free: true };
   }
   const offers = (challenge.accepts ?? []) as Array<{ networkName?: string; network?: string }>;
-  const payOn = offers[0]?.networkName ?? offers[0]?.network;
+  const requested = process.env.E2E_PAYMENT_NETWORK;
+  const offer = requested ? offers.find(o => o.networkName === requested) : offers[0];
+  if (requested && !offer) throw new Error(`Requested E2E payment network ${requested} is not offered by ${config.baseUrl}`);
+  const payOn = offer?.networkName ?? offer?.network;
   if (!payOn) {
     throw new Error(
       `${config.baseUrl} says it charges but offered no chain to pay on. ` +
@@ -62,7 +65,7 @@ export function unfundedReason(error: unknown, payOn: string, payer?: string): s
   return (
     `the payer has nothing to spend on ${payOn}` +
     (payer ? ` (${payer})` : '') +
-    `. Top it up — Arc chains settle through Circle Gateway, so the balance has to be ` +
-    `deposited there, not just held in the wallet. Service said: ${text.slice(0, 200)}`
+    (payOn === 'arc-testnet-nano' ? '. Deposit USDC into Circle Gateway.' : '. Fund its USDC balance on the selected chain.') +
+    ` Service said: ${text.slice(0, 200)}`
   );
 }

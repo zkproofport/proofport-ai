@@ -139,7 +139,7 @@ beforeAll(async () => {
   } catch (err) {
     throw new Error(
       `Cannot connect to ${BASE_URL}. Ensure the container is running:\n` +
-      `  cd proofport-ai && docker compose up --build -d\n` +
+      `  ./scripts/dev.sh (from the parent workspace)\n` +
       `Original error: ${err}`
     );
   }
@@ -161,10 +161,14 @@ describe('Discovery Endpoints', () => {
     expect(json.service).toBe('proofport-ai');
   });
 
-  it('GET /.well-known/agent-card.json returns A2A agent card with 2 skills', async () => {
+  it('GET /.well-known/agent-card.json returns A2A agent card with 3 skills', async () => {
     const { status, json } = await jsonGet('/.well-known/agent-card.json');
     expect(status).toBe(200);
-    expect(json.name).toBe('proveragent.base.eth');
+    const namesByChain: Record<number, string> = { 1: 'proveragent.eth', 11155111: 'proveragent.sepolia', 8453: 'proveragent.base.eth', 84532: 'proveragent.base.sepolia', 5042002: 'proveragent.arc' };
+    const card = json.identity?.erc8004 ? json : (await jsonGet('/.well-known/agent-card.json')).json;
+    const expectedName = namesByChain[card.identity?.erc8004?.chainId];
+    expect(expectedName, 'identity chain must have a known agent name').toBeDefined();
+    expect(json.name).toBe(expectedName);
     expect(json.protocolVersion).toBe('0.3.0');
     expect(Array.isArray(json.skills)).toBe(true);
     expect(json.skills.length).toBe(3);
@@ -180,10 +184,14 @@ describe('Discovery Endpoints', () => {
     const { status, json } = await jsonGet('/.well-known/agent.json');
     expect(status).toBe(200);
     expect(json.name).toBeDefined();
-    expect(json.name).toBe('proveragent.base.eth');
+    const namesByChain: Record<number, string> = { 1: 'proveragent.eth', 11155111: 'proveragent.sepolia', 8453: 'proveragent.base.eth', 84532: 'proveragent.base.sepolia', 5042002: 'proveragent.arc' };
+    const card = json.identity?.erc8004 ? json : (await jsonGet('/.well-known/agent-card.json')).json;
+    const expectedName = namesByChain[card.identity?.erc8004?.chainId];
+    expect(expectedName, 'identity chain must have a known agent name').toBeDefined();
+    expect(json.name).toBe(expectedName);
   });
 
-  it('GET /.well-known/mcp.json returns MCP server metadata with 2 tools', async () => {
+  it('GET /.well-known/mcp.json returns MCP server metadata with 3 tools', async () => {
     const { status, json } = await jsonGet('/.well-known/mcp.json');
     expect(status).toBe(200);
     expect(json.serverInfo).toBeDefined();
@@ -291,7 +299,10 @@ describe('REST API — x402 Single-Step Flow', () => {
     const decoded = JSON.parse(Buffer.from(paymentHeader!, 'base64').toString());
     expect(decoded.accepts.length).toBeGreaterThan(0);
     expect(decoded.accepts[0].scheme).toBe('exact');
-    expect(decoded.accepts[0].extra.nonce).toBe(json.nonce);
+    // The application nonce is returned in the body; Gateway's signing domain
+    // intentionally carries only name/version/verifyingContract.
+    expect(decoded.accepts[0].extra.name).toBeTruthy();
+    expect(decoded.accepts[0].extra.version).toBeTruthy();
   });
 
   it('POST /api/v1/prove without inputs returns 402 challenge (inputs checked after payment)', async () => {
@@ -462,7 +473,7 @@ describe('REST API — x402 Single-Step Flow', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('A2A message/send — get_supported_circuits', () => {
-  it('get_supported_circuits returns completed task with both circuits', async () => {
+  it('get_supported_circuits returns completed task with all five circuits', async () => {
     const result = await a2aClient.sendMessage(
       makeDataPartMessage({ skill: 'get_supported_circuits', chainId: '84532' }),
     );
@@ -479,7 +490,7 @@ describe('A2A message/send — get_supported_circuits', () => {
     expect(dataArtifact).toBeDefined();
     const circuits = (dataArtifact!.parts.find((p: Part) => p.kind === 'data' && (p as any).data?.circuits) as any).data.circuits;
     expect(circuits.find((c: any) => c.id === 'coinbase_attestation')).toBeDefined();
-    expect(circuits.find((c: any) => c.id === 'coinbase_country_attestation')).toBeDefined();
+    expect(circuits.map((c: any) => c.id)).toEqual(expect.arrayContaining(['coinbase_attestation', 'coinbase_country_attestation', 'oidc_domain_attestation', 'arc_eligibility', 'giwa_attestation']));
   });
 });
 
@@ -693,7 +704,7 @@ describe('MCP StreamableHTTP', () => {
     }
   });
 
-  it('tools/call get_supported_circuits returns circuit list with both circuits', async () => {
+  it('tools/call get_supported_circuits returns all five circuits', async () => {
     const { client, transport } = await createMcpClient();
     try {
       const result = await client.callTool({ name: 'get_supported_circuits', arguments: {} });
@@ -705,7 +716,7 @@ describe('MCP StreamableHTTP', () => {
 
       const circuitIds = parsed.circuits.map((c: any) => c.id);
       expect(circuitIds).toContain('coinbase_attestation');
-      expect(circuitIds).toContain('coinbase_country_attestation');
+      expect(circuitIds).toEqual(expect.arrayContaining(['coinbase_attestation', 'coinbase_country_attestation', 'oidc_domain_attestation', 'arc_eligibility', 'giwa_attestation']));
     } finally {
       await transport.close();
     }
@@ -860,6 +871,15 @@ describe(
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('SKILL.md & Guide Endpoints', () => {
+  it.each(['coinbase_attestation', 'coinbase_country_attestation', 'oidc_domain_attestation', 'arc_eligibility', 'giwa_attestation'])('publishes the canonical %s guide', async circuit => {
+    const res = await fetch(`${BASE_URL}/api/v1/guide/${circuit}`);
+    expect(res.status).toBe(200);
+    const guide = await res.json();
+    expect(guide.circuit_id).toBe(circuit);
+    expect(guide.endpoints.guide.url).toBe(`${BASE_URL}/api/v1/guide/${circuit}`);
+    expect(guide.constants.verification.verifier_address).toMatch(/^0x[0-9a-fA-F]{40}$/);
+  });
+
   it('GET /.well-known/SKILL.md returns markdown with correct content-type', async () => {
     const res = await fetch(`${BASE_URL}/.well-known/SKILL.md`);
     expect(res.status).toBe(200);

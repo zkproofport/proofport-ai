@@ -1,6 +1,6 @@
 /**
  * Auto-registration on ERC-8004 Identity contract at server startup.
- * Supports dual-chain registration (Base + Ethereum mainnet).
+ * Verifies every configured Base, Ethereum and Arc identity.
  */
 
 import { withRegistrationLock } from './registrationLock.js';
@@ -25,6 +25,17 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): P
     })]);
   } finally {
     clearTimeout(timer);
+  }
+}
+
+/** Bounded read-only retries for RPC replicas catching up to a mined write. */
+async function withReadbackRetry<T>(chainId: number, read: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try { return await read(); } catch (error) {
+      if (attempt === 2) throw error;
+      log.warn({ action: 'identity.readback.retry', chainId, attempt: attempt + 1, err: error }, 'Waiting for confirmed identity state to become readable');
+      await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+    }
   }
 }
 
@@ -107,7 +118,7 @@ function metadataMatches(current: AgentMetadata | null, expected: AgentMetadata)
     JSON.stringify(current[key as keyof AgentMetadata]) === JSON.stringify(expected[key as keyof AgentMetadata]));
 }
 
-async function registerOnChain(config: Config, chain: ChainIdentity): Promise<bigint | null> {
+async function registerOnChain(config: Config, chain: ChainIdentity): Promise<bigint> {
   const chainLabel = `${chain.chainName} (${chain.chainId})`;
   try {
     const registration = new AgentRegistration({
@@ -116,13 +127,16 @@ async function registerOnChain(config: Config, chain: ChainIdentity): Promise<bi
       chainRpcUrl: chain.rpcUrl,
       privateKey: config.proverPrivateKey,
     });
-    const isRegistered = await withTimeout(registration.isRegistered(), 30000, `isRegistered:${chain.chainId}`);
+    const hasCachedToken = Boolean(chain.cachedTokenId);
+    if (hasCachedToken && !/^(0|[1-9][0-9]*)$/.test(chain.cachedTokenId)) {
+      throw new Error(`Invalid cached agent tokenId for chain ${chain.chainId}`);
+    }
+    // A configured token is verified by ownerOf + tokenURI directly. Do not
+    // depend on balanceOf (or historical log discovery) to verify a known id.
+    const isRegistered = hasCachedToken || await withTimeout(registration.isRegistered(), 30000, `isRegistered:${chain.chainId}`);
     let tokenId: bigint;
     let current: AgentMetadata | null = null;
-    if (isRegistered || chain.cachedTokenId) {
-      if (chain.cachedTokenId && !/^(0|[1-9][0-9]*)$/.test(chain.cachedTokenId)) {
-        throw new Error(`Invalid cached agent tokenId for chain ${chain.chainId}`);
-      }
+    if (isRegistered) {
       const cached = chain.cachedTokenId ? BigInt(chain.cachedTokenId) : undefined;
       const info = await withTimeout(registration.getRegistration(cached), 120000, `getRegistration:${chain.chainId}`);
       if (!info || !info.isRegistered) throw new Error(`Owned registration unresolved on chain ${chain.chainId}`);
@@ -133,23 +147,28 @@ async function registerOnChain(config: Config, chain: ChainIdentity): Promise<bi
       tokenId = result.tokenId;
       log.info({ action: 'identity.chain.minted', chainId: chain.chainId, tokenId: tokenId.toString(), transactionHash: result.transactionHash }, 'Agent minted; verifying discovery metadata');
     }
-    await withTimeout(registration.assertTokenOwner(tokenId), 30000, `ownerOf:${chain.chainId}`);
+    await withReadbackRetry(chain.chainId, () => withTimeout(registration.assertTokenOwner(tokenId), 30000, `ownerOf:${chain.chainId}`));
     const expected = buildAgentMetadata(config, chain, registration.agentAddress, tokenId);
     if (!metadataMatches(current, expected)) {
       await withTimeout(registration.updateMetadata(tokenId, expected), txTimeout(chain.chainId), `updateMetadata:${chain.chainId}`);
     }
-    const active = await withTimeout(registration.getOnchainMetadata(tokenId, 'active'), 30000, `getActive:${chain.chainId}`);
+    const active = await withReadbackRetry(chain.chainId, () => withTimeout(registration.getOnchainMetadata(tokenId, 'active'), 30000, `getActive:${chain.chainId}`));
     if (active !== 'true') {
       await withTimeout(registration.setOnchainMetadata(tokenId, 'active', 'true'), txTimeout(chain.chainId), `setActive:${chain.chainId}`);
     }
-    const uri = await withTimeout(registration.getTokenMetadata(tokenId), 30000, `verifyTokenURI:${chain.chainId}`);
-    if (!metadataMatches(parseMetadataUri(uri), expected)) throw new Error(`Registration metadata readback mismatch on chain ${chain.chainId}`);
-    if (await withTimeout(registration.getOnchainMetadata(tokenId, 'active'), 30000, `verifyActive:${chain.chainId}`) !== 'true') throw new Error(`Registration inactive on chain ${chain.chainId}`);
+    // Base can expose a receipt before every RPC backend has that block's
+    // state. Reads are pinned to the write receipt block by AgentRegistration;
+    // retry visibility checks only, never submit the update again.
+    await withReadbackRetry(chain.chainId, async () => {
+      const uri = await withTimeout(registration.getTokenMetadata(tokenId), 30000, `verifyTokenURI:${chain.chainId}`);
+      if (!metadataMatches(parseMetadataUri(uri), expected)) throw new Error(`Registration metadata readback mismatch on chain ${chain.chainId}`);
+      if (await withTimeout(registration.getOnchainMetadata(tokenId, 'active'), 30000, `verifyActive:${chain.chainId}`) !== 'true') throw new Error(`Registration inactive on chain ${chain.chainId}`);
+    });
     log.info({ action: 'identity.chain.ready', chainId: chain.chainId, tokenId: tokenId.toString(), owner: registration.agentAddress, endpoint: config.a2aBaseUrl }, 'Owned agent registration verified');
     return tokenId;
   } catch (error) {
     log.error({ action: 'identity.chain.failed', chain: chainLabel, err: error instanceof Error ? error : new Error(String(error)) }, `Registration failed on ${chainLabel}`);
-    return null;
+    throw new Error(`ERC-8004 registration failed on ${chainLabel}`, { cause: error });
   }
 }
 
@@ -167,8 +186,8 @@ export function isIdentityRegistrationEnabled(config: Config): boolean {
  * if ETHEREUM_RPC_URL is configured. Each chain gets its own agent identity
  * with chain-specific metadata.
  *
- * Returns a Map of chainId -> tokenId for all successful registrations.
- * Rejects when the required Arc identity cannot be verified. The caller exposes
+ * Returns a Map of chainId -> tokenId only when every configured identity is verified.
+ * Rejects when any configured identity cannot be verified. The caller exposes
  * this failure through readiness while keeping the HTTP server available.
  */
 export async function ensureAgentRegistered(config: Config, teeProvider?: TeeProvider): Promise<Map<number, bigint>> {
@@ -182,17 +201,23 @@ export async function ensureAgentRegistered(config: Config, teeProvider?: TeePro
   const chains = getChainIdentities(config);
   log.info({ action: 'identity.chains', count: chains.length, chains: chains.map(c => `${c.agentName}@${c.chainId}`) }, `Registering on ${chains.length} chain(s)`);
 
+  const failures: { chainId: number; error: unknown }[] = [];
   for (const chain of chains) {
     const owner = new ethers.Wallet(config.proverPrivateKey).address.toLowerCase();
     const key = `identity:registration:${chain.chainId}:${chain.identityAddress.toLowerCase()}:${owner}`;
-    const tokenId = await withRegistrationLock(config.redisUrl, key, () => registerOnChain(config, chain));
-    if (tokenId !== null) {
+    try {
+      const tokenId = await withRegistrationLock(config.redisUrl, key, () => registerOnChain(config, chain));
       results.set(chain.chainId, tokenId);
+    } catch (error) {
+      failures.push({ chainId: chain.chainId, error });
+      // Also captures lock acquisition failures, which occur before registerOnChain.
+      log.error({ action: 'identity.chain.failed', chainId: chain.chainId, err: error }, 'Configured identity could not be verified');
     }
   }
 
-  if (config.arcRpcUrl && !results.has(config.arcChainId)) {
-    throw new Error(`Required Arc ERC-8004 registration failed on chain ${config.arcChainId}; inspect identity.chain.failed logs`);
+  if (failures.length) {
+    throw new AggregateError(failures.map(failure => failure.error),
+      `Required ERC-8004 registration failed on chain(s): ${failures.map(failure => failure.chainId).join(', ')}; inspect identity.chain.failed logs`);
   }
   log.info({ action: 'identity.complete', registered: results.size, chains: [...results.entries()].map(([c, t]) => `${c}:${t}`) }, 'Registration complete');
   return results;

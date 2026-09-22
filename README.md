@@ -229,7 +229,7 @@ npm install @zkproofport-ai/mcp@latest @zkproofport-ai/sdk@latest ethers
 npx zkproofport-mcp    # Starts stdio MCP server
 ```
 
-Arc support described here requires SDK/MCP **0.2.12 or later**, including shared action validation/hashing and exact EIP-712 signing in both proof paths. Install from npm and check the resolved version. Release Please manages package versions and the release workflow publishes them; repository source changes alone do not update `@latest`.
+Arc/GIWA optional-action support requires **SDK 0.2.14 or later** and **MCP 0.2.15 or later** for the step-by-step input preparation path. MCP 0.2.14 has input-validation bugs in that path; its all-in-one tool delegates to the SDK. Install from npm and check the resolved version. Release Please manages package versions and the release workflow publishes them; repository source changes alone do not update `@latest`.
 
 ### Circle Agent Wallet on Arc — EXPERIMENTAL
 
@@ -375,7 +375,7 @@ The agent auto-registers on-chain at startup via the ERC-8004 Identity contract.
 | `BASE_RPC_URL` | Base chain RPC endpoint |
 | `CHAIN_RPC_URL` | RPC for proof verification |
 | `EAS_GRAPHQL_ENDPOINT` | EAS GraphQL endpoint for attestation queries |
-| `PROVER_PRIVATE_KEY` | Agent wallet private key (64 hex chars, no 0x) |
+| `PROVER_PRIVATE_KEY` | Agent wallet private key (64 hex chars, optional 0x); also submits direct payment settlements |
 | `PAYMENT_MODE` | `disabled` / `testnet` / `mainnet` |
 | `A2A_BASE_URL` | Public-facing service URL (for Agent Card) |
 
@@ -393,18 +393,50 @@ The agent auto-registers on-chain at startup via the ERC-8004 Identity contract.
 | `ENCLAVE_CID` | — | Nitro Enclave CID (required when `TEE_MODE=nitro`) |
 | `ENCLAVE_PORT` | `5000` | Nitro Enclave port |
 | `TEE_ATTESTATION` | `false` | Enable attestation verification |
-| `PAYMENT_PAY_TO` | — | Operator wallet (required when payment enabled) |
+| `PAYMENT_PAY_TO` | — | Payment recipient (required when payment enabled); must match the prover wallet when direct settlement is offered |
 | `PAYMENT_PROOF_PRICE` | `$0.10` | Price per proof (USD) |
 | `ERC8004_IDENTITY_ADDRESS` | — | ERC-8004 Identity contract |
 | `ERC8004_REPUTATION_ADDRESS` | — | ERC-8004 Reputation contract |
 | `GEMINI_API_KEY` | — | Gemini API key for chat |
 | `OPENAI_API_KEY` | — | OpenAI API key for chat |
 | `PHOENIX_COLLECTOR_ENDPOINT` | — | Phoenix OTLP endpoint for tracing |
-| `AGENT_VERSION` | `1.0.0` | Agent version string |
+| `AGENT_VERSION` | Server package version | Optional advertised agent version override |
 
-## Deployment (AWS Nitro Enclave)
+### Direct payment settlement wallet
 
-proofport-ai deploys to **AWS EC2** with Nitro Enclave support. Deployment uses **blue-green slot switching** for zero downtime.
+`PROVER_PRIVATE_KEY` is the single operator key for agent identity signing and
+direct x402 settlement. No separate `PAYMENT_SETTLER_PRIVATE_KEY` is read.
+When a configured payment network uses payee settlement, startup checks that the
+prover key is valid and its address matches `PAYMENT_PAY_TO`. A mismatch stops
+startup before the service offers payment. Fund this wallet for transaction gas
+on each directly settled network. Facilitator and Gateway settlement do not use
+this wallet to submit each payment; payment-disabled operation skips this check.
+
+For local paid-path tests, provide `PROVER_PRIVATE_KEY` and its public address as
+`PAYMENT_PAY_TO` in the shell, then run `./scripts/ai-dev.sh --payment`. The
+script uses the same prover key in the server container. `scripts/verify-payment.ts`
+also uses this pair for direct settlement, plus a distinct `PAYMENT_BUYER_KEY`
+for the customer-side authorization; keep private keys out of shell history.
+
+## Deployment
+
+The current deployment target is **GCP Cloud Run**, through the parent workspace's
+`deploy-ai.yml` workflow. Commit service changes to `main`, update the parent's
+pinned service commit, and dispatch that parent's `main`. Staging uses testnets;
+production uses mainnets. Cloud Run uses `TEE_MODE=local`, so it does not provide
+Nitro hardware attestation or the Nitro encrypted-payload endpoint.
+
+The deployment gate verifies all configured ERC-8004 identities, all five circuit
+discovery entries, and every payment offer. Actual paid proof E2E is a separate
+check: use `scripts/run-published-e2e.mjs` with an explicit `E2E_BASE_URL` to install
+and exercise the versions in the package manifests. It verifies generated proofs
+on chain; a successful 402 response alone is not a paid proof test.
+
+### AWS Nitro reference
+
+The retained AWS deployment supports hardware-attested proving and blue-green
+slot switching. It is not the current deployment target; use it only after an
+explicit change to that deployment decision.
 
 ### Blue-Green Deployment
 
@@ -435,10 +467,49 @@ aws/stop-active-slot.sh    # Stop active slot containers
 ## Testing
 
 ```bash
-npm test                # Unit tests
+npm run test:unit       # Unit and integration tests
 npm run test:e2e        # E2E against Docker stack
 npm run test:watch      # Watch mode
 ```
+
+### Published SDK/MCP E2E
+
+```bash
+E2E_BASE_URL=https://stg-ai.zkproofport.app \
+E2E_PAYMENT_NETWORK=base-sepolia \
+npm run test:e2e:published
+```
+
+This installs the exact SDK/MCP versions from their package manifests into an
+isolated temporary directory, together with the supported Circle CLI **1.1.4**.
+It verifies those versions and gives every test subprocess that CLI through its
+PATH; the global installation is neither used nor changed. SDK imports and the
+MCP process use the installed registry artifacts, not workspace links. The
+installation is removed after testing. Use `-- --sdk-version X.Y.Z --mcp-version
+X.Y.Z` to validate a specific already published release.
+
+The full run creates paid testnet proofs. Supply credentials in the untracked
+`.env.test` or process environment: `ATTESTATION_KEY`, `GIWA_ATTESTATION_KEY`,
+`E2E_PAYER_WALLET_KEY`, and `E2E_OIDC_JWT` (or an authenticated gcloud account).
+`E2E_PAYMENT_NETWORK` selects the proof suites' payment network. The separate
+payment matrix checks Base Sepolia, Arc immediate settlement, Ethereum Sepolia,
+and Arc nano individually. Give it funded test wallets using explicit
+`E2E_PAYER_KEY_BASE_SEPOLIA`, `E2E_PAYER_KEY_ARC_TESTNET`,
+`E2E_PAYER_KEY_ETHEREUM_SEPOLIA`, and `E2E_PAYER_KEY_ARC_TESTNET_NANO` overrides
+when the common payer cannot pay on those networks. Alternatively,
+`E2E_ARC_AGENT_ADDRESS` selects an existing, authenticated Circle Agent Wallet
+for both Arc cases. Immediate settlement needs on-chain USDC; nano needs Gateway
+USDC. The runner never derives a payer from the prover key, transfers funds,
+or deposits automatically.
+
+A free package/discovery check is:
+
+```bash
+E2E_BASE_URL=https://stg-ai.zkproofport.app \
+npm run test:e2e:published -- -t 'should list all 5 circuits'
+```
+
+That check does not establish proof generation or settlement success.
 
 ### A2A Testing (a2a-ui + Phoenix)
 

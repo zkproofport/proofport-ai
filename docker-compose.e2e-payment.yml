@@ -8,7 +8,7 @@
 # Sepolia). $0.01 rather than $0.10 -- cheap enough to run repeatedly, which is
 # the only way the paid path actually gets exercised.
 #
-# PAYMENT_SETTLER_PRIVATE_KEY must come from the environment: the service
+# PROVER_PRIVATE_KEY must come from the environment: the service
 # refuses to start without it while a self-settled chain is offered, and a key
 # does not belong in a committed file.
 services:
@@ -16,8 +16,8 @@ services:
     environment:
       PAYMENT_MODE: testnet
       PAYMENT_NETWORKS: "base-sepolia,arc-testnet,ethereum-sepolia"
-      PAYMENT_PAY_TO: "0x5A3E649208Ae15ec52496c1Ae23b2Ff89Ac02f0c"
-      PAYMENT_SETTLER_PRIVATE_KEY: "${PAYMENT_SETTLER_PRIVATE_KEY:?set PAYMENT_SETTLER_PRIVATE_KEY to a wallet with USDC on Arc}"
+      PAYMENT_PAY_TO: "${PAYMENT_PAY_TO:?set PAYMENT_PAY_TO to the PROVER_PRIVATE_KEY wallet address}"
+      PROVER_PRIVATE_KEY: "${PROVER_PRIVATE_KEY:?set PROVER_PRIVATE_KEY to a wallet with USDC on Arc}"
       X402_FACILITATOR_URL: "https://x402.dexter.cash"
       PAYMENT_PROOF_PRICE: "$$0.01"
       ARC_RPC_URL: "https://rpc.testnet.arc.io"

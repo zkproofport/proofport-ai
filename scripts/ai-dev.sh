@@ -40,17 +40,17 @@ for arg in "$@"; do
       echo ""
       echo "  --payment   Start with x402 payment ON (\$0.01), offering Base Sepolia,"
       echo "              Arc testnet and Ethereum Sepolia. Requires"
-      echo "              PAYMENT_SETTLER_PRIVATE_KEY: no public facilitator settles"
+      echo "              PROVER_PRIVATE_KEY: no public facilitator settles"
       echo "              Arc or Ethereum, so this service submits the buyer's signed"
-      echo "              authorization itself and needs a funded wallet to do it."
+      echo "              authorization itself. PAYMENT_PAY_TO must be this wallet."
       exit 0 ;;
   esac
 done
 
 COMPOSE_FILES=(-f docker-compose.yml)
 if [ "$WITH_PAYMENT" = "1" ]; then
-  if [ -z "${PAYMENT_SETTLER_PRIVATE_KEY:-}" ]; then
-    echo "[ERROR] --payment needs PAYMENT_SETTLER_PRIVATE_KEY."
+  if [ -z "${PROVER_PRIVATE_KEY:-}" ]; then
+    echo "[ERROR] --payment needs PROVER_PRIVATE_KEY."
     echo ""
     echo "  It is the wallet that submits a buyer's signed authorization on the"
     echo "  chains no public x402 facilitator settles (Arc, Ethereum). The buyer"
@@ -58,6 +58,10 @@ if [ "$WITH_PAYMENT" = "1" ]; then
     echo ""
     echo "  It needs USDC on Arc testnet, which is also Arc's gas asset:"
     echo "  faucet.circle.com gives 20 USDC every 2 hours, no account needed."
+    exit 1
+  fi
+  if [ -z "${PAYMENT_PAY_TO:-}" ]; then
+    echo "[ERROR] --payment needs PAYMENT_PAY_TO set to the PROVER_PRIVATE_KEY wallet address."
     exit 1
   fi
   COMPOSE_FILES+=(-f docker-compose.e2e-payment.yml)
@@ -225,7 +229,7 @@ echo "  Useful Commands"
 echo "=========================================="
 echo ""
 echo "  View logs:       cd proofport-ai && docker compose logs -f ai"
-echo "  With payment:    ./scripts/ai-dev.sh --payment   (needs PAYMENT_SETTLER_PRIVATE_KEY)"
+echo "  With payment:    ./scripts/ai-dev.sh --payment   (needs PROVER_PRIVATE_KEY)"
 echo "  Stop:            cd proofport-ai && docker compose down"
 echo "  Reset:           cd proofport-ai && docker compose down -v"
 echo ""

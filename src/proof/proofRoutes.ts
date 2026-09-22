@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from 'express';
+import { circuitActionBinding } from '@zkproofport-app/sdk/circuits';
 import type { RedisClient } from '../redis/client.js';
 import type { Config } from '../config/index.js';
 import type { TeeProvider } from '../tee/types.js';
@@ -14,6 +15,7 @@ import { hexToBytes } from '../input/inputBuilder.js';
 import type { CircuitParams } from '../input/inputBuilder.js';
 import { buildGuide } from './guideBuilder.js';
 import { getVerifierAddress } from '../config/deployments.js';
+import { GIWA_CHAIN_ID } from '../config/contracts.js';
 import { ethers } from 'ethers';
 import { createLogger } from '../logger.js';
 import { parseAttestationDocument, verifyAttestationDocument } from '../tee/attestation.js';
@@ -91,6 +93,18 @@ export function chooseVerificationTarget(
   circuitId: CircuitId,
   testnet: boolean,
 ): ProveResponse['verification'] {
+  const dedicated: Partial<Record<CircuitId, { chainId: number; rpcUrl: string }>> = {
+    [CIRCUIT_IDS.ARC_ELIGIBILITY]: { chainId: config.arcChainId, rpcUrl: config.arcRpcUrl },
+    [CIRCUIT_IDS.GIWA_ATTESTATION]: { chainId: GIWA_CHAIN_ID, rpcUrl: config.giwaRpcUrl },
+  };
+  const target = dedicated[circuitId];
+  if (target) {
+    if (!target.rpcUrl) return null;
+    if (!Number.isSafeInteger(target.chainId) || target.chainId <= 0) throw new Error(`Invalid verification chain for ${circuitId}`);
+    const verifierAddress = getVerifierAddress(circuitId, String(target.chainId));
+    if (!verifierAddress) throw new Error(`No ${circuitId} verifier configured on chain ${target.chainId}`);
+    return { ...target, verifierAddress };
+  }
   if (config.ethereumRpcUrl) {
     const chainId = testnet ? 11155111 : 1;
     const verifierAddress = getVerifierAddress(circuitId, String(chainId));
@@ -104,6 +118,24 @@ export function chooseVerificationTarget(
   return verifierAddress
     ? { chainId, verifierAddress, rpcUrl: config.chainRpcUrl }
     : null;
+}
+
+function proofTypeForCircuit(circuitId: CircuitId, provider?: string): string {
+  const types: Record<CircuitId, string> = {
+    [CIRCUIT_IDS.COINBASE_ATTESTATION]: 'kyc',
+    [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: 'country',
+    [CIRCUIT_IDS.ARC_ELIGIBILITY]: 'arc_eligibility',
+    [CIRCUIT_IDS.GIWA_ATTESTATION]: 'giwa_attestation',
+    [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: 'google_login',
+  };
+  const type = types[circuitId];
+  if (!type) throw new Error(`Unknown proof type for circuit ${circuitId}`);
+  if (circuitId === CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION && provider) {
+    const providers: Record<string, string> = { google: 'google_workspace', microsoft: 'microsoft_365' };
+    if (!providers[provider]) throw new Error(`Unknown OIDC provider ${provider}`);
+    return providers[provider];
+  }
+  return type;
 }
 
 /**
@@ -126,6 +158,23 @@ async function generateProofFromInputs(
   let proverInputs: Record<string, any>;
   const inputBuildStart = Date.now();
 
+  const actionInputs = inputs as { domain_separator?: unknown; action_hash?: unknown };
+  const hasDomain = actionInputs.domain_separator !== undefined;
+  const hasAction = actionInputs.action_hash !== undefined;
+  if (hasDomain !== hasAction) {
+    res.status(400).json({ error: 'INVALID_REQUEST', message: 'Send both domain_separator and action_hash, or neither for an identity-only proof.' });
+    return;
+  }
+  if (hasDomain && hasAction) {
+    if (circuitActionBinding(circuitId) === 'none') {
+      res.status(400).json({ error: 'INVALID_REQUEST', message: `${circuitId} does not support action binding.` });
+      return;
+    }
+    if (![actionInputs.domain_separator, actionInputs.action_hash].every(value => typeof value === 'string' && /^0x[0-9a-fA-F]{64}$/.test(value))) {
+      res.status(400).json({ error: 'INVALID_REQUEST', message: 'domain_separator and action_hash must each be a 0x-prefixed 32-byte hash.' });
+      return;
+    }
+  }
   if (isOidc) {
     // OIDC: pass OidcProvePayload { jwt, jwks, scope, provider } — TEE/bbProver validates JWT + builds circuit inputs
     const oidc = inputs as { jwt?: string; jwks?: unknown; scope?: string };
@@ -142,21 +191,6 @@ async function generateProofFromInputs(
       return;
     }
 
-    if (circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY) {
-      // Required, and NOT derivable here: the domain names a verifying
-      // contract and a chain only the caller knows. Deriving one would bind
-      // the proof to the wrong contract, which is exactly what this circuit
-      // exists to prevent.
-      if (!cb.domain_separator || !cb.action_hash) {
-        res.status(400).json({
-          error: 'INVALID_REQUEST',
-          message:
-            'domain_separator and action_hash are required for the action-bound circuit. ' +
-            'Sign an EIP-712 typed action; personal_sign over signal_hash is the coinbase_kyc flow.',
-        });
-        return;
-      }
-    }
 
     if (circuitId === CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION) {
       if (!cb.country_list || cb.country_list.length === 0) {
@@ -265,15 +299,7 @@ async function generateProofFromInputs(
     }
   }
 
-  // Derive proofType from circuit + provider
-  let proofType: string = ctx.circuitId === CIRCUIT_IDS.COINBASE_ATTESTATION ? 'kyc'
-    : ctx.circuitId === CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION ? 'country'
-    : 'google_login';
-  if (ctx.circuitId === CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION) {
-    const oidcInputs = ctx.inputs as { provider?: string };
-    if (oidcInputs.provider === 'google') proofType = 'google_workspace';
-    else if (oidcInputs.provider === 'microsoft') proofType = 'microsoft_365';
-  }
+  const proofType = proofTypeForCircuit(ctx.circuitId, (ctx.inputs as { provider?: string }).provider);
 
   // Build response
   const response: ProveResponse = {
@@ -753,9 +779,7 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
           }
         }
 
-        const e2eProofType: string = circuitId === CIRCUIT_IDS.COINBASE_ATTESTATION ? 'kyc'
-          : circuitId === CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION ? 'country'
-          : 'google_login';
+        const e2eProofType = proofTypeForCircuit(circuitId);
 
         const response: ProveResponse = {
           circuit: circuitId,

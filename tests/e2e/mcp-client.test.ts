@@ -32,6 +32,7 @@ function getOidcJwt(): string | undefined {
   }
 }
 const OIDC_JWT = getOidcJwt();
+if (!OIDC_JWT) console.warn('SKIP OIDC proof: E2E_OIDC_JWT absent and gcloud identity token unavailable');
 
 describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
   let client: Client;
@@ -47,8 +48,8 @@ describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
 
     // Spawn MCP server from npm package
     transport = new StdioClientTransport({
-      command: 'npx',
-      args: ['zkproofport-mcp'],
+      command: process.env.E2E_MCP_ENTRY ? process.execPath : 'npx',
+      args: process.env.E2E_MCP_ENTRY ? [process.env.E2E_MCP_ENTRY] : ['--no-install', 'zkproofport-mcp'],
       env: {
         ...process.env,
         PROOFPORT_URL: BASE_URL,
@@ -69,7 +70,7 @@ describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
   });
 
   describe('get_supported_circuits', () => {
-    it('should list all 3 circuits', async () => {
+    it('should list all 5 circuits', async () => {
       const result = await client.callTool({
         name: 'get_supported_circuits',
         arguments: {},
@@ -81,6 +82,8 @@ describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
       expect(Object.keys(data.circuits)).toContain('coinbase_attestation');
       expect(Object.keys(data.circuits)).toContain('coinbase_country_attestation');
       expect(Object.keys(data.circuits)).toContain('oidc_domain_attestation');
+      expect(Object.keys(data.circuits)).toContain('arc_eligibility');
+      expect(Object.keys(data.circuits)).toContain('giwa_attestation');
     });
   });
 
@@ -90,6 +93,7 @@ describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
         name: 'generate_proof',
         arguments: {
           circuit: 'coinbase_kyc',
+          pay_on: process.env.E2E_PAYMENT_NETWORK,
           scope: 'e2e-test:npm-mcp-kyc',
         },
       });
@@ -112,6 +116,7 @@ describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
         name: 'generate_proof',
         arguments: {
           circuit: 'coinbase_country',
+          pay_on: process.env.E2E_PAYMENT_NETWORK,
           scope: 'e2e-test:npm-mcp-country',
           country_list: ['US', 'KR'],
           is_included: true,
@@ -132,6 +137,7 @@ describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
         name: 'generate_proof',
         arguments: {
           circuit: 'oidc_domain',
+          pay_on: process.env.E2E_PAYMENT_NETWORK,
           scope: 'e2e-test:npm-mcp-oidc',
           jwt: OIDC_JWT,
         },
@@ -155,6 +161,7 @@ describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
         name: 'prepare_inputs',
         arguments: {
           circuit: 'coinbase_kyc',
+          pay_on: process.env.E2E_PAYMENT_NETWORK,
           scope: 'e2e-test:npm-mcp-steps',
         },
       });

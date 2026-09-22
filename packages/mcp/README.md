@@ -10,7 +10,7 @@ npm install -g @zkproofport-ai/mcp@latest
 npm install @zkproofport-ai/mcp@latest @zkproofport-ai/sdk@latest ethers
 ```
 
-The shared hashing helper and corrected Arc `prepare_inputs` behavior require SDK/MCP **0.2.12 or later**. Install from npm and check the resolved version. Release Please manages package versions and the release workflow publishes them; repository source changes alone do not update `@latest`.
+The shared hashing helper requires SDK/MCP **0.2.12 or later**. Optional actions for both Arc and GIWA in the step-by-step `prepare_inputs` tool require **MCP 0.2.15 or later**, with **SDK 0.2.14 or later**. MCP 0.2.14 supports these modes through `generate_proof`, but its `prepare_inputs` still rejects GIWA actions and fails for Arc without an action. Install from npm and check the resolved version. Release Please manages package versions and the release workflow publishes them; repository source changes alone do not update `@latest`.
 
 For an MCP client, use the installed `zkproofport-mcp` executable or:
 
@@ -273,3 +273,32 @@ Use `--silent` for raw result JSON. Paid endpoints still require a compatible ap
 ## License
 
 MIT
+
+
+### Testing the published packages
+
+From the `proofport-ai` repository root, use the isolated registry runner:
+
+```bash
+E2E_BASE_URL=https://stg-ai.zkproofport.app \
+E2E_PAYMENT_NETWORK=base-sepolia \
+npm run test:e2e:published -- --sdk-version 0.2.14 --mcp-version 0.2.15
+```
+
+It installs those exact npm versions outside the workspace, resolves SDK imports
+and the MCP process to that installation, and removes it afterwards. The runner
+also installs and verifies Circle CLI 1.1.4, automatically putting it on the test
+subprocess PATH without changing the global installation. A normal
+workspace test run exercises local packages and is not published-package evidence.
+The full suite creates paid testnet proofs. It requires the attestation and payer
+credentials loaded by `tests/setup.ts`; GIWA uses `GIWA_ATTESTATION_KEY`, and OIDC
+uses `E2E_OIDC_JWT` or an authenticated gcloud account. The payment matrix checks
+Base Sepolia, Arc immediate settlement, Ethereum Sepolia, and Arc Gateway nano
+separately, so each needs a funded payer on its selected network. Optional
+`E2E_PAYER_KEY_<NETWORK>` overrides use uppercase names with underscores, for
+example `E2E_PAYER_KEY_ETHEREUM_SEPOLIA`. `E2E_ARC_AGENT_ADDRESS` selects an
+existing Circle Agent Wallet for both Arc cases; the supported Circle CLI,
+on-chain USDC for immediate settlement, and Gateway USDC for nano are required. The runner never deposits or transfers funds.
+
+For a non-paying package/discovery check, append
+`-t 'should list all 5 circuits'`. This checks discovery only, not proof generation.

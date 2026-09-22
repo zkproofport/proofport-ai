@@ -7,10 +7,9 @@ name: CI
 # Everything here calls a script that already exists in the repo, so a developer
 # reproduces CI by running the same npm scripts locally.
 #
-# Deliberately NOT here: anything needing a live backend. `npm run test:e2e`
-# (root) and `packages/mcp`'s e2e project both talk to a server at
-# E2E_BASE_URL / localhost:4002. proofport-ai is paused by design and staging was
-# torn down, so those cannot run unattended — see .claude/agents/ai-dev.md.
+# Live E2E runs separately against an explicitly selected service with funded
+# payment wallets. GCP staging is active; unit CI must not consume customer
+# credentials or count omitted paid proofs as passes.
 
 on:
   push:
@@ -75,8 +74,8 @@ jobs:
         run: npm run build --workspace @zkproofport-ai/sdk
 
       # ── Root server ────────────────────────────────────────────────────────
-      - name: Typecheck (root)
-        run: npm run typecheck
+      - name: Typecheck (root and operational scripts)
+        run: npm run typecheck:all
 
       - name: Build (root)
         run: npm run build

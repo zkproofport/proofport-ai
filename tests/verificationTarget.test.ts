@@ -108,3 +108,26 @@ describe('which chain gets chosen', () => {
     }
   });
 });
+
+describe('dedicated circuit verifier chains', () => {
+  it('returns the configured Arc verifier and RPC independently of the Base payment chain', () => {
+    const config = { ...configWith(BASE_SEPOLIA, ETHEREUM_SEPOLIA), arcChainId: 5042002, arcRpcUrl: 'https://rpc.testnet.arc.network' };
+    expect(chooseVerificationTarget(config, CIRCUIT_IDS.ARC_ELIGIBILITY, true)).toMatchObject({ chainId: 5042002, rpcUrl: config.arcRpcUrl, verifierAddress: expect.stringMatching(/^0x[0-9a-fA-F]{40}$/) });
+  });
+  it('returns GIWA Sepolia verification instead of looking for the verifier on Ethereum/Base', () => {
+    const config = { ...configWith(BASE_SEPOLIA, ETHEREUM_SEPOLIA), giwaRpcUrl: 'https://sepolia-rpc.giwa.io' };
+    expect(chooseVerificationTarget(config, CIRCUIT_IDS.GIWA_ATTESTATION, true)).toMatchObject({ chainId: 91342, rpcUrl: config.giwaRpcUrl, verifierAddress: expect.stringMatching(/^0x[0-9a-fA-F]{40}$/) });
+  });
+  it.each([CIRCUIT_IDS.ARC_ELIGIBILITY, CIRCUIT_IDS.GIWA_ATTESTATION])('does not invent a testnet RPC for %s on a production configuration', circuit => {
+    expect(chooseVerificationTarget(configWith(BASE_MAINNET, ETHEREUM_MAINNET), circuit, false)).toBeNull();
+  });
+});
+
+describe('dedicated verifier configuration errors', () => {
+  it.each([0, -1, 1.5, Number.NaN])('rejects invalid Arc verification chain %s', arcChainId => {
+    expect(() => chooseVerificationTarget({ ...configWith(BASE_SEPOLIA, ETHEREUM_SEPOLIA), arcRpcUrl: 'https://arc.example', arcChainId }, CIRCUIT_IDS.ARC_ELIGIBILITY, true)).toThrow('Invalid verification chain');
+  });
+  it('rejects a chain with no deployment instead of borrowing a verifier from another chain', () => {
+    expect(() => chooseVerificationTarget({ ...configWith(BASE_SEPOLIA, ETHEREUM_SEPOLIA), arcRpcUrl: 'https://arc.example', arcChainId: 999 }, CIRCUIT_IDS.ARC_ELIGIBILITY, true)).toThrow('No arc_eligibility verifier configured on chain 999');
+  });
+});

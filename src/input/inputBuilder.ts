@@ -108,9 +108,8 @@ export function computeSignalHash(
 export function eip712Digest(domainSeparator?: string, actionHash?: string): Uint8Array {
   if (!domainSeparator || !actionHash) {
     throw new Error(
-      'arc_eligibility requires domainSeparator and actionHash. The caller signs ' +
-      'an EIP-712 typed action; personal_sign over signal_hash is the ' +
-      'coinbase_attestation flow.',
+      'EIP-712 action signing requires both domainSeparator and actionHash. ' +
+      'For an identity-only proof, omit the action and personal_sign the signal hash.',
     );
   }
   return ethers.getBytes(
@@ -127,9 +126,9 @@ export function eip712Digest(domainSeparator?: string, actionHash?: string): Uin
 export function recoverUserPubkeyFromDigest(
   digest: Uint8Array,
   signature: string,
-  circuitId: string,
+  hasAction: boolean,
 ): string {
-  if (circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY) {
+  if (hasAction) {
     return ethers.SigningKey.recoverPublicKey(digest, signature);
   }
   return recoverUserPubkey(digest, signature);
@@ -616,11 +615,6 @@ export async function computeCircuitParams(
 
   // Step 2: Recover user public key.
   //
-  // From whatever the wallet actually signed. `arc_eligibility` has it sign an
-  // EIP-712 digest over the action, not signal_hash, so recovering against
-  // signal_hash there yields a public key that is not the user's -- and the
-  // circuit then fails on "User pubkey does not match address", pointing at
-  // the address rather than at the message.
   /*
    * What was signed follows the ACTION, not the circuit id. Arc and GIWA both
    * accept either; asking the circuit gave the wrong answer the moment the
@@ -632,7 +626,7 @@ export async function computeCircuitParams(
   const signedDigest = hasAction
     ? eip712Digest(request.domainSeparator, request.actionHash)
     : signalHash;
-  const userPubkey = recoverUserPubkeyFromDigest(signedDigest, signature, circuitId);
+  const userPubkey = recoverUserPubkeyFromDigest(signedDigest, signature, hasAction);
   const { x: userPubkeyX, y: userPubkeyY } = extractPubkeyCoordinates(userPubkey);
 
   /*

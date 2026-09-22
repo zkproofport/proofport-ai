@@ -22,7 +22,8 @@
     "test:all": "vitest run",
     "typecheck:all": "tsc --noEmit -p tsconfig.scripts.json",
     "sdk:local": "npm install --no-save ../proofport-app-sdk && node -e \"console.log('Using LOCAL customer SDK (node_modules only; package.json untouched)')\"",
-    "sdk:npm": "npm ci && node -e \"console.log('Restored the npm-published customer SDK from the lockfile')\""
+    "sdk:npm": "npm ci && node -e \"console.log('Restored the npm-published customer SDK from the lockfile')\"",
+    "test:e2e:published": "node scripts/run-published-e2e.mjs"
   },
   "dependencies": {
     "@a2a-js/sdk": "^0.3.10",

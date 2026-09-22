@@ -77,3 +77,60 @@ describe('deployment discovery metadata', () => {
     },
   );
 });
+
+describe('complete circuit discovery and deployment isolation', () => {
+  const circuits = ['coinbase_attestation', 'coinbase_country_attestation', 'oidc_domain_attestation', 'arc_eligibility', 'giwa_attestation'];
+
+  it('links every canonical guide on A2A, MCP, OASF and SKILL discovery', () => {
+    const guides = [buildAgentCard(config).guides, buildMcpDiscovery(config)['x-guides'], buildOasfAgent(config).guides];
+    for (const circuit of circuits) {
+      const link = `${config.a2aBaseUrl}/api/v1/guide/${circuit}`;
+      for (const guide of guides) expect(guide).toHaveProperty(circuit, link);
+      expect(buildSkillMd(config)).toContain(link);
+    }
+  });
+
+  it('describes optional action binding for both Arc and GIWA without forcing Coinbase witnesses on OIDC', () => {
+    const card = buildAgentCard(config);
+    const mcp = buildMcpDiscovery(config);
+    for (const text of [card.skills[0].description, mcp.tools[0].description, buildSkillMd(config)]) {
+      expect(text).toContain('giwa_attestation');
+      expect(text).toMatch(/optional/i);
+      expect(text).not.toContain('action (required)');
+      expect(text).not.toContain('arc_eligibility additionally requires');
+    }
+    expect(mcp.tools[0].inputSchema.properties.inputs).not.toHaveProperty('required');
+  });
+
+  it.each([
+    ['staging', config, [11155111, 84532, 5042002], 'proveragent.sepolia', 3288n],
+    ['production', { ...config, chainRpcUrl: 'https://mainnet.base.org', ethereumRpcUrl: 'https://ethereum.example.com', arcRpcUrl: '', a2aBaseUrl: 'https://ai.zkproofport.app', paymentNetworks: 'base', erc8004IdentityAddress: '0x0000000000000000000000000000000000000033' }, [1, 8453], 'proveragent.eth', 99n],
+  ] as const)('%s publishes only its configured names, registries and tokens', async (_name, current, chainIds, agentName, tokenId) => {
+    const { getChainIdentities } = await import('../../src/config/index.js');
+    expect(getChainIdentities(current).map(chain => chain.chainId)).toEqual(chainIds);
+    const card = buildAgentCard(current, tokenId);
+    const oasf = buildOasfAgent(current, tokenId);
+    expect(card.name).toBe(agentName);
+    expect(buildMcpDiscovery(current).serverInfo.name).toBe(agentName);
+    expect(oasf.name).toBe(agentName);
+    expect(card.identity?.erc8004).toEqual({ chainId: chainIds[0], contractAddress: current.erc8004IdentityAddress, tokenId: tokenId.toString() });
+    expect(oasf.registrations).toEqual([{ agentId: Number(tokenId), agentRegistry: `eip155:${chainIds[0]}:${current.erc8004IdentityAddress}` }]);
+    expect(oasf.services.some(service => service.name === 'ENS')).toBe(false);
+    const app = express();
+    const tokens = { chains: new Map(chainIds.map(chainId => [chainId, tokenId])) };
+    app.get('/', getAgentRegistrationHandler(current, tokens));
+    const response = await request(app).get('/');
+    expect(response.body.registrations.map((row: { agentRegistry: string }) => Number(row.agentRegistry.split(':')[1]))).toEqual(chainIds);
+    if (_name === 'production') {
+      expect(JSON.stringify(response.body)).not.toMatch(/11155111|84532|5042002|3288/);
+      expect(JSON.stringify(card)).not.toContain('stg-ai');
+      expect(JSON.stringify(oasf)).not.toContain('sepolia');
+    }
+  });
+
+  it('refuses to publish a staging token map under production configuration', () => {
+    const production = { ...config, chainRpcUrl: 'https://mainnet.base.org', arcRpcUrl: '' };
+    const handler = getAgentRegistrationHandler(production, { chains: new Map([[84532, 592n]]) });
+    expect(() => handler({} as never, {} as never)).toThrow('Unknown registered chain 84532');
+  });
+});

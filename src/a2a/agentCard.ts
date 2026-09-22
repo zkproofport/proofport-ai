@@ -19,9 +19,24 @@ function paymentNetworks(config: Config): string {
 }
 
 function serviceDescription(config: Config): string {
-  return `ZK proof generation for Coinbase KYC, country verification, OIDC domain verification, and Arc action eligibility. ` +
+  return `ZK proof generation for Coinbase KYC, country verification, OIDC domain verification, Arc eligibility, and GIWA attestations with optional action authorization. ` +
     `Provable circuits: ${PROVABLE_CIRCUIT_IDS.join(', ')}. Noir circuits execute in ${executionDescription(config)}. ` +
     `Configured x402 USDC payment networks: ${paymentNetworks(config)}. See /identity/status for verified ERC-8004 registrations.`;
+}
+
+function discoveryName(config: Config): string {
+  const primary = getChainIdentities(config).find(identity => identity.chainId === getChainId(config));
+  return primary?.agentName ?? 'ZKProofport prover';
+}
+
+function circuitGuides(config: Config): Record<string, string> {
+  return {
+    description: 'Step-by-step guides for preparing circuit-specific proof inputs. Read the guide BEFORE calling prove.',
+    ...Object.fromEntries(PROVABLE_CIRCUIT_IDS.map(id => [id, `${config.a2aBaseUrl}/api/v1/guide/${id}`])),
+    // Preserve existing discovery keys for clients using the original aliases.
+    coinbase_kyc: `${config.a2aBaseUrl}/api/v1/guide/coinbase_kyc`,
+    coinbase_country: `${config.a2aBaseUrl}/api/v1/guide/coinbase_country`,
+  };
 }
 
 function registrationRows(config: Config, chains: Map<number, bigint>) {
@@ -36,11 +51,7 @@ function registrationRows(config: Config, chains: Map<number, bigint>) {
 
 export type AgentCard = SDKAgentCard & {
   protocolVersions?: string[];
-  guides?: {
-    description: string;
-    coinbase_kyc: string;
-    coinbase_country: string;
-  };
+  guides?: Record<string, string>;
   identity?: {
     erc8004: {
       contractAddress: string;
@@ -90,16 +101,16 @@ function verifierLine(chainName: string, chainId: number, chainVerifiers: Record
 export function buildAgentCard(config: Config, tokenId?: bigint | null): AgentCard {
   // Determine chain from RPC URL, independent of payment mode
   const isProduction = isProductionChain(config);
-  const erc8004Identity = isProduction
+  const erc8004Identity = config.erc8004IdentityAddress || (isProduction
     ? ERC8004_ADDRESSES.mainnet.identity
-    : ERC8004_ADDRESSES.sepolia.identity;
+    : ERC8004_ADDRESSES.sepolia.identity);
   const chainId = getChainId(config);
   const chainName = isProduction ? 'Ethereum Mainnet' : 'Ethereum Sepolia';
   const chainVerifiers = getChainVerifiers(String(chainId));
   const verifiers = verifierLine(chainName, chainId, chainVerifiers);
 
   return {
-    name: 'proveragent.base.eth',
+    name: discoveryName(config),
     description: serviceDescription(config),
     url: `${config.a2aBaseUrl}/a2a`,
     version: config.agentVersion,
@@ -135,7 +146,7 @@ ${PROVABLE_CIRCUIT_IDS.join(', ')}
 
 REQUIRED INPUTS:
 Inputs are circuit-specific. Read /api/v1/guide/{circuit} and prepare them with the client SDK.
-Coinbase circuits use wallet/attestation witnesses. arc_eligibility additionally requires the EIP-712 domain separator and action hash signed by the KYC wallet. OIDC domain verification uses its OIDC witness.
+Coinbase circuits use wallet/attestation witnesses. arc_eligibility and giwa_attestation support optional EIP-712 action binding: provide both domain_separator and action_hash for a signed action, or omit both for an identity-only proof. GIWA uses its own configured attester. OIDC domain verification uses its OIDC witness.
 
 PAYMENT: ${config.paymentProofPrice} USDC. Configured networks: ${paymentNetworks(config)}. Read the returned x402 offers.
 
@@ -184,11 +195,7 @@ ON-CHAIN VERIFICATION:
     ],
     defaultInputModes: ['application/json'],
     defaultOutputModes: ['application/json'],
-    guides: {
-      description: 'Step-by-step guides for preparing proof inputs. Read the guide BEFORE calling prove.',
-      coinbase_kyc: `${config.a2aBaseUrl}/api/v1/guide/coinbase_kyc`,
-      coinbase_country: `${config.a2aBaseUrl}/api/v1/guide/coinbase_country`,
-    },
+    guides: circuitGuides(config),
     identity: {
       erc8004: {
         contractAddress: erc8004Identity,
@@ -222,7 +229,7 @@ export function buildMcpDiscovery(config: Config) {
   return {
     protocolVersion: '2025-11-25',
     serverInfo: {
-      name: 'proveragent.base.eth',
+      name: discoveryName(config),
       version: config.agentVersion,
       description: serviceDescription(config),
     },
@@ -232,33 +239,15 @@ export function buildMcpDiscovery(config: Config) {
     tools: [
       {
         name: 'prove',
-        description: `[SINGLE-STEP x402] Generate a zero-knowledge proof via x402 single-step flow. POST circuit + inputs → receive 402 with nonce → pay USDC → retry with X-Payment-TX and X-Payment-Nonce headers. Generates the ZK proof in ${executionDescription(config)}. Configured payment networks: ${paymentNetworks(config)}. Takes 30-90 seconds. Provable circuits: ${PROVABLE_CIRCUIT_IDS.join(', ')}. EAS schemas — coinbase_attestation 0xf8b05c79f090979bf4a80270aba232dff11a10d9ca55c4f88de95317970f0de9, coinbase_country_attestation 0x1801901fabd0e6189356b4fb52bb0ab855276d84f7ec140839fbd1f6801ca065. arc_eligibility reads the same Coinbase attestation as coinbase_attestation but binds the proof to one EIP-712 action the wallet signed; it is EXPERIMENTAL and its verifier is on Arc Testnet only. Authorized signers: [0x952f32128AF084422539C4Ff96df5C525322E564, 0x8844591D47F17bcA6F5dF8f6B64F4a739F1C0080, 0x88fe64ea2e121f49bb77abea6c0a45e93638c3c5, 0x44ace9abb148e8412ac4492e9a1ae6bd88226803]. Returns proof (hex), publicInputs, proofWithInputs (for on-chain verification)${config.teeMode === 'nitro' && config.teeAttestationEnabled ? ", hardware TEE attestation when requested" : ". No hardware TEE attestation is advertised"}. ${verifiers}.`,
+        description: `[SINGLE-STEP x402] Generate a zero-knowledge proof via x402 single-step flow. POST circuit + inputs → receive 402 with nonce → pay USDC → retry with X-Payment-TX and X-Payment-Nonce headers. Generates the ZK proof in ${executionDescription(config)}. Configured payment networks: ${paymentNetworks(config)}. Takes 30-90 seconds. Provable circuits: ${PROVABLE_CIRCUIT_IDS.join(', ')}. EAS schemas — coinbase_attestation 0xf8b05c79f090979bf4a80270aba232dff11a10d9ca55c4f88de95317970f0de9, coinbase_country_attestation 0x1801901fabd0e6189356b4fb52bb0ab855276d84f7ec140839fbd1f6801ca065. arc_eligibility and giwa_attestation support optional EIP-712 action binding; omit the action for an identity-only proof. Arc uses Coinbase attestations and GIWA uses its configured attester. Read each circuit guide for its verification chain and witness fields. Authorized signers: [0x952f32128AF084422539C4Ff96df5C525322E564, 0x8844591D47F17bcA6F5dF8f6B64F4a739F1C0080, 0x88fe64ea2e121f49bb77abea6c0a45e93638c3c5, 0x44ace9abb148e8412ac4492e9a1ae6bd88226803]. Returns proof (hex), publicInputs, proofWithInputs (for on-chain verification)${config.teeMode === 'nitro' && config.teeAttestationEnabled ? ", hardware TEE attestation when requested" : ". No hardware TEE attestation is advertised"}. ${verifiers}.`,
         inputSchema: {
           type: 'object',
           properties: {
             circuit: { type: 'string', description: `Canonical circuit id. Values: ${PROVABLE_CIRCUIT_IDS.join(', ')}` },
             inputs: {
               type: 'object',
-              properties: {
-                signal_hash: { type: 'string', description: '0x-prefixed 32-byte signal hash' },
-                nullifier: { type: 'string', description: '0x-prefixed 32-byte nullifier' },
-                scope_bytes: { type: 'string', description: '0x-prefixed 32-byte keccak256 of scope string' },
-                merkle_root: { type: 'string', description: '0x-prefixed 32-byte Merkle root' },
-                user_address: { type: 'string', description: '0x-prefixed 20-byte wallet address' },
-                signature: { type: 'string', description: 'eth_sign(signal_hash), 65 bytes hex' },
-                user_pubkey_x: { type: 'string' },
-                user_pubkey_y: { type: 'string' },
-                raw_transaction: { type: 'string' },
-                tx_length: { type: 'number' },
-                coinbase_attester_pubkey_x: { type: 'string' },
-                coinbase_attester_pubkey_y: { type: 'string' },
-                merkle_proof: { type: 'array', items: { type: 'string' } },
-                leaf_index: { type: 'number' },
-                depth: { type: 'number' },
-                country_list: { type: 'array', items: { type: 'string' } },
-                is_included: { type: 'boolean' },
-              },
-              required: ['signal_hash', 'nullifier', 'scope_bytes', 'merkle_root', 'user_address', 'signature', 'user_pubkey_x', 'user_pubkey_y', 'raw_transaction', 'tx_length', 'coinbase_attester_pubkey_x', 'coinbase_attester_pubkey_y', 'merkle_proof', 'leaf_index', 'depth'],
+              description: 'Circuit-specific prepared witness from the SDK. Read /api/v1/guide/{circuit}; OIDC uses jwt, jwks, scope and provider, while attestation circuits use wallet/attestation inputs. Optional action binding takes both domain_separator and action_hash, or neither.',
+              additionalProperties: true,
             },
           },
           required: ['circuit', 'inputs'],
@@ -266,7 +255,7 @@ export function buildMcpDiscovery(config: Config) {
       },
       {
         name: 'get_supported_circuits',
-        description: '[DISCOVERY] List all supported ZK circuits with metadata, verifier addresses, EAS schema IDs, and chain information. Call this first to discover available proof types (coinbase_kyc, coinbase_country) before starting a session.',
+        description: `[DISCOVERY] List all supported ZK circuits with metadata, verifier addresses, attestation sources, and chain information. Provable circuits: ${PROVABLE_CIRCUIT_IDS.join(', ')}.`,
         inputSchema: {
           type: 'object',
           properties: {},
@@ -285,11 +274,7 @@ export function buildMcpDiscovery(config: Config) {
         },
       },
     ],
-    'x-guides': {
-      description: 'Step-by-step guides for preparing proof inputs. Read the guide BEFORE calling prove.',
-      coinbase_kyc: `${config.a2aBaseUrl}/api/v1/guide/coinbase_kyc`,
-      coinbase_country: `${config.a2aBaseUrl}/api/v1/guide/coinbase_country`,
-    },
+    'x-guides': circuitGuides(config),
     'x-x402': {
       paymentRequired: config.paymentMode !== 'disabled',  // whether payment is actually charged
       baseUrl: config.a2aBaseUrl,
@@ -316,13 +301,13 @@ export function buildMcpDiscovery(config: Config) {
 export function buildOasfAgent(config: Config, tokenId?: bigint | null) {
   const isProduction = isProductionChain(config);
   const chainId = getChainId(config);
-  const erc8004Identity = isProduction
+  const erc8004Identity = config.erc8004IdentityAddress || (isProduction
     ? ERC8004_ADDRESSES.mainnet.identity
-    : ERC8004_ADDRESSES.sepolia.identity;
+    : ERC8004_ADDRESSES.sepolia.identity);
 
   return {
     type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
-    name: 'proveragent.base.eth',
+    name: discoveryName(config),
     description: serviceDescription(config),
     image: `${config.a2aBaseUrl}/icon.png`,
     agentType: 'service',
@@ -358,12 +343,8 @@ export function buildOasfAgent(config: Config, tokenId?: bigint | null) {
       {
         name: 'MCP',
         endpoint: `${config.a2aBaseUrl}/mcp`,
-        version: '2024-11-05',
+        version: '2025-11-25',
         mcpTools: ['prove', 'get_supported_circuits', 'get_guide'],
-      },
-      {
-        name: 'ENS',
-        endpoint: 'proveragent.base.eth',
       },
       {
         name: 'DID',
@@ -374,11 +355,7 @@ export function buildOasfAgent(config: Config, tokenId?: bigint | null) {
         endpoint: `eip155:${chainId}:${new ethers.Wallet(config.proverPrivateKey).address}`,
       },
     ],
-    guides: {
-      description: 'Step-by-step guides for preparing proof inputs. Read the guide BEFORE calling prove.',
-      coinbase_kyc: `${config.a2aBaseUrl}/api/v1/guide/coinbase_kyc`,
-      coinbase_country: `${config.a2aBaseUrl}/api/v1/guide/coinbase_country`,
-    },
+    guides: circuitGuides(config),
     x402Support: true,  // always supports x402 protocol (price may be $0 when disabled)
     active: true,
     registrations: [
@@ -464,9 +441,9 @@ export function getOasfAgentHandler(config: Config, tokenIdRef: TokenIdRef): (re
  * Provides bidirectional link between domain and on-chain identity (Rule 4)
  */
 export function getAgentRegistrationHandler(config: Config, tokenIdRef: TokenIdRef): (req: Request, res: Response) => void {
-  const identityAddress = isProductionChain(config)
+  const identityAddress = config.erc8004IdentityAddress || (isProductionChain(config)
     ? ERC8004_ADDRESSES.mainnet.identity
-    : ERC8004_ADDRESSES.sepolia.identity;
+    : ERC8004_ADDRESSES.sepolia.identity);
 
   return (_req: Request, res: Response) => {
     const registrations: { agentId: number | null; agentRegistry: string }[] = registrationRows(config, tokenIdRef.chains);
@@ -549,14 +526,11 @@ Execution: ${executionDescription(config)}.
 
 Validate the ERC-8004 registration's current owner and active capability metadata.
 Use its x402 endpoint's origin to read this document and the circuit guide.
-- Arc action-bound KYC: ${config.a2aBaseUrl}/api/v1/guide/arc_eligibility
-- Coinbase KYC: ${config.a2aBaseUrl}/api/v1/guide/coinbase_kyc
-- Coinbase Country: ${config.a2aBaseUrl}/api/v1/guide/coinbase_country
-- OIDC: ${config.a2aBaseUrl}/api/v1/guide/oidc_domain
+${PROVABLE_CIRCUIT_IDS.map(id => `- ${id}: ${config.a2aBaseUrl}/api/v1/guide/${id}`).join('\n')}
 
 ## Local MCP for agents
 
-Install with \`npm install -g @zkproofport-ai/mcp@latest\` (Arc support: 0.2.11+) and launch \`zkproofport-mcp\` over stdio.
+Install with \`npm install -g @zkproofport-ai/mcp@latest\` (GIWA and optional action support: 0.2.14+) and launch \`zkproofport-mcp\` over stdio.
 Set PROOFPORT_URL=${config.a2aBaseUrl} in that local process.
 Load the existing ATTESTATION_KEY only into the local signer process; never send credentials to an LLM.
 Connect and call \`tools/list\`; use the returned inputSchema for \`tools/call\`.
@@ -565,9 +539,9 @@ Local tools: generate_proof, deposit_to_gateway, gateway_balance, get_supported_
 request_challenge, prepare_inputs, submit_proof, verify_proof.
 Read guides with HTTPS GET; get_guide is a remote service tool, not a local SDK tool.
 
-For a single KYC + exact-action authorization proof, select \`generate_proof\` with:
-- circuit: \`arc_eligibility\`
-- action: the application's complete EIP-712 typed action (required)
+For a single attestation + exact-action authorization proof, select \`generate_proof\` with:
+- circuit: \`arc_eligibility\` or \`giwa_attestation\`
+- action: the application's complete EIP-712 typed action (optional; omit for an identity-only proof)
 - scope: the application's scope, e.g. \`ledger-house\`
 - pay_with: \`arc\` for an existing Circle Agent Wallet
 - pay_on: \`arc-testnet-nano\` only when present in the live offered networks below
@@ -580,7 +554,7 @@ for an Agent Wallet inspect its Gateway balance through the Circle CLI.
 
 After proof generation, call \`verify_proof\` with the proof result. The application must also bind
 its domain, delegate, amount, action, expiry, nonce, scope and trusted attester root before staking.
-Arc Eligibility proves KYC and the same KYC wallet's authorization in one circuit.
+Arc and GIWA prove the configured attestation and, when an action is supplied, that same wallet's authorization in one circuit. Without an action, the wallet signs the challenge instead; an identity-only proof does not authorize an application action. Coinbase KYC, Coinbase country and OIDC domain circuits do not take an action.
 
 ## x402 payment
 
@@ -597,7 +571,7 @@ USDC held in the Agent Wallet and USDC deposited in Gateway are different balanc
 
 ## CLI equivalent
 
-With the existing signer environment loaded and an offered Arc nanopayment network:
+Choose any canonical circuit above and its guide. For GIWA, replace arc_eligibility below with giwa_attestation; omit --action for an identity-only proof. With the existing signer environment loaded and an offered Arc nanopayment network:
 
 \`PROOFPORT_URL=${config.a2aBaseUrl} zkproofport-prove arc_eligibility --action action.json --scope ledger-house --pay-with arc --pay-on arc-testnet-nano --max-payment 0.001 --silent\`
 

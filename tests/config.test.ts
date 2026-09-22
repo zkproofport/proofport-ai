@@ -1,3 +1,5 @@
+import { createRequire } from 'node:module';
+const serverVersion = createRequire(import.meta.url)('../package.json').version;
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { loadConfig } from '../src/config/index.js';
 
@@ -169,7 +171,7 @@ describe('Config', () => {
       expect(port).toBe(5000);
     });
 
-    it('should default agentVersion to 1.0.0 if not set', () => {
+    it('uses the released server package version when AGENT_VERSION is not overridden', () => {
       process.env.REDIS_URL = 'redis://redis:6379';
       process.env.BASE_RPC_URL = 'https://mainnet.base.org';
       process.env.EAS_GRAPHQL_ENDPOINT = 'https://base.easscan.org/graphql';
@@ -181,7 +183,7 @@ describe('Config', () => {
       delete process.env.AGENT_VERSION;
 
       const config = loadConfig();
-      expect(config.agentVersion).toBe('1.0.0');
+      expect(config.agentVersion).toBe(serverVersion);
     });
 
     it('should read agentVersion from env when set', () => {

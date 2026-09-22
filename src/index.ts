@@ -29,6 +29,7 @@ import { buildAgentCard } from './a2a/agentCard.js';
 import { RedisTaskStore } from './a2a/redisTaskStore.js';
 import { ProofportExecutor } from './a2a/proofportExecutor.js';
 import { validatePaymentConfig, getPaymentModeConfig } from './payment/freeTier.js';
+import { validateSettlementConfig } from './payment/settlementAccount.js';
 import { getTeeConfig, createTeeProvider, resolveTeeMode } from './tee/index.js';
 import { ensureAgentRegistered, isIdentityRegistrationEnabled } from './identity/autoRegister.js';
 import { createAgentAuthMiddleware } from './identity/agentAuth.js';
@@ -61,6 +62,7 @@ export async function initializeIdentity(config: Config, tokenIdRef: TokenIdRef,
 function createApp(config: Config) {
   // Validate payment config at startup
   validatePaymentConfig(config);
+  validateSettlementConfig(config);
 
   const tokenIdRef: TokenIdRef = { chains: new Map() };
   const identityState: IdentityState = {

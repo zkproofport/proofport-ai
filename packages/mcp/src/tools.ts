@@ -72,7 +72,8 @@ CIRCUITS:
   - "coinbase_kyc": Proves the user passed Coinbase KYC verification.
   - "coinbase_country": Proves the user's country of residence is (or is not) in a given list. Requires country_list and is_included.
   - "oidc_domain": Proves the user authenticated via OIDC and their email belongs to a specific domain. Requires jwt and scope.
-  - "arc_eligibility": Coinbase KYC, with the wallet's signature bound to ONE EIP-712 action. Requires action. The proof carries that action's hash, so a contract can check WHICH instruction was authorised -- not merely that somebody eligible signed something. Verified on Arc Testnet (chain 5042002).
+  - "arc_eligibility": Coinbase KYC, optionally binding the wallet's signature to ONE EIP-712 action. Without action it signs the request signal hash. The proof carries that action's hash, so a contract can check WHICH instruction was authorised -- not merely that somebody eligible signed something. Verified on Arc Testnet (chain 5042002).
+  - "giwa_attestation": GIWA attestation, optionally binding one EIP-712 action. Uses a GIWA-attested wallet; verified on GIWA Sepolia (chain 91342).
 
 RETURNS: Full ProofResult with proof bytes, public inputs, and timing information. Use verify_proof separately to verify on-chain.`,
     {
@@ -95,7 +96,7 @@ RETURNS: Full ProofResult with proof bytes, public inputs, and timing informatio
         })
         .optional()
         .describe(
-          'The EIP-712 action to authorise. Required for arc_eligibility and rejected for every other circuit. ' +
+          'The EIP-712 action to authorise. Optional for arc_eligibility and giwa_attestation; rejected for other circuits. ' +
           'Any structure is provable: the circuit hashes it without reading it, so a deposit, a grant of authority ' +
           'or an agreement in prose all work. The wallet signs exactly these fields, and the proof carries their hash.',
         ),
@@ -334,7 +335,7 @@ RETURNS: whether a deposit was made, its transaction hash, and the Gateway balan
   // ─── prepare_inputs ─────────────────────────────────────────────────
   server.tool(
     'prepare_inputs',
-    `Step 1 of the step-by-step flow: Prepare all circuit inputs. Arc requires action and signs that exact validated EIP-712 object; Coinbase signs the signal hash. Queries EAS, builds the Merkle proof, and returns private witness inputs including the Arc domain_separator and action_hash. Handle these inputs only in trusted local code, never expose them to the dApp, model or logs. Call this BEFORE request_challenge. For oidc_domain circuit, provide jwt and scope instead of Coinbase-specific parameters.`,
+    `Step 1 of the step-by-step flow: Prepare all circuit inputs. Arc and GIWA optionally sign the exact validated EIP-712 action; without action they sign the signal hash. Coinbase signs the signal hash. Queries EAS, builds the Merkle proof, and returns private witness inputs including the Arc domain_separator and action_hash. Handle these inputs only in trusted local code, never expose them to the dApp, model or logs. Call this BEFORE request_challenge. For oidc_domain circuit, provide jwt and scope instead of Coinbase-specific parameters.`,
     {
       circuit: circuitParam(),
       scope: z
@@ -355,7 +356,7 @@ RETURNS: whether a deposit was made, its transaction hash, and the Gateway balan
         })
         .optional()
         .describe(
-          'The EIP-712 action to authorise. Required for arc_eligibility and rejected for every other circuit. ' +
+          'The EIP-712 action to authorise. Optional for arc_eligibility and giwa_attestation; rejected for other circuits. ' +
           'Any structure is provable: the circuit hashes it without reading it, so a deposit, a grant of authority ' +
           'or an agreement in prose all work. The wallet signs exactly these fields, and the proof carries their hash.',
         ),
@@ -383,12 +384,11 @@ RETURNS: whether a deposit was made, its transaction hash, and the Gateway balan
         const scope = params.scope || 'proofport';
         const isOidc = params.circuit === 'oidc_domain';
 
-        if (action && circuitId !== CIRCUIT_IDS.ARC_ELIGIBILITY) {
-          return errorResult(`An action was given but '${circuitId}' was requested; only arc_eligibility carries one.`);
+        const supportsAction = circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY || circuitId === CIRCUIT_IDS.GIWA_ATTESTATION;
+        if (action && !supportsAction) {
+          return errorResult(`An action was given but '${circuitId}' was requested; only arc_eligibility and giwa_attestation carry one.`);
         }
-        const actionHashes = circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY
-          ? hashTypedAction(action!)
-          : undefined;
+        const actionHashes = action ? hashTypedAction(action) : undefined;
 
         if (isOidc) {
           // OIDC path: prepare inputs locally from JWT (no EAS attestation needed)

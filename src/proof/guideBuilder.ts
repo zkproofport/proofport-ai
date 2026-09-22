@@ -1,10 +1,11 @@
 import { createRequire } from 'module';
 import { CIRCUITS, type CircuitId } from '../config/circuits.js';
 import { CIRCUIT_IDS } from '../config/circuitIds.js';
-import { AUTHORIZED_SIGNERS, COINBASE_ATTESTER_CONTRACT } from '../config/contracts.js';
+import { AUTHORIZED_SIGNERS, COINBASE_ATTESTER_CONTRACT, ATTESTATION_SOURCES, GIWA_CHAIN_ID } from '../config/contracts.js';
 import { getChainVerifiers } from '../config/deployments.js';
 import { resolvePaymentNetworks, type PaymentNetwork } from '../payment/networks.js';
-import type { Config } from '../config/index.js';
+import { type Config, getPaymentChainId, isTestnet } from '../config/index.js';
+import { parseUnits } from 'ethers';
 
 const require = createRequire(import.meta.url);
 let mcpPkgVersion: string | null;
@@ -18,18 +19,31 @@ try {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function derivePaymentConstants(config: Config) {
-  const isTestnet = config.paymentMode === 'testnet';
-  const chainId = isTestnet ? 84532 : 8453;
-  const usdcAddress = isTestnet
-    ? '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
-    : '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+function encryptionGuide(config: Config) {
+  const encrypted = config.teeMode === 'nitro';
+  return {
+    enabled: encrypted,
+    description: encrypted
+      ? 'Encrypt proof inputs with the attested teePublicKey from the challenge. Only the Nitro enclave decrypts the witness.'
+      : 'This deployment provides no hardware TEE attestation. HTTPS protects transport; the prover receives proof inputs.',
+    sdk_usage: 'generateProof checks the actual challenge for teePublicKey and encrypts when available.',
+  };
+}
 
-  // paymentProofPrice is e.g. "$0.10" -- parse to USDC base units (6 decimals)
-  const priceStr = config.paymentProofPrice.replace(/[^0-9.]/g, '');
-  const paymentAmount = String(Math.round(parseFloat(priceStr) * 1e6));
-
-  return { isTestnet, chainId, usdcAddress, paymentAmount };
+function paymentGuide(config: Config, networks: PaymentNetwork[]) {
+  return {
+    protocol: 'x402 v2; use the selected live offer',
+    chains: networks.map(network => ({
+      network: network.caip2, network_name: network.id, asset: network.usdc, decimals: network.decimals,
+      settlement: network.settlement,
+      eip712_domain: network.batching
+        ? { name: network.batching.name, version: network.batching.version, chainId: network.chainId, verifyingContract: network.batching.gatewayWallet }
+        : { name: network.eip3009.name, version: network.eip3009.version, chainId: network.chainId, verifyingContract: network.usdc },
+    })),
+    single_step_flow: 'POST /api/v1/prove → 402 PAYMENT-REQUIRED and accepts → sign the selected offer → retry with PAYMENT-SIGNATURE. Return X-Payment-Nonce when the challenge supplied one.',
+    nonce_details: 'X-Payment-Nonce is single-use and circuit-bound; required with X-Payment-TX. Signed authorization payments also have their own replay protection.',
+    nanopayments: 'For arc-testnet-nano, use @circle-fin/x402-batching. Circle Agent Wallet backing EOA signs GatewayWalletBatched; Gateway settles against deposited balance. USDC in the wallet and deposited Gateway balance are separate.',
+  };
 }
 
 function circuitAlias(circuitId: CircuitId): string {
@@ -50,156 +64,39 @@ function circuitAlias(circuitId: CircuitId): string {
 // ---------------------------------------------------------------------------
 
 
-function buildConstants(
-  config: Config,
-  circuitId: CircuitId,
-  isTestnet: boolean,
-  chainId: number,
-  usdcAddress: string,
-  paymentAmount: string,
-  paymentNetworks: PaymentNetwork[],
-) {
+function buildConstants(config: Config, circuitId: CircuitId) {
   const circuit = CIRCUITS[circuitId];
-  const chainVerifiers = getChainVerifiers(String(chainId));
-  const verifierAddr = chainVerifiers[circuitId] || 'NOT_DEPLOYED';
-
-  // OIDC circuits have no EAS, no Coinbase contracts
-  if (circuitId === CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION) {
-    return {
-      contracts: {
-        verifier_address: verifierAddr,
-        chain_id: chainId,
-      },
-      payment: {
-        recipient: config.paymentPayTo,
-        amount: paymentAmount,
-        asset: usdcAddress,
-        network: isTestnet ? 'base-sepolia' : 'base',
-        currency: 'USDC',
-        decimals: 6,
-      },
-      rpc: {
-        payment_rpc_url: config.chainRpcUrl,
-        payment_rpc_chain: isTestnet ? 'Base Sepolia (chain ID 84532)' : 'Base Mainnet (chain ID 8453)',
-        payment_rpc_note: 'Used for x402 payment settlement and on-chain proof verification.',
-      },
-      x402: {
-        protocol: 'x402 v2, exact scheme (EIP-3009 TransferWithAuthorization)',
-        description:
-          'You sign a USDC authorization and send it. You never submit a transaction, so you ' +
-          'need USDC on the chain you pay on and nothing else — no gas, no native token. ' +
-          'Settlement is not your problem: a public facilitator does it where one serves the ' +
-          'chain, and this service does it where none does.',
-        // Named per chain, not once. A single facilitator_url was published
-        // here and in the 402 body, which is wrong for any chain no public
-        // facilitator serves -- Arc and both Ethereum chains -- and told an
-        // agent to POST to a facilitator that would refuse it.
-        chains: paymentNetworks.map((net) => ({
-          network: net.caip2,
-          network_name: net.id,
-          asset: net.usdc,
-          decimals: net.decimals,
-          eip712_domain: { name: net.eip3009.name, version: net.eip3009.version, chainId: net.chainId },
-          settled_by:
-            net.settlement === 'facilitator'
-              ? `facilitator ${net.facilitatorUrl} (it pays the gas)`
-              : 'this service (it pays the gas, out of your payment)',
-        })),
-        single_step_flow: {
-          description:
-            'POST /prove with {circuit, inputs} → 402 listing chains in `accepts` → sign one → ' +
-            'retry with the PAYMENT-SIGNATURE and X-Payment-Nonce headers.',
-          header_note:
-            'PAYMENT-SIGNATURE carries the base64 x402 payment payload. That is the v2 header name; ' +
-            'X-Payment was v1 and is still read.',
-          nonce_details:
-            'The 402 body carries a 32-byte nonce. Send it back as X-Payment-Nonce. It is single-use ' +
-            'and bound to the circuit it was issued for.',
-          alternative:
-            'If you would rather submit your own transaction, send its hash as X-Payment-TX with ' +
-            'X-Payment-Network naming the chain. You pay the gas on that path.',
-        },
-      },
-      verification: {
-        description: 'On-chain proof verification using deployed Solidity verifier contracts',
-        verifier_address: verifierAddr,
-        chain_id: chainId,
-        chain_name: isTestnet ? 'Base Sepolia' : 'Base',
-        function_signature: 'verify(bytes calldata _proof, bytes32[] calldata _publicInputs) external view returns (bool)',
-        input_format: 'proof and publicInputs are separate fields. Split publicInputs hex blob into 32-byte (bytes32) chunks.',
-      },
-    };
-  }
-
+  const chainId = getPaymentChainId(config);
+  const networks = resolvePaymentNetworks(config.paymentNetworks);
+  const first = networks[0];
+  if (!first) throw new Error('No configured payment network');
+  const verifierAddr = getChainVerifiers(String(chainId))[circuitId];
+  if (!verifierAddr) throw new Error(`No ${circuitId} verifier configured on chain ${chainId}`);
+  const source = ATTESTATION_SOURCES[circuitId];
   return {
-    eas: {
-      graphql_endpoint: config.easGraphqlEndpoint,
-      schema_id: (circuit as any).easSchemaId,
-    },
+    ...(source?.kind === 'eas-base' && {
+      eas: { graphql_endpoint: config.easGraphqlEndpoint, schema_id: (circuit as any).easSchemaId, chain_id: 8453 },
+      authorized_signers: source.signers,
+    }),
     contracts: {
-      coinbase_attester: COINBASE_ATTESTER_CONTRACT,
-      function_selector: (circuit as any).functionSelector,
-      verifier_address: verifierAddr,
-      chain_id: chainId,
+      ...(source && { coinbase_attester: source.contract, function_selector: (circuit as any).functionSelector }),
+      verifier_address: verifierAddr, chain_id: chainId,
     },
-    authorized_signers: AUTHORIZED_SIGNERS,
     payment: {
-      recipient: config.paymentPayTo,
-      amount: paymentAmount,
-      asset: usdcAddress,
-      network: isTestnet ? 'base-sepolia' : 'base',
-      currency: 'USDC',
-      decimals: 6,
+      required: config.paymentMode !== 'disabled', recipient: config.paymentPayTo,
+      amount: config.paymentMode === 'disabled' ? '0' : parseUnits(config.paymentProofPrice.replace(/^\$/, ''), first.decimals).toString(),
+      asset: first.usdc, network: first.id, currency: 'USDC', decimals: first.decimals,
+      source: 'The first configured offer is shown here for compatibility. Use the live 402 accepts list to select a network.',
     },
     rpc: {
-      eas_rpc_url: config.baseRpcUrl,
-      eas_rpc_chain: 'Base Mainnet (chain ID 8453)',
-      eas_rpc_note: 'Used for EAS attestation query, raw TX fetch, attester pubkey recovery, Merkle proof. EAS attestations are ALWAYS on Base Mainnet regardless of payment chain.',
-      payment_rpc_url: config.chainRpcUrl,
-      payment_rpc_chain: isTestnet ? 'Base Sepolia (chain ID 84532)' : 'Base Mainnet (chain ID 8453)',
-      payment_rpc_note: 'Used for x402 payment settlement and on-chain proof verification.',
+      ...(source?.kind === 'eas-base' && { eas_rpc_url: config.baseRpcUrl, eas_rpc_chain: 'Base Mainnet (8453)' }),
+      verification_rpc_url: config.chainRpcUrl,
     },
-    x402: {
-      protocol: 'x402 v2, exact scheme (EIP-3009 TransferWithAuthorization)',
-      description:
-        'You sign a USDC authorization and send it. You never submit a transaction, so you ' +
-        'need USDC on the chain you pay on and nothing else — no gas, no native token. ' +
-        'Settlement is not your problem: a public facilitator does it where one serves the ' +
-        'chain, and this service does it where none does.',
-      chains: paymentNetworks.map((net) => ({
-        network: net.caip2,
-        network_name: net.id,
-        asset: net.usdc,
-        decimals: net.decimals,
-        eip712_domain: { name: net.eip3009.name, version: net.eip3009.version, chainId: net.chainId },
-        settled_by:
-          net.settlement === 'facilitator'
-            ? `facilitator ${net.facilitatorUrl} (it pays the gas)`
-            : 'this service (it pays the gas, out of your payment)',
-      })),
-      single_step_flow: {
-        description:
-          'POST /prove with circuit + inputs → 402 listing chains in `accepts` → sign one → ' +
-          'retry with the PAYMENT-SIGNATURE and X-Payment-Nonce headers.',
-        header_note:
-          'PAYMENT-SIGNATURE carries the base64 x402 payment payload. That is the v2 header name; ' +
-          'X-Payment was v1 and is still read.',
-        nonce_details:
-          'The 402 body carries a 32-byte nonce. Send it back as X-Payment-Nonce. Single-use ' +
-          '(consumed on first successful payment verification) and circuit-bound (a coinbase_kyc ' +
-          'nonce cannot be reused for coinbase_country).',
-        alternative:
-          'If you would rather submit your own transaction, send its hash as X-Payment-TX with ' +
-          'X-Payment-Network naming the chain. You pay the gas on that path.',
-      },
-    },
+    x402: paymentGuide(config, networks),
     verification: {
-      description: 'On-chain proof verification using deployed Solidity verifier contracts',
-      verifier_address: verifierAddr,
-      chain_id: chainId,
-      chain_name: isTestnet ? 'Base Sepolia' : 'Base',
-      function_signature: 'verify(bytes calldata _proof, bytes32[] calldata _publicInputs) external view returns (bool)',
-      input_format: 'proof and publicInputs are separate fields. Split publicInputs hex blob into 32-byte (bytes32) chunks.',
+      verifier_address: verifierAddr, chain_id: chainId, chain_name: isTestnet(config) ? 'Base Sepolia' : 'Base', rpc_url: config.chainRpcUrl,
+      function_signature: 'verify(bytes proof, bytes32[] publicInputs) external view returns (bool)',
+      input_format: 'Keep proof and publicInputs separate; split the publicInputs hex blob into bytes32 words.',
     },
   };
 }
@@ -272,26 +169,12 @@ function buildFormulas(circuitId: CircuitId) {
 function buildInputSchema(circuitId: CircuitId) {
   if (circuitId === CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION) {
     return {
-      note: 'OIDC circuit inputs are computed SERVER-SIDE from the JWT. The client only sends jwt and scope_string.',
+      note: 'Use generateProof or prepareOidcPayload: the SDK fetches JWKS and sends jwt, jwks, scope and provider. The prover validates the JWT and builds circuit inputs.',
       client_fields: [
-        {
-          name: 'jwt',
-          type: 'string',
-          description: 'Raw OIDC id_token (JWT) from provider (Google, Microsoft, Apple, etc.). Must use RS256 algorithm and contain email + email_verified claims.',
-          how_to_obtain: 'OIDC authentication flow with the identity provider',
-        },
-        {
-          name: 'scope_string',
-          type: 'string',
-          description: 'Scope string for nullifier partitioning (e.g. "myapp:membership")',
-          how_to_obtain: 'Defined by the requesting application',
-        },
-        {
-          name: 'domain',
-          type: 'string (optional)',
-          description: 'Domain to prove. If omitted, auto-extracted from email claim in JWT.',
-          how_to_obtain: 'Optional override',
-        },
+        { name: 'jwt', type: 'string', description: 'RS256 id_token from Google or Microsoft containing the required email claims.' },
+        { name: 'jwks', type: 'object', description: 'Issuer JWKS fetched by prepareOidcPayload.' },
+        { name: 'scope', type: 'string', description: 'Application scope string for nullifier partitioning.' },
+        { name: 'provider', type: 'google | microsoft', description: 'Provider matching the JWT issuer; defaults to google in the SDK.' },
       ],
       server_computed_fields: [
         { name: 'pubkey_modulus_limbs', description: '18 x u128 RSA public key modulus limbs (from JWKS)' },
@@ -443,15 +326,17 @@ function buildInputSchema(circuitId: CircuitId) {
 }
 
 function buildEndpoints(config: Config, circuitId: CircuitId) {
-  const alias = circuitAlias(circuitId);
+  const alias = circuitId;
   return {
     prove: {
       method: 'POST',
       url: `${config.a2aBaseUrl}/api/v1/prove`,
       content_type: 'application/json',
-      flow: 'x402 single-step: POST with {circuit} → 402 with nonce + TEE public key → encrypt inputs → pay → retry with {circuit, encrypted_payload} + payment headers',
+      flow: config.teeMode === 'nitro'
+        ? 'x402 single-step: POST with {circuit} → 402 with nonce + TEE public key → encrypt inputs → pay → retry with {circuit, encrypted_payload} + payment headers'
+        : 'x402 single-step: POST with {circuit} → 402 with nonce and live offers → pay when required → retry with {circuit, inputs} over HTTPS and payment headers',
       timeout_hint: '10-30 seconds',
-      description: 'Verifies payment on-chain and triggers ZK proof generation inside TEE. Inputs are E2E encrypted — the server is a blind relay.',
+      description: 'Settles the selected payment and generates the proof. Encrypt with teePublicKey when the challenge supplies it; otherwise the prover receives the witness over HTTPS.',
     },
     guide: {
       method: 'GET',
@@ -462,235 +347,126 @@ function buildEndpoints(config: Config, circuitId: CircuitId) {
 }
 
 
-/** Arc's single proof binds the KYC holder to a typed action, not a generic KYC signature. */
-function buildArcGuide(config: Config) {
-  const circuit = CIRCUITS[CIRCUIT_IDS.ARC_ELIGIBILITY];
+/** Both action-capable circuits also support identity-only proofs. */
+function buildActionGuide(circuitId: CircuitId, config: Config) {
+  const circuit = CIRCUITS[circuitId];
+  const source = ATTESTATION_SOURCES[circuitId];
+  if (!source) throw new Error(`No attestation source for ${circuitId}`);
+  const targets: Partial<Record<CircuitId, { chainId: number; name: string; rpc: string }>> = {
+    [CIRCUIT_IDS.ARC_ELIGIBILITY]: { chainId: config.arcChainId, name: `Arc (${config.arcChainId})`, rpc: config.arcRpcUrl },
+    [CIRCUIT_IDS.GIWA_ATTESTATION]: { chainId: GIWA_CHAIN_ID, name: 'GIWA Sepolia', rpc: config.giwaRpcUrl },
+  };
+  const target = targets[circuitId];
+  if (!target) throw new Error(`No action guide target for ${circuitId}`);
+  if (!Number.isSafeInteger(target.chainId) || target.chainId <= 0) throw new Error(`Invalid verification chain for ${circuitId}`);
+  const verifier = getChainVerifiers(String(target.chainId))[circuitId];
+  if (!verifier) throw new Error(`No ${circuitId} verifier configured on chain ${target.chainId}`);
   const networks = resolvePaymentNetworks(config.paymentNetworks);
   const nano = networks.find(network => network.id === 'arc-testnet-nano');
-  const chainId = 5042002;
-  const verifier = getChainVerifiers(String(chainId))[CIRCUIT_IDS.ARC_ELIGIBILITY] ?? null;
-  const encrypted = config.teeMode === 'nitro';
-  const payment = { required: config.paymentMode !== 'disabled', recipient: config.paymentPayTo,
-    price: config.paymentProofPrice, source: 'Use the live 402 accepts list for amount, asset, recipient and payment domain.' };
+  const isGiwa = source.kind === 'giwa-sepolia';
+  const cliBase = `PROOFPORT_URL=${config.a2aBaseUrl} zkproofport-prove ${circuitId} --scope myapp:membership${nano ? ' --pay-with arc --pay-on arc-testnet-nano' : ''}`;
   return {
-    circuit_id: circuit.id, display_name: circuit.displayName, description: circuit.description,
-    e2e_encryption: {
-      enabled: encrypted,
-      description: encrypted
-        ? 'Use the attested teePublicKey returned by the challenge to encrypt proof inputs.'
-        : 'This deployment provides no hardware TEE attestation. HTTPS protects transport; the prover receives proof inputs.',
-      sdk_usage: 'generateProof checks the actual challenge for teePublicKey. Never infer TEE availability from a circuit name.',
-    },
+    circuit_id: circuit.id, display_name: circuit.displayName,
+    description: `Prove the configured ${isGiwa ? 'GIWA' : 'Coinbase KYC'} attestation, optionally authorizing one exact EIP-712 action with the same wallet.`,
+    e2e_encryption: encryptionGuide(config),
     local_mcp_server: {
       recommended: true, npm_package: '@zkproofport-ai/mcp', version: mcpPkgVersion,
-      install: `npm install -g @zkproofport-ai/mcp@latest`,
-      command: 'zkproofport-mcp', transport: 'stdio',
-      discovery: 'Connect to the local MCP server and call tools/list. Read generate_proof inputSchema before tools/call.',
-      required_arguments: ['circuit', 'action'],
-      generate_proof: { circuit: 'arc_eligibility', scope: 'ledger-house',
-        action: '<complete EIP-712 typed action prepared by the trusted application>',
-        ...(nano ? { pay_with: 'arc', pay_on: nano.id } : {}),
-      },
-      verification: 'After generate_proof, call verify_proof with its result. Verify on Arc Testnet before staking.',
-      credentials: 'ATTESTATION_KEY stays in the local signer process. Circle Agent Wallet signing uses the existing Circle CLI login. Do not put keys in model prompts or tool arguments.',
+      install: 'npm install -g @zkproofport-ai/mcp@latest', command: 'zkproofport-mcp', transport: 'stdio',
+      discovery: 'Connect, call tools/list, and follow generate_proof inputSchema. Keys stay in the local signer process.',
+      required_arguments: ['circuit'], optional_arguments: ['scope', 'action', 'pay_with', 'pay_on', 'max_payment'],
+      generate_proof: { circuit: circuitId, scope: 'myapp:membership', ...(nano ? { pay_with: 'arc', pay_on: nano.id } : {}) },
+      action_bound_example: { circuit: circuitId, scope: 'myapp:membership', action: '<complete EIP-712 typed action supplied by the trusted application>' },
+      verification: `Call verify_proof with the returned result. Check the proof on ${target.name}; action authorization additionally requires application policy checks.`,
+      credentials: `ATTESTATION_KEY stays local.${isGiwa ? ' The SDK uses its built-in GIWA Sepolia RPC and explorer for witness preparation; server GIWA_RPC_URL/GIWA_EXPLORER_URL configure the server-side path.' : ''} PAYMENT_PRIVATE_KEY is a separate key-based payment option, not a fallback to the attestation signer.`,
     },
     sdk: {
       package: '@zkproofport-ai/sdk',
-      quick_start: `import { createConfig, generateProof, walletFromArcAgent } from '@zkproofport-ai/sdk';
-const payment = await walletFromArcAgent({ address: agentWalletB, chain: 'ARC-TESTNET' });
+      quick_start: `import { createConfig, generateProof${nano ? ', walletFromArcAgent' : ''} } from '@zkproofport-ai/sdk';
+${nano ? "const payment = await walletFromArcAgent({ address: agentWalletB, chain: 'ARC-TESTNET' });" : '// Supply an explicitly selected funded payment wallet when this service charges.'}
 const result = await generateProof(
   createConfig({ baseUrl: '${config.a2aBaseUrl}' }),
-  { attestation: existingKycSigner, payment },
-  { circuit: 'arc_eligibility', scope: 'ledger-house', action${nano ? ", payOn: 'arc-testnet-nano'" : ''} },
-);`,
-      cli: `PROOFPORT_URL=${config.a2aBaseUrl} zkproofport-prove arc_eligibility --action action.json --scope ledger-house${nano ? ' --pay-with arc --pay-on arc-testnet-nano --max-payment 0.001' : ''} --silent`,
-      payment_selection: 'Explicitly choose an offered payment network and a funded payment wallet; no attestation-key payment fallback exists.',
+  { attestation: existingAttestationSigner, payment },
+  { circuit: '${circuitId}', scope: 'myapp:membership', action${nano ? ", payOn: 'arc-testnet-nano'" : ''} },
+);
+// Omit action above for an identity-only proof.`,
+      cli: `${cliBase} --action action.json --silent`,
+      identity_only: `${cliBase} --silent`, action_bound: `${cliBase} --action action.json --silent`,
+      payment_selection: 'Choose an offered network and an existing funded payment wallet explicitly. Payment is independent of the circuit verification chain.',
     },
     constants: {
-      eas: { graphql_endpoint: config.easGraphqlEndpoint, schema_id: (circuit as any).easSchemaId,
-        chain_id: 8453, note: 'Coinbase KYC attestation data is read on Base Mainnet; proof verification is on Arc.' },
-      contracts: { coinbase_attester: COINBASE_ATTESTER_CONTRACT, verifier_address: verifier, chain_id: chainId },
-      authorized_signers: AUTHORIZED_SIGNERS,
-      payment,
-      x402: {
-        protocol: 'x402 v2; use the selected live offer',
-        chains: networks.map(network => ({
-          network: network.caip2, network_name: network.id, asset: network.usdc, decimals: network.decimals,
-          settlement: network.settlement,
-          eip712_domain: network.batching
-            ? { name: network.batching.name, version: network.batching.version, chainId: network.chainId,
-                verifyingContract: network.batching.gatewayWallet }
-            : { name: network.eip3009.name, version: network.eip3009.version, chainId: network.chainId,
-                verifyingContract: network.usdc },
-        })),
-        single_step_flow: 'POST /api/v1/prove → 402 PAYMENT-REQUIRED and accepts → sign selected offer → retry with PAYMENT-SIGNATURE and X-Payment-Nonce.',
-        nanopayments: 'For arc-testnet-nano, use @circle-fin/x402-batching. Circle CLI signs GatewayWalletBatched typed data using the Agent Wallet backing EOA. Gateway verifies and settles against its deposited balance; each proof purchase requires no buyer transfer transaction.',
-      },
-      verification: { verifier_address: verifier, chain_id: chainId, chain_name: 'Arc Testnet',
-        rpc_url: config.arcRpcUrl,
-        function_signature: 'verify(bytes proof, bytes32[] publicInputs) external view returns (bool)',
-        public_input_count: 192,
-        input_format: '192 bytes32 field words encoding six [u8;32] values. Keep the proof and publicInputs separate.',
+      ...(source.kind === 'eas-base' && { eas: { graphql_endpoint: config.easGraphqlEndpoint, schema_id: (circuit as any).easSchemaId, chain_id: 8453 } }),
+      attestation_source: source.kind === 'giwa-sepolia'
+        ? { chain_id: source.chainId, rpc_url: config.giwaRpcUrl, explorer_url: config.giwaExplorerUrl }
+        : { chain_id: 8453, rpc_url: config.baseRpcUrl, graphql_endpoint: config.easGraphqlEndpoint },
+      contracts: { attester: source.contract, verifier_address: verifier, chain_id: target.chainId },
+      authorized_signers: source.signers,
+      payment: { required: config.paymentMode !== 'disabled', recipient: config.paymentPayTo, price: config.paymentProofPrice, source: 'Use the live 402 accepts list.' },
+      x402: paymentGuide(config, networks),
+      verification: { verifier_address: verifier, chain_id: target.chainId, chain_name: target.name, rpc_url: target.rpc,
+        function_signature: 'verify(bytes proof, bytes32[] publicInputs) external view returns (bool)', public_input_count: 192,
+        input_format: '192 bytes32 field words encoding six [u8;32] values. Keep proof and publicInputs separate.',
       },
     },
     action: {
-      type: 'EIP-712 TypedData', required_fields: ['domain', 'types', 'primaryType', 'message'],
+      required: false, type: 'EIP-712 TypedData', required_fields_when_present: ['domain', 'types', 'primaryType', 'message'],
       domain: 'Bind name, version, chainId and verifyingContract to the intended application.',
-      message: 'The staking application builds CredentialDelegation(delegate, action, amount, expiresAt, nonce). Never replace the application-provided action with a generic example.',
-      security: 'One circuit verifies both an authorized Coinbase attester transaction for wallet A and A\'s EIP-712 action signature. The application contract must match domain, action hash, trusted attester root, scope, expiry and replay protection before acting as delegate B.',
+      message: 'Use the complete application-provided typed action. The schema is application-defined; do not replace it with a fixed deposit or delegation example.',
+      security: 'The application must compare domain, action hash, trusted attester root, scope and its replay/expiry policy. An identity-only proof does not authorize an action.',
     },
     formulas: {
-      signing_digest: 'keccak256(0x1901 || domain_separator || action_hash)',
-      domain_separator: 'EIP-712 domain hash', action_hash: 'EIP-712 hashStruct(primaryType, message)',
-      scope: 'keccak256(UTF8(scope))',
+      identity_signature: 'Without action, personal_sign(signal_hash). Circuit action_hash and domain_separator are zero.',
+      signing_digest: 'With action, keccak256(0x1901 || domain_separator || action_hash); signal_hash is zero in the circuit witness.',
+      domain_separator: 'EIP-712 domain hash', action_hash: 'EIP-712 hashStruct(primaryType, message)', scope: 'keccak256(UTF8(scope))',
+      nullifier: 'keccak256(keccak256(address_bytes || keccak256(UTF8(circuitId))) || scope_bytes)',
+      nullifier_note: 'Same wallet, circuit and scope produce the same nullifier with or without action.',
     },
     input_schema: {
-      preparation: 'Use local MCP generate_proof with the typed action; the SDK prepares the private circuit witness locally.',
+      preparation: 'Use generate_proof locally. On the REST wire omit both domain_separator and action_hash for identity-only mode; for action mode provide both 32-byte hashes.',
       public_fields: ['signal_hash', 'domain_separator', 'action_hash', 'signer_list_merkle_root', 'scope', 'nullifier'],
-      private_inputs: 'KYC holder public key and EIP-712 signature, signed Coinbase attestation transaction and attester membership proof. Never send these through an LLM.',
+      private_inputs: 'Wallet public key and signature, signed attestation transaction and attester membership proof. Never expose these through an LLM.',
     },
-    endpoints: {
-      prove: { method: 'POST', url: `${config.a2aBaseUrl}/api/v1/prove`, content_type: 'application/json' },
-      guide: { method: 'GET', url: `${config.a2aBaseUrl}/api/v1/guide/arc_eligibility` },
-    },
+    endpoints: buildEndpoints(config, circuitId),
   };
 }
-
-// ---------------------------------------------------------------------------
-// Main export
-// ---------------------------------------------------------------------------
 
 export function buildGuide(circuitId: CircuitId, config: Config): object {
   const circuit = CIRCUITS[circuitId];
   if (!circuit) throw new Error(`Unknown circuit '${circuitId}'.`);
-  if (circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY) return buildArcGuide(config);
-  const { isTestnet, chainId, usdcAddress, paymentAmount } = derivePaymentConstants(config);
-
-  // OIDC-specific guide
-  if (circuitId === CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION) {
-    return {
-      circuit_id: circuitId,
-      display_name: circuit.displayName,
-      description: circuit.description,
-
-      overview: {
-        what: 'Prove email domain affiliation (e.g. "@google.com") from an OIDC JWT token without revealing the full email address.',
-        how: 'Client sends a raw JWT (id_token from Google/Microsoft/Apple) and a scope string. The server fetches JWKS, verifies RSA signature structure, extracts the email domain, computes a nullifier, and generates a ZK proof.',
-        privacy: 'The proof reveals only the domain (e.g. "google.com") and a nullifier. The full email, JWT claims, and RSA key material remain private.',
-      },
-
-      sdk: {
-        package: '@zkproofport-ai/sdk',
-        repository: 'https://github.com/zkproofport/proofport-ai',
-        install: 'npm install @zkproofport-ai/sdk@latest ethers',
-        description: 'For OIDC proofs, the client only needs to provide the JWT and scope. The server handles all cryptographic computation.',
-        quick_start: `\
-// OIDC Domain proof — client only sends JWT + scope
-const response = await fetch('${config.a2aBaseUrl}/api/v1/prove', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    circuit: 'oidc_domain',
-    inputs: {
-      jwt: '<OIDC id_token from Google/Microsoft/Apple>',
-      scope_string: 'myapp:membership',
-    },
-  }),
-});
-// First call returns 402 with payment nonce
-// After payment, retry with X-Payment-TX and X-Payment-Nonce headers`,
-      },
-
-      local_mcp_server: {
-        recommended: true,
-        npm_package: '@zkproofport-ai/mcp',
-        version: mcpPkgVersion,
-        install: `npm install -g @zkproofport-ai/mcp@latest`,
-        readme: 'https://www.npmjs.com/package/@zkproofport-ai/mcp',
-      },
-
-      constants: buildConstants(config, circuitId, isTestnet, chainId, usdcAddress, paymentAmount, resolvePaymentNetworks(config.paymentNetworks)),
-      formulas: buildFormulas(circuitId),
-      input_schema: buildInputSchema(circuitId),
-      endpoints: buildEndpoints(config, circuitId),
-    };
-  }
-
-  // Coinbase circuit guides
+  if (circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY || circuitId === CIRCUIT_IDS.GIWA_ATTESTATION) return buildActionGuide(circuitId, config);
+  const oidc = circuitId === CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION;
+  const country = circuitId === CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION;
+  if (!oidc && !country && circuitId !== CIRCUIT_IDS.COINBASE_ATTESTATION) throw new Error(`No guide builder for '${circuitId}'.`);
+  const params = country ? ", countryList: ['KR'], isIncluded: true" : '';
+  const oidcParams = oidc ? ", jwt: existingIdToken, provider: 'google'" : '';
   return {
-    circuit_id: circuitId,
-    display_name: circuit.displayName,
-    description: circuit.description,
-
-    // E2E Encryption with TEE (Trusted Execution Environment)
-    e2e_encryption: {
-      enabled: true,
-      description: 'All proof inputs are end-to-end encrypted using X25519 ECDH + AES-256-GCM. The server acts as a blind relay and cannot read your inputs.',
-      protocol: 'Client encrypts with TEE\'s attested X25519 public key (bound to AWS Nitro Enclave attestation). Only the TEE can decrypt and generate the proof.',
-      tee_public_key: 'Included in the 402 challenge response as teePublicKey field. Cryptographically verified via AWS Nitro attestation document (COSE Sign1).',
-      sdk_usage: 'generateProof() automatically detects and applies E2E encryption when TEE is available. No additional configuration needed.',
-    },
-
-    // PRIMARY RECOMMENDATION: Local MCP Server (npm package)
+    circuit_id: circuitId, display_name: circuit.displayName, description: circuit.description,
+    ...(oidc && { overview: {
+      what: 'Prove email domain affiliation without disclosing the full email in the public proof.',
+      how: 'The SDK takes a Google or Microsoft JWT and scope, fetches JWKS, and sends jwt, jwks, scope and provider to the prover. The prover validates the JWT and builds circuit inputs.',
+      privacy: config.teeMode === 'nitro' ? 'Inputs are encrypted to the Nitro enclave. Public proof inputs reveal the domain and nullifier.' : 'HTTPS protects transport, but this prover receives the JWT. Public proof inputs reveal the domain and nullifier.',
+    } }),
+    e2e_encryption: encryptionGuide(config),
     local_mcp_server: {
-      recommended: true,
-      npm_package: '@zkproofport-ai/mcp',
-      version: mcpPkgVersion,
-      install: `npm install -g @zkproofport-ai/mcp@latest`,
-      readme: 'https://www.npmjs.com/package/@zkproofport-ai/mcp',
+      recommended: true, npm_package: '@zkproofport-ai/mcp', version: mcpPkgVersion,
+      install: 'npm install -g @zkproofport-ai/mcp@latest', readme: 'https://www.npmjs.com/package/@zkproofport-ai/mcp',
+      required_arguments: ['circuit', ...(country ? ['country_list', 'is_included'] : []), ...(oidc ? ['jwt'] : [])],
+      generate_proof: { circuit: circuitAlias(circuitId), scope: 'myapp:membership', ...(country && { country_list: ['KR'], is_included: true }), ...(oidc && { jwt: '<existing id_token>', provider: 'google' }) },
     },
-
-    // ALTERNATIVE: SDK for programmatic use
     sdk: {
-      package: '@zkproofport-ai/sdk',
-      repository: 'https://github.com/zkproofport/proofport-ai',
-      note: 'Install via npm or clone the repository.',
-      install: 'npm install @zkproofport-ai/sdk@latest ethers',
-      description:
-        'Use the @zkproofport-ai/sdk SDK directly in your code for programmatic proof generation.',
-      quick_start: `\
-import { generateProof, fromPrivateKey } from '@zkproofport-ai/sdk';
-
-const attestationSigner = fromPrivateKey('0x...');  // wallet with Coinbase KYC attestation
-const paymentSigner = fromPrivateKey('0x...');      // wallet with USDC balance (optional, defaults to attestation signer)
-
+      package: '@zkproofport-ai/sdk', repository: 'https://github.com/zkproofport/proofport-ai', install: 'npm install @zkproofport-ai/sdk@latest ethers',
+      description: 'Use generateProof to prepare witnesses, request a challenge, pay using the explicit payment wallet, and encrypt when the deployment supplies a TEE key.',
+      quick_start: `import { createConfig, generateProof } from '@zkproofport-ai/sdk';
+// Existing signer and explicitly selected funded payment wallet stay in local code.
 const result = await generateProof(
-  { baseUrl: '${config.a2aBaseUrl}' },
-  { attestation: attestationSigner, payment: paymentSigner },
-  { circuit: '${circuitAlias(circuitId)}', scope: 'proofport' },
-);
-
-console.log(result.proof);           // ZK proof hex
-console.log(result.publicInputs);    // public inputs hex
-console.log(result.proofWithInputs); // combined for on-chain verify`,
-      cli: `\
-# Clone, install, and build
-git clone https://github.com/zkproofport/proofport-ai.git
-cd proofport-ai && npm install && npx tsc -p packages/sdk
-
-# Run full-flow example
-ATTESTATION_KEY=0x... PAYMENT_KEY=0x... SERVER_URL=${config.a2aBaseUrl} npx tsx packages/sdk/examples/full-flow.ts`,
-      cdp_wallet: `\
-// CDP wallet or any external wallet adapter
-import { generateProof, CdpWalletSigner } from '@zkproofport-ai/sdk';
-
-const signer = new CdpWalletSigner({
-  getAddress: () => myWallet.getAddress(),
-  signMessage: (msg) => myWallet.signMessage(msg),
-  signTypedData: (domain, types, message) => myWallet.signTypedData(domain, types, message),
-});
-
-const result = await generateProof(
-  { baseUrl: '${config.a2aBaseUrl}' },
-  { attestation: signer },
-  { circuit: '${circuitAlias(circuitId)}', scope: 'proofport' },
+  createConfig({ baseUrl: '${config.a2aBaseUrl}' }),
+  { attestation: existingAttestationSigner, payment: existingPaymentWallet },
+  { circuit: '${circuitAlias(circuitId)}', scope: 'myapp:membership'${params}${oidcParams} },
 );`,
+      cli: oidc
+        ? 'Use local MCP generate_proof with jwt and provider, or the SDK example. Keep JWTs out of shell history.'
+        : `PROOFPORT_URL=${config.a2aBaseUrl} zkproofport-prove ${circuitAlias(circuitId)} --scope myapp:membership${country ? ' --countries KR --included true' : ''} --silent`,
+      payment_selection: 'Load PAYMENT_PRIVATE_KEY for pay_with=key, or select an existing Circle/CDP payment wallet. The attestation signer is not a payment fallback.',
     },
-
-    constants: buildConstants(config, circuitId, isTestnet, chainId, usdcAddress, paymentAmount, resolvePaymentNetworks(config.paymentNetworks)),
-    formulas: buildFormulas(circuitId),
-
-    input_schema: buildInputSchema(circuitId),
-    endpoints: buildEndpoints(config, circuitId),
+    constants: buildConstants(config, circuitId), formulas: buildFormulas(circuitId), input_schema: buildInputSchema(circuitId), endpoints: buildEndpoints(config, circuitId),
   };
 }

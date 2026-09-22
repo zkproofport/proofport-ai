@@ -31,6 +31,7 @@ export class AgentRegistration {
   private readonly signer: ethers.Wallet;
   private readonly contract: ethers.Contract;
   private lastTxNonce: number = -1;
+  private confirmedWriteBlock: number | undefined;
   private readonly identityAddress: string;
 
   constructor(config: AgentRegistrationConfig) {
@@ -46,13 +47,25 @@ export class AgentRegistration {
     }
 
     this.identityAddress = config.identityContractAddress;
-    this.provider = new ethers.JsonRpcProvider(config.chainRpcUrl);
+    this.provider = new ethers.JsonRpcProvider(config.chainRpcUrl, undefined, { cacheTimeout: -1 });
     this.signer = new ethers.Wallet(config.privateKey, this.provider);
     this.contract = new ethers.Contract(
       config.identityContractAddress,
       IDENTITY_ABI,
       this.signer
     );
+  }
+
+  /** Read our own writes at the mined block, never at a lagging RPC "latest". */
+  private confirmWrite(receipt: ethers.TransactionReceipt | null): void {
+    if (!receipt || receipt.status !== 1 || !Number.isSafeInteger(receipt.blockNumber) || receipt.blockNumber < 0) {
+      throw new Error('Expected a successful confirmed registration transaction receipt');
+    }
+    this.confirmedWriteBlock = Math.max(this.confirmedWriteBlock ?? 0, receipt.blockNumber);
+  }
+
+  private readOverrides(): { blockTag: number | 'latest' } {
+    return { blockTag: this.confirmedWriteBlock ?? 'latest' };
   }
 
   /**
@@ -116,6 +129,7 @@ export class AgentRegistration {
 
     log.info({ action: 'identity.register.step', step: 'waiting_receipt', txHash: tx.hash }, 'Waiting for TX receipt');
     const receipt = await tx.wait();
+    this.confirmWrite(receipt);
 
     // Extract tokenId from logs (Transfer event topic[3] or indexed tokenId)
     if (!receipt.logs || receipt.logs.length === 0) {
@@ -231,7 +245,7 @@ export class AgentRegistration {
   /** A cached id or historical Transfer is not proof of current ownership. */
   async assertTokenOwner(tokenId: bigint): Promise<void> {
     if (tokenId < 0n || tokenId > (1n << 256n) - 1n) throw new Error(`Invalid agent tokenId: ${tokenId}`);
-    const owner: string = await this.contract.ownerOf(tokenId);
+    const owner: string = await this.contract.ownerOf(tokenId, this.readOverrides());
     if (owner.toLowerCase() !== this.signer.address.toLowerCase()) {
       throw new Error(`Agent token ${tokenId} is owned by ${owner}, not configured prover ${this.signer.address}`);
     }
@@ -241,14 +255,14 @@ export class AgentRegistration {
    * Get metadata URI for a known tokenId (single RPC call)
    */
   async getTokenMetadata(tokenId: bigint): Promise<string> {
-    return this.contract.tokenURI(tokenId);
+    return this.contract.tokenURI(tokenId, this.readOverrides());
   }
 
   /**
    * Get on-chain key-value metadata (returns decoded UTF-8 string)
    */
   async getOnchainMetadata(tokenId: bigint, key: string): Promise<string> {
-    const raw: string = await this.contract.getMetadata(tokenId, key);
+    const raw: string = await this.contract.getMetadata(tokenId, key, this.readOverrides());
     return ethers.toUtf8String(raw);
   }
 
@@ -262,7 +276,7 @@ export class AgentRegistration {
     log.info({ action: 'identity.setMetadata.sending', key, tokenId: tokenId.toString() }, `Sending setMetadata(${key})`);
     const tx = await this.contract.setMetadata(tokenId, key, valueBytes, overrides);
     log.info({ action: 'identity.setMetadata.waiting', txHash: tx.hash }, 'Waiting for setMetadata receipt');
-    await tx.wait();
+    this.confirmWrite(await tx.wait());
     return tx.hash;
   }
 
@@ -278,7 +292,7 @@ export class AgentRegistration {
     log.info({ action: 'identity.updateMetadata.sending', tokenId: tokenId.toString(), uriLength: metadataUri.length }, 'Sending setAgentURI');
     const tx = await this.contract.setAgentURI(tokenId, metadataUri, overrides);
     log.info({ action: 'identity.updateMetadata.waiting', txHash: tx.hash }, 'Waiting for setAgentURI receipt');
-    await tx.wait();
+    this.confirmWrite(await tx.wait());
     return tx.hash;
   }
 
