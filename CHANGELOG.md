@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.2.8](https://github.com/zkproofport/proofport-ai/compare/server-v0.2.7...server-v0.2.8) (2026-09-22)
+
+
+### Features
+
+* prove giwa_attestation, with an optional EIP-712 action ([0a21fb5](https://github.com/zkproofport/proofport-ai/commit/0a21fb5cc265ebfd6e95e01da2b30d4e7608a351))
+
+
+### Bug Fixes
+
+* **demo:** use released action SDK and MCP packages ([b8a2d6a](https://github.com/zkproofport/proofport-ai/commit/b8a2d6af948497cbce9d5cbbca09a6f056af9e3e))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @zkproofport-ai/mcp bumped from ^0.2.12 to ^0.2.13
+    * @zkproofport-ai/sdk bumped from ^0.2.12 to ^0.2.13
+
 ## [0.2.7](https://github.com/zkproofport/proofport-ai/compare/server-v0.2.6...server-v0.2.7) (2026-09-13)
 
 
