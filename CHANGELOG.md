@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.2.10](https://github.com/zkproofport/proofport-ai/compare/server-v0.2.9...server-v0.2.10) (2026-09-22)
+
+
+### Bug Fixes
+
+* synchronize proving, payments and multichain discovery ([49c7f8e](https://github.com/zkproofport/proofport-ai/commit/49c7f8e5de1131818e4b3112511e5d14c6c9b5f0))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @zkproofport-ai/mcp bumped from ^0.2.14 to ^0.2.15
+    * @zkproofport-ai/sdk bumped from ^0.2.14 to ^0.2.15
+
 ## [0.2.9](https://github.com/zkproofport/proofport-ai/compare/server-v0.2.8...server-v0.2.9) (2026-09-22)
 
 
