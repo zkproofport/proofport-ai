@@ -1,5 +1,4 @@
 import { ethers } from 'ethers';
-import { AUTHORIZED_SIGNERS } from './constants.js';
 
 /**
  * Simple binary Merkle tree for signer verification.
@@ -89,8 +88,16 @@ export class SimpleMerkleTree {
  * Find the index of a signer address in the authorized signers list.
  * Case-insensitive comparison.
  */
-export function findSignerIndex(signerAddress: string): number {
-  const index = AUTHORIZED_SIGNERS.findIndex(
+export function findSignerIndex(
+  signerAddress: string,
+  /*
+   * Required, with no default. It defaulted to Coinbase's four, which meant a
+   * caller that forgot to pass GIWA's single signer got "signer not authorized"
+   * naming an address that IS authorized -- for the other chain.
+   */
+  signers: readonly string[],
+): number {
+  const index = signers.findIndex(
     addr => addr.toLowerCase() === signerAddress.toLowerCase(),
   );
   if (index === -1) {
@@ -104,13 +111,13 @@ export function findSignerIndex(signerAddress: string): number {
 /**
  * Build a Merkle tree from authorized signers and get proof for the given signer index.
  */
-export function buildSignerMerkleTree(signerIndex: number): {
+export function buildSignerMerkleTree(signerIndex: number, signers: readonly string[]): {
   root: string;
   proof: string[];
   leafIndex: number;
   depth: number;
 } {
-  const tree = new SimpleMerkleTree(AUTHORIZED_SIGNERS);
+  const tree = new SimpleMerkleTree([...signers]);
   const root = tree.getRoot();
   const { proof, leafIndex, depth } = tree.getProof(signerIndex);
 

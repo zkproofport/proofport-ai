@@ -1,5 +1,11 @@
 import { ethers } from 'ethers';
-import { CIRCUITS, COINBASE_ATTESTER_CONTRACT, DEFAULT_EAS_GRAPHQL, DEFAULT_EAS_RPC } from './constants.js';
+import {
+  CIRCUITS,
+  DEFAULT_EAS_GRAPHQL,
+  DEFAULT_EAS_RPC,
+  attestationSource,
+} from './constants.js';
+import type { AttestationSource } from './constants.js';
 import type { CircuitId, EASAttestation, AttestationData, ClientConfig } from './types.js';
 
 // ─── GraphQL query ──────────────────────────────────────────────────────
@@ -217,11 +223,13 @@ export function validateAttestationTx(
 ): { valid: boolean; error?: string } {
   const tx = ethers.Transaction.from(rawTransaction);
 
-  // Check destination
-  if (!tx.to || tx.to.toLowerCase() !== COINBASE_ATTESTER_CONTRACT.toLowerCase()) {
+  // Check destination: the attester contract THIS circuit's attestation must
+  // have been sent to, from the one table that knows.
+  const expectedAttester = attestationSource(circuitId).contract;
+  if (!tx.to || tx.to.toLowerCase() !== expectedAttester.toLowerCase()) {
     return {
       valid: false,
-      error: `Transaction destination ${tx.to} does not match Coinbase Attester Contract ${COINBASE_ATTESTER_CONTRACT}`,
+      error: `Transaction destination ${tx.to} does not match the attester contract for ${circuitId}: ${expectedAttester}`,
     };
   }
 
@@ -288,11 +296,78 @@ export function getSignerAddress(pubkey: string): string {
  * 3. Validate transaction fields
  * 4. Return attestation + raw transaction
  */
+/**
+ * The GIWA attestation for a wallet, found by reading our attester's own calls.
+ *
+ * Not an EAS query: GIWA's attester is ours on GIWA Sepolia and nothing indexes
+ * it. Asking Base's EAS for a GIWA wallet does not fail cleanly either -- the
+ * schema id is absent, so the request comes back HTTP 400 and reads like a
+ * broken endpoint rather than "wrong chain".
+ */
+async function fetchGiwaAttestation(
+  source: Extract<AttestationSource, { kind: 'giwa-sepolia' }>,
+  recipientAddress: string,
+): Promise<AttestationData> {
+  const attester = ethers.getAddress(source.signers[0]);
+  const wanted = ethers.getAddress(recipientAddress);
+
+  const listUrl =
+    `${source.explorer}/api?module=account&action=txlist` +
+    `&address=${attester}&sort=desc&page=1&offset=100`;
+  const listResponse = await fetch(listUrl);
+  if (!listResponse.ok) {
+    throw new Error(`GIWA explorer request failed: HTTP ${listResponse.status}`);
+  }
+  const listBody = (await listResponse.json()) as { result?: unknown };
+  const calls = Array.isArray(listBody.result)
+    ? (listBody.result as Array<{ hash: string; to: string | null; input: string }>)
+    : [];
+
+  const ATTEST_ACCOUNT = '0x56feed5e';
+  const match = calls.find((tx) => {
+    if (!tx.to || ethers.getAddress(tx.to) !== ethers.getAddress(source.contract)) return false;
+    if (!tx.input?.toLowerCase().startsWith(ATTEST_ACCOUNT) || tx.input.length < 74) return false;
+    try {
+      return ethers.getAddress('0x' + tx.input.slice(34, 74)) === wanted;
+    } catch {
+      return false;
+    }
+  });
+  if (!match) {
+    throw new Error(
+      `No GIWA attestation found for ${recipientAddress} on GIWA Sepolia. ` +
+      'This is not a Coinbase attestation -- the wallet must be attested by GIWA.',
+    );
+  }
+
+  const rawTransaction = await fetchRawTransaction(source.rpc, match.hash);
+  return {
+    attestation: {
+      id: match.hash,
+      txid: match.hash,
+      recipient: wanted,
+      attester,
+      time: 0,
+      expirationTime: 0,
+      schemaId: '',
+    },
+    rawTransaction,
+  };
+}
+
 export async function fetchAttestation(
   config: ClientConfig,
   circuitId: CircuitId,
   recipientAddress: string,
 ): Promise<AttestationData> {
+  // Which chain attests THIS circuit, and how it is found. Coinbase's are
+  // indexed by EAS on Base Mainnet; GIWA's are not indexed at all, so they are
+  // read from our attester's own calls.
+  const source = attestationSource(circuitId);
+  if (source.kind === 'giwa-sepolia') {
+    return fetchGiwaAttestation(source, recipientAddress);
+  }
+
   // EAS attestations are ALWAYS on Base Mainnet — never configurable
   const easGraphqlUrl = DEFAULT_EAS_GRAPHQL;
   const easRpcUrl = DEFAULT_EAS_RPC;

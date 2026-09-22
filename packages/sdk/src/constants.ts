@@ -49,6 +49,88 @@ export const AUTHORIZED_SIGNERS = [
   '0x44ace9abb148e8412ac4492e9a1ae6bd88226803',
 ];
 
+/** MockGiwaAttester on GIWA Sepolia -- the `to` of a GIWA attest transaction. */
+export const GIWA_ATTESTER_CONTRACT = '0x6646d970499BBeD728636823A5A7e551E811b414';
+
+/** The one address that signs GIWA attest transactions. */
+export const GIWA_AUTHORIZED_SIGNERS = ['0xEE099845CDfF93e73aDcBcB36A9B93578bcCed4b'];
+
+/**
+ * GIWA Sepolia, where giwa_attestation is attested and verified.
+ *
+ * Constants, not configuration, for the same reason the EAS endpoints below
+ * are: a customer has no reason to point this at another chain, and letting
+ * them would only produce proofs against an attester nobody accepts.
+ */
+export const GIWA_RPC = 'https://sepolia-rpc.giwa.io/';
+export const GIWA_EXPLORER = 'https://sepolia-explorer.giwa.io';
+export const GIWA_CHAIN_ID = 91342;
+
+/**
+ * Where THIS circuit's attestation lives, and who is allowed to have signed it.
+ *
+ * One table, keyed by circuit id, `Record<CircuitId, …>` so a new circuit
+ * without an entry is a compile error. It replaces three separate two-branch
+ * tests -- which attester contract, which signer list, which lookup -- each of
+ * which ended on Coinbase's values for anything that was not GIWA. That is the
+ * shape this repo bans: a circuit nobody added would not fail, it would be
+ * checked against Coinbase's attester and proved against Coinbase's signers.
+ *
+ * `null` is not "unknown": it is a circuit with no attestation transaction at
+ * all. OIDC's signature is inside the identity token.
+ */
+export type AttestationSource =
+  | { kind: 'eas-base'; contract: string; signers: readonly string[] }
+  | { kind: 'giwa-sepolia'; contract: string; signers: readonly string[]; chainId: number; rpc: string; explorer: string };
+
+export const ATTESTATION_SOURCES: Record<CircuitId, AttestationSource | null> = {
+  [CIRCUIT_IDS.COINBASE_ATTESTATION]: {
+    kind: 'eas-base',
+    contract: COINBASE_ATTESTER_CONTRACT,
+    signers: AUTHORIZED_SIGNERS,
+  },
+  [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: {
+    kind: 'eas-base',
+    contract: COINBASE_ATTESTER_CONTRACT,
+    signers: AUTHORIZED_SIGNERS,
+  },
+  [CIRCUIT_IDS.ARC_ELIGIBILITY]: {
+    kind: 'eas-base',
+    contract: COINBASE_ATTESTER_CONTRACT,
+    signers: AUTHORIZED_SIGNERS,
+  },
+  [CIRCUIT_IDS.GIWA_ATTESTATION]: {
+    kind: 'giwa-sepolia',
+    contract: GIWA_ATTESTER_CONTRACT,
+    signers: GIWA_AUTHORIZED_SIGNERS,
+    chainId: GIWA_CHAIN_ID,
+    rpc: GIWA_RPC,
+    explorer: GIWA_EXPLORER,
+  },
+  [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: null,
+};
+
+/**
+ * The attestation source for a circuit, or an error naming the circuit.
+ *
+ * Two different failures, said differently: a circuit this build has never
+ * heard of, and a circuit that genuinely has no attestation to fetch.
+ */
+export function attestationSource(circuitId: CircuitId): AttestationSource {
+  if (!(circuitId in ATTESTATION_SOURCES)) {
+    throw new Error(
+      `Unknown circuit '${circuitId}'. Known: ${Object.keys(ATTESTATION_SOURCES).join(', ')}.`,
+    );
+  }
+  const source = ATTESTATION_SOURCES[circuitId];
+  if (!source) {
+    throw new Error(
+      `'${circuitId}' has no on-chain attestation to fetch -- its signature is inside the identity token.`,
+    );
+  }
+  return source;
+}
+
 export const DEFAULT_EAS_GRAPHQL = 'https://base.easscan.org/graphql';
 // Use drpc.org instead of mainnet.base.org: the latter prunes transactions
 // older than ~30 days, so eth_getTransactionByHash returns null for any

@@ -2,7 +2,13 @@ import { ethers } from 'ethers';
 import type { CircuitId, ProveInputs, ClientConfig } from './types.js';
 import { CIRCUIT_NAME_MAP, type CircuitName } from './types.js';
 import { CIRCUIT_IDS } from './circuits.js';
-import { CIRCUITS, RAW_TX_PADDED_LENGTH, MERKLE_PROOF_MAX_DEPTH, COUNTRY_LIST_MAX_LENGTH } from './constants.js';
+import {
+  CIRCUITS,
+  RAW_TX_PADDED_LENGTH,
+  MERKLE_PROOF_MAX_DEPTH,
+  COUNTRY_LIST_MAX_LENGTH,
+  attestationSource,
+} from './constants.js';
 import { fetchAttestation, recoverAttesterPubkey, getSignerAddress } from './attestation.js';
 import { findSignerIndex, buildSignerMerkleTree } from './merkle.js';
 
@@ -87,6 +93,68 @@ export function computeNullifier(
   return ethers.getBytes(
     ethers.keccak256(ethers.concat([userSecret, scopeBytes])),
   );
+}
+
+/**
+ * Compute nullifier = keccak256(keccak256(address + keccak256(circuitId)) + scope)
+ *
+ * The wallet and a constant compiled into the circuit, and NOT `signal_hash`.
+ * The circuits that can bind an action derive it this way because they must:
+ * `signal_hash` is empty in action mode, so a nullifier taken from it would
+ * give one wallet two identities in one scope depending on how it asked. It
+ * was already wrong before those circuits branched — nothing constrains
+ * `signal_hash` there, so varying bytes minted identities.
+ *
+ * MUST match `verify_wallet_nullifier` in the circuit library and
+ * `computeWalletNullifier` in the server's input builder. When they disagree
+ * the proof fails with "Nullifier mismatch" and nothing names this function.
+ */
+export function computeWalletNullifier(
+  userAddress: string,
+  circuitId: string,
+  scopeBytes: Uint8Array,
+): Uint8Array {
+  const circuitTag = ethers.getBytes(ethers.keccak256(ethers.toUtf8Bytes(circuitId)));
+  const userSecret = ethers.getBytes(
+    ethers.keccak256(ethers.concat([ethers.getBytes(userAddress), circuitTag])),
+  );
+  return ethers.getBytes(ethers.keccak256(ethers.concat([userSecret, scopeBytes])));
+}
+
+/**
+ * Which nullifier each circuit expects. A table rather than a test on the id,
+ * so a circuit nobody thought about is an error instead of whichever formula
+ * the last branch held.
+ */
+const NULLIFIER_RULE: Record<CircuitId, 'wallet-and-circuit-tag' | 'wallet-and-signal-hash' | 'built-from-the-token'> = {
+  [CIRCUIT_IDS.COINBASE_ATTESTATION]: 'wallet-and-signal-hash',
+  [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: 'wallet-and-signal-hash',
+  [CIRCUIT_IDS.ARC_ELIGIBILITY]: 'wallet-and-circuit-tag',
+  [CIRCUIT_IDS.GIWA_ATTESTATION]: 'wallet-and-circuit-tag',
+  // OIDC's nullifier is derived inside the OIDC payload builder, from the
+  // identity token; this function is never asked for it.
+  [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: 'built-from-the-token',
+};
+
+/** The nullifier this circuit expects, by its own rule. */
+export function nullifierForCircuit(
+  circuitId: CircuitId,
+  userAddress: string,
+  signalHash: Uint8Array,
+  scopeBytes: Uint8Array,
+): Uint8Array {
+  const rule = NULLIFIER_RULE[circuitId];
+  if (!rule) {
+    throw new Error(
+      `No nullifier rule for circuit '${circuitId}'. Known: ${Object.keys(NULLIFIER_RULE).join(', ')}.`,
+    );
+  }
+  if (rule === 'built-from-the-token') {
+    throw new Error(`'${circuitId}' builds its nullifier from the identity token, not from a wallet signature.`);
+  }
+  return rule === 'wallet-and-circuit-tag'
+    ? computeWalletNullifier(userAddress, circuitId, scopeBytes)
+    : computeNullifier(userAddress, signalHash, scopeBytes);
 }
 
 // ─── Internal helpers for input assembly ────────────────────────────────
@@ -257,13 +325,14 @@ export async function prepareInputs(config: ClientConfig, params: {
   const attesterAddress = getSignerAddress(attesterPubkey);
   const { x: attesterPubkeyX, y: attesterPubkeyY } = extractPubkeyCoordinates(attesterPubkey);
 
-  // Step 5: Build Merkle tree
-  const signerIndex = findSignerIndex(attesterAddress);
-  const merkleData = buildSignerMerkleTree(signerIndex);
+  // Step 5: Build Merkle tree over the signers THIS circuit accepts.
+  const { signers } = attestationSource(circuitId);
+  const signerIndex = findSignerIndex(attesterAddress, signers);
+  const merkleData = buildSignerMerkleTree(signerIndex, signers);
 
-  // Step 6: Compute scope and nullifier
+  // Step 6: Compute scope and the nullifier THIS circuit expects
   const scopeBytes = computeScope(scope);
-  const nullifierBytes = computeNullifier(userAddress, signalHash, scopeBytes);
+  const nullifierBytes = nullifierForCircuit(circuitId, userAddress, signalHash, scopeBytes);
 
   // Step 7: Convert raw TX to byte array
   const rawTxBytes = hexToBytes(attestationData.rawTransaction);
