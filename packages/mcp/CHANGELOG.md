@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.15](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.2.14...mcp-v0.2.15) (2026-09-22)
+
+
+### Bug Fixes
+
+* synchronize proving, payments and multichain discovery ([49c7f8e](https://github.com/zkproofport/proofport-ai/commit/49c7f8e5de1131818e4b3112511e5d14c6c9b5f0))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @zkproofport-ai/sdk bumped from ^0.2.14 to ^0.2.15
+
 ## [0.2.14](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.2.13...mcp-v0.2.14) (2026-09-22)
 
 

@@ -1,7 +1,7 @@
 {
   "name": "@zkproofport-ai/sdk",
-  "version": "0.2.14",
-  "description": "TypeScript SDK for ZKProofport identity proofs and experimental Arc Testnet EIP-712 action authorization. Circle Agent Wallet payments, Circle Gateway nanopayments and x402 USDC; Coinbase KYC, country and OIDC proofs.",
+  "version": "0.2.15",
+  "description": "TypeScript SDK for ZKProofport Coinbase KYC, country, OIDC, Arc eligibility and GIWA attestation proofs. Optional EIP-712 action binding for Arc/GIWA; x402 USDC and Circle Gateway payments.",
   "keywords": [
     "sdk",
     "typescript",
