@@ -59,7 +59,10 @@ describe('E2E Encryption Flow', () => {
       if (res.json.payment.payTo) {
         expect(res.json.payment.payTo).toBeTruthy();
       }
-      expect(res.json.payment.maxAmountRequired).toBeDefined();
+      // `amount`, not `maxAmountRequired`: the offer carries what this request
+      // costs, in the token's units. The old name was asserted here long after
+      // it stopped being sent, so this failed everywhere it ran.
+      expect(res.json.payment.amount).toBeDefined();
     });
 
     it('should include teePublicKey field in 402 response', async () => {

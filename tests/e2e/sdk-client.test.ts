@@ -123,7 +123,15 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
       const result = await generateProof(
         config,
         { attestation: giwaSigner!, payment: paymentSigner },
-        { circuit: 'giwa_attestation', scope: 'e2e-test:npm-sdk-giwa' },
+        {
+          circuit: 'giwa_attestation',
+          scope: 'e2e-test:npm-sdk-giwa',
+          // Named, not left to the SDK's first offer: the payer holds USDC on
+          // Base Sepolia and none on Arc testnet, and an unfunded chain fails
+          // at settlement with a message about the gateway rather than the
+          // proof.
+          payOn: 'base-sepolia',
+        },
       );
 
       expect(result.proof).toBeTruthy();
@@ -149,6 +157,7 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
         {
           circuit: 'giwa_attestation',
           scope: 'e2e-test:npm-sdk-giwa-action',
+          payOn: 'base-sepolia',
           action: {
             domain: {
               name: 'GIWA E2E',
@@ -182,7 +191,7 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
       const plain = await generateProof(
         config,
         { attestation: giwaSigner!, payment: paymentSigner },
-        { circuit: 'giwa_attestation', scope },
+        { circuit: 'giwa_attestation', scope, payOn: 'base-sepolia' },
       );
       const bound = await generateProof(
         config,
@@ -190,6 +199,7 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
         {
           circuit: 'giwa_attestation',
           scope,
+          payOn: 'base-sepolia',
           action: {
             domain: { name: 'GIWA E2E', version: '1', chainId: 91342, verifyingContract: '0x6646d970499BBeD728636823A5A7e551E811b414' },
             types: { Deposit: [{ name: 'amount', type: 'uint256' }] },

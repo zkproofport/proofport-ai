@@ -25,6 +25,15 @@ import { describe, it, expect, beforeAll } from 'vitest';
 
 const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:4002';
 const HOST = new URL(BASE_URL).host;
+/*
+ * The same host as a did:web identifier: a port is written `%3A`, per W3C
+ * did:web. A deployment has no port and the two forms are identical there,
+ * which is why this read as `new URL(...).host` for months and only a local
+ * run could tell the difference.
+ */
+const DID_HOST = new URL(BASE_URL).port
+  ? `${new URL(BASE_URL).hostname}%3A${new URL(BASE_URL).port}`
+  : new URL(BASE_URL).hostname;
 
 async function getJson(path: string): Promise<{ status: number; body: unknown }> {
   const res = await fetch(`${BASE_URL}${path}`);
@@ -127,10 +136,12 @@ describe('service documents', () => {
         verificationMethod: { id: string; controller: string; blockchainAccountId: string }[];
         service: { serviceEndpoint: string }[];
       };
-      expect(doc.id).toBe(`did:web:${HOST}`);
+      expect(doc.id).toBe(`did:web:${DID_HOST}`);
       expect(doc.verificationMethod[0].controller).toBe(doc.id);
       expect(doc.verificationMethod[0].id.startsWith(doc.id)).toBe(true);
-      expect(doc.service[0].serviceEndpoint).toBe(`https://${HOST}`);
+      // The URL the service says it is reachable at, scheme included: https on
+              // a deployment, http on a machine serving it locally.
+              expect(doc.service[0].serviceEndpoint).toBe(`${new URL(BASE_URL).origin}`);
     });
 
     it('names the same chain the agent is registered on', async () => {

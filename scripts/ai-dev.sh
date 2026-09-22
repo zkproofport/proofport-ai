@@ -20,7 +20,7 @@ REPO_ROOT="$(cd "$AI_DIR/.." && pwd)"
 if [ -f "$REPO_ROOT/scripts/lib/dev-docker.sh" ]; then
   # shellcheck source=/dev/null
   source "$REPO_ROOT/scripts/lib/dev-docker.sh"
-  dev_docker_init || exit 1
+  dev_docker_init x86_64 || exit 1
   docker() { command docker "${DEV_DOCKER_ARGS[@]}" "$@"; }
 fi
 

@@ -280,13 +280,18 @@ describe('REST API — x402 Single-Step Flow', () => {
     expect(json.payment).toBeDefined();
     expect(json.payment.scheme).toBe('exact');
     expect(json.payment.payTo).toBeDefined();
-    // Check PAYMENT-REQUIRED header exists
+    // The PAYMENT-REQUIRED header carries the WHOLE offer — `{x402Version,
+    // resource, accepts}` — not the first option flattened. It stopped being
+    // one option on 2026-09-13, because a client reading the header (Circle's
+    // CLI does) saw one chain and refused when it could not pay on that one.
+    // These two assertions read the old flattened shape until 2026-09-22 and
+    // had been failing ever since, on every environment.
     const paymentHeader = headers.get('payment-required');
     expect(paymentHeader).toBeDefined();
-    // Decode and validate
     const decoded = JSON.parse(Buffer.from(paymentHeader!, 'base64').toString());
-    expect(decoded.scheme).toBe('exact');
-    expect(decoded.extra.nonce).toBe(json.nonce);
+    expect(decoded.accepts.length).toBeGreaterThan(0);
+    expect(decoded.accepts[0].scheme).toBe('exact');
+    expect(decoded.accepts[0].extra.nonce).toBe(json.nonce);
   });
 
   it('POST /api/v1/prove without inputs returns 402 challenge (inputs checked after payment)', async () => {

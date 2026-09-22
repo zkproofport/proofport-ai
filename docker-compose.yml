@@ -3,6 +3,11 @@ services:
     image: redis:7-alpine
     container_name: proofport-ai-redis
     command: redis-server --appendonly yes
+    # Published so a server running on the Mac can reach it. Without this the
+    # only Redis a native run could use was the root dev stack's on 6379, which
+    # means this stack does not start unless another project's does.
+    ports:
+      - "6380:6379"
     volumes:
       - redis_data:/data
     healthcheck:

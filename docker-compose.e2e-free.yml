@@ -1,0 +1,16 @@
+# Compose override that switches payment OFF, for running the E2E suite
+# against a local container without spending testnet USDC.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.e2e-free.yml up -d ai
+#
+# Why this file exists rather than a line in .env.development: the base stack
+# reads .env.development, which sets PAYMENT_MODE=testnet because that is what
+# the service does in normal local use. run-e2e.sh's first phase says it runs
+# with payment disabled -- it did not, it ran with whatever that file happened
+# to hold, and every local run of the free-tier suites was charging. An
+# `environment:` entry wins over env_file, so this makes the phase say what it
+# does. Nothing else changes; a proof produced here is the same proof.
+services:
+  ai:
+    environment:
+      PAYMENT_MODE: disabled
