@@ -7,8 +7,10 @@ export type CircuitName =
   | 'coinbase_kyc'
   | 'coinbase_country'
   | 'oidc_domain'
-  /** Coinbase KYC, with the signature bound to one EIP-712 action. */
-  | 'arc_eligibility';
+  /** Coinbase KYC, optionally binding the signature to one EIP-712 action. */
+  | 'arc_eligibility'
+  /** GIWA account attestation, optionally binding one EIP-712 action. */
+  | 'giwa_attestation';
 
 /**
  * Canonical circuit IDs this server can prove.
@@ -27,6 +29,7 @@ export const CIRCUIT_NAME_MAP: Record<CircuitName, CircuitId> = {
   coinbase_country: CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION,
   oidc_domain: CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION,
   arc_eligibility: CIRCUIT_IDS.ARC_ELIGIBILITY,
+  giwa_attestation: CIRCUIT_IDS.GIWA_ATTESTATION,
 };
 
 /** Map canonical circuit IDs back to client-friendly names. */
@@ -35,6 +38,7 @@ export const CIRCUIT_ID_MAP: Record<CircuitId, CircuitName> = {
   [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: 'coinbase_country',
   [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: 'oidc_domain',
   [CIRCUIT_IDS.ARC_ELIGIBILITY]: 'arc_eligibility',
+  [CIRCUIT_IDS.GIWA_ATTESTATION]: 'giwa_attestation',
 };
 
 // ─── Configuration ──────────────────────────────────────────────────────
@@ -231,7 +235,8 @@ export interface ProofParams {
   provider?: 'google' | 'microsoft';
 
   /**
-   * Required for arc_eligibility; rejected for every other circuit, including OIDC.
+   * Optional for arc_eligibility and giwa_attestation; rejected for every
+   * other circuit, including OIDC.
    * The local wallet signs these exact EIP-712 fields after shape, root-type and
    * value validation. The relying contract must compare the domain/action hashes
    * and enforce the approved actor, amount, nonce and deadline.

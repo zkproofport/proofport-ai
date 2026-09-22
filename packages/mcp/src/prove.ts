@@ -4,7 +4,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { fromPrivateKey } from '@zkproofport-ai/sdk';
+import { fromPrivateKey, CIRCUIT_NAME_MAP } from '@zkproofport-ai/sdk';
 
 const privateValues = [process.env.ATTESTATION_KEY, process.env.E2E_ATTESTATION_WALLET_ADDRESS]
   .filter((value): value is string => typeof value === 'string' && value.length >= 8);
@@ -279,7 +279,7 @@ function printUsage() {
   writeError('  --login-google             Login with Google account (device flow)');
   writeError('  --login-google-workspace   Login with Google Workspace (device flow)');
   writeError('  --login-microsoft-365      Login with Microsoft 365 (device flow)');
-  writeError('  --action <file.json>        EIP-712 action (for arc_eligibility)');
+  writeError('  --action <file.json>        EIP-712 action (arc_eligibility, giwa_attestation)');
   writeError('  --pay-with <key|cdp|circle|arc> Which wallet pays, when the service charges');
   writeError('  --pay-on <chain>            Which chain to pay on (e.g. arc-testnet, base-sepolia)');
   writeError('  --max-payment <USDC>        Maximum proof fee, up to six decimal places');
@@ -288,6 +288,12 @@ function printUsage() {
   writeError('  coinbase_kyc       Prove Coinbase KYC verification (requires ATTESTATION_KEY)');
   writeError('  coinbase_country   Prove KYC country attestation (requires ATTESTATION_KEY)');
   writeError('  oidc_domain        Prove email domain via OIDC JWT (--jwt required)');
+  writeError('  arc_eligibility    Coinbase KYC, optionally binding one EIP-712 action (--action)');
+  writeError('  giwa_attestation   GIWA account attestation, optionally binding one action');
+  writeError('');
+  writeError('ATTESTATION_KEY must be the wallet attested for the circuit you ask for:');
+  writeError('  Coinbase attests on Base; GIWA attests on GIWA Sepolia, and one');
+  writeError('  wallet is rarely attested by both.');
   writeError('');
   writeError('Examples:');
   writeError('  # pay on Arc from a Circle wallet');
@@ -323,9 +329,10 @@ if (maxPayment !== undefined && !/^\d+(\.\d{1,6})?$/.test(maxPayment)) {
 // names neither.
 const wantsDeviceFlow = loginGoogle || loginGoogleWorkspace || loginMicrosoft365;
 if (!circuit && !wantsDeviceFlow) {
+  // The list comes from the name map, not from four names typed here: the
+  // usage text above went two circuits out of date exactly that way.
   const msg =
-    'A circuit is required. Pass one of: coinbase_kyc, coinbase_country, ' +
-    'oidc_domain, arc_eligibility.';
+    `A circuit is required. Pass one of: ${Object.keys(CIRCUIT_NAME_MAP).join(', ')}.`;
   if (silent) writeError(JSON.stringify({ error: msg }));
   else writeError(`Error: ${msg}`);
   process.exit(1);
@@ -449,15 +456,19 @@ if (loginGoogle || loginGoogleWorkspace || loginMicrosoft365) {
 // and a shell-quoted one loses its quoting in ways that surface as a wrong
 // hash rather than a parse error.
 let action: unknown;
-if (circuit === 'arc_eligibility') {
-  if (!actionFile) {
-    const msg =
-      '--action <file.json> is required for arc_eligibility. The file holds ' +
-      'an EIP-712 structure: { domain, types, primaryType, message }.';
-    if (silent) writeError(JSON.stringify({ error: msg }));
-    else writeError(`Error: ${msg}`);
-    process.exit(1);
-  }
+const canBindAction = circuit === 'arc_eligibility' || circuit === 'giwa_attestation';
+if (actionFile && !canBindAction) {
+  const msg =
+    `--action was given but '${circuit}' has no inputs for one. Only ` +
+    'arc_eligibility and giwa_attestation carry an action.';
+  if (silent) writeError(JSON.stringify({ error: msg }));
+  else writeError(`Error: ${msg}`);
+  process.exit(1);
+}
+if (canBindAction && actionFile) {
+  // Optional since 2026-09-22: both circuits sign the request's signal hash
+  // when no action is given. It used to be required for arc_eligibility
+  // because that circuit had no second path.
   const { readFileSync } = await import('node:fs');
   try {
     action = JSON.parse(readFileSync(actionFile, 'utf8'));

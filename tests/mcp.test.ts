@@ -106,7 +106,10 @@ describe('handleGetSupportedCircuits', () => {
     const result = handleGetSupportedCircuits({});
 
     expect(result.circuits).toHaveLength(Object.keys(CIRCUITS).length);
-    expect(result.circuits.length).toBe(4);
+    // Five since giwa_attestation became provable on 2026-09-22. The literal
+    // is kept alongside the derived count on purpose: without it, deleting a
+    // circuit from CIRCUITS would still pass.
+    expect(result.circuits.length).toBe(5);
   });
 
   it('should include coinbase_attestation with correct metadata', () => {

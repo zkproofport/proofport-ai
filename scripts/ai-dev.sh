@@ -4,6 +4,26 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AI_DIR="$(dirname "$SCRIPT_DIR")"
 
+# WHICH DOCKER VM THIS STACK RUNS ON.
+#
+# `docker` with no --context uses the CURRENT context, which is not "default":
+# it is whatever `docker context use` last selected, and on this machine that
+# was `colima-realrep` -- an x86_64 Colima VM kept for another project. This
+# script inherited it and built the image under emulation, where `npm ci` alone
+# ran for twenty minutes. Measured 2026-09-22.
+#
+# The shared library selects Colima's aarch64 default VM for the length of this
+# process only, exactly as the root dev scripts do, and never touches the
+# user's global context. Non-Colima setups (Desktop, plain Linux, remote) are
+# left alone.
+REPO_ROOT="$(cd "$AI_DIR/.." && pwd)"
+if [ -f "$REPO_ROOT/scripts/lib/dev-docker.sh" ]; then
+  # shellcheck source=/dev/null
+  source "$REPO_ROOT/scripts/lib/dev-docker.sh"
+  dev_docker_init || exit 1
+  docker() { command docker "${DEV_DOCKER_ARGS[@]}" "$@"; }
+fi
+
 # Start with payment switched ON, so the paid path can be exercised locally.
 #
 # Without this the service runs PAYMENT_MODE=disabled and every request is

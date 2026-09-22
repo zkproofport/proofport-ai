@@ -43,6 +43,21 @@ err() { echo -e "${RED}[FAIL]${NC} $1"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 
 BASE_URL="${E2E_BASE_URL:-http://localhost:4002}"
+# Same Docker target as ai-dev.sh, chosen for this process only.
+#
+# These were plain `docker compose`, which uses whatever context is current.
+# On a machine with two Colima VMs that is how an E2E run talks to a daemon the
+# stack is not on -- containers "missing", logs empty, and a failure that reads
+# like a broken service. Teammates on Docker Desktop or plain Linux Docker are
+# left exactly as configured.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+if [ -f "$REPO_ROOT/scripts/lib/dev-docker.sh" ]; then
+  # shellcheck source=/dev/null
+  source "$REPO_ROOT/scripts/lib/dev-docker.sh"
+  dev_docker_init || exit 1
+  docker() { command docker "${DEV_DOCKER_ARGS[@]}" "$@"; }
+fi
+
 COMPOSE_BASE="docker compose -f docker-compose.yml"
 COMPOSE_PAYMENT="docker compose -f docker-compose.yml -f docker-compose.e2e-payment.yml"
 

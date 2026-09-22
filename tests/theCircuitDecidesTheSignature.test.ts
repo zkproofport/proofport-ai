@@ -66,14 +66,24 @@ async function runFlow(params: Record<string, unknown>, signer: ReturnType<typeo
 }
 
 describe('the circuit decides the signature', () => {
-  it('refuses arc_eligibility with no action, and says what is missing', async () => {
+  it('signs the signal hash for arc_eligibility when no action is given', async () => {
+    /*
+     * This asserted a refusal until 2026-09-22, when the circuit gained the
+     * branch it had never had: with no action it personal_signs the signal
+     * hash, exactly as coinbase_attestation does. What the circuit does is
+     * what decides here, which is the point of the file's name.
+     */
     const signer = watchfulSigner();
-    await expect(
-      runFlow({ circuit: 'arc_eligibility', scope: 'test' }, signer),
-    ).rejects.toThrow(/authorised ONE EIP-712 action, and no action was given/);
-    // Nothing was signed, so nothing wrong could have been sent.
-    expect(signer.signMessage).not.toHaveBeenCalled();
+    await runFlow({ circuit: 'arc_eligibility', scope: 'test' }, signer);
+    expect(signer.signMessage).toHaveBeenCalled();
     expect(signer.signTypedData).not.toHaveBeenCalled();
+  });
+
+  it('signs the typed data for arc_eligibility when an action is given', async () => {
+    const signer = watchfulSigner();
+    await runFlow({ circuit: 'arc_eligibility', scope: 'test', action: ACTION }, signer);
+    expect(signer.signTypedData).toHaveBeenCalled();
+    expect(signer.signMessage).not.toHaveBeenCalled();
   });
 
   it('refuses an action on a circuit that cannot carry one', async () => {
@@ -84,18 +94,14 @@ describe('the circuit decides the signature', () => {
     expect(signer.signTypedData).not.toHaveBeenCalled();
   });
 
-  it('names the alternative in both refusals, so a caller knows what to do', async () => {
+  it('names the circuits that do carry an action, so a caller knows where to go', async () => {
     const signer = watchfulSigner();
-    const missing = await runFlow({ circuit: 'arc_eligibility', scope: 'test' }, signer).catch(
-      (e: Error) => e.message,
-    );
-    expect(missing).toContain(CIRCUIT_IDS.COINBASE_ATTESTATION);
-
     const extra = await runFlow(
       { circuit: 'coinbase_kyc', scope: 'test', action: ACTION },
       signer,
     ).catch((e: Error) => e.message);
     expect(extra).toContain(CIRCUIT_IDS.ARC_ELIGIBILITY);
+    expect(extra).toContain(CIRCUIT_IDS.GIWA_ATTESTATION);
   });
 });
 

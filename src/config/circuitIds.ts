@@ -86,6 +86,11 @@ export const PROVABLE_CIRCUIT_IDS = [
   CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION,
   CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION,
   CIRCUIT_IDS.ARC_ELIGIBILITY,
+  // Added 2026-09-22, when its circuit gained the optional EIP-712 action and
+  // its verifier was deployed on GIWA Sepolia. Its attestation comes from our
+  // own attester on that chain, not from Coinbase's EAS -- see
+  // ATTESTATION_SOURCES.
+  CIRCUIT_IDS.GIWA_ATTESTATION,
 ] as const satisfies readonly CanonicalCircuitId[];
 
 /**
@@ -131,6 +136,10 @@ export const CIRCUIT_DIRS: Record<CircuitId, { dir: string; packageName: Circuit
   [CIRCUIT_IDS.ARC_ELIGIBILITY]: {
     dir: 'arc-eligibility',
     packageName: CIRCUIT_IDS.ARC_ELIGIBILITY,
+  },
+  [CIRCUIT_IDS.GIWA_ATTESTATION]: {
+    dir: 'giwa-attestation',
+    packageName: CIRCUIT_IDS.GIWA_ATTESTATION,
   },
 };
 

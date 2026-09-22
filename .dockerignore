@@ -1,0 +1,28 @@
+# The image never uses the host's modules: both stages run `npm ci` from the
+# lockfile. Without this line the build context was the whole 1.4 GB tree, and
+# `docker build` spent minutes uploading it before running a single step --
+# measured 2026-09-22, when a local run sent 258 MB and was still going.
+node_modules
+packages/*/node_modules
+
+# Built on the host, rebuilt in the builder stage.
+dist
+packages/*/dist
+
+# Secrets. They are mounted or passed as environment variables at run time and
+# have no business inside an image layer.
+.env
+.env.*
+!.env.example
+
+# Nothing the runtime reads.
+.git
+.github
+tests
+telegram-bot
+demo
+docs
+*.md
+!README.md
+coverage
+.vitest

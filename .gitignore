@@ -15,7 +15,10 @@ coverage/
 *~
 
 # Docker
-.dockerignore
+# `.dockerignore` is NOT ignored. It was, from the first Docker commit
+# (2026-02-10), which is why nobody had one: every build sent the whole tree
+# including a 1.4 GB node_modules the image never uses. It is a build input
+# like the Dockerfile and belongs in the repository.
 
 # Rust prover build artifacts
 prover/target/

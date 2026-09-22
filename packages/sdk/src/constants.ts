@@ -31,6 +31,13 @@ export const CIRCUITS: Record<CircuitId, {
     easSchemaId: '0xf8b05c79f090979bf4a80270aba232dff11a10d9ca55c4f88de95317970f0de9',
     functionSelector: '0x56feed5e',
   },
+  [CIRCUIT_IDS.GIWA_ATTESTATION]: {
+    displayName: 'GIWA Attestation',
+    // No EAS schema: GIWA's attestation is not indexed by EAS on Base. It is
+    // found by reading our own attester's calls on GIWA Sepolia, so a schema
+    // id here would be a value nothing looks up.
+    functionSelector: '0x56feed5e',
+  },
 };
 
 export const COINBASE_ATTESTER_CONTRACT = '0x357458739F90461b99789350868CD7CF330Dd7EE';

@@ -185,10 +185,12 @@ async function generateProofFromInputs(
         countryListLength: (cb.country_list || []).length,
         isIncluded: cb.is_included,
       }),
-      ...(circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY && {
-        domainSeparator: cb.domain_separator,
-        actionHash: cb.action_hash,
-      }),
+      // Whenever the caller sent them, not only for one circuit: the action
+      // is optional on both circuits that can carry one, and naming a circuit
+      // here is how the next one gets forgotten.
+      ...(cb.domain_separator && cb.action_hash
+        ? { domainSeparator: cb.domain_separator, actionHash: cb.action_hash }
+        : {}),
     } satisfies CircuitParams;
   }
 

@@ -38,6 +38,7 @@ function circuitAlias(circuitId: CircuitId): string {
     [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: 'coinbase_country',
     [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: 'oidc_domain',
     [CIRCUIT_IDS.ARC_ELIGIBILITY]: 'arc_eligibility',
+    [CIRCUIT_IDS.GIWA_ATTESTATION]: 'giwa_attestation',
   };
   const alias = aliases[circuitId];
   if (!alias) throw new Error(`Unknown circuit '${circuitId}'.`);

@@ -103,7 +103,9 @@ export const CIRCUIT_SUPPORT_STATUS: Readonly<Record<CanonicalCircuitId, Circuit
     coinbase_country_attestation: 'supported',
     oidc_domain_attestation: 'supported',
     arc_eligibility: 'experimental',
-    giwa_attestation: 'planned',
+    // Experimental since 2026-09-22: built, deployed on GIWA Sepolia and
+    // provable here. Testnet-only, which is what keeps it out of 'supported'.
+    giwa_attestation: 'experimental',
     mdl_kr_ownership: 'planned',
     mdl_kr_age: 'planned',
     mdl_kr_region: 'planned',
@@ -159,6 +161,10 @@ export const PROVABLE_CIRCUIT_IDS = [
   CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION,
   CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION,
   CIRCUIT_IDS.ARC_ELIGIBILITY,
+  // Added 2026-09-22 with the server's own list, which a test holds byte
+  // identical to this one: the two trees ship separately and cannot import
+  // each other, so nothing else stops one moving without the other.
+  CIRCUIT_IDS.GIWA_ATTESTATION,
 ] as const satisfies readonly CanonicalCircuitId[];
 
 /** Narrows an unknown value to a circuit the proofport-ai server can prove. */

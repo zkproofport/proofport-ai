@@ -97,7 +97,9 @@ Corrected Arc stepwise support and shared action hashing require SDK/MCP **0.2.1
 
 **For OIDC circuits** (`oidc_domain`): No wallet or attestation needed — just a JWT `id_token` from your OIDC provider.
 
-**For the action-bound circuit** (`arc_eligibility`): the same Coinbase KYC attestation as above. What differs is what the wallet signs — see below.
+**For GIWA** (`giwa_attestation`): an attestation from GIWA's attester on **GIWA Sepolia**, and a local signer for that wallet. It is not a Coinbase attestation — one wallet is rarely attested by both, so the key you pass must be the wallet attested on the chain the circuit reads.
+
+**For the circuits that can bind an action** (`arc_eligibility`, `giwa_attestation`): the attestation above for whichever one you ask for. What differs is what the wallet signs, and the action is **optional** — see below.
 
 ## Quick Start
 
@@ -122,8 +124,16 @@ console.log('Valid:', verification.valid);
 
 > **Experimental. Testnet only.**
 >
-> `arc_eligibility` is deployed experimentally on **Arc Testnet, chain 5042002**, not mainnet. The verifier is `0xCbC8E63fF92659E8B44cFF117D33005Bb669a018`; the Ledger House EligibilityGate is `0xD0F3eE648386B59B484157332E736388Fcc41F47`. Its public-input layout and deployment may change. Do not put it in front of real funds. The circuits that are generally available are
-> `coinbase_kyc`, `coinbase_country` and `oidc_domain`.
+> Two circuits can bind an action, both on testnets and neither generally available:
+>
+> | Circuit | Chain | Verifier |
+> |---|---|---|
+> | `arc_eligibility` | Arc Testnet, 5042002 | `0x2aEB66292f631ceb6225ffA2439B1f2b4b15e44a` |
+> | `giwa_attestation` | GIWA Sepolia, 91342 | `0x5Da234546874304F8c51BBEed00fC632938211c1` |
+>
+> The Ledger House EligibilityGate on Arc is `0xD0F3eE648386B59B484157332E736388Fcc41F47`. Public-input layouts and deployments may change; do not put either in front of real funds. Generally available: `coinbase_kyc`, `coinbase_country`, `oidc_domain`.
+>
+> **The action is optional on both.** Send one and the wallet signs typed data; send none and it signs the request's signal hash exactly as `coinbase_kyc` does. The circuits branch on this, and refuse a request that tries to be both. Until 2026-09-22 `arc_eligibility` required an action — its circuit had no second path — and `giwa_attestation` could not take one at all.
 
 ### The problem it solves
 
@@ -173,6 +183,10 @@ const result = await generateProof(
   },
 );
 ```
+
+Ask for `giwa_attestation` instead and the same call works against GIWA's
+attestation, with the domain naming chain `91342`. A wallet refuses typed data
+whose domain names a chain it is not on, so the chain id follows the circuit.
 
 The wallet renders `amount`, `nonce` and `expiry` by name for the person to
 read. Two 32-byte hashes reach the circuit — the EIP-712 domain separator and

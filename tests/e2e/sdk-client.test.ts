@@ -22,6 +22,7 @@ import {
   fromPrivateKey,
   verifyProof,
   requestChallenge,
+  extractNullifierFromPublicInputs,
   CIRCUITS,
   type ClientConfig,
   type ProofportSigner,
@@ -29,6 +30,15 @@ import {
 
 const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:4002';
 const ATTESTATION_KEY = process.env.ATTESTATION_KEY;
+/*
+ * A DIFFERENT wallet from ATTESTATION_KEY.
+ *
+ * giwa_attestation is attested by our own attester on GIWA Sepolia, not by
+ * Coinbase on Base, so the wallet that satisfies one satisfies neither the
+ * other. Only one wallet is attested on GIWA today, and its key is the one
+ * the circuit fixtures are generated from.
+ */
+const GIWA_KEY = process.env.GIWA_ATTESTATION_KEY;
 const PAYER_KEY = process.env.E2E_PAYER_WALLET_KEY;
 
 function getOidcJwt(): string | undefined {
@@ -44,6 +54,7 @@ const OIDC_JWT = getOidcJwt();
 describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
   let config: ClientConfig;
   let attestationSigner: ProofportSigner;
+  let giwaSigner: ProofportSigner | undefined;
   let paymentSigner: ProofportSigner;
 
   beforeAll(async () => {
@@ -55,6 +66,7 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
     });
 
     attestationSigner = fromPrivateKey(ATTESTATION_KEY);
+    giwaSigner = GIWA_KEY ? fromPrivateKey(GIWA_KEY) : undefined;
     paymentSigner = fromPrivateKey(PAYER_KEY);
 
     // Health check
@@ -106,6 +118,94 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
       expect(result.timing).toBeDefined();
       expect(result.verification).toBeDefined();
     }, 120_000);
+
+    it.skipIf(!GIWA_KEY)('giwa_attestation: full E2E proof generation, no action', async () => {
+      const result = await generateProof(
+        config,
+        { attestation: giwaSigner!, payment: paymentSigner },
+        { circuit: 'giwa_attestation', scope: 'e2e-test:npm-sdk-giwa' },
+      );
+
+      expect(result.proof).toBeTruthy();
+      expect(result.proof.startsWith('0x')).toBe(true);
+      expect(result.publicInputs).toBeTruthy();
+      /*
+       * Six 32-byte public inputs -- signal_hash, domain_separator,
+       * action_hash, signer_list_merkle_root, scope, nullifier -- as ONE
+       * 0x-prefixed hex string of 192 field elements, each padded to 32 bytes.
+       * The count is asserted through the string's length rather than an array
+       * length, because the server returns a string and `'0x…'.length` would
+       * otherwise have been compared against 192 and passed for no reason.
+       */
+      expect(result.publicInputs.startsWith('0x')).toBe(true);
+      expect((result.publicInputs.length - 2) / 2).toBe(192 * 32);
+      if (result.paymentTxHash) expect(result.paymentTxHash).toMatch(/^0x/);
+    }, 180_000);
+
+    it.skipIf(!GIWA_KEY)('giwa_attestation: full E2E proof generation, with an action', async () => {
+      const result = await generateProof(
+        config,
+        { attestation: giwaSigner!, payment: paymentSigner },
+        {
+          circuit: 'giwa_attestation',
+          scope: 'e2e-test:npm-sdk-giwa-action',
+          action: {
+            domain: {
+              name: 'GIWA E2E',
+              version: '1',
+              // The chain the GIWA verifier is on. A wallet refuses typed data
+              // whose domain names a chain it is not on.
+              chainId: 91342,
+              verifyingContract: '0x6646d970499BBeD728636823A5A7e551E811b414',
+            },
+            types: {
+              Deposit: [
+                { name: 'amount', type: 'uint256' },
+                { name: 'nonce', type: 'uint256' },
+              ],
+            },
+            primaryType: 'Deposit',
+            message: { amount: '1000000', nonce: '1' },
+          },
+        },
+      );
+
+      expect(result.proof).toBeTruthy();
+      expect((result.publicInputs.length - 2) / 2).toBe(192 * 32);
+    }, 180_000);
+
+    it.skipIf(!GIWA_KEY)('giwa_attestation: the same wallet and scope give the same nullifier in both modes', async () => {
+      // The property the circuit change exists for. If the nullifier still
+      // came from signal_hash these two would differ, because signal_hash is
+      // zero in action mode -- one wallet, two identities, one scope.
+      const scope = 'e2e-test:npm-sdk-giwa-nullifier';
+      const plain = await generateProof(
+        config,
+        { attestation: giwaSigner!, payment: paymentSigner },
+        { circuit: 'giwa_attestation', scope },
+      );
+      const bound = await generateProof(
+        config,
+        { attestation: giwaSigner!, payment: paymentSigner },
+        {
+          circuit: 'giwa_attestation',
+          scope,
+          action: {
+            domain: { name: 'GIWA E2E', version: '1', chainId: 91342, verifyingContract: '0x6646d970499BBeD728636823A5A7e551E811b414' },
+            types: { Deposit: [{ name: 'amount', type: 'uint256' }] },
+            primaryType: 'Deposit',
+            message: { amount: '1' },
+          },
+        },
+      );
+      // ProofResult carries no nullifier field, so it is read from the public
+      // inputs with the SDK's own per-circuit layout -- the same reader a
+      // consumer would use.
+      expect(extractNullifierFromPublicInputs(bound.publicInputs, 'giwa_attestation')).toBe(
+        extractNullifierFromPublicInputs(plain.publicInputs, 'giwa_attestation'),
+      );
+      expect(extractNullifierFromPublicInputs(plain.publicInputs, 'giwa_attestation')).toMatch(/^0x[0-9a-f]{64}$/i);
+    }, 300_000);
 
     it('coinbase_country: full E2E proof generation', async () => {
       const result = await generateProof(

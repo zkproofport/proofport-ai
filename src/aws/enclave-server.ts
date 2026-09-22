@@ -71,6 +71,11 @@ const CIRCUITS: Record<CircuitId, { dir: string; bytecode: string; vk: string }>
     bytecode: `${CIRCUIT_IDS.ARC_ELIGIBILITY}.json`,
     vk: 'vk/vk',
   },
+  [CIRCUIT_IDS.GIWA_ATTESTATION]: {
+    dir: 'giwa-attestation',
+    bytecode: `${CIRCUIT_IDS.GIWA_ATTESTATION}.json`,
+    vk: 'vk/vk',
+  },
   [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: {
     dir: 'oidc-domain-attestation',
     bytecode: `${CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION}.json`,

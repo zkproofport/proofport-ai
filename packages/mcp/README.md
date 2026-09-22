@@ -38,17 +38,34 @@ Proof generation is paid when the endpoint's live x402 challenge requires paymen
 ## Prerequisites
 
 - Coinbase circuits, including experimental `arc_eligibility`, require a valid Coinbase KYC EAS attestation on Base and its local credential signer (`ATTESTATION_KEY`).
+- Experimental `giwa_attestation` requires an attestation from GIWA's attester on **GIWA Sepolia**, not from Coinbase. `ATTESTATION_KEY` must be the wallet attested there; one wallet is rarely attested on both chains.
 - OIDC proofs require an `id_token`; the CLI offers `--login-google`, `--login-google-workspace`, and `--login-microsoft-365` device login. Complete login locally.
 - A paid endpoint requires an explicitly selected compatible payment wallet and the user's approval of the payment terms.
 - Circle Agent Wallet payments require Circle CLI, its existing login, and the chosen wallet. Preserve that login and wallet; proof generation must not create, import, replace or switch them.
 
-## Arc Testnet — EXPERIMENTAL
+## Action-bound circuits — EXPERIMENTAL, testnet only
 
-`arc_eligibility` proves Coinbase KYC **and exact-action authorization** in one proof. The credential holder signs the exact EIP-712 action authorizing an operational wallet. It is experimental on **Arc Testnet, chain 5042002**, with no mainnet support implied.
+`arc_eligibility` and `giwa_attestation` each prove an attestation **and, when
+you supply one, exact-action authorization** in the same proof: the credential
+holder signs the exact EIP-712 action, so the person reads named fields instead
+of an opaque hash and the verifying contract recomputes what they approved.
+
+**The action is optional on both.** Send none and the wallet signs the
+request's signal hash, exactly as `coinbase_kyc` does. The circuits branch on
+this and refuse a request carrying both. Until 2026-09-22 `arc_eligibility`
+required one and `giwa_attestation` could not take one at all.
+
+They differ in what attests the wallet and where the verifier lives:
+
+| Circuit | Attested by | Chain | Verifier |
+|---|---|---|---|
+| `arc_eligibility` | Coinbase KYC on Base | Arc Testnet, 5042002 | `0x2aEB66292f631ceb6225ffA2439B1f2b4b15e44a` |
+| `giwa_attestation` | GIWA's attester on GIWA Sepolia | GIWA Sepolia, 91342 | `0x5Da234546874304F8c51BBEed00fC632938211c1` |
+
+No mainnet support is implied for either.
 
 | Contract | Arc Testnet address |
 |---|---|
-| Eligibility verifier | `0xCbC8E63fF92659E8B44cFF117D33005Bb669a018` |
 | Ledger House EligibilityGate | `0xD0F3eE648386B59B484157332E736388Fcc41F47` |
 
 The layout and deployments may change. Discover the dApp's policy, prover endpoint and live payment offer before preparing an action. ERC-8004 identifies the prover; it grants no wallet spending permission.
@@ -210,9 +227,9 @@ The CLI loads `--action` from a JSON file and calls the local MCP server interna
 
 | Parameter | Type | Requirement |
 |---|---|---|
-| `circuit` | string | `coinbase_kyc`, `coinbase_country`, `oidc_domain`, or experimental `arc_eligibility` |
+| `circuit` | string | `coinbase_kyc`, `coinbase_country`, `oidc_domain`, or experimental `arc_eligibility` / `giwa_attestation` |
 | `scope` | string | Optional; default `proofport` |
-| `action` | EIP-712 object | Required for `arc_eligibility`, rejected for other circuits |
+| `action` | EIP-712 object | Optional for `arc_eligibility` and `giwa_attestation`; rejected for circuits that cannot prove one, rather than dropped |
 | `pay_with` | `key` / `cdp` / `circle` / `arc` | Select the payment wallet explicitly; use `arc` for Circle Agent Wallet |
 | `pay_on` | string | Select an actual offered route; `arc-testnet-nano` is the Arc Gateway path |
 | `max_payment` | string | Maximum decimal USDC proof fee |

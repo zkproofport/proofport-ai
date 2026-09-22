@@ -78,25 +78,29 @@ export async function generateProof(
   let domainSeparator: string | undefined;
   let actionHash: string | undefined;
 
-  // Reject circuit/action mismatches before either EAS or OIDC processing.
-  if (circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY && !action) {
+  /*
+   * Which circuits carry an action, and what happens when one is given.
+   *
+   * Both of these branch in-circuit: with an action the wallet signs the typed
+   * data, without one it signs the request's signal hash. Arc used to require
+   * one -- its circuit had no second path -- and that requirement lived here as
+   * a circuit name typed twice. Now the only refusal is an action sent where
+   * nothing can prove it, which must be an error rather than a silent drop: a
+   * dropped action leaves the caller believing the proof authorized something.
+   */
+  const canBindAction =
+    circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY ||
+    circuitId === CIRCUIT_IDS.GIWA_ATTESTATION;
+
+  if (action && !canBindAction) {
     throw new Error(
-      `${CIRCUIT_IDS.ARC_ELIGIBILITY} proves that a wallet authorised ONE EIP-712 action, and no action was given. ` +
-        `Its domain separator and action hash are public inputs, so there is nothing to prove without one. ` +
-        `Pass \`action\`, or ask for ${CIRCUIT_IDS.COINBASE_ATTESTATION}.`,
-    );
-  }
-  if (action && circuitId !== CIRCUIT_IDS.ARC_ELIGIBILITY) {
-    throw new Error(
-      `An action was given but '${circuitId}' was requested, and only ${CIRCUIT_IDS.ARC_ELIGIBILITY} carries one. ` +
+      `An action was given but '${circuitId}' was requested, and it has no inputs for one. ` +
         `Signing typed data for '${circuitId}' yields a signature that circuit cannot verify. ` +
-        `Ask for ${CIRCUIT_IDS.ARC_ELIGIBILITY}, or drop the action.`,
+        `Ask for ${CIRCUIT_IDS.ARC_ELIGIBILITY} or ${CIRCUIT_IDS.GIWA_ATTESTATION}, or drop the action.`,
     );
   }
 
-  const actionHashes = circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY
-    ? hashTypedAction(action!)
-    : undefined;
+  const actionHashes = action ? hashTypedAction(action) : undefined;
 
   if (!isOidc) {
     // Step 1: Sign.

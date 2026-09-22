@@ -21,6 +21,7 @@ import {
   computeSignalHash,
   computeScope,
   computeNullifier,
+  computeWalletNullifier,
   splitSignatureToBytes,
   hexToBytes,
   padBytes,
@@ -183,12 +184,23 @@ async function main() {
     console.log(`  wrote ${out}`);
   }
 
-  // ── arc_eligibility: the wallet signs an EIP-712 action instead ───────────
+  // ── arc_eligibility: two fixtures, because the circuit has two modes ─────
+  //
+  // With an action the wallet signs EIP-712 typed data and `signal_hash` goes
+  // out as zeros; without one it personal_signs `signal_hash` and the EIP-712
+  // pair goes out as zeros. The circuit refuses a fixture that fills both, so
+  // the old single fixture -- a real signal hash AND an action -- no longer
+  // executes.
+  //
+  // The nullifier comes from the wallet and a constant compiled into the
+  // circuit, not from `signal_hash`: that value is zero in action mode, so
+  // deriving from it would give one wallet two identities in one scope.
   {
     const arcId = 'arc_eligibility';
     const signal = computeSignalHash(wallet.address, SCOPE, arcId);
     const scopeBytes = computeScope(SCOPE);
-    const nullifier = computeNullifier(wallet.address, signal, scopeBytes);
+    const nullifier = computeWalletNullifier(wallet.address, arcId, scopeBytes);
+    const EMPTY_32 = new Uint8Array(32);
 
     const domain = {
       name: 'ArcVault',
@@ -206,9 +218,9 @@ async function main() {
     const message = { amount: 10_000_000n, nonce: 1n, expiry: 1_789_000_000n };
     const signature = await wallet.signTypedData(domain, types, message);
 
-    const body = [
+    const withAction = [
       header(arcId),
-      list('signal_hash', Array.from(signal)),
+      list('signal_hash', Array.from(EMPTY_32)),
       list('domain_separator', Array.from(ethers.getBytes(ethers.TypedDataEncoder.hashDomain(domain)))),
       list('action_hash', Array.from(ethers.getBytes(ethers.TypedDataEncoder.hashStruct('Deposit', types, message)))),
       ...shared,
@@ -219,8 +231,28 @@ async function main() {
       '',
     ].join('\n');
     const out = path.join(CIRCUITS_DIR, 'arc-eligibility', 'Prover.toml');
-    fs.writeFileSync(out, body);
+    fs.writeFileSync(out, withAction);
     console.log(`  wrote ${out}`);
+
+    // The same wallet and scope with no action: the EIP-712 pair is empty and
+    // the wallet personal_signs the challenge. The nullifier is byte for byte
+    // the one above, which is the property worth checking.
+    const signalSignature = await wallet.signMessage(signal);
+    const noAction = [
+      header(arcId),
+      list('signal_hash', Array.from(signal)),
+      list('domain_separator', Array.from(EMPTY_32)),
+      list('action_hash', Array.from(EMPTY_32)),
+      ...shared,
+      list('nullifier', Array.from(nullifier)),
+      '',
+      '# ============ Private Inputs ============',
+      ...privateTail(signalSignature),
+      '',
+    ].join('\n');
+    const outNoAction = path.join(CIRCUITS_DIR, 'arc-eligibility', 'Prover.no-action.toml');
+    fs.writeFileSync(outNoAction, noAction);
+    console.log(`  wrote ${outNoAction}`);
   }
 }
 

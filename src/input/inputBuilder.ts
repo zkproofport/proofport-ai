@@ -1,7 +1,8 @@
 import { ethers } from 'ethers';
 import { CIRCUITS, type CircuitId } from '../config/circuits.js';
 import { CIRCUIT_IDS } from '../config/circuitIds.js';
-import { AUTHORIZED_SIGNERS } from '../config/contracts.js';
+import { AUTHORIZED_SIGNERS, ATTESTATION_SOURCES } from '../config/contracts.js';
+import { findGiwaAttestation } from './giwaAttestation.js';
 import { SimpleMerkleTree } from './merkleTree.js';
 import {
   fetchAttestationData,
@@ -161,8 +162,11 @@ export interface MerkleData {
 /**
  * Build a Merkle tree from authorized signers and get proof for the given signer index.
  */
-export function buildSignerMerkleTree(signerIndex: number): MerkleData {
-  const tree = new SimpleMerkleTree(AUTHORIZED_SIGNERS);
+export function buildSignerMerkleTree(
+  signerIndex: number,
+  signers: readonly string[] = AUTHORIZED_SIGNERS,
+): MerkleData {
+  const tree = new SimpleMerkleTree([...signers]);
   const root = tree.getRoot();
   const { proof, leafIndex, depth } = tree.getProof(signerIndex);
 
@@ -172,8 +176,11 @@ export function buildSignerMerkleTree(signerIndex: number): MerkleData {
 /**
  * Find the index of a signer address in the authorized signers list.
  */
-export function findSignerIndex(signerAddress: string): number {
-  const index = AUTHORIZED_SIGNERS.findIndex(
+export function findSignerIndex(
+  signerAddress: string,
+  signers: readonly string[] = AUTHORIZED_SIGNERS,
+): number {
+  const index = signers.findIndex(
     addr => addr.toLowerCase() === signerAddress.toLowerCase(),
   );
   if (index === -1) {
@@ -197,6 +204,66 @@ export function computeScope(scopeString: string): Uint8Array {
 /**
  * Compute nullifier = keccak256(keccak256(address + signalHash) + scope)
  */
+/**
+ * The nullifier for a circuit whose secret material is the WALLET and a
+ * constant compiled into that circuit -- not `signal_hash`.
+ *
+ * `arc_eligibility` and `giwa_attestation` derive it this way. They had to:
+ * both branch on whether an action was supplied, and `signal_hash` is zero in
+ * action mode, so a nullifier taken from it would differ between the two modes
+ * for one wallet in one scope. It was already wrong before the branch --
+ * nothing in those circuits constrains `signal_hash`, and in action mode
+ * nobody signs it, so a prover could mint identities by varying bytes.
+ *
+ * MUST match `verify_wallet_nullifier` in coinbase-libs/src/nullifier.nr. If
+ * the two disagree the proof fails with "Nullifier mismatch" and nothing
+ * points here.
+ */
+export function computeWalletNullifier(
+  userAddress: string,
+  circuitId: string,
+  scopeBytes: Uint8Array,
+): Uint8Array {
+  const circuitTag = ethers.getBytes(
+    ethers.keccak256(ethers.toUtf8Bytes(circuitId)),
+  );
+  const userSecret = ethers.getBytes(
+    ethers.keccak256(ethers.concat([ethers.getBytes(userAddress), circuitTag])),
+  );
+  return ethers.getBytes(
+    ethers.keccak256(ethers.concat([userSecret, scopeBytes])),
+  );
+}
+
+/**
+ * Which nullifier formula a circuit uses. A table, because the answer differs
+ * per circuit and the wrong one produces a proof that simply fails.
+ */
+const NULLIFIER_FROM_WALLET_AND_TAG: Readonly<Record<string, boolean>> = Object.freeze({
+  coinbase_attestation: false,
+  coinbase_country_attestation: false,
+  arc_eligibility: true,
+  giwa_attestation: true,
+});
+
+/** The nullifier this circuit expects, by its own rule. */
+export function nullifierForCircuit(
+  circuitId: string,
+  userAddress: string,
+  signalHash: Uint8Array,
+  scopeBytes: Uint8Array,
+): Uint8Array {
+  const fromWallet = NULLIFIER_FROM_WALLET_AND_TAG[circuitId];
+  if (fromWallet === undefined) {
+    throw new Error(
+      `No nullifier rule for circuit '${circuitId}'. Add it to NULLIFIER_FROM_WALLET_AND_TAG.`
+    );
+  }
+  return fromWallet
+    ? computeWalletNullifier(userAddress, circuitId, scopeBytes)
+    : computeNullifier(userAddress, signalHash, scopeBytes);
+}
+
 export function computeNullifier(
   userAddress: string,
   signalHash: Uint8Array,
@@ -343,14 +410,30 @@ export function assembleKycInputs(params: {
  * positionally, so a field in the wrong place makes a proof that fails to
  * verify with nothing naming the cause.
  */
+const EMPTY_32 = new Array(32).fill(0);
+
 export function assembleActionInputs(params: CircuitParams): string[] {
-  if (!params.domainSeparator || !params.actionHash) {
-    throw new Error('arc_eligibility requires domainSeparator and actionHash');
+  /*
+   * An action is OPTIONAL for both circuits that use this vector.
+   *
+   * It used to be required, because `arc_eligibility` had no second path: it
+   * always verified an EIP-712 signature, so a request without an action built
+   * a vector 64 bytes short and the prover died naming none of it. Both
+   * circuits branch now -- with an action the wallet signs the typed data and
+   * `signal_hash` must be empty; without one it personal_signs `signal_hash`
+   * and the pair must be empty. The circuit refuses a vector that fills both.
+   */
+  const bound = Boolean(params.domainSeparator) && Boolean(params.actionHash);
+  if (Boolean(params.domainSeparator) !== Boolean(params.actionHash)) {
+    throw new Error(
+      'Half an action: send both domainSeparator and actionHash, or neither. ' +
+      `Got domainSeparator=${Boolean(params.domainSeparator)}, actionHash=${Boolean(params.actionHash)}.`
+    );
   }
   const inputs: string[] = [];
-  inputs.push(...uint8ArrayToDecimalStrings(params.signalHash));
-  inputs.push(...bytesToDecimalStrings(hexToBytes(params.domainSeparator)));
-  inputs.push(...bytesToDecimalStrings(hexToBytes(params.actionHash)));
+  inputs.push(...(bound ? EMPTY_32.map(String) : uint8ArrayToDecimalStrings(params.signalHash)));
+  inputs.push(...(bound ? bytesToDecimalStrings(hexToBytes(params.domainSeparator!)) : EMPTY_32.map(String)));
+  inputs.push(...(bound ? bytesToDecimalStrings(hexToBytes(params.actionHash!)) : EMPTY_32.map(String)));
   inputs.push(...bytesToDecimalStrings(hexToBytes(params.merkleRoot)));
   inputs.push(...uint8ArrayToDecimalStrings(params.scopeBytes));
   inputs.push(...uint8ArrayToDecimalStrings(params.nullifierBytes));
@@ -532,36 +615,73 @@ export async function computeCircuitParams(
   // signal_hash there yields a public key that is not the user's -- and the
   // circuit then fails on "User pubkey does not match address", pointing at
   // the address rather than at the message.
-  const signedDigest =
-    circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY
-      ? eip712Digest(request.domainSeparator, request.actionHash)
-      : signalHash;
+  /*
+   * What was signed follows the ACTION, not the circuit id. Arc and GIWA both
+   * accept either; asking the circuit gave the wrong answer the moment the
+   * action became optional, and recovering against the wrong digest yields a
+   * well-formed key for a wallet nobody controls -- which the circuit reports
+   * as "User pubkey does not match address", pointing at the address.
+   */
+  const hasAction = Boolean(request.domainSeparator) && Boolean(request.actionHash);
+  const signedDigest = hasAction
+    ? eip712Digest(request.domainSeparator, request.actionHash)
+    : signalHash;
   const userPubkey = recoverUserPubkeyFromDigest(signedDigest, signature, circuitId);
   const { x: userPubkeyX, y: userPubkeyY } = extractPubkeyCoordinates(userPubkey);
 
-  // Step 3: Fetch attestation transaction from Base chain
-  const attestationData = await fetchAttestationData(
-    easGraphqlEndpoint,
-    rpcUrls,
-    circuitId,
-    address,
-  );
+  /*
+   * Step 3: the attestation transaction, from whichever chain attests THIS
+   * circuit. Coinbase's are indexed by EAS on Base; GIWA's come from our own
+   * attester on GIWA Sepolia, which nothing indexes. Asking Base for a GIWA
+   * wallet does not fail -- it answers "no attestation", which reads as an
+   * unattested user.
+   */
+  const source = ATTESTATION_SOURCES[circuitId];
+  if (!source) {
+    throw new Error(
+      `${circuitId} has no on-chain attestation source, so this pipeline cannot build its inputs.`
+    );
+  }
 
-  // Step 4: Recover Coinbase attester public key
-  const attesterPubkey = recoverAttesterPubkey(attestationData.rawTransaction);
+  let rawTransaction: string;
+  if (source.kind === 'giwa-sepolia') {
+    const explorerUrl = process.env.GIWA_EXPLORER_URL;
+    const giwaRpcUrl = process.env.GIWA_RPC_URL;
+    if (!explorerUrl || !giwaRpcUrl) {
+      throw new Error(
+        'GIWA_RPC_URL and GIWA_EXPLORER_URL are required to prove giwa_attestation'
+      );
+    }
+    const found = await findGiwaAttestation(explorerUrl, giwaRpcUrl, address);
+    if (!found) {
+      throw new Error(`No GIWA attestation found for ${address}`);
+    }
+    rawTransaction = found.rawTransaction;
+  } else {
+    const attestationData = await fetchAttestationData(
+      easGraphqlEndpoint,
+      rpcUrls,
+      circuitId,
+      address,
+    );
+    rawTransaction = attestationData.rawTransaction;
+  }
+
+  // Step 4: Recover the attester's public key from that transaction
+  const attesterPubkey = recoverAttesterPubkey(rawTransaction);
   const attesterAddress = getSignerAddress(attesterPubkey);
   const { x: attesterPubkeyX, y: attesterPubkeyY } = extractPubkeyCoordinates(attesterPubkey);
 
-  // Step 5: Build Merkle tree
-  const signerIndex = findSignerIndex(attesterAddress);
-  const merkleData = buildSignerMerkleTree(signerIndex);
+  // Step 5: Build the Merkle tree over THIS circuit's accepted signers
+  const signerIndex = findSignerIndex(attesterAddress, source.signers);
+  const merkleData = buildSignerMerkleTree(signerIndex, source.signers);
 
   // Step 6: Compute scope and nullifier
   const scopeBytes = computeScope(scope);
-  const nullifierBytes = computeNullifier(address, signalHash, scopeBytes);
+  const nullifierBytes = nullifierForCircuit(circuitId, address, signalHash, scopeBytes);
 
   // Step 7: Convert raw TX to byte array
-  const rawTxHex = attestationData.rawTransaction;
+  const rawTxHex = rawTransaction;
   const rawTxBytes = hexToBytes(rawTxHex);
   const txLength = rawTxBytes.length;
 
@@ -629,12 +749,17 @@ export async function buildCircuitInputs(
         `coinbase_country_attestation input vector has ${inputs.length} entries, expected ${COINBASE_COUNTRY_ATTESTATION_INPUT_LENGTH}`
       );
     }
-  } else if (circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY) {
+  } else if (
+    circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY ||
+    circuitId === CIRCUIT_IDS.GIWA_ATTESTATION
+  ) {
+    // One vector for both: the two circuits take the same public inputs in the
+    // same order, and both make the action optional.
     inputs = assembleActionInputs(params);
 
     if (inputs.length !== ARC_ELIGIBILITY_INPUT_LENGTH) {
       throw new Error(
-        `arc_eligibility input vector has ${inputs.length} entries, expected ${ARC_ELIGIBILITY_INPUT_LENGTH}`
+        `${circuitId} input vector has ${inputs.length} entries, expected ${ARC_ELIGIBILITY_INPUT_LENGTH}`
       );
     }
   } else {

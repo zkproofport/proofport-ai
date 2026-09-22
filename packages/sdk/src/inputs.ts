@@ -218,16 +218,27 @@ export async function prepareInputs(config: ClientConfig, params: {
   const signalHash = computeSignalHash(userAddress, scope, circuitId);
 
   // Step 2: Recover the user's public key from the digest they actually signed.
-  const isAction = circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY;
-  if (isAction && !(params.domainSeparator && params.actionHash)) {
+  /*
+   * The circuits that can carry an action, and both treat it as optional
+   * since their circuits gained the branch on 2026-09-22. Naming one here is
+   * what made a GIWA request with an action impossible to express.
+   */
+  const canBindAction =
+    circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY ||
+    circuitId === CIRCUIT_IDS.GIWA_ATTESTATION;
+  const isAction = Boolean(params.domainSeparator) && Boolean(params.actionHash);
+
+  if (!canBindAction && (params.domainSeparator || params.actionHash)) {
     throw new Error(
-      `${CIRCUIT_IDS.ARC_ELIGIBILITY} signs an EIP-712 action, so domainSeparator and actionHash are required here. ` +
-      'Without them the public key is recovered from signal_hash and belongs to nobody.',
+      `An EIP-712 action was given but '${circuitId}' has no inputs for one. ` +
+      `Only ${CIRCUIT_IDS.ARC_ELIGIBILITY} and ${CIRCUIT_IDS.GIWA_ATTESTATION} carry one.`,
     );
   }
-  if (!isAction && (params.domainSeparator || params.actionHash)) {
+  if (Boolean(params.domainSeparator) !== Boolean(params.actionHash)) {
     throw new Error(
-      `An EIP-712 action was given but '${circuitId}' does not carry one. Only ${CIRCUIT_IDS.ARC_ELIGIBILITY} does.`,
+      'Half an action: pass both domainSeparator and actionHash, or neither. ' +
+      'The circuit refuses a request that fills one side, and a public key ' +
+      'recovered against the wrong digest belongs to nobody.',
     );
   }
   const userPubkey = isAction

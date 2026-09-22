@@ -63,5 +63,16 @@ export const CIRCUITS: Record<CircuitId, {
     requiredInputs: ['address', 'signature', 'scope', 'domain_separator', 'action_hash'],
     easSchemaId: '0xf8b05c79f090979bf4a80270aba232dff11a10d9ca55c4f88de95317970f0de9',
     functionSelector: '0x56feed5e',
+  },  [CIRCUIT_IDS.GIWA_ATTESTATION]: {
+    id: CIRCUIT_IDS.GIWA_ATTESTATION,
+    displayName: 'GIWA Attestation',
+    description:
+      'Prove a GIWA account attestation, optionally binding one EIP-712 ' +
+      'action to the same wallet. The attestation comes from our attester on ' +
+      'GIWA Sepolia rather than from Coinbase, and the verifier lives on that ' +
+      'chain too.',
+    requiredInputs: ['address', 'signature', 'scope'],
+    functionSelector: '0x56feed5e',
   },
+
 };

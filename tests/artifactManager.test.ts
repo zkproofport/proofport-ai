@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { PROVABLE_CIRCUIT_IDS } from '../src/config/circuitIds.js';
+import { CIRCUIT_DIRS, PROVABLE_CIRCUIT_IDS } from '../src/config/circuitIds.js';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -137,31 +137,24 @@ describe('artifactManager', () => {
     });
 
     it('skips re-download if artifacts exist and hashes match', async () => {
-      // Pre-create all artifacts (JSON + VK for all 4 circuits)
-      const circuit1Dir = path.join(circuitsDir, 'coinbase-attestation', 'target');
-      const circuit2Dir = path.join(circuitsDir, 'coinbase-country-attestation', 'target');
-      const circuit3Dir = path.join(circuitsDir, 'oidc-domain-attestation', 'target');
-      const circuit4Dir = path.join(circuitsDir, 'arc-eligibility', 'target');
-
-      await fs.mkdir(path.join(circuit1Dir, 'vk'), { recursive: true });
-      await fs.mkdir(path.join(circuit2Dir, 'vk'), { recursive: true });
-      await fs.mkdir(path.join(circuit3Dir, 'vk'), { recursive: true });
-      await fs.mkdir(path.join(circuit4Dir, 'vk'), { recursive: true });
-
+      /*
+       * Every provable circuit's artifacts, from CIRCUIT_DIRS.
+       *
+       * This listed four directories and four file names by hand, which is
+       * why adding a fifth circuit broke it: the loop below cannot miss one,
+       * and the failure it would have hidden is "the server re-downloads on
+       * every boot".
+       */
       const jsonContent = '{}';
       const vkContent = '';
 
-      await fs.writeFile(path.join(circuit1Dir, 'coinbase_attestation.json'), jsonContent);
-      await fs.writeFile(path.join(circuit1Dir, 'vk', 'vk'), vkContent);
-      await fs.writeFile(path.join(circuit2Dir, 'coinbase_country_attestation.json'), jsonContent);
-      await fs.writeFile(path.join(circuit2Dir, 'vk', 'vk'), vkContent);
-      await fs.writeFile(path.join(circuit3Dir, 'oidc_domain_attestation.json'), jsonContent);
-      await fs.writeFile(path.join(circuit3Dir, 'vk', 'vk'), vkContent);
-      await fs.writeFile(path.join(circuit4Dir, 'arc_eligibility.json'), jsonContent);
-      await fs.writeFile(path.join(circuit4Dir, 'vk', 'vk'), vkContent);
+      for (const { dir, packageName } of Object.values(CIRCUIT_DIRS)) {
+        const target = path.join(circuitsDir, dir, 'target');
+        await fs.mkdir(path.join(target, 'vk'), { recursive: true });
+        await fs.writeFile(path.join(target, `${packageName}.json`), jsonContent);
+        await fs.writeFile(path.join(target, 'vk', 'vk'), vkContent);
+      }
 
-      // Write matching hash metadata
-      const crypto = await import('node:crypto');
       const jsonHash = crypto.createHash('sha256').update(jsonContent).digest('hex');
       const vkHash = crypto.createHash('sha256').update(vkContent).digest('hex');
       // Derived from the id list, not typed out. A hardcoded list here missed

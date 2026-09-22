@@ -103,6 +103,13 @@ export function loadConfig() {
     // lists already carry a number for it that Circle has not published. A
     // guessed chain id would sign for the wrong network, so it is required
     // input when Arc is switched on.
+    // GIWA Sepolia, where giwa_attestation's attester and verifier live. Opt-in
+    // like Arc: with neither set, every other circuit behaves as before and a
+    // GIWA request is refused with a message naming these two rather than
+    // reaching Coinbase's EAS and reporting the wallet as unattested.
+    giwaRpcUrl: process.env.GIWA_RPC_URL || '',
+    giwaExplorerUrl: process.env.GIWA_EXPLORER_URL || '',
+
     arcRpcUrl: process.env.ARC_RPC_URL || '',
     arcChainId: process.env.ARC_CHAIN_ID ? Number(process.env.ARC_CHAIN_ID) : 0,
     arcIdentityAddress: process.env.ARC_IDENTITY_ADDRESS || '',
