@@ -106,7 +106,6 @@ function createApp(config: Config) {
     walletConnectProjectId: config.walletConnectProjectId, trustProxyHops: config.approvalTrustProxyHops }));
   app.use('/approval', approvalSecurityHeaders);
   app.get('/approve/:id', approvalSecurityHeaders, (_req, res) => {
-    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https: wss:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'");
     res.sendFile(path.join(__dirname, '..', 'public', 'approval', 'index.html'));
   });
   app.use(express.static(path.join(__dirname, '..', 'public')));
