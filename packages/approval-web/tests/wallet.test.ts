@@ -3,10 +3,10 @@ import { ApprovalWallet } from '../src/wallet';
 import { freezeAction } from '../src/model';
 const address = `0x${'a'.repeat(40)}`;
 const other = `0x${'b'.repeat(40)}`;
-const frozen = () => freezeAction({ domain: { name: 'Test', version: '1', chainId: 8453, verifyingContract: address }, types: { Action: [{ name: 'count', type: 'uint256' }] }, primaryType: 'Action', message: { count: '0' } });
-function setup() {
+const frozen = (chainId = 8453) => freezeAction({ domain: { name: 'Test', version: '1', chainId, verifyingContract: address }, types: { Action: [{ name: 'count', type: 'uint256' }] }, primaryType: 'Action', message: { count: '0' } });
+function setup(chainId = 8453) {
     let accounts = [address];
-    let chain = '0x2105';
+    let chain: unknown = '0x2105';
     const listeners = new Map<string, (...args: unknown[]) => void>();
     const provider = {
         request: vi.fn(async ({ method }: {
@@ -25,10 +25,43 @@ function setup() {
         removeListener: (event: string) => { listeners.delete(event); },
     };
     const submit = vi.fn(async () => { });
-    const wallet = new ApprovalWallet(frozen(), address, () => true, submit, vi.fn());
-    return { wallet, provider, submit, listeners, setAccounts: (a: string[]) => { accounts = a; }, setChain: (c: string) => { chain = c; } };
+    const wallet = new ApprovalWallet(frozen(chainId), address, () => true, submit, vi.fn());
+    return { wallet, provider, submit, listeners, setAccounts: (a: string[]) => { accounts = a; }, setChain: (c: unknown) => { chain = c; } };
 }
 describe('simulated wallet approval safety', () => {
+    // Installed WalletConnect returns a number; injected providers commonly return hex.
+    it.each([91342, '0x164ce', '0x164CE'])('accepts GIWA chain result %s and preserves the numeric signing domain', async chain => {
+        const s = setup(91342);
+        s.setChain(chain);
+        await s.wallet.connect(s.provider);
+        expect(s.wallet.address).toBe(address);
+        await s.wallet.sign();
+        expect(s.submit).toHaveBeenCalledTimes(1);
+        const sign = s.provider.request.mock.calls.find(([request]) => request.method === 'eth_signTypedData_v4')!;
+        expect(JSON.parse(sign[0].params![1] as string).domain.chainId).toBe(91342);
+        expect(s.provider.request.mock.calls.filter(([request]) => request.method === 'eth_chainId')).toHaveLength(3);
+    });
+    it.each([91343, '0x164cf', 0, -91342, 91342.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1, '91342', '0x', '0x164cg', null, undefined, true, {}])('rejects wrong or malformed chain result %s before signing', async chain => {
+        const s = setup(91342);
+        s.setChain(chain);
+        await expect(s.wallet.connect(s.provider)).rejects.toThrow(/chain/i);
+        expect(s.wallet.address).toBeUndefined();
+        expect(s.provider.request.mock.calls.some(([request]) => request.method === 'eth_signTypedData_v4')).toBe(false);
+        expect(s.submit).not.toHaveBeenCalled();
+    });
+    it('rejects a silently changed numeric chain after the wallet signature resolves', async () => {
+        const s = setup(91342);
+        s.setChain('0x164ce');
+        await s.wallet.connect(s.provider);
+        s.provider.request.mockImplementation(async ({ method }) => {
+            if (method === 'eth_accounts') return [address];
+            if (method === 'eth_chainId') return s.provider.request.mock.calls.some(([request]) => request.method === 'eth_signTypedData_v4') ? 91343 : 91342;
+            return `0x${'1'.repeat(130)}`;
+        });
+        await expect(s.wallet.sign()).rejects.toThrow(/chain/i);
+        expect(s.provider.request.mock.calls.some(([request]) => request.method === 'eth_signTypedData_v4')).toBe(true);
+        expect(s.submit).not.toHaveBeenCalled();
+    });
     it('submits exact frozen typed data once after account and chain rechecks', async () => {
         const s = setup();
         await s.wallet.connect(s.provider);

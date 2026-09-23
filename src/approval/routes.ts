@@ -7,7 +7,8 @@ export function approvalSecurityHeaders(_req: Request, res: Response, next: Next
   res.setHeader('Cache-Control', 'no-store'); res.setHeader('Referrer-Policy', 'no-referrer');
   // WalletConnect core's trusted Verify origins host its attestation iframe.
   // Keep frame-ancestors closed: allowing outbound frames does not allow this page to be embedded.
-  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https: wss:; frame-src 'self' https://verify.walletconnect.org https://verify.walletconnect.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'");
+  // AppKit's default KHTeka fonts are served only from fonts.reown.com.
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' https://fonts.reown.com; img-src 'self' data: https:; connect-src 'self' https: wss:; frame-src 'self' https://verify.walletconnect.org https://verify.walletconnect.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'");
   res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('X-Frame-Options', 'DENY'); next();
 }
 function bearer(req: Request): string {

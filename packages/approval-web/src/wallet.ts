@@ -77,7 +77,12 @@ export class ApprovalWallet {
         if (this.expected && address.toLowerCase() !== this.expected.toLowerCase())
             throw new ApprovalError('The connected wallet does not match the expected signing wallet. Choose the requested wallet.');
         const chain = await provider.request({ method: 'eth_chainId' });
-        if (typeof chain !== 'string' || !/^0x[0-9a-f]+$/i.test(chain) || BigInt(chain) !== BigInt(this.action.domain.chainId))
+        let chainId: bigint | undefined;
+        if (typeof chain === 'number' && Number.isSafeInteger(chain) && chain > 0)
+            chainId = BigInt(chain);
+        else if (typeof chain === 'string' && /^0x[0-9a-f]+$/i.test(chain))
+            chainId = BigInt(chain);
+        if (chainId !== BigInt(this.action.domain.chainId))
             throw new ApprovalError(`Switch your wallet to chain ${this.action.domain.chainId}, then connect again.`);
         return address;
     }

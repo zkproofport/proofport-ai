@@ -40,6 +40,9 @@ explicit `walletConnectProjectId`; otherwise the page explains its absence.
 The official WalletConnect EthereumProvider and its QR modal are bundled and
 loaded only after the user chooses mobile connection. The metadata URL is the
 origin alone. No capability or request identifier is passed to WalletConnect.
+One provider is reused per page, including cancelled pairing retries; an active
+session with the requested chain and signing permission is reused without another pairing. Chain checks accept both
+hexadecimal EIP-1193 strings and WalletConnect's safe integer response.
 The selected wallet must already use the exact requested chain; the page
 displays a recoverable mismatch instead of guessing a chain or RPC URL.
 
