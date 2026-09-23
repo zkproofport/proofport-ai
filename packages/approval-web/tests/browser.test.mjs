@@ -17,7 +17,7 @@ function session(status = 'pending') {
     return { approvalId: 'demo', status, expiresAt: new Date(Date.now() + 600000).toISOString(), circuit: 'giwa_attestation', scope: 'app.example / access', expectedSigner: address,
         action: { domain: { name: 'Example application', version: '1', chainId: 91337, verifyingContract: `0x${'1'.repeat(40)}` }, primaryType: 'AccessRequest', types: { AccessRequest: [{ name: 'note', type: 'string' }, { name: 'amount', type: 'uint256' }, { name: 'enabled', type: 'bool' }, { name: 'items', type: 'Item[]' }], Item: [{ name: 'value', type: 'uint256' }] }, message: { note: '<img src=x onerror="window.xss=true"> Review these exact terms', amount: '0', enabled: false, items: [{ value: '9007199254740993123456789' }] } } };
 }
-async function fixture({ behavior = 'success', status = 'pending', presentation = false, expiresIn = 600000, viewport = { width: 1280, height: 1050 } } = {}) {
+async function fixture({ behavior = 'success', status = 'pending', presentation = false, mobileRecovery = false, expiresIn = 600000, viewport = { width: 1280, height: 1050 } } = {}) {
     const context = await browser.newContext({ viewport });
     const page = await context.newPage();
     const posts = [];
@@ -29,7 +29,7 @@ async function fixture({ behavior = 'success', status = 'pending', presentation 
     current.expiresAt = new Date(Date.now() + expiresIn).toISOString();
     if (presentation)
         current = { ...current, scope: 'community.proofport.app/topics', action: { domain: { ...current.action.domain, name: 'Proofport Community', chainId: 91342 }, primaryType: 'TopicPermission', types: { TopicPermission: [{ name: 'topic', type: 'string' }, { name: 'permissions', type: 'Permissions' }, { name: 'nonce', type: 'uint256' }], Permissions: [{ name: 'read', type: 'bool' }, { name: 'write', type: 'bool' }] }, message: { topic: 'research / protocol-updates', permissions: { read: true, write: false }, nonce: '0' } } };
-    await page.addInitScript(({ address, behavior, chainId }) => {
+    await page.addInitScript(({ address, behavior, chainId, mobileRecovery }) => {
         window.walletCalls = [];
         const listeners = {};
         let accounts = [address];
@@ -40,6 +40,8 @@ async function fixture({ behavior = 'success', status = 'pending', presentation 
                 if (method === 'eth_chainId')
                     return `0x${chainId.toString(16)}`;
                 if (method === 'eth_signTypedData_v4') {
+                    if (behavior === 'held-sign')
+                        return new Promise((_resolve, reject) => { window.releaseSignature = () => reject(Object.assign(new Error('declined'), { code: 4001 })); });
                     if (behavior === 'reject')
                         throw Object.assign(new Error('declined'), { code: 4001 });
                     if (behavior === 'account-change') {
@@ -50,16 +52,35 @@ async function fixture({ behavior = 'success', status = 'pending', presentation 
                 }
                 throw Object.assign(new Error('unsupported'), { code: 4200 });
             } };
+        if (mobileRecovery) {
+            window.mobileFixture = { connectCalls: 0, resetCalls: 0 };
+            window.mobileFixtureProvider = provider;
+            window.mobileListenerCount = () => Object.values(listeners).reduce((total, entries) => total + entries.length, 0);
+        }
         const announce = () => window.dispatchEvent(new CustomEvent('eip6963:announceProvider', { detail: { info: { uuid: 'test-wallet', name: 'Simulated EVM wallet', icon: 'data:image/svg+xml,<svg onload="alert(1)"/>', rdns: 'test.wallet' }, provider } }));
         window.addEventListener('eip6963:requestProvider', announce);
-    }, { address, behavior, chainId: current.action.domain.chainId });
+    }, { address, behavior, chainId: current.action.domain.chainId, mobileRecovery });
     await page.route('**/*', async (route) => {
         const request = route.request(), url = new URL(request.url());
         if (url.origin !== 'https://approval.test')
             return route.abort();
+        // Simulate only the mobile-wallet transport boundary; render the actual
+        // built review UI and exercise its listeners, busy state and recovery.
+        if (mobileRecovery && /^\/approval\/assets\/walletconnect-[^/]+\.js$/.test(url.pathname))
+            return route.fulfill({ contentType: 'text/javascript', body: `
+                export async function mobileWallet() {
+                    window.mobileFixture.connectCalls++;
+                    if (window.mobileFixture.connectCalls === 1) throw new Error('Simulated connection failure');
+                    return window.mobileFixtureProvider;
+                }
+                export async function resetMobileWallet() {
+                    window.mobileFixture.resetCalls++;
+                    await new Promise(resolve => { window.finishMobileReset = resolve; });
+                }
+            ` });
         if (url.pathname.startsWith('/api/v1/action-approvals/')) {
             if (url.pathname.endsWith('/config'))
-                return route.fulfill({ json: {} });
+                return route.fulfill({ json: mobileRecovery ? { walletConnectProjectId: 'offline-browser-fixture' } : {} });
             headers.push(request.headers());
             if (request.method() === 'POST') {
                 posts.push({ path: url.pathname, body: request.postDataJSON() });
@@ -174,6 +195,47 @@ test('reject works without wallet and optional mobile configuration is explicit'
     finally {
         await f.context.close();
     }
+});
+test('mobile recovery resets without automatic pairing and removes connected-wallet listeners', async () => {
+    const f = await fixture({ mobileRecovery: true, behavior: 'held-sign' });
+    try {
+        const connect = f.page.getByRole('button', { name: 'Connect mobile wallet', exact: true });
+        await connect.click();
+        await f.page.getByRole('alert').waitFor();
+        const reset = f.page.getByRole('button', { name: 'Reset mobile connection', exact: true });
+        await reset.click();
+        await f.page.waitForFunction(() => window.mobileFixture.resetCalls === 1);
+        assert.equal(await connect.isDisabled(), true);
+        assert.equal(await reset.isDisabled(), true);
+        await f.page.evaluate(() => window.finishMobileReset());
+        await f.page.waitForFunction(() => ![...document.querySelectorAll('button')].find(button => button.textContent === 'Connect mobile wallet').disabled);
+        assert.deepEqual(await f.page.evaluate(() => window.mobileFixture), { connectCalls: 1, resetCalls: 1 });
+        await connect.click();
+        const disconnect = f.page.getByRole('button', { name: 'Disconnect mobile wallet', exact: true });
+        await disconnect.waitFor();
+        assert.equal(await f.page.evaluate(() => window.mobileListenerCount()), 3);
+        const sign = f.page.getByRole('button', { name: 'Review and sign', exact: true });
+        assert.equal(await sign.isDisabled(), false);
+        await sign.click();
+        await f.page.waitForFunction(() => typeof window.releaseSignature === 'function');
+        assert.equal(await disconnect.isDisabled(), true);
+        await f.page.evaluate(() => window.releaseSignature());
+        await f.page.waitForFunction(() => ![...document.querySelectorAll('button')].find(button => button.textContent === 'Disconnect mobile wallet').disabled);
+        await disconnect.click();
+        await f.page.waitForFunction(() => window.mobileFixture.resetCalls === 2);
+        assert.equal(await f.page.getByRole('heading', { name: 'Connected wallet', exact: true }).count(), 0);
+        assert.equal(await f.page.evaluate(() => window.mobileListenerCount()), 0);
+        assert.equal(await f.page.getByRole('button', { name: 'Review and sign', exact: true }).isDisabled(), true);
+        assert.equal(await connect.isDisabled(), true);
+        await f.page.evaluate(() => window.finishMobileReset());
+        await f.page.waitForFunction(() => ![...document.querySelectorAll('button')].find(button => button.textContent === 'Connect mobile wallet').disabled);
+        assert.deepEqual(await f.page.evaluate(() => window.mobileFixture), { connectCalls: 2, resetCalls: 2 });
+        await connect.click();
+        await disconnect.waitFor();
+        assert.deepEqual(await f.page.evaluate(() => window.mobileFixture), { connectCalls: 3, resetCalls: 2 });
+        assert.equal(f.posts.length, 0);
+    }
+    finally { await f.context.close(); }
 });
 test('status polling preserves keyboard focus while the request is unchanged', async () => {
     const f = await fixture();

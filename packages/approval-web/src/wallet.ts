@@ -22,6 +22,13 @@ export function walletError(error: unknown): string {
 }
 export class ApprovalError extends Error {
 }
+export function matchesChain(chain: unknown, expected: number): boolean {
+    if (typeof chain === 'number' && Number.isSafeInteger(chain) && chain > 0)
+        return BigInt(chain) === BigInt(expected);
+    if (typeof chain === 'string' && /^0x[0-9a-f]+$/i.test(chain))
+        return BigInt(chain) === BigInt(expected);
+    return false;
+}
 export class ApprovalWallet {
     address?: string;
     busy = false;
@@ -77,13 +84,10 @@ export class ApprovalWallet {
         if (this.expected && address.toLowerCase() !== this.expected.toLowerCase())
             throw new ApprovalError('The connected wallet does not match the expected signing wallet. Choose the requested wallet.');
         const chain = await provider.request({ method: 'eth_chainId' });
-        let chainId: bigint | undefined;
-        if (typeof chain === 'number' && Number.isSafeInteger(chain) && chain > 0)
-            chainId = BigInt(chain);
-        else if (typeof chain === 'string' && /^0x[0-9a-f]+$/i.test(chain))
-            chainId = BigInt(chain);
-        if (chainId !== BigInt(this.action.domain.chainId))
-            throw new ApprovalError(`Switch your wallet to chain ${this.action.domain.chainId}, then connect again.`);
+        if (!matchesChain(chain, this.action.domain.chainId)) {
+            const reported = typeof chain === 'number' || typeof chain === 'string' ? String(chain).slice(0, 64) : 'unavailable';
+            throw new ApprovalError(`The wallet session reports chain ${reported}; this request requires chain ${this.action.domain.chainId}. Select the requested network or reset the mobile connection, then connect again.`);
+        }
         return address;
     }
     async sign(): Promise<void> {

@@ -41,10 +41,16 @@ The official WalletConnect EthereumProvider and its QR modal are bundled and
 loaded only after the user chooses mobile connection. The metadata URL is the
 origin alone. No capability or request identifier is passed to WalletConnect.
 One provider is reused per page, including cancelled pairing retries; an active
-session with the requested chain and signing permission is reused without another pairing. Chain checks accept both
-hexadecimal EIP-1193 strings and WalletConnect's safe integer response.
-The selected wallet must already use the exact requested chain; the page
-displays a recoverable mismatch instead of guessing a chain or RPC URL.
+session with the requested chain and signing permission is reused without another pairing.
+The requested, already approved chain is selected through WalletConnect's public
+API before checking the session: its restored wrapper and internal EIP-155
+default can disagree. Chain checks accept hexadecimal EIP-1193 strings and safe
+integer responses and still enforce the exact action domain before and after signing.
+An unsuccessful connection offers **Reset mobile connection**; an established
+mobile connection offers **Disconnect mobile wallet**. Both end the session without
+creating another Core. The next connection opens a new pairing. Reset is disabled
+while pairing or signing, and never deletes unrelated browser storage. Unsupported
+chains remain explicit errors; no chain or RPC URL is guessed.
 
 Review/sign rechecks account and chain both before and after the wallet prompt.
 Account/network/disconnect events invalidate the selection. A failed approval

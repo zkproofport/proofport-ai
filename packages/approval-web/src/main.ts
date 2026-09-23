@@ -73,6 +73,7 @@ interface WalletChoice {
 let session: ApprovalSession | undefined, api: ApprovalApi, wallet: ApprovalWallet | undefined;
 let error = '', operation = false, configReady = false, projectId: string | undefined, connectedName = '';
 let frozenIdentity = '', polling = false, broken = false;
+let mobileAttempted = false;
 const wallets: WalletChoice[] = [];
 const statuses = { pending: 'Awaiting approval', approved: 'Approved', rejected: 'Rejected', consumed: 'Used by requester', expired: 'Expired' };
 const circuitNames: Record<string, string> = { giwa_attestation: 'GIWA KYC', arc_eligibility: 'Coinbase KYC (Arc)' };
@@ -90,6 +91,23 @@ async function connect(choice: WalletChoice): Promise<void> {
         report(cause);
     }
     render();
+}
+async function disconnectMobile(): Promise<void> {
+    if (!pending() || operation || wallet?.busy)
+        return;
+    operation = true;
+    error = '';
+    // Stop approval listeners and clear its address before ending the session.
+    wallet?.dispose();
+    render();
+    try {
+        const { resetMobileWallet } = await import('./walletconnect');
+        await resetMobileWallet();
+        connectedName = '';
+        mobileAttempted = false;
+    }
+    catch (cause) { report(cause); }
+    finally { operation = false; render(); }
 }
 function identity(value: ApprovalSession): string { return JSON.stringify([value.approvalId, value.circuit, value.scope, value.expectedSigner, value.expiresAt, walletPayload(value.action)]); }
 function accept(value: ApprovalSession, initial = false): void {
@@ -232,6 +250,8 @@ function render(): void {
             const connected = el('div', 'connected');
             connected.append(icon('check'), el('strong', '', connectedName), el('p', 'mono', wallet.address), el('span', 'muted small', `Chain ${session.action.domain.chainId}`));
             walletCard.append(connected, button('Change wallet', 'text-button', () => { wallet?.invalidate(); error = ''; render(); }, wallet.busy));
+            if (connectedName === 'WalletConnect')
+                walletCard.append(button('Disconnect mobile wallet', 'wallet-option', () => void disconnectMobile(), operation || wallet.busy));
         }
         else {
             walletCard.append(el('p', 'card-note', `Use your credential wallet on chain ${session.action.domain.chainId}. Connecting does not sign the action.`));
@@ -239,7 +259,7 @@ function render(): void {
             if (!wallets.length)
                 walletCard.append(el('p', 'muted small', 'No browser wallets detected. Open this page in a compatible wallet browser, or connect a mobile wallet.'));
             walletCard.append(button('Connect mobile wallet', 'wallet-option', () => void (async () => { if (!projectId || operation)
-                return; operation = true; error = ''; render(); try {
+                return; operation = true; mobileAttempted = true; error = ''; wallet?.dispose(); render(); try {
                 const { mobileWallet } = await import('./walletconnect');
                 const provider = await mobileWallet(projectId, session!.action.domain.chainId);
                 operation = false;
@@ -254,6 +274,10 @@ function render(): void {
             } })(), !projectId || !configReady || operation || !!wallet?.busy));
             if (configReady && !projectId)
                 walletCard.append(el('p', 'muted small', 'Mobile wallet connection is not configured. Use an available browser wallet.'));
+            if (mobileAttempted) {
+                walletCard.append(button('Reset mobile connection', 'wallet-option', () => void disconnectMobile(), operation || !!wallet?.busy));
+                walletCard.append(el('p', 'card-note', 'A saved session may be reused without a QR code. Reset it, then connect again to pair your wallet with a new QR code.'));
+            }
         }
         root.append(walletCard);
         const actions = el('section', 'actions');
