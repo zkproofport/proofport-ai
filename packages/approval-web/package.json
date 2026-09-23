@@ -1,0 +1,21 @@
+{
+  "name": "@zkproofport-ai/approval-web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --config vitest.config.ts",
+    "test:browser": "node --test tests/browser.test.mjs"
+  },
+  "dependencies": {
+    "@walletconnect/ethereum-provider": "2.25.0"
+  },
+  "devDependencies": {
+    "vite": "8.3.0"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  }
+}

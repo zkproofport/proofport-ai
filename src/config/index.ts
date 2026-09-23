@@ -26,6 +26,13 @@ function validateTeeMode(value: string): 'disabled' | 'local' | 'nitro' {
   return value as 'disabled' | 'local' | 'nitro';
 }
 
+/** Disabled until the operator specifies the verified ingress proxy count. */
+export function parseApprovalTrustProxyHops(value: string | undefined): number | false {
+  if (value === undefined) return false;
+  if (!/^(?:[1-9]|1[0-6])$/.test(value)) throw new Error('APPROVAL_TRUST_PROXY_HOPS must be an integer from 1 to 16, or unset to disable proxy trust.');
+  return Number(value);
+}
+
 export function loadConfig() {
   const paymentMode = validatePaymentMode(getRequiredEnv('PAYMENT_MODE'));
 
@@ -44,6 +51,8 @@ export function loadConfig() {
     proverPrivateKey: getRequiredEnv('PROVER_PRIVATE_KEY'),
     paymentMode,
     a2aBaseUrl: getRequiredEnv('A2A_BASE_URL'),
+    walletConnectProjectId: process.env.WALLETCONNECT_PROJECT_ID?.trim() || undefined,
+    approvalTrustProxyHops: parseApprovalTrustProxyHops(process.env.APPROVAL_TRUST_PROXY_HOPS),
     websiteUrl: process.env.WEBSITE_URL || 'https://zkproofport.com',
     agentVersion: process.env.AGENT_VERSION || serverVersion,
 

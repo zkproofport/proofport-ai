@@ -5,7 +5,9 @@ import {afterAll,beforeAll,describe,it,expect} from 'vitest';
 import {chromium,type Browser,type Page} from 'playwright';
 import {ethers} from 'ethers';
 import {randomUUID} from 'node:crypto';
-import {writeFile} from 'node:fs/promises';
+import {mkdtemp,rm,writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {loadDemoConfig} from '../../demo/shared/config.ts';
 import {readGatewayBalance} from '../../demo/shared/walletStatus.ts';
 import {extractArcPublicMetadata} from '../../demo/audit/address-audit.ts';
@@ -13,6 +15,8 @@ import {publishedProverPackages} from '../../demo/shared/proverPackages.ts';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {assertUnusedStakeAction} from '../../demo/shared/userAction.ts';
+import {fromPrivateKey} from '@zkproofport-ai/sdk';
+import {callToolWithSimulatedApproval} from './simulatedHumanApproval.js';
 
 const enabled=process.env.ARC_DAPP_LIVE_E2E==='1';
 const reuse=process.env.ARC_DAPP_REUSE_COMPLETED==='1';
@@ -150,38 +154,40 @@ describe.skipIf(!enabled).sequential('live user-supplied action in the dApp',()=
 });
 
 describe.skipIf(!enabled)('published MCP accepts arbitrary action fields',()=>{
- it('both proof paths sign custom fields and refuse a non-KYC fixture before payment',async()=>{
+ it('both proof paths accept custom fields with simulated-human approval when supported and refuse a non-KYC fixture before payment',async()=>{
   const config=loadDemoConfig(),packages=publishedProverPackages();
   const observed=await (await fetch(base+'/demo/wallet')).json() as {wallet:string};
   const before=await readGatewayBalance(observed.wallet);
   const fixture=ethers.Wallet.createRandom();
+  const approvalDirectory=await mkdtemp(join(tmpdir(),'proofport-dapp-action-e2e-'));
   const action={domain:{name:'User custom dApp',version:'3',chainId:5042002,verifyingContract:config.gate},
    primaryType:'UserChosenAction',types:{UserChosenAction:[{name:'who',type:'address'},{name:'customText',type:'string'},
     {name:'customFlag',type:'bool'},{name:'customAmount',type:'uint256'},{name:'customTags',type:'string[]'}]},
    message:{who:observed.wallet,customText:'User chooses all type names, keys and values',customFlag:true,customAmount:'42',customTags:['one','two']}};
   const transport=new StdioClientTransport({command:process.execPath,args:[packages.mcpEntry],stderr:'pipe',env:{
    PATH:process.env.PATH??'/usr/bin:/bin',HOME:process.env.HOME??'',PROOFPORT_URL:config.discovery.allowedOrigin,
-   ATTESTATION_KEY:fixture.privateKey,ARC_AGENT_WALLET:observed.wallet,CIRCLE_ACCEPT_TERMS:'1',
+   ATTESTATION_KEY:fixture.privateKey,ARC_AGENT_WALLET:observed.wallet,CIRCLE_ACCEPT_TERMS:'1',ZKPROOFPORT_APPROVAL_DIR:approvalDirectory,
   }});
   let signed=false;
-  transport.stderr?.on('data',chunk=>{if(String(chunk).includes('Step 1: Sign Typed Action'))signed=true;});
+  transport.stderr?.on('data',chunk=>{if(/Step 1: (Sign|Approve) Typed Action/.test(String(chunk)))signed=true;});
   const client=new Client({name:'custom-action-e2e',version:'1.0.0'},{capabilities:{}});
   try{
    await client.connect(transport);
    expect(client.getServerVersion()?.name).toBe('zkproofport-mcp');
-   const response=await client.callTool({name:'generate_proof',arguments:{circuit:'arc_eligibility',scope:'custom-action-e2e',action,pay_with:'arc',pay_on:'arc-testnet-nano',max_payment:'0'}},undefined,{timeout:120000});
+   const hasApproval=(await client.listTools()).tools.some(tool=>tool.name==='get_action_approval');
+   const response=await callToolWithSimulatedApproval(client,{baseUrl:config.discovery.allowedOrigin},fromPrivateKey(fixture.privateKey),'generate_proof',{circuit:'arc_eligibility',scope:'custom-action-e2e',action,pay_with:'arc',pay_on:'arc-testnet-nano',max_payment:'0'},120000) as {isError?:boolean;content:unknown};
    expect(signed).toBe(true);expect(response.isError).toBe(true);
    const content=response.content as {type:string;text?:string}[];
    const error=JSON.parse(content.filter(c=>c.type==='text').map(c=>c.text).join('')).error as string;
-   expect(/attestation|KYC/i.test(error)).toBe(true);
-   const prepared=await client.callTool({name:'prepare_inputs',arguments:{circuit:'arc_eligibility',scope:'custom-action-e2e',action}},undefined,{timeout:120000});
+   expect(hasApproval ? /Action proof could not continue/i.test(error) : /attestation|KYC/i.test(error)).toBe(true);
+   const prepared=await callToolWithSimulatedApproval(client,{baseUrl:config.discovery.allowedOrigin},fromPrivateKey(fixture.privateKey),'prepare_inputs',{circuit:'arc_eligibility',scope:'custom-action-e2e',action},120000) as {isError?:boolean;content:unknown};
    expect(prepared.isError).toBe(true);
    const preparedContent=prepared.content as {type:string;text?:string}[];
    const preparationError=JSON.parse(preparedContent.filter(c=>c.type==='text').map(c=>c.text).join('')).error as string;
    // Old MCP accepted action but used personal_sign and omitted recovery hashes.
    // The upgraded package must reach the actual KYC lookup with correct hashes.
-   expect(preparationError).toMatch(/No attestation found/);
+   expect(preparationError).toMatch(hasApproval ? /Action proof could not continue/ : /No attestation found/);
    expect(await readGatewayBalance(observed.wallet)).toBe(before);
-  }finally{await client.close();}
+  }finally{await client.close();await rm(approvalDirectory,{recursive:true,force:true});}
  },150_000);
 });

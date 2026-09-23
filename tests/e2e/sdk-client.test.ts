@@ -9,9 +9,9 @@
 
 import { execSync } from 'child_process';
 import { describe, it, expect, beforeAll } from 'vitest';
+import * as sdk from '@zkproofport-ai/sdk';
 import {
   createConfig,
-  generateProof,
   fromPrivateKey,
   verifyProof,
   requestChallenge,
@@ -20,8 +20,15 @@ import {
   type ClientConfig,
   type ProofportSigner,
   type PaymentWallet,
+  type ProofParams,
 } from '@zkproofport-ai/sdk';
 import { planPayment, unfundedReason } from './payer.js';
+import { generateProofWithSimulatedApproval } from './simulatedHumanApproval.js';
+
+// Current-source actions exercise the approval API with a simulated human
+// fixture signature. Older isolated npm SDKs retain their historical path.
+const generateProof = (config: ClientConfig, signers: { attestation: ProofportSigner; payment?: PaymentWallet }, params: ProofParams) =>
+  generateProofWithSimulatedApproval(sdk, config, signers, params);
 
 const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:4002';
 const ATTESTATION_KEY = process.env.ATTESTATION_KEY;

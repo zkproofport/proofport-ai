@@ -71,6 +71,12 @@ jobs:
           }
           NODE
 
+      # Human-action clients require the matching approval API on their default
+      # production origin. Fail fast; retry this existing release after rollout.
+      - name: Require production server readiness
+        if: steps.pkg.outputs.skip != 'true'
+        run: node scripts/check-npm-release-readiness.mjs
+
       - name: Install dependencies
         if: steps.pkg.outputs.skip != 'true'
         run: npm ci

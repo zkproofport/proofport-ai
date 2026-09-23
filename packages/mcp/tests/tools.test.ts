@@ -1,6 +1,18 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ethers } from 'ethers';
 import { z } from 'zod';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+const approval = { approvalId: 'approval_0123456789', approvalUrl: 'https://test.example.com/approve/id#browser', requesterToken: 'private-requester-token', expiresAt: new Date(Date.now() + 600_000).toISOString() };
+class PendingApprovalError extends Error {
+  approval = approval;
+  constructor() { super('Human action approval required'); }
+}
+const mockResolveApproval = vi.fn();
+const mockApprovalStatus = vi.fn();
+let approvalDirectory: string;
 
 // ─── Mock @zkproofport-ai/sdk ──────────────────────────────────────────────────
 // Mirrors the SDK's real public surface. Payment (makePayment / PaymentInfo /
@@ -16,6 +28,9 @@ const mockVerifyProof = vi.fn();
 const mockComputeSignalHash = vi.fn().mockReturnValue('0xsignalhash');
 
 vi.mock('@zkproofport-ai/sdk', async () => ({
+  ActionApprovalRequiredError: PendingApprovalError,
+  resolveActionApproval: mockResolveApproval,
+  getActionApprovalStatus: mockApprovalStatus,
   hashTypedAction: (await import('../../sdk/src/index.js')).hashTypedAction,
   CIRCUIT_IDS: (await import('../../sdk/src/circuits.js')).CIRCUIT_IDS,
   generateProof: mockGenerateProof,
@@ -82,6 +97,11 @@ function parseToolResult(result: { content: Array<{ type: string; text: string }
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  mockGenerateProof.mockReset();
+  mockResolveApproval.mockReset().mockRejectedValue(new PendingApprovalError());
+  mockApprovalStatus.mockReset().mockResolvedValue({ status: 'pending', expiresAt: approval.expiresAt });
+  approvalDirectory = await mkdtemp(join(tmpdir(), 'proofport-mcp-approval-'));
+  vi.stubEnv('ZKPROOFPORT_APPROVAL_DIR', approvalDirectory);
 
   // Re-apply default mock return values after clearAllMocks
   mockSigner.getAddress.mockReturnValue('0xMockAttestationAddress');
@@ -117,12 +137,101 @@ beforeEach(async () => {
   registerTools(mockServer as any, testConfig as any, mockSigner as any);
 });
 
+afterEach(async () => {
+  await rm(approvalDirectory, { recursive: true, force: true });
+  vi.unstubAllEnvs();
+});
+
+describe('human action approval orchestration', () => {
+  it('returns actionable pending status without exposing the requester secret', async () => {
+    mockGenerateProof.mockRejectedValue(new PendingApprovalError());
+    const result = await callTool('generate_proof', { circuit: 'giwa_attestation', action: CUSTOM_ACTION });
+    expect(result.isError).toBeUndefined();
+    expect(parseToolResult(result)).toMatchObject({ status: 'awaiting_approval', approval_id: approval.approvalId, approval_url: approval.approvalUrl });
+    expect(JSON.stringify(result)).not.toContain(approval.requesterToken);
+    const status = await callTool('get_action_approval', { approval_id: approval.approvalId });
+    expect(parseToolResult(status)).toMatchObject({ status: 'pending' });
+  });
+
+  it('resumes the saved request but refuses changed payment or action parameters', async () => {
+    const params = { circuit: 'giwa_attestation', scope: 'scope', action: CUSTOM_ACTION, max_payment: '0.10' };
+    mockGenerateProof.mockRejectedValueOnce(new PendingApprovalError());
+    await callTool('generate_proof', params);
+    mockGenerateProof.mockResolvedValue({ proof: '0xproof' });
+    const changed = await callTool('generate_proof', { ...params, max_payment: '1.00', approval_id: approval.approvalId });
+    expect(changed.isError).toBe(true);
+    expect(parseToolResult(changed).error).toMatch(/match/);
+    const result = await callTool('generate_proof', { ...params, approval_id: approval.approvalId });
+    expect(parseToolResult(result)).toEqual({ proof: '0xproof' });
+    expect(mockGenerateProof.mock.lastCall?.[2].actionApproval).toEqual(approval);
+  });
+
+  it('freezes circuit and payment terms while the saved approval is loaded', async () => {
+    const params = { circuit: 'giwa_attestation', scope: 'scope', action: structuredClone(CUSTOM_ACTION), max_payment: '0.10' };
+    mockGenerateProof.mockRejectedValueOnce(new PendingApprovalError());
+    await callTool('generate_proof', params);
+    mockGenerateProof.mockResolvedValue({ proof: '0xproof' });
+    const resume = { ...params, approval_id: approval.approvalId };
+    const pending = callTool('generate_proof', resume);
+    resume.circuit = 'arc_eligibility';
+    resume.max_payment = '100';
+    const result = await pending;
+    expect(result.isError).toBeUndefined();
+    expect(mockGenerateProof.mock.lastCall?.[2]).toMatchObject({ circuit: 'giwa_attestation', maxPayment: '0.10' });
+  });
+
+  it('does not reflect private signatures from a prover error into model context', async () => {
+    mockGenerateProof.mockRejectedValueOnce(new Error('server echoed private-signature-secret'));
+    const generated = await callTool('generate_proof', { circuit: 'giwa_attestation', action: CUSTOM_ACTION });
+    expect(JSON.stringify(generated)).not.toContain('private-signature-secret');
+    expect(generated.isError).toBe(true);
+    mockResolveApproval.mockResolvedValueOnce({ address: '0xHuman', signature: '0xprivate-signature-secret' });
+    mockPrepareInputs.mockResolvedValueOnce({ userSignature: '0xprivate-signature-secret' });
+    const prepared = parseToolResult(await callTool('prepare_inputs', { circuit: 'giwa_attestation', action: CUSTOM_ACTION }));
+    mockSubmitProof.mockRejectedValueOnce(new Error('server echoed private-signature-secret'));
+    const submitted = await callTool('submit_proof', { circuit: 'giwa_attestation', prepared_inputs_id: prepared.prepared_inputs_id, nonce: 'nonce' });
+    expect(JSON.stringify(submitted)).not.toContain('private-signature-secret');
+    expect(submitted.isError).toBe(true);
+  });
+
+  it('preserves safe approval states without reflecting provider messages', async () => {
+    mockGenerateProof.mockRejectedValueOnce(Object.assign(new Error('private-signature-secret'), { code: 'ACTION_APPROVAL_EXPIRED' }));
+    const result = await callTool('generate_proof', { circuit: 'giwa_attestation', action: CUSTOM_ACTION });
+    expect(parseToolResult(result).error).toMatch(/expired/i);
+    expect(JSON.stringify(result)).not.toContain('private-signature-secret');
+  });
+
+  it('only returns public proof fields from successful action responses', async () => {
+    const response = { proof: '0xproof', debugSignature: 'private-signature-secret', timing: { totalMs: 1, privateSignature: 'private-signature-secret' }, verification: { chainId: 91342, rpcUrl: 'https://rpc.example.com', verifierAddress: '0x123', debugSignature: 'private-signature-secret' } };
+    mockGenerateProof.mockResolvedValueOnce(response);
+    const generated = await callTool('generate_proof', { circuit: 'giwa_attestation', action: CUSTOM_ACTION });
+    expect(JSON.stringify(generated)).not.toContain('private-signature-secret');
+    expect(parseToolResult(generated)).toMatchObject({ proof: '0xproof', timing: { totalMs: 1 } });
+    mockResolveApproval.mockResolvedValueOnce({ address: '0xHuman', signature: '0xprivate-signature-secret' });
+    mockPrepareInputs.mockResolvedValueOnce({ userSignature: '0xprivate-signature-secret' });
+    const prepared = parseToolResult(await callTool('prepare_inputs', { circuit: 'giwa_attestation', action: CUSTOM_ACTION }));
+    mockSubmitProof.mockResolvedValueOnce(response);
+    const submitted = await callTool('submit_proof', { circuit: 'giwa_attestation', prepared_inputs_id: prepared.prepared_inputs_id, nonce: 'nonce' });
+    expect(JSON.stringify(submitted)).not.toContain('private-signature-secret');
+    expect(submitted.isError).toBeUndefined();
+  });
+
+  it('step-by-step action preparation also waits instead of using the private key', async () => {
+    const result = await callTool('prepare_inputs', { circuit: 'arc_eligibility', action: CUSTOM_ACTION });
+    expect(result.isError).toBeUndefined();
+    expect(parseToolResult(result).status).toBe('awaiting_approval');
+    expect(mockSigner.signTypedData).not.toHaveBeenCalled();
+    expect(mockSigner.signMessage).not.toHaveBeenCalled();
+    expect(mockPrepareInputs).not.toHaveBeenCalled();
+  });
+});
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe('registerTools', () => {
   it('registers proof operations and both Gateway balance tools', () => {
     const expected = ['generate_proof', 'get_supported_circuits', 'request_challenge',
-      'prepare_inputs', 'submit_proof', 'verify_proof', 'deposit_to_gateway', 'gateway_balance'];
+      'prepare_inputs', 'submit_proof', 'verify_proof', 'deposit_to_gateway', 'gateway_balance', 'get_action_approval'];
     expect(mockServer.tool).toHaveBeenCalledTimes(expected.length);
     expect(Object.keys(toolHandlers).sort()).toEqual(expected.sort());
   });
@@ -517,21 +626,27 @@ const CUSTOM_ACTION = {
 };
 
 describe('prepare_inputs action authorization', () => {
-  it.each(['arc_eligibility', 'giwa_attestation'])('%s signs exactly the custom nested action and returns both hashes used for key recovery', async (circuit) => {
-    mockPrepareInputs.mockResolvedValue({ field: 'prepared' });
+  it.each(['arc_eligibility', 'giwa_attestation'])('%s uses the human signature and keeps the action witness behind a private handle', async (circuit) => {
+    mockResolveApproval.mockResolvedValue({ address: '0xHumanAddress', signature: '0xHumanSignature' });
+    mockPrepareInputs.mockResolvedValue({ field: 'prepared', user_signature: '0xHumanSignature' });
     const params = { circuit, action: CUSTOM_ACTION };
     const schema = z.object(toolHandlers.prepare_inputs.schema as z.ZodRawShape);
     expect(schema.parse(params)).toEqual(params);
     const result = await callTool('prepare_inputs', schema.parse(params));
     expect(result.isError).toBeUndefined();
-    expect(mockSigner.signTypedData).toHaveBeenCalledWith(CUSTOM_ACTION.domain, CUSTOM_ACTION.types, CUSTOM_ACTION.message);
+    expect(mockSigner.signTypedData).not.toHaveBeenCalled();
     expect(mockSigner.signMessage).not.toHaveBeenCalled();
     const domainSeparator = ethers.TypedDataEncoder.hashDomain(CUSTOM_ACTION.domain);
     const actionHash = ethers.TypedDataEncoder.hashStruct('Instruction', CUSTOM_ACTION.types, CUSTOM_ACTION.message);
     expect(mockPrepareInputs).toHaveBeenCalledWith(testConfig, expect.objectContaining({
-      circuitId: circuit, userSignature: '0xmocktypeddata', domainSeparator, actionHash,
+      circuitId: circuit, userAddress: '0xHumanAddress', userSignature: '0xHumanSignature', domainSeparator, actionHash,
     }));
-    expect(parseToolResult(result)).toEqual({ field: 'prepared', domain_separator: domainSeparator, action_hash: actionHash });
+    expect(parseToolResult(result)).toMatchObject({ prepared_inputs_id: expect.any(String), domain_separator: domainSeparator, action_hash: actionHash });
+    expect(JSON.stringify(result)).not.toContain('0xHumanSignature');
+    mockSubmitProof.mockResolvedValue({ proof: '0xproof' });
+    const submit = await callTool('submit_proof', { circuit, prepared_inputs_id: parseToolResult(result).prepared_inputs_id, nonce: '0xnonce' });
+    expect(parseToolResult(submit)).toEqual({ proof: '0xproof' });
+    expect(mockSubmitProof.mock.lastCall?.[1].inputs).toMatchObject({ field: 'prepared', user_signature: '0xHumanSignature', action_hash: actionHash });
   });
 
   it.each(['arc_eligibility', 'giwa_attestation'])('%s without action signs only the request signal hash', async (circuit) => {
@@ -579,17 +694,18 @@ describe('prepare_inputs action authorization', () => {
 });
 
 
-it('snapshots the MCP action before the local address lookup', async () => {
+it('snapshots the MCP action before waiting for human approval', async () => {
   const action = structuredClone(CUSTOM_ACTION);
   const approved = structuredClone(action);
-  mockSigner.getAddress.mockImplementationOnce(async () => {
+  mockResolveApproval.mockImplementationOnce(async () => {
     action.message.terms.quantity = '999';
-    return '0xMockAttestationAddress';
+    return { address: '0xHumanAddress', signature: '0xHumanSignature' };
   });
   mockPrepareInputs.mockResolvedValue({ field: 'prepared' });
   const result = await callTool('prepare_inputs', { circuit: 'arc_eligibility', action });
   expect(result.isError).toBeUndefined();
-  expect(mockSigner.signTypedData).toHaveBeenCalledWith(approved.domain, approved.types, approved.message);
+  expect(mockResolveApproval.mock.calls[0][1].action).toEqual(approved);
+  expect(mockSigner.signTypedData).not.toHaveBeenCalled();
   expect(parseToolResult(result).action_hash).toBe(ethers.TypedDataEncoder.hashStruct(approved.primaryType, approved.types, approved.message));
 });
 
@@ -622,10 +738,12 @@ describe('nested action field validation in MCP', () => {
   });
 
   it('preserves actual booleans in custom nested structs and arrays', async () => {
+    mockResolveApproval.mockResolvedValue({ address: '0xHumanAddress', signature: '0xHumanSignature' });
     mockPrepareInputs.mockResolvedValue({ field: 'prepared' });
     const result = await callTool('prepare_inputs', { circuit: 'arc_eligibility', action: BOOLEAN_ACTION });
     expect(result.isError).toBeUndefined();
-    expect(mockSigner.signTypedData).toHaveBeenCalledWith(BOOLEAN_ACTION.domain, BOOLEAN_ACTION.types, BOOLEAN_ACTION.message);
+    expect(mockResolveApproval.mock.calls[0][1].action).toEqual(BOOLEAN_ACTION);
+    expect(mockSigner.signTypedData).not.toHaveBeenCalled();
     expect(parseToolResult(result).action_hash).toBe(ethers.TypedDataEncoder.hashStruct('Instruction', BOOLEAN_ACTION.types, BOOLEAN_ACTION.message));
   });
 });

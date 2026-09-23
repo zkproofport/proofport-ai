@@ -34,6 +34,7 @@ import { getTeeConfig, createTeeProvider, resolveTeeMode } from './tee/index.js'
 import { ensureAgentRegistered, isIdentityRegistrationEnabled } from './identity/autoRegister.js';
 import { createAgentAuthMiddleware } from './identity/agentAuth.js';
 import { createProofRoutes } from './proof/proofRoutes.js';
+import { createActionApprovalRouter, approvalSecurityHeaders } from './approval/routes.js';
 import type { LLMProvider } from './chat/llmProvider.js';
 import { OpenAIProvider } from './chat/openaiClient.js';
 import { GeminiProvider } from './chat/geminiClient.js';
@@ -99,6 +100,15 @@ function createApp(config: Config) {
 
   // Static files (icon.png for 8004scan agent image)
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  // These routes own their small parser and capability auth, before the
+  // general parser/optional agent middleware. Approval never authorizes payment.
+  app.use('/api/v1/action-approvals', createActionApprovalRouter({ redis, origin: config.a2aBaseUrl,
+    walletConnectProjectId: config.walletConnectProjectId, trustProxyHops: config.approvalTrustProxyHops }));
+  app.use('/approval', approvalSecurityHeaders);
+  app.get('/approve/:id', approvalSecurityHeaders, (_req, res) => {
+    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https: wss:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'");
+    res.sendFile(path.join(__dirname, '..', 'public', 'approval', 'index.html'));
+  });
   app.use(express.static(path.join(__dirname, '..', 'public')));
 
   app.use(express.json());

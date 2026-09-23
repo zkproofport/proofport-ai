@@ -8,6 +8,7 @@ packages/*/node_modules
 # Built on the host, rebuilt in the builder stage.
 dist
 packages/*/dist
+public/approval
 
 # Secrets. They are mounted or passed as environment variables at run time and
 # have no business inside an image layer.

@@ -80,6 +80,15 @@ jobs:
       - name: Build (root)
         run: npm run build
 
+      - name: Unit tests (approval page)
+        run: npm run test --workspace @zkproofport-ai/approval-web
+
+      - name: Install approval-page test browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser tests (approval page, simulated wallet)
+        run: npm run test:browser --workspace @zkproofport-ai/approval-web
+
       # .env.test is gitignored (it holds real E2E credentials) so it is absent
       # here. tests/setup.ts tolerates a missing file, but tests/inputBuilder.ts
       # hard-fails at import without PROVER_PRIVATE_KEY, so supply it.

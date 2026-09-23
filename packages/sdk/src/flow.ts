@@ -19,6 +19,7 @@ import { CIRCUITS } from './constants.js';
 import { hashTypedAction } from './action.js';
 import { CIRCUIT_IDS } from './circuits.js';
 import { encryptForTee } from './tee.js';
+import { ActionApprovalError, resolveActionApproval } from './actionApproval.js';
 
 export interface FlowCallbacks {
   onStep?: (step: StepResult) => void;
@@ -33,7 +34,7 @@ export interface FlowCallbacks {
  * sent in plaintext.
  *
  * @param config - Server URL
- * @param signers - ProofportSigner for attestation (required)
+ * @param signers - Attestation signer for proofs without an action; optional payment wallet
  * @param params - Circuit name, scope, and optional country params
  * @param callbacks - Optional callbacks for step progress
  * @returns ProofResult with proof, publicInputs, and attestation info
@@ -41,7 +42,7 @@ export interface FlowCallbacks {
 export async function generateProof(
   config: ClientConfig,
   signers: {
-    attestation: ProofportSigner;
+    attestation?: ProofportSigner;
     /**
      * The wallet that pays, when the service charges. A different wallet from
      * `attestation` and deliberately so: the attestation wallet is fixed by
@@ -58,11 +59,15 @@ export async function generateProof(
   params: ProofParams,
   callbacks?: FlowCallbacks,
 ): Promise<ProofResult> {
-  // Keep the approved values stable across asynchronous signer operations.
+  // Keep the requested circuit and approved values stable across asynchronous operations.
+  const circuit = params.circuit;
   const action = params.action ? structuredClone(params.action) : params.action;
-  const circuitId: CircuitId = CIRCUIT_NAME_MAP[params.circuit];
+  const circuitId: CircuitId = CIRCUIT_NAME_MAP[circuit];
   const scope = params.scope || 'proofport';
   const isOidc = CIRCUITS[circuitId]?.inputType === 'oidc';
+  if (params.actionApproval && !action) {
+    throw new ActionApprovalError('ACTION_APPROVAL_INVALID', 'Resuming an action approval requires its original action.');
+  }
 
   const steps: StepResult[] = [];
   function recordStep<T>(step: number, name: string, data: T, startTime: number): T {
@@ -103,6 +108,10 @@ export async function generateProof(
   const actionHashes = action ? hashTypedAction(action) : undefined;
 
   if (!isOidc) {
+    const credentialSigner = signers.attestation;
+    if (!action && !credentialSigner) {
+      throw new Error('An attestation signer is required for this proof without an action. Pass signers.attestation.');
+    }
     // Step 1: Sign.
     //
     // `signal_hash` is computed either way, because the nullifier derives from
@@ -114,25 +123,27 @@ export async function generateProof(
     // structure, which the wallet renders as named fields, and the verifying
     // contract can recompute.
     let t = Date.now();
-    const attestationAddress = await signers.attestation.getAddress();
+    const approved = action
+      ? await resolveActionApproval(config, { circuit, scope, action }, params.actionApproval)
+      : undefined;
+    const attestationAddress = approved ? approved.address : await credentialSigner!.getAddress();
     const signalHash = computeSignalHash(attestationAddress, scope, circuitId);
     const signalHashHex = ethers.hexlify(signalHash);
 
     let signature: string;
     if (action) {
-      const { domain, types, message } = action;
+      const { domain } = action;
       ({ domainSeparator, actionHash } = actionHashes!);
-      signature = await signers.attestation.signTypedData(domain, types, message);
-      recordStep(1, 'Sign Typed Action', {
+      signature = approved!.signature;
+      recordStep(1, 'Approve Typed Action', {
         signalHash: signalHashHex,
         domainSeparator,
         actionHash,
         primaryType: action.primaryType,
         verifyingContract: domain.verifyingContract,
-        signature,
       }, t);
     } else {
-      signature = await signers.attestation.signMessage(signalHash);
+      signature = await credentialSigner!.signMessage(signalHash);
       recordStep(1, 'Sign Signal Hash', { signalHash: signalHashHex, signature }, t);
     }
 
@@ -172,9 +183,9 @@ export async function generateProof(
 
   // Step 3: Request challenge (server returns nonce + TEE key if available)
   let t = Date.now();
-  const challenge = await requestChallenge(config, params.circuit);
+  const challenge = await requestChallenge(config, circuit);
   const isE2E = !!challenge.teePublicKey;
-  recordStep(3, 'Request Challenge', { nonce: challenge.nonce, e2e: isE2E, keyId: challenge.teePublicKey?.keyId ?? null }, t);
+  recordStep(3, 'Request Challenge', action ? { e2e: isE2E } : { nonce: challenge.nonce, e2e: isE2E, keyId: challenge.teePublicKey?.keyId ?? null }, t);
 
   // Step 3b: Pay, if the service charges.
   //
@@ -213,16 +224,16 @@ export async function generateProof(
       challenge.teePublicKey!.publicKey,
     );
     proveResponse = await submitEncryptedProof(config, {
-      circuit: params.circuit,
+      circuit,
       encryptedPayload,
       nonce: challenge.nonce,
       paymentHeaders,
     });
-    recordStep(4, 'Generate Proof (E2E Encrypted)', proveResponse, t);
+    recordStep(4, 'Generate Proof (E2E Encrypted)', action ? { circuit, completed: true } : proveResponse, t);
   } else if (isOidc) {
     // OIDC plaintext path: send payload (JWT + JWKS) — server relays to prover, prover validates + builds inputs
     proveResponse = await submitProof(config, {
-      circuit: params.circuit,
+      circuit,
       inputs: oidcPayload! as unknown as Record<string, unknown>,
       nonce: challenge.nonce,
       paymentHeaders,
@@ -231,12 +242,14 @@ export async function generateProof(
   } else {
     // Coinbase plaintext path: send pre-computed inputs (TEE disabled / local dev)
     proveResponse = await submitProof(config, {
-      circuit: params.circuit,
+      circuit,
       inputs: easInputs!,
       nonce: challenge.nonce,
       paymentHeaders,
     });
-    recordStep(4, 'Generate Proof', proveResponse, t);
+    // An untrusted response may echo witness fields. Progress for an action
+    // reports completion without forwarding the provider's response object.
+    recordStep(4, 'Generate Proof', action ? { circuit, completed: true } : proveResponse, t);
   }
 
   return {

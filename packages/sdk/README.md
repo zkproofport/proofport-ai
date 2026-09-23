@@ -4,6 +4,8 @@ Client SDK for ZKProofport zero-knowledge proofs, including experimental exact-a
 
 The shared `hashTypedAction` helper is available from **SDK 0.2.12**. Arc/GIWA optional actions require **SDK 0.2.14 or later**; MCP stepwise input preparation requires **MCP 0.2.15 or later**. Release Please owns the versions. Confirm the resolved npm versions before using this path.
 
+Human action approval requires SDK **0.3.0 or later** and a compatible AI service with the approval API enabled. For the CLI/MCP flow, use MCP **0.3.0 or later** as well. Earlier releases that support action hashing do not implement this approval lifecycle. Action requests now pause for human approval; handle `ActionApprovalRequiredError` and resume as shown below.
+
 ## Overview
 
 @zkproofport-ai/sdk is a TypeScript SDK for generating privacy-preserving zero-knowledge proofs using Coinbase KYC attestations and OIDC JWT tokens. Generate a proof with a single function call, or fine-tune each step for custom workflows.
@@ -93,11 +95,11 @@ Use **SDK 0.2.14 or later** and **MCP 0.2.15 or later** for both Arc/GIWA signat
 
 1. **Coinbase account with KYC verification** — Complete identity verification on [Coinbase](https://www.coinbase.com/)
 2. **Coinbase KYC EAS attestation on Base** — Obtain an attestation via [Coinbase Verifications](https://www.coinbase.com/onchain-verify). This creates an on-chain EAS attestation on Base linked to your wallet address.
-3. **Credential signer** (required) — A local signer for the wallet holding the EAS attestation. The CLI uses `ATTESTATION_KEY`; programmatic callers can supply a compatible `ProofportSigner`. Keep key material outside model context.
+3. **Credential signer for proofs without an action** — A local signer for the wallet holding the EAS attestation. The CLI uses `ATTESTATION_KEY`; programmatic callers can supply a compatible `ProofportSigner`. An Arc/GIWA action instead requires the credential holder to connect a wallet and sign through the approval page. Keep key material outside model context.
 
 **For OIDC circuits** (`oidc_domain`): No wallet or attestation needed — just a JWT `id_token` from your OIDC provider.
 
-**For GIWA** (`giwa_attestation`): an attestation from GIWA's attester on **GIWA Sepolia**, and a local signer for that wallet. It is not a Coinbase attestation — one wallet is rarely attested by both, so the key you pass must be the wallet attested on the chain the circuit reads.
+**For GIWA** (`giwa_attestation`): an attestation from GIWA's attester on **GIWA Sepolia**, and control of that wallet. Without an action, supply its local signer; with an action, the person connects that wallet on the approval page. The attestation must belong to the wallet signing the proof request on the chain the circuit reads.
 
 **For the circuits that can bind an action** (`arc_eligibility`, `giwa_attestation`): the attestation above for whichever one you ask for. What differs is what the wallet signs, and the action is **optional** — see below.
 
@@ -135,7 +137,7 @@ console.log('Valid:', verification.valid);
 >
 > The Ledger House EligibilityGate on Arc is `0xD0F3eE648386B59B484157332E736388Fcc41F47`. Public-input layouts and deployments may change; do not put either in front of real funds. Generally available: `coinbase_kyc`, `coinbase_country`, `oidc_domain`.
 >
-> **The action is optional on both.** Send one and the wallet signs typed data; send none and it signs the request's signal hash exactly as `coinbase_kyc` does. The circuits branch on this, and refuse a request that tries to be both. Until 2026-09-22 `arc_eligibility` required an action — its circuit had no second path — and `giwa_attestation` could not take one at all.
+> **The action is optional on both.** Send one and the SDK pauses for a human to connect a wallet and sign the exact typed data. Send none and the supplied credential signer signs the request's signal hash as before. Supplying `ATTESTATION_KEY` does not bypass action approval.
 
 ### The problem it solves
 
@@ -154,15 +156,18 @@ wallet and scope no matter what the proof is later used for, so:
 
 ### What changes
 
-Pass an `action` and the wallet signs an [EIP-712](https://eips.ethereum.org/EIPS/eip-712)
-typed structure instead. You define the structure — this SDK keeps no registry
-of action shapes and never invents one.
+Pass an `action` and a human wallet signs an [EIP-712](https://eips.ethereum.org/EIPS/eip-712)
+typed structure through the AI service's approval page. You define the structure;
+the SDK does not invent action fields. No proof challenge or payment starts while
+approval is pending. The agent's payment wallet remains separately configured.
 
 ```typescript
-const result = await generateProof(
-  config,
-  { attestation: attestationSigner },
-  {
+import {
+  ActionApprovalRequiredError, generateProof, getActionApprovalStatus,
+  type ActionApproval, type ClientConfig, type PaymentWallet, type ProofParams,
+} from '@zkproofport-ai/sdk';
+
+const params: ProofParams = {
     circuit: 'arc_eligibility',
     scope: 'my-app',
     action: {
@@ -180,15 +185,56 @@ const result = await generateProof(
         ],
       },
       primaryType: 'Deposit',
-      message: { amount: 100_000n, nonce: 1n, expiry: deadline },
+      message: { amount: '100000', nonce: '1', expiry: String(deadline) },
     },
-  },
-);
+};
+
+// For a CLI or backend with an appropriate request lifetime. An MCP tool should
+// return the URL promptly and resume in a later call instead of waiting here.
+async function waitForHumanApproval(config: ClientConfig, approval: ActionApproval) {
+  while (Date.now() < Date.parse(approval.expiresAt)) {
+    const status = await getActionApprovalStatus(config, approval);
+    if (status.status === 'approved') return;
+    if (status.status !== 'pending') throw new Error(`Action approval is ${status.status}`);
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
+  throw new Error('Action approval expired');
+}
+
+async function generateWithHumanApproval(config: ClientConfig, payment: PaymentWallet, params: ProofParams) {
+  try {
+    return await generateProof(config, { payment }, params);
+  } catch (error) {
+    if (!(error instanceof ActionApprovalRequiredError)) throw error;
+    const approval = error.approval;
+    console.error('Review and sign:', approval.approvalUrl);
+    await waitForHumanApproval(config, approval);
+    // Consume once. Do not retry this call automatically after a failure.
+    return generateProof(config, { payment }, { ...params, actionApproval: approval });
+  }
+}
+
+const result = await generateWithHumanApproval(config, payment, params);
 ```
 
-Ask for `giwa_attestation` instead and the same call works against GIWA's
-attestation, with the domain naming chain `91342`. A wallet refuses typed data
-whose domain names a chain it is not on, so the chain id follows the circuit.
+`ActionApprovalRequiredError` is a pause, not a failed proof. Its `.approval`
+handle contains `{approvalId, approvalUrl, requesterToken, expiresAt}`. Keep
+`requesterToken` in private application storage; only show the approval URL to
+the person. Status replies contain no signature. `resolveActionApproval`
+checks the original circuit, scope, full action and recovered signer before
+preparing inputs. Rejected, expired and consumed sessions cannot proceed.
+
+The session expires after ten minutes and can be consumed once. If a response
+is lost after consumption, inspect the previous proof/payment outcome before
+requesting fresh approval; never automatically pay again. Session expiry does
+not expire the EIP-712 signature on chain. The relying contract must enforce
+the action's own nonce and deadline. This flow supports EOA credential wallets;
+contract-wallet signature verification is outside the current circuit.
+
+Ask for `giwa_attestation` instead to use the credential wallet's GIWA Sepolia
+attestation. The action domain names the relying contract's execution chain;
+it is independent of the chain used for attestation lookup or proof payment.
+The approval page asks the wallet to use the action's declared chain.
 
 The wallet renders `amount`, `nonce` and `expiry` by name for the person to
 read. Two 32-byte hashes reach the circuit — the EIP-712 domain separator and
@@ -239,11 +285,11 @@ the one-per-person property it exists for.
 
 ### Omitting `action`
 
-`arc_eligibility` requires `action`; omitting it is rejected. Other circuits reject `action`; Coinbase uses `personal_sign`, while OIDC uses its JWT flow without wallet signing. The application must verify the exact target, operational wallet, amount, nonce and deadline as well as the proof.
+Both `arc_eligibility` and `giwa_attestation` accept an omitted action and retain their local `personal_sign` path. Coinbase circuits reject `action` and retain their existing signing path; OIDC rejects `action` and uses its JWT flow without wallet signing. For action proofs, the application must verify the exact target, operational wallet, amount, nonce and deadline as well as the proof.
 
 ## Arc Circle Agent Wallet path — EXPERIMENTAL
 
-Use the existing Circle CLI login and selected Arc Agent Wallet; do not create or switch wallets as part of proof generation. Install the CLI if needed, then let the user complete any missing login locally. Load A’s `ATTESTATION_KEY` only through the trusted local client environment or secret store. Keep A’s key and address out of the dApp service, model context, UI, logs, Git and npm package contents. Keep Circle login secrets local too.
+Use the existing Circle CLI login and selected Arc Agent Wallet; do not create or switch wallets as part of proof generation. Install the CLI if needed, then let the user complete any missing login locally. Credential holder A connects their wallet on the human approval page; this action flow does not load A's `ATTESTATION_KEY`. Keep credential data and Circle login secrets outside model context and ordinary logs.
 
 ```bash
 npm install -g @circle-fin/cli
@@ -261,17 +307,15 @@ After the user reviews the action and the live x402 offer, save those exact appr
 ```typescript
 import { readFile } from 'node:fs/promises';
 import {
-  createConfig, fromPrivateKey, generateProof, verifyProof, walletFor,
+  createConfig, verifyProof, walletFor,
   type ProofParams, type ApprovedPayment,
 } from '@zkproofport-ai/sdk';
 
 const config = createConfig({baseUrl: 'https://stg-ai.zkproofport.app'});
 const action: NonNullable<ProofParams['action']> = JSON.parse(await readFile('approved-action.json', 'utf8'));
 const approvedPayment: ApprovedPayment = JSON.parse(await readFile('approved-payment.json', 'utf8'));
-const result = await generateProof(config, {
-  attestation: fromPrivateKey(process.env.ATTESTATION_KEY!), // local credential holder A
-  payment: await walletFor('arc'),                         // existing Circle wallet B
-}, {
+// generateWithHumanApproval is the bounded catch/poll/resume helper above.
+const result = await generateWithHumanApproval(config, await walletFor('arc'), {
   circuit: 'arc_eligibility', scope: 'ledger-house', action,
   payOn: 'arc-testnet-nano', maxPayment: '0.001', approvedPayment,
 });
@@ -299,7 +343,7 @@ Both `generateProof`/`generate_proof` and Arc input preparation use this complet
 | `primaryType` | non-empty string | The declared top-level struct; it must equal the single root inferred by the encoder. |
 | `message` | object | Values matching the declared field types, including nested objects and arrays. |
 
-No SDK action registry restricts struct names, field names or business values. For example, `Instruction` can contain `terms: Terms` and `labels: string[]`, where `Terms` contains `quantity: uint256` and `memo: string`. The circuit binds their hashes; each relying application decides which structures it can execute. Declare every approval-critical field in `types`: extra message keys absent from the schema are not signed. Invalid shape, missing declared fields (including nested structs/arrays), non-boolean `bool` values, malformed field declarations/encoded values, ambiguous roots and a mismatched `primaryType` are rejected before local signing. Field names and type declarations must be non-empty strings.
+No SDK action registry restricts business-specific struct names, field names or values. For example, `Instruction` can contain `terms: Terms` and `labels: string[]`, where `Terms` contains `quantity: uint256` and `memo: string`. The circuit binds their hashes; each relying application decides which structures it can execute. Declare every approval-critical field in `types`; the approval API rejects extra unsigned message keys. Invalid shape, missing declared fields (including nested structs/arrays), non-boolean `bool` values, malformed field declarations/encoded values, ambiguous roots and a mismatched `primaryType` are rejected before human signing. The API also bounds request size, nesting, array length and declaration count.
 
 Use decimal **integer strings** for JSON integer message values, especially `uint256` (for example `"10000000"`); JSON cannot represent `bigint`, and large JavaScript numbers can lose precision. Addresses/bytes are `0x` strings, booleans remain JSON booleans, and nested values follow their declared types. `domain.chainId` remains an integer JSON number.
 
@@ -441,14 +485,14 @@ if (verification.valid) {
 
 ## Step-by-Step API
 
-For Arc, validate/hash **before** local signing. `prepareInputs` needs the camelCase hashes to recover A's public key from the EIP-712 digest; it does not add those hashes to its returned object. Attach the snake_case fields for submission. `signal_hash` is still computed internally for nullifier derivation and is not the Arc signing message.
+For Arc/GIWA actions, obtain human approval before preparing inputs. `prepareInputs` needs the camelCase hashes to recover A's public key from the approved EIP-712 digest; it does not add those hashes to its returned object. Attach the snake_case fields for submission. `signal_hash` is still computed internally for nullifier derivation and is not the action signing message. Low-level witness APIs accept signatures but cannot establish who operated the signing wallet.
 
 Prepared inputs are **private witness data**: they include A's public key, signature and attestation data. Keep them inside trusted local code and send them only to the chosen prover (encrypted when a supported TEE key is provided). Do not forward them to the dApp, model, UI or logs. The `generateProof` public result is the boundary for sharing a proof; step callbacks and `proofport://config` can contain sensitive signer data and must not be forwarded wholesale.
 
 ```typescript
 import { readFile } from 'node:fs/promises';
 import {
-  createConfig, fromPrivateKey, hashTypedAction, prepareInputs,
+  createConfig, createActionApproval, resolveActionApproval, hashTypedAction, prepareInputs,
   requestChallenge, signPayment, submitProof, submitEncryptedProof,
   encryptForTee, walletFor, CIRCUIT_IDS,
   type TypedAction, type ApprovedPayment,
@@ -457,17 +501,20 @@ import {
 const config = createConfig({ baseUrl: 'https://stg-ai.zkproofport.app' });
 const action: TypedAction = JSON.parse(await readFile('approved-action.json', 'utf8'));
 const approvedPayment: ApprovedPayment = JSON.parse(await readFile('approved-payment.json', 'utf8'));
-const signer = fromPrivateKey(process.env.ATTESTATION_KEY!); // local A only
 const scope = 'ledger-house';
 
-// 1. Validate the exact user-approved action, then sign it locally.
+// 1. Create an immutable request, then let the person connect and sign.
 const { domainSeparator, actionHash } = hashTypedAction(action);
-const userSignature = await signer.signTypedData(action.domain, action.types, action.message);
+const request = { circuit: 'arc_eligibility' as const, scope, action };
+const approval = await createActionApproval(config, request);
+console.error('Review and sign:', approval.approvalUrl);
+await waitForHumanApproval(config, approval); // bounded helper from the example above
+const approved = await resolveActionApproval(config, request, approval);
 
-// 2. Recover from the typed digest and build the private witness locally.
+// 2. The signature has been verified and consumed. Build the private witness.
 const prepared = await prepareInputs(config, {
   circuitId: CIRCUIT_IDS.ARC_ELIGIBILITY,
-  userAddress: await signer.getAddress(), userSignature, scope,
+  userAddress: approved.address, userSignature: approved.signature, scope,
   domainSeparator, actionHash,
 });
 const inputs = { ...prepared, domain_separator: domainSeparator, action_hash: actionHash };
@@ -616,8 +663,8 @@ The proof contains 148 public input fields (32 bytes each):
 **Circuit Types:**
 
 ```typescript
-type CircuitName = 'coinbase_kyc' | 'coinbase_country' | 'oidc_domain' | 'arc_eligibility';
-type CircuitId = 'coinbase_attestation' | 'coinbase_country_attestation' | 'oidc_domain_attestation' | 'arc_eligibility';
+type CircuitName = 'coinbase_kyc' | 'coinbase_country' | 'oidc_domain' | 'arc_eligibility' | 'giwa_attestation';
+type CircuitId = 'coinbase_attestation' | 'coinbase_country_attestation' | 'oidc_domain_attestation' | 'arc_eligibility' | 'giwa_attestation';
 ```
 
 **Configuration:**
@@ -651,6 +698,7 @@ function fromSigner(signer: ethers.Signer): ProofportSigner;
 interface ProofParams {
   circuit: CircuitName;
   action?: { domain: { name: string; version: string; chainId: number; verifyingContract: string }; types: Record<string, Array<{name: string; type: string}>>; primaryType: string; message: Record<string, unknown> }; // optional for arc_eligibility and giwa_attestation
+  actionApproval?: ActionApproval; // private handle; resume the original action after human approval
   payOn?: string;
   maxPayment?: string; // decimal USDC
   approvedPayment?: ApprovedPayment;

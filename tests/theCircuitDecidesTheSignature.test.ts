@@ -14,7 +14,7 @@
  * The mobile app had the same defect in its KYC hook and it produced proofs
  * from the wrong circuit for a day before anyone noticed.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { ethers } from 'ethers';
 import { CIRCUIT_IDS } from '../packages/sdk/src/circuits.js';
 
@@ -65,6 +65,25 @@ async function runFlow(params: Record<string, unknown>, signer: ReturnType<typeo
   );
 }
 
+const humanWallet = new ethers.Wallet('0x' + '45'.repeat(32));
+afterEach(() => vi.unstubAllGlobals());
+
+/** Simulate the HTTP result of a separate human wallet approval. */
+async function runApprovedFlow(params: Record<string, unknown>, signer: ReturnType<typeof watchfulSigner>, onStatus?: () => void) {
+  const frozen = structuredClone({ circuit: params.circuit, scope: params.scope || 'proofport', action: params.action as typeof ACTION });
+  const approval = { approvalId: 'human-fixture', requesterToken: 'requester-capability',
+    approvalUrl: 'https://ai.example.test/approve/human-fixture#browser-capability', expiresAt: '2099-01-01T00:00:00.000Z' };
+  const signature = await humanWallet.signTypedData(frozen.action.domain, frozen.action.types, frozen.action.message);
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.endsWith('/consume')) return Response.json({ ...frozen, address: humanWallet.address, signature });
+    expect(url).toBe('http://localhost:4002/api/v1/action-approvals/human-fixture');
+    onStatus?.();
+    return Response.json({ ...frozen, approvalId: approval.approvalId, expiresAt: approval.expiresAt,
+      status: 'approved', address: humanWallet.address });
+  }));
+  return runFlow({ ...params, actionApproval: approval }, signer);
+}
+
 describe('the circuit decides the signature', () => {
   it('signs the signal hash for arc_eligibility when no action is given', async () => {
     /*
@@ -79,10 +98,11 @@ describe('the circuit decides the signature', () => {
     expect(signer.signTypedData).not.toHaveBeenCalled();
   });
 
-  it('signs the typed data for arc_eligibility when an action is given', async () => {
+  it('uses human-approved typed data for arc_eligibility when an action is given', async () => {
     const signer = watchfulSigner();
-    await runFlow({ circuit: 'arc_eligibility', scope: 'test', action: ACTION }, signer);
-    expect(signer.signTypedData).toHaveBeenCalled();
+    await runApprovedFlow({ circuit: 'arc_eligibility', scope: 'test', action: ACTION }, signer);
+    expect(signer.getAddress).not.toHaveBeenCalled();
+    expect(signer.signTypedData).not.toHaveBeenCalled();
     expect(signer.signMessage).not.toHaveBeenCalled();
   });
 
@@ -172,15 +192,17 @@ describe('action validation before local signing', () => {
     expect(signer.signTypedData).not.toHaveBeenCalled();
   });
 
-  it('signs caller-owned nested types and passes both hashes into recovery and proof submission', async () => {
+  it('uses approved caller-owned nested types and passes both hashes into recovery and proof submission', async () => {
     const signer = watchfulSigner();
-    await runFlow({ circuit: 'arc_eligibility', action: NESTED_ACTION }, signer);
-    expect(signer.signTypedData).toHaveBeenCalledWith(NESTED_ACTION.domain, NESTED_ACTION.types, NESTED_ACTION.message);
+    await runApprovedFlow({ circuit: 'arc_eligibility', action: NESTED_ACTION }, signer);
+    expect(signer.signTypedData).not.toHaveBeenCalled();
     expect(signer.signMessage).not.toHaveBeenCalled();
     const domainSeparator = ethers.TypedDataEncoder.hashDomain(NESTED_ACTION.domain);
     const actionHash = ethers.TypedDataEncoder.hashStruct('Instruction', NESTED_ACTION.types, NESTED_ACTION.message);
     const { prepareInputs } = await import('../packages/sdk/src/inputs.js');
     const { submitProof } = await import('../packages/sdk/src/prove.js');
+    const input = vi.mocked(prepareInputs).mock.calls.at(-1)![1];
+    expect(ethers.verifyTypedData(NESTED_ACTION.domain, NESTED_ACTION.types, NESTED_ACTION.message, input.userSignature)).toBe(humanWallet.address);
     expect(prepareInputs).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ domainSeparator, actionHash }));
     expect(submitProof).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({
       inputs: expect.objectContaining({ domain_separator: domainSeparator, action_hash: actionHash }),
@@ -200,31 +222,31 @@ describe('action validation before local signing', () => {
 
 
 describe('action ownership across asynchronous signing', () => {
-  it('snapshots the approved action before getAddress can mutate caller-owned values', async () => {
+  it('snapshots the approved action before the status request can mutate caller-owned values', async () => {
     const action = { ...ACTION, types: { Deposit: [
       { name: 'amount', type: 'uint256' }, { name: 'nonce', type: 'uint256' },
     ] }, message: { amount: '10000000', nonce: '1' } };
     const approved = structuredClone(action);
-    const wallet = ethers.Wallet.createRandom();
-    const signer = {
-      getAddress: vi.fn(async () => { action.message.nonce = '2'; return wallet.address; }),
-      signMessage: vi.fn(wallet.signMessage.bind(wallet)),
-      signTypedData: vi.fn(wallet.signTypedData.bind(wallet)),
-    };
-    await runFlow({ circuit: 'arc_eligibility', action }, signer);
+    const signer = watchfulSigner();
+    await runApprovedFlow({ circuit: 'arc_eligibility', action }, signer, () => { action.message.nonce = '2'; });
     const { prepareInputs } = await import('../packages/sdk/src/inputs.js');
     const input = vi.mocked(prepareInputs).mock.calls.at(-1)![1];
-    expect(ethers.verifyTypedData(approved.domain, approved.types, approved.message, input.userSignature) === wallet.address).toBe(true);
+    expect(action.message.nonce).toBe('2');
+    expect(ethers.verifyTypedData(approved.domain, approved.types, approved.message, input.userSignature)).toBe(humanWallet.address);
     expect(input.actionHash).toBe(ethers.TypedDataEncoder.hashStruct(approved.primaryType, approved.types, approved.message));
-    expect(signer.signTypedData).toHaveBeenCalledWith(approved.domain, approved.types, approved.message);
+    expect(signer.getAddress).not.toHaveBeenCalled();
+    expect(signer.signTypedData).not.toHaveBeenCalled();
   });
 });
 
 
-it('hashes and signs actual booleans in arbitrary nested structs and arrays', async () => {
+it('recovers approved actual booleans in arbitrary nested structs and arrays', async () => {
   const signer = watchfulSigner();
-  await runFlow({ circuit: 'arc_eligibility', action: BOOLEAN_ACTION }, signer);
-  expect(signer.signTypedData).toHaveBeenCalledWith(BOOLEAN_ACTION.domain, BOOLEAN_ACTION.types, BOOLEAN_ACTION.message);
+  await runApprovedFlow({ circuit: 'arc_eligibility', action: BOOLEAN_ACTION }, signer);
+  expect(signer.signTypedData).not.toHaveBeenCalled();
+  const { prepareInputs } = await import('../packages/sdk/src/inputs.js');
+  const input = vi.mocked(prepareInputs).mock.calls.at(-1)![1];
+  expect(ethers.verifyTypedData(BOOLEAN_ACTION.domain, BOOLEAN_ACTION.types, BOOLEAN_ACTION.message, input.userSignature)).toBe(humanWallet.address);
   const { hashTypedAction } = await import('../packages/sdk/src/index.js');
   expect(hashTypedAction(BOOLEAN_ACTION).actionHash).toBe(ethers.TypedDataEncoder.hashStruct('Instruction', BOOLEAN_ACTION.types, BOOLEAN_ACTION.message));
 });

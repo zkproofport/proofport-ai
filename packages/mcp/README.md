@@ -37,8 +37,8 @@ Proof generation is paid when the endpoint's live x402 challenge requires paymen
 
 ## Prerequisites
 
-- Coinbase circuits, including experimental `arc_eligibility`, require a valid Coinbase KYC EAS attestation on Base and its local credential signer (`ATTESTATION_KEY`).
-- Experimental `giwa_attestation` requires an attestation from GIWA's attester on **GIWA Sepolia**, not from Coinbase. `ATTESTATION_KEY` must be the wallet attested there; one wallet is rarely attested on both chains.
+- Coinbase circuits, require a valid Coinbase KYC EAS attestation on Base and its local credential signer (`ATTESTATION_KEY`). Arc without an action also uses that key; Arc with an action uses the human wallet approval below.
+- Experimental `giwa_attestation` requires an attestation from GIWA's attester on **GIWA Sepolia**, not from Coinbase. Without an action, `ATTESTATION_KEY` must be the wallet attested there. With an action, the human connects that attested wallet on the approval page; the CLI does not need its key. One wallet is rarely attested on both chains.
 - OIDC proofs require an `id_token`; the CLI offers `--login-google`, `--login-google-workspace`, and `--login-microsoft-365` device login. Complete login locally.
 - A paid endpoint requires an explicitly selected compatible payment wallet and the user's approval of the payment terms.
 - Circle Agent Wallet payments require Circle CLI, its existing login, and the chosen wallet. Preserve that login and wallet; proof generation must not create, import, replace or switch them.
@@ -69,6 +69,18 @@ No mainnet support is implied for either.
 | Ledger House EligibilityGate | `0xD0F3eE648386B59B484157332E736388Fcc41F47` |
 
 The layout and deployments may change. Discover the dApp's policy, prover endpoint and live payment offer before preparing an action. ERC-8004 identifies the prover; it grants no wallet spending permission.
+
+### Human approval for actions
+
+Human action approval requires MCP **0.3.0 or later**, its compatible SDK **0.3.0 or later**, and an AI service with the approval API enabled. Upgrade the CLI/MCP package to use this flow.
+
+When `action` is present, `generate_proof` returns `awaiting_approval`, an `approval_url`, `approval_id`, and `expires_at`. Show the URL to the person. They review the request's circuit, scope, exact EIP-712 domain, type and message fields, connect their credential wallet, and explicitly sign. Browser extensions and WalletConnect-compatible EVM wallets are supported; WalletConnect requires server configuration. It is a ZKProofport approval-page URL, not a MetaMask-specific address.
+
+The AI queries `get_action_approval` with the ID. Once approved, repeat the original `generate_proof` call with exactly the same arguments plus `approval_id`. Changed action, circuit, scope or payment terms are rejected. The requester secret is stored in owner-only local files and never returned in the MCP result. `ATTESTATION_KEY` never signs this action. Ordinary no-action proofs and the proof-payment wallet continue to use their existing behavior.
+
+Approval expires after ten minutes and can be consumed once. Rejection, expiry or an already-consumed request stops the flow. A network error after consumption must be investigated before retrying; the client does not create a replacement authorization or repeat payment automatically. The current proof circuits recover an EOA signature; smart-contract credential wallets are not supported by this flow. The relying dApp must enforce its own action nonce and deadline; the approval page's expiry does not add a deadline to the signed message.
+
+The CLI prints the URL to stderr, waits for approval, and resumes automatically. This prompt is also printed in `--silent` mode; stdout remains the final proof JSON. Ctrl+C stops waiting and closes the MCP process.
 
 ### Existing Circle Agent Wallet and Gateway balance
 
@@ -190,16 +202,17 @@ After proof generation, use `verify_proof`. Separately obtain approval for the s
 
 ### Stepwise Arc flow in trusted local code
 
-The corrected `prepare_inputs` path validates the complete action and encodes its values before asking local A to sign EIP-712. It passes both hashes into SDK key recovery and returns `domain_separator` and `action_hash` with the prepared witness. Malformed Arc/GIWA actions and actions supplied for Coinbase/OIDC are rejected before signing. Omitting the optional action on Arc/GIWA signs `signal_hash` and proves the credential without action binding. Coinbase continues to sign `signal_hash`; OIDC uses the JWT path without wallet signing.
+`prepare_inputs` with an action follows the same human-approval pause and resume. After approval, it returns `prepared_inputs_id`, `circuit`, `domain_separator` and `action_hash`. The raw signature and witness stay in owner-only local storage. The handle expires after ten minutes and can be submitted once.
 
-**Prepared inputs are private witness data**, including A's public key, signature and attestation data. Run this orchestration inside a trusted local MCP client; do not pass tool responses through model context, the dApp, UI or logs. Share the public `generate_proof` result instead. `proofport://config` also exposes A's address and stays local.
+1. Call `prepare_inputs` with the action, share the returned approval URL, and wait using `get_action_approval`.
+2. Repeat `prepare_inputs` with unchanged arguments and `approval_id`.
+3. Call `request_challenge` with the same circuit and `inputs: {}`.
+4. For a free, non-encrypted endpoint, call `submit_proof` with the circuit, returned `prepared_inputs_id` and challenge `nonce`.
+5. Verify the public result using `verify_proof`.
 
-1. Obtain the action approval locally, then call `prepare_inputs` with `{circuit: "arc_eligibility", scope: "ledger-house", action: approvedAction}`. Preserve the entire result, including both snake_case hashes.
-2. Call `request_challenge` with `{circuit: "arc_eligibility", inputs: {}}` to obtain a fresh nonce, actual payment offers and optional TEE key without sending the witness yet.
-3. For an endpoint with payment disabled and no TEE key, call `submit_proof` with `{circuit: "arc_eligibility", inputs: preparedInputs, nonce: challenge.nonce}`. The nonce is required; omitting it only requests another challenge.
-4. Verify the returned public proof with `verify_proof`, then obtain the separate stake approval and confirm the transaction receipt.
+Without an action, the existing credential-key / OIDC path and raw private-witness result remain unchanged. Handle such witnesses only in trusted local code, never model context, dApp UI or logs. `proofport://config` also exposes the local credential address and must stay private.
 
-The MCP `submit_proof` tool currently accepts only `circuit`, `inputs` and `nonce`; it has no payment-header or encrypted-envelope argument. For a paid or encrypted flow, use all-in-one `generate_proof`, or the SDK stepwise API (`hashTypedAction` → local typed signature → `prepareInputs` with camelCase hashes → attach snake_case hashes → `requestChallenge` → `signPayment` with approved terms → `submitProof`/`submitEncryptedProof`). Do not assume this MCP stepwise tool automatically pays or encrypts. With Circle Agent Wallet, the SDK's `signPayment` uses `@circle-fin/x402-batching` for the live Gateway batched offer and signs through the Circle CLI adapter; it draws the 0.001-USDC proof fee from the existing funded Gateway balance.
+`submit_proof` accepts either `inputs` or `prepared_inputs_id`, never both. It does not sign proof payments or encrypt inputs. For paid or encrypted flows use `generate_proof`, or the SDK's full flow. Human action approval and approval of the proof-payment terms are separate.
 
 ### CLI path
 
@@ -219,7 +232,8 @@ The CLI loads `--action` from a JSON file and calls the local MCP server interna
 | `generate_proof` | Prepare inputs, select an approved payment path and generate a proof. Returns proof, public inputs, timing and verifier metadata; attestation is conditional. |
 | `verify_proof` | Verify the actual proof on-chain; accepts `{result: <full proof result>}`. |
 | `get_supported_circuits` | Discover circuits and verifier metadata. |
-| `prepare_inputs` | Prepare circuit inputs with the configured credential signer. |
+| `prepare_inputs` | Prepare ordinary inputs, or request human approval and return a private action witness handle. |
+| `get_action_approval` | Read approval status without starting a proof or payment. |
 | `request_challenge` | Fetch a live challenge, payment offers and optional TEE key. |
 | `submit_proof` | Submit prepared inputs and nonce; no payment headers or encrypted-envelope argument. |
 | `gateway_balance` | Read Gateway balance using `PAYMENT_PRIVATE_KEY` only; returns USDC base units. |
@@ -231,6 +245,7 @@ The CLI loads `--action` from a JSON file and calls the local MCP server interna
 |---|---|---|
 | `circuit` | string | `coinbase_kyc`, `coinbase_country`, `oidc_domain`, or experimental `arc_eligibility` / `giwa_attestation` |
 | `scope` | string | Optional; default `proofport` |
+| `approval_id` | string | Resume an approved request with all original arguments unchanged |
 | `action` | EIP-712 object | Optional for `arc_eligibility` and `giwa_attestation`; rejected for circuits that cannot prove one, rather than dropped |
 | `pay_with` | `key` / `cdp` / `circle` / `arc` | Select the payment wallet explicitly; use `arc` for Circle Agent Wallet |
 | `pay_on` | string | Select an actual offered route; `arc-testnet-nano` is the Arc Gateway path |
@@ -246,7 +261,8 @@ The CLI loads `--action` from a JSON file and calls the local MCP server interna
 | Variable | Purpose |
 |---|---|
 | `PROOFPORT_URL` | Selected prover endpoint; Arc staging uses `https://stg-ai.zkproofport.app` |
-| `ATTESTATION_KEY` | Local credential-holder key for Coinbase circuits; keep secret |
+| `ATTESTATION_KEY` | Local credential key for no-action EAS proofs; not needed for human-approved actions |
+| `ZKPROOFPORT_APPROVAL_DIR` | Private local continuation storage; defaults to `~/.config/zkproofport/approvals` (directory 0700, files 0600) |
 | `ARC_AGENT_WALLET` | Existing Circle Agent Wallet address to use |
 | `ARC_CLI_CHAIN` | Circle CLI chain; Arc testnet is `ARC-TESTNET` |
 | `PAYMENT_PRIVATE_KEY` | Private-key payer and private-key-only Gateway tools |

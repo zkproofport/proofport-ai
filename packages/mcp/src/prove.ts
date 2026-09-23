@@ -5,6 +5,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { fromPrivateKey, CIRCUIT_NAME_MAP } from '@zkproofport-ai/sdk';
+import { toolData, waitForActionApproval, type PendingActionApproval } from './approvalCli.js';
 
 const privateValues = [process.env.ATTESTATION_KEY, process.env.E2E_ATTESTATION_WALLET_ADDRESS]
   .filter((value): value is string => typeof value === 'string' && value.length >= 8);
@@ -259,7 +260,7 @@ function printUsage() {
   writeError('Usage: ATTESTATION_KEY=0x... zkproofport-prove [circuit] [options]');
   writeError('');
   writeError('Environment variables:');
-  writeError('  ATTESTATION_KEY    (required) Private key of wallet with Coinbase EAS attestation');
+  writeError('  ATTESTATION_KEY    Credential key for proofs WITHOUT --action (not needed for OIDC or human action approval)');
   writeError('');
   writeError('Paying (only when the service charges — the wallet and the chain are separate choices):');
   writeError('  --pay-with arc      an Arc agent wallet, signed by Circle CLI (no key here)');
@@ -279,7 +280,7 @@ function printUsage() {
   writeError('  --login-google             Login with Google account (device flow)');
   writeError('  --login-google-workspace   Login with Google Workspace (device flow)');
   writeError('  --login-microsoft-365      Login with Microsoft 365 (device flow)');
-  writeError('  --action <file.json>        EIP-712 action (arc_eligibility, giwa_attestation)');
+  writeError('  --action <file.json>        EIP-712 action; opens a human wallet approval link (Arc/GIWA)');
   writeError('  --pay-with <key|cdp|circle|arc> Which wallet pays, when the service charges');
   writeError('  --pay-on <chain>            Which chain to pay on (e.g. arc-testnet, base-sepolia)');
   writeError('  --max-payment <USDC>        Maximum proof fee, up to six decimal places');
@@ -348,7 +349,8 @@ const hasLoginFlag = loginGoogle || loginGoogleWorkspace || loginMicrosoft365;
 
 // Coinbase circuits require ATTESTATION_KEY (EAS-attested wallet)
 // OIDC/login flows do not require any key — ephemeral key is generated internally
-if (!isOidc && !hasLoginFlag) {
+const awaitsHumanAction = !!actionFile && (circuit === 'arc_eligibility' || circuit === 'giwa_attestation');
+if (!isOidc && !hasLoginFlag && !awaitsHumanAction) {
   if (!attestationKey) {
     if (silent) {
       writeError(JSON.stringify({ error: 'ATTESTATION_KEY environment variable is required' }));
@@ -523,25 +525,42 @@ const transport = new StdioClientTransport({
 });
 
 const client = new Client({ name: 'zkproofport-prove', version: '1.0.0' });
+const approvalAbort = new AbortController();
+const cancelApproval = () => { approvalAbort.abort(); };
+process.once('SIGINT', cancelApproval);
+process.once('SIGTERM', cancelApproval);
 
 try {
   demoTrace('mcp_start');
   await client.connect(transport);
   demoTrace('mcp_connected');
-  log('[zkproofport-prove] Connected. Generating proof (30-90 seconds)...');
+  log(action ? '[zkproofport-prove] Connected. Requesting human action approval...' : '[zkproofport-prove] Connected. Generating proof (30-90 seconds)...');
 
   demoTrace('mcp_generate_proof');
-  const result = await client.callTool({
+  let result = await client.callTool({
     name: 'generate_proof',
     arguments: toolArgs,
-  }, undefined, {timeout: 240000});
+  }, undefined, {timeout: 240000, signal: approvalAbort.signal});
 
+  if (approvalAbort.signal.aborted) throw new Error('Proof request cancelled; check its status before retrying');
+  const data = toolData(result);
+  if (data.status === 'awaiting_approval') {
+    const approvalId = await waitForActionApproval(data as PendingActionApproval,
+      call => client.callTool(call, undefined, { timeout: 20000, signal: approvalAbort.signal }),
+      message => writeError(message), { signal: approvalAbort.signal });
+    if (approvalAbort.signal.aborted) throw new Error('Action approval cancelled');
+    log('[zkproofport-prove] Human signature approved. Generating proof (30-90 seconds)...');
+    result = await client.callTool({ name: 'generate_proof', arguments: { ...toolArgs, approval_id: approvalId } }, undefined, { timeout: 240000, signal: approvalAbort.signal });
+    const resumed = toolData(result);
+    if (resumed.status === 'awaiting_approval') throw new Error('Approval did not complete; no replacement request was started');
+  }
+
+  if (approvalAbort.signal.aborted) throw new Error('Proof request cancelled; check its status before retrying');
   const isError = (result as any).isError;
   const content = (result as any).content;
   const output = content?.[0]?.text ?? JSON.stringify(result, null, 2);
   if (isError) {
-    writeError(output);
-    process.exit(1);
+    throw new Error(output);
   }
   demoTrace('mcp_result');
   console.log(safeText(output));
@@ -552,7 +571,9 @@ try {
   } else {
     writeError(`[zkproofport-prove] Error: ${message}`);
   }
-  process.exit(1);
+  process.exitCode = approvalAbort.signal.aborted ? 130 : 1;
 } finally {
+  process.removeListener('SIGINT', cancelApproval);
+  process.removeListener('SIGTERM', cancelApproval);
   await client.close();
 }

@@ -47,6 +47,21 @@ export { createConfig } from './config.js';
 // Flow (main entry point)
 export { generateProof } from './flow.js';
 export type { FlowCallbacks } from './flow.js';
+export {
+  createActionApproval,
+  getActionApprovalStatus,
+  consumeActionApproval,
+  resolveActionApproval,
+  ActionApprovalRequiredError,
+  ActionApprovalError,
+} from './actionApproval.js';
+export type {
+  ActionApproval,
+  ActionApprovalRequest,
+  ActionApprovalStatus,
+  ActionApprovalState,
+  ActionApprovalErrorCode,
+} from './actionApproval.js';
 
 // Individual steps (for step-by-step usage)
 export { requestChallenge, createSession } from './session.js';

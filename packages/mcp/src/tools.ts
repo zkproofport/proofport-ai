@@ -17,10 +17,14 @@ import {
   CIRCUIT_NAME_MAP,
   ensureGatewayBalance,
   gatewayBalance,
+  ActionApprovalRequiredError,
+  getActionApprovalStatus,
+  resolveActionApproval,
   type CircuitName,
   type ProofportSigner,
   type ClientConfig,
 } from '@zkproofport-ai/sdk';
+import { ApprovalStore } from './approvalStore.js';
 
 /**
  * The circuit names every tool accepts, read from the map the SDK owns.
@@ -46,11 +50,67 @@ function jsonResult(data: unknown) {
   };
 }
 
+// Provider diagnostics and arbitrary extension fields are never model-facing
+// when a response was produced with a privately stored human signature.
+const publicProofSchema = z.object({
+  circuit: z.string().optional(), proofType: z.string().optional(),
+  proof: z.string(), publicInputs: z.string().optional(), proofWithInputs: z.string().optional(),
+  attestation: z.object({
+    document: z.string(), proof_hash: z.string(),
+    verification: z.object({
+      rootCaValid: z.boolean(), chainValid: z.boolean(), signatureValid: z.boolean(),
+      pcrs: z.record(z.string().regex(/^\d+$/), z.string()),
+    }),
+  }).nullable().optional(),
+  timing: z.object({ totalMs: z.number(), inputBuildMs: z.number().optional(),
+    paymentVerifyMs: z.number().optional(), proveMs: z.number().optional() }).optional(),
+  verification: z.object({ chainId: z.number(), verifierAddress: z.string(), rpcUrl: z.string() }).nullable().optional(),
+});
+
 export function registerTools(
   server: McpServer,
   config: ClientConfig,
   signer: ProofportSigner,
 ): void {
+  const approvals = new ApprovalStore();
+  const approvalIdParam = () => z.string().optional().describe('Resume the SAME original action request using the approval_id returned with awaiting_approval. Keep all original parameters unchanged.');
+  function originalRequest(params: Record<string, unknown>): Record<string, unknown> {
+    const { approval_id: _approvalId, ...request } = params;
+    return request;
+  }
+  async function operationError(error: unknown, operation: string, params: Record<string, unknown>) {
+    if (error instanceof ActionApprovalRequiredError) {
+      const id = await approvals.save(config, error.approval, operation, originalRequest(params));
+      return jsonResult({
+        status: 'awaiting_approval', approval_id: id,
+        approval_url: error.approval.approvalUrl, expires_at: error.approval.expiresAt,
+        next_step: 'Give this approval URL to the human. Query get_action_approval; once approved, repeat this tool with the SAME parameters plus approval_id. Do not sign or submit the approval on the human\'s behalf.',
+      });
+    }
+    if (params.action) {
+      const safeErrors: Record<string, string> = {
+        ACTION_APPROVAL_REJECTED: 'The person rejected this action request.',
+        ACTION_APPROVAL_EXPIRED: 'This action approval expired. A new human approval is required.',
+        ACTION_APPROVAL_CONSUMED: 'This approval was already used. Check the existing proof request before retrying.',
+        ACTION_APPROVAL_INVALID: 'This approval does not match the original action request.',
+        ACTION_APPROVAL_UNAVAILABLE: 'Approval status is unavailable. Check its status before retrying.',
+      };
+      const code = (error as { code?: unknown })?.code;
+      return errorResult(typeof code === 'string' && Object.hasOwn(safeErrors, code) ? safeErrors[code]
+        : 'Action proof could not continue. The original request must match; check approval status before retrying.');
+    }
+    return errorResult(error instanceof Error ? error.message : String(error));
+  }
+
+  server.tool('get_action_approval', 'Read the status of a human wallet approval created by this MCP client. This operation never starts a proof or payment.', {
+    approval_id: z.string().describe('The approval_id returned by generate_proof or prepare_inputs'),
+  }, async ({ approval_id }) => {
+    try {
+      const approval = await approvals.get(config, approval_id);
+      const status = await getActionApprovalStatus(config, approval);
+      return jsonResult({ approval_id, status: status.status, expires_at: status.expiresAt });
+    } catch (error) { return errorResult(error instanceof Error ? error.message : String(error)); }
+  });
 /**
  * Whether any payment wallet is configured at all.
  *
@@ -75,9 +135,12 @@ CIRCUITS:
   - "arc_eligibility": Coinbase KYC, optionally binding the wallet's signature to ONE EIP-712 action. Without action it signs the request signal hash. The proof carries that action's hash, so a contract can check WHICH instruction was authorised -- not merely that somebody eligible signed something. Verified on Arc Testnet (chain 5042002).
   - "giwa_attestation": GIWA attestation, optionally binding one EIP-712 action. Uses a GIWA-attested wallet; verified on GIWA Sepolia (chain 91342).
 
-RETURNS: Full ProofResult with proof bytes, public inputs, and timing information. Use verify_proof separately to verify on-chain.`,
+WITH ACTION: Returns awaiting_approval with an approval URL for the HUMAN to review and sign in their wallet. Keep the request parameters unchanged, query get_action_approval, then repeat with approval_id when approved. ATTESTATION_KEY cannot authorize an action on the human's behalf. Ordinary proofs without action retain automatic signing.
+
+RETURNS: awaiting_approval or the full ProofResult with proof bytes, public inputs, and timing information. Use verify_proof separately to verify on-chain.`,
     {
       circuit: circuitParam(),
+      approval_id: approvalIdParam(),
       scope: z
         .string()
         .optional()
@@ -149,8 +212,14 @@ RETURNS: Full ProofResult with proof bytes, public inputs, and timing informatio
       approved_payment:z.object({network:z.string(),scheme:z.string(),amount:z.string().regex(/^\d+$/),asset:z.string(),payTo:z.string(),extra:z.object({name:z.string(),version:z.string(),verifyingContract:z.string()})}).optional().describe('Exact user-approved terms. For direct EIP-3009 set extra.verifyingContract to the offer asset; for Gateway copy its required extra.verifyingContract. Changed fee, recipient, token, chain or signing domain is rejected before signing.'),
     },
     async (params) => {
+      params = structuredClone(params);
+      const request = originalRequest(params);
       try {
         const action = params.action ? structuredClone(params.action) : params.action;
+        if (params.approval_id && !action) return errorResult('approval_id requires the original action');
+        const actionApproval = params.approval_id
+          ? await approvals.load(config, params.approval_id, 'generate_proof', request)
+          : undefined;
         const payment = params.pay_with
           ? await walletFor(params.pay_with)
           : hasAnyPaymentWalletConfigured()
@@ -162,6 +231,7 @@ RETURNS: Full ProofResult with proof bytes, public inputs, and timing informatio
           {
             circuit: params.circuit,
             ...(action ? { action } : {}),
+            ...(actionApproval ? { actionApproval } : {}),
             scope: params.scope,
             countryList: params.country_list,
             isIncluded: params.is_included,
@@ -179,9 +249,10 @@ RETURNS: Full ProofResult with proof bytes, public inputs, and timing informatio
             },
           },
         );
-        return jsonResult(result);
+        return jsonResult(action ? publicProofSchema.parse(result) : result);
       } catch (error) {
-        return errorResult(error instanceof Error ? error.message : String(error));
+        try { return await operationError(error, 'generate_proof', request); }
+        catch (storageError) { return errorResult(storageError instanceof Error ? storageError.message : String(storageError)); }
       }
     },
   );
@@ -335,9 +406,10 @@ RETURNS: whether a deposit was made, its transaction hash, and the Gateway balan
   // ─── prepare_inputs ─────────────────────────────────────────────────
   server.tool(
     'prepare_inputs',
-    `Step 1 of the step-by-step flow: Prepare all circuit inputs. Arc and GIWA optionally sign the exact validated EIP-712 action; without action they sign the signal hash. Coinbase signs the signal hash. Queries EAS, builds the Merkle proof, and returns private witness inputs including the Arc domain_separator and action_hash. Handle these inputs only in trusted local code, never expose them to the dApp, model or logs. Call this BEFORE request_challenge. For oidc_domain circuit, provide jwt and scope instead of Coinbase-specific parameters.`,
+    `Step 1 of the step-by-step flow. WITH ACTION: human wallet approval is required; returns awaiting_approval until resumed with approval_id. Approved action witnesses stay in private local storage; pass the returned prepared_inputs_id to submit_proof. WITHOUT ACTION: retains the existing credential-key signature and private witness result. Handle private witness inputs only in trusted local code, never expose them to the dApp, model or logs. Call this BEFORE request_challenge. For oidc_domain provide jwt and scope.`,
     {
       circuit: circuitParam(),
+      approval_id: approvalIdParam(),
       scope: z
         .string()
         .optional()
@@ -378,6 +450,8 @@ RETURNS: whether a deposit was made, its transaction hash, and the Gateway balan
         .describe('OIDC provider. "google" (default) for Google Workspace, "microsoft" for Microsoft 365.'),
     },
     async (params) => {
+      params = structuredClone(params);
+      const request = originalRequest(params);
       try {
         const action = params.action ? structuredClone(params.action) : params.action;
         const circuitId = CIRCUIT_NAME_MAP[params.circuit];
@@ -388,7 +462,10 @@ RETURNS: whether a deposit was made, its transaction hash, and the Gateway balan
         if (action && !supportsAction) {
           return errorResult(`An action was given but '${circuitId}' was requested; only arc_eligibility and giwa_attestation carry one.`);
         }
-        const actionHashes = action ? hashTypedAction(action) : undefined;
+        let actionHashes;
+        try { actionHashes = action ? hashTypedAction(action) : undefined; }
+        catch (validationError) { return errorResult(validationError instanceof Error ? validationError.message : 'Invalid action'); }
+        if (params.approval_id && !action) return errorResult('approval_id requires the original action');
 
         if (isOidc) {
           // OIDC path: prepare inputs locally from JWT (no EAS attestation needed)
@@ -400,15 +477,21 @@ RETURNS: whether a deposit was made, its transaction hash, and the Gateway balan
         }
 
         // EAS path: the circuit selects typed action or personal_sign.
-        const userAddress = await signer.getAddress();
+        const actionApproval = params.approval_id
+          ? await approvals.load(config, params.approval_id, 'prepare_inputs', request)
+          : undefined;
+        const authorization = action
+          ? await resolveActionApproval(config, { circuit: params.circuit, scope, action }, actionApproval)
+          : undefined;
+        const userAddress = authorization ? authorization.address : await signer.getAddress();
         const signalHash = computeSignalHash(
           userAddress,
           scope,
           circuitId,
         );
 
-        const userSignature = actionHashes
-          ? await signer.signTypedData(action!.domain, action!.types, action!.message)
+        const userSignature = authorization
+          ? authorization.signature
           : await signer.signMessage(signalHash);
 
         const inputs = await prepareInputs(config, {
@@ -421,13 +504,16 @@ RETURNS: whether a deposit was made, its transaction hash, and the Gateway balan
           ...actionHashes,
         });
 
-        return jsonResult(actionHashes ? {
-          ...inputs,
-          domain_separator: actionHashes.domainSeparator,
-          action_hash: actionHashes.actionHash,
-        } : inputs);
+        if (actionHashes) {
+          const id = await approvals.saveInputs(config, params.circuit, {
+            ...inputs, domain_separator: actionHashes.domainSeparator, action_hash: actionHashes.actionHash,
+          });
+          return jsonResult({ prepared_inputs_id: id, circuit: params.circuit, domain_separator: actionHashes.domainSeparator, action_hash: actionHashes.actionHash });
+        }
+        return jsonResult(inputs);
       } catch (error) {
-        return errorResult(error instanceof Error ? error.message : String(error));
+        try { return await operationError(error, 'prepare_inputs', request); }
+        catch (storageError) { return errorResult(storageError instanceof Error ? storageError.message : String(storageError)); }
       }
     },
   );
@@ -442,9 +528,11 @@ You MUST pass the nonce returned by request_challenge. POST /api/v1/prove answer
       circuit: circuitParam(),
       inputs: z
         .union([z.string(), z.record(z.unknown())])
+        .optional()
         .describe(
           'Full ProveInputs object from prepare_inputs. Accepts a JSON string or a structured object.',
         ),
+      prepared_inputs_id: z.string().optional().describe('Private local action witness handle returned by prepare_inputs. Use instead of inputs; consumed once.'),
       nonce: z
         .string()
         .describe(
@@ -453,8 +541,12 @@ You MUST pass the nonce returned by request_challenge. POST /api/v1/prove answer
     },
     async (params) => {
       try {
-        const inputs =
-          typeof params.inputs === 'string'
+        if ((params.inputs === undefined) === (params.prepared_inputs_id === undefined)) {
+          return errorResult('Provide exactly one of inputs or prepared_inputs_id');
+        }
+        const inputs = params.prepared_inputs_id
+          ? await approvals.consumeInputs(config, params.prepared_inputs_id, params.circuit)
+          : typeof params.inputs === 'string'
             ? JSON.parse(params.inputs)
             : params.inputs;
 
@@ -464,8 +556,9 @@ You MUST pass the nonce returned by request_challenge. POST /api/v1/prove answer
           nonce: params.nonce,
         });
 
-        return jsonResult(result);
+        return jsonResult(params.prepared_inputs_id ? publicProofSchema.parse(result) : result);
       } catch (error) {
+        if (params.prepared_inputs_id) return errorResult('Private action proof submission could not complete. The handle may have been consumed; check the request before retrying.');
         return errorResult(error instanceof Error ? error.message : String(error));
       }
     },

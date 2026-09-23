@@ -4,6 +4,7 @@ import {readUserStakeAction} from '../demo/shared/userAction.ts';
 import * as actionPolicy from '../demo/shared/userAction.ts';
 import {generateProof} from '../packages/sdk/src/flow.js';
 import {fromPrivateKey} from '../packages/sdk/src/signer.js';
+import type {TypedAction} from '../packages/sdk/src/types.js';
 
 const gate='0x1111111111111111111111111111111111111111',wallet='0x2222222222222222222222222222222222222222';
 function submitted(){return {
@@ -12,6 +13,23 @@ function submitted(){return {
  primaryType:'CredentialDelegation',message:{delegate:wallet,action:'stake',amount:'10000000',expiresAt:String(Math.floor(Date.now()/1000)+2700),nonce:'chosen-by-the-user'},
 };}
 afterEach(()=>vi.unstubAllGlobals());
+
+// Only the HTTP approval boundary is simulated. Signature creation and the
+// SDK's digest/address recovery remain real; attestation I/O stops the flow.
+async function approvedAction(action:TypedAction,scope='proofport'){
+ const human=new ethers.Wallet('0x'+'56'.repeat(32));
+ const signature=await human.signTypedData(action.domain,action.types,action.message);
+ const approval={approvalId:'demo-approval',approvalUrl:'https://ai.example.test/approve/demo-approval#browser',
+  requesterToken:'requester-capability',expiresAt:'2099-01-01T00:00:00.000Z'};
+ const snapshot=structuredClone({circuit:'arc_eligibility',scope,action});
+ vi.stubGlobal('fetch',async(url:string)=>{
+  if(url.endsWith('/consume'))return Response.json({...snapshot,address:human.address,signature});
+  if(url.endsWith('/action-approvals/demo-approval'))return Response.json({...snapshot,approvalId:approval.approvalId,
+   expiresAt:approval.expiresAt,status:'approved',address:human.address});
+  throw Error('stop-at-attestation-boundary');
+ });
+ return {approval,signature,address:human.address};
+}
 
 describe('the user action reaches authorization unchanged',()=>{
  it('blocks a consumed action before another proof payment',async()=>{
@@ -30,14 +48,17 @@ describe('the user action reaches authorization unchanged',()=>{
    message:{actor:wallet,memo:'Entirely user-defined keys and values',enabled:true,parameters:{quantity:'42',policy:ethers.id('user-policy')}},
   };
   const signer=fromPrivateKey(ethers.Wallet.createRandom().privateKey);
+  const signing=vi.spyOn(signer,'signTypedData');
+  const approved=await approvedAction(action);
   let signed:Record<string,unknown>|undefined;
-  vi.stubGlobal('fetch',async()=>{throw Error('stop-at-attestation-boundary');});
-  await expect(generateProof({baseUrl:'http://localhost:1'} as never,{attestation:signer},{circuit:'arc_eligibility',action},
-   {onStep:step=>{if(step.name==='Sign Typed Action')signed=step.data as Record<string,unknown>;}}
+  await expect(generateProof({baseUrl:'http://localhost:1'} as never,{attestation:signer},{circuit:'arc_eligibility',action,actionApproval:approved.approval},
+   {onStep:step=>{if(step.name==='Approve Typed Action')signed=step.data as Record<string,unknown>;}}
   )).rejects.toThrow('stop-at-attestation-boundary');
   expect(signed?.primaryType).toBe('MyCustomAction');
   expect(signed?.actionHash).toBe(ethers.TypedDataEncoder.hashStruct(action.primaryType,action.types,action.message));
-  expect(ethers.verifyTypedData(action.domain,action.types,action.message,String(signed?.signature))).toBe(await signer.getAddress());
+  expect(ethers.verifyTypedData(action.domain,action.types,action.message,approved.signature)).toBe(approved.address);
+  expect(signed).not.toHaveProperty('signature');
+  expect(signing).not.toHaveBeenCalled();
  });
  it('preserves custom nonce and deadline representations and owns an immutable copy',()=>{
   const input=submitted(),action=readUserStakeAction(input,{gate,amount:'10',wallet});
@@ -56,18 +77,20 @@ describe('the user action reaches authorization unchanged',()=>{
    {...input,types:{CredentialDelegation:[...input.types.CredentialDelegation].reverse()}},
   ])expect(()=>readUserStakeAction(value,{gate,amount:'10',wallet})).toThrow();
  });
- it('the SDK signs the exact submitted EIP-712 action and binds its hashes',async()=>{
+ it('the SDK verifies the human-approved EIP-712 action and binds its hashes',async()=>{
   const input=submitted(),action=readUserStakeAction(input,{gate,amount:'10',wallet});
   const key=ethers.Wallet.createRandom().privateKey,signer=fromPrivateKey(key);
+  const signing=vi.spyOn(signer,'signTypedData');
+  const approved=await approvedAction(action,'ledger-house');
   let signed:Record<string,unknown>|undefined;
-  // The test stops after a real local signature, before any proof purchase or external request.
-  vi.stubGlobal('fetch',async()=>{throw Error('stop-at-attestation-boundary');});
-  await expect(generateProof({baseUrl:'http://localhost:1'} as never,{attestation:signer},{circuit:'arc_eligibility',scope:'ledger-house',action},
-   {onStep:step=>{if(step.name==='Sign Typed Action')signed=step.data as Record<string,unknown>;}}
+  await expect(generateProof({baseUrl:'http://localhost:1'} as never,{attestation:signer},{circuit:'arc_eligibility',scope:'ledger-house',action,actionApproval:approved.approval},
+   {onStep:step=>{if(step.name==='Approve Typed Action')signed=step.data as Record<string,unknown>;}}
   )).rejects.toThrow('stop-at-attestation-boundary');
   expect(signed?.domainSeparator).toBe(ethers.TypedDataEncoder.hashDomain(input.domain));
   expect(signed?.actionHash).toBe(ethers.TypedDataEncoder.hashStruct(input.primaryType,input.types,input.message));
-  const signature=String(signed?.signature),address=new ethers.Wallet(key).address;
+  const {signature,address}=approved;
+  expect(signed).not.toHaveProperty('signature');
+  expect(signing).not.toHaveBeenCalled();
   expect(ethers.verifyTypedData(input.domain,input.types,input.message,signature)).toBe(address);
   for(const change of [{nonce:'other'},{amount:'10000001'},{delegate:gate},{expiresAt:'1'}])
    expect(ethers.verifyTypedData(input.domain,input.types,{...input.message,...change},signature)).not.toBe(address);

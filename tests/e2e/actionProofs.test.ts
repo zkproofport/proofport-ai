@@ -7,9 +7,14 @@
 import { describe, it, expect } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { createConfig, generateProof, fromPrivateKey, verifyProof, extractNullifierFromPublicInputs, type ProofResult } from '@zkproofport-ai/sdk';
+import * as sdk from '@zkproofport-ai/sdk';
+import { createConfig, fromPrivateKey, verifyProof, extractNullifierFromPublicInputs, type ProofResult } from '@zkproofport-ai/sdk';
 import { planPayment } from './payer.js';
+import { callToolWithSimulatedApproval, generateProofWithSimulatedApproval } from './simulatedHumanApproval.js';
 import { TypedDataEncoder, keccak256, toUtf8Bytes } from 'ethers';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const baseUrl = process.env.E2E_BASE_URL || 'http://localhost:4002';
 const payerKey = process.env.E2E_PAYER_WALLET_KEY;
@@ -53,24 +58,27 @@ for (const protocol of ['sdk', 'mcp'] as const) {
           primaryType: 'Grant', message: { amount: '1000000', nonce: 'action-parity' },
         };
         let client: Client | undefined;
+        let approvalDirectory: string | undefined;
         try {
           if (protocol === 'mcp') {
+            approvalDirectory = await mkdtemp(join(tmpdir(), 'proofport-action-e2e-'));
             const entry = process.env.E2E_MCP_ENTRY;
             const transport = new StdioClientTransport({
               command: entry ? process.execPath : 'npx',
               args: entry ? [entry] : ['--no-install', 'zkproofport-mcp'],
-              env: { ...process.env, PROOFPORT_URL: baseUrl, ATTESTATION_KEY: row.key!, PAYMENT_PRIVATE_KEY: payerKey, PAYMENT_KEY: payerKey } as Record<string, string>,
+              env: { ...process.env, PROOFPORT_URL: baseUrl, ATTESTATION_KEY: row.key!, PAYMENT_PRIVATE_KEY: payerKey, PAYMENT_KEY: payerKey,
+                ZKPROOFPORT_APPROVAL_DIR: approvalDirectory } as Record<string, string>,
             });
             client = new Client({ name: 'action-proof-e2e', version: '1.0.0' }, { capabilities: {} });
             await client.connect(transport);
           }
           const prove = async (bound: boolean): Promise<ProofResult> => {
-            if (protocol === 'sdk') return generateProof(config, { attestation: fromPrivateKey(row.key!), payment: plan.wallet }, {
+            if (protocol === 'sdk') return generateProofWithSimulatedApproval(sdk, config, { attestation: fromPrivateKey(row.key!), payment: plan.wallet }, {
               circuit: row.circuit, scope, payOn: plan.payOn, ...(bound ? { action } : {}),
             });
-            const result = await client!.callTool({ name: 'generate_proof', arguments: {
+            const result = await callToolWithSimulatedApproval(client!, config, fromPrivateKey(row.key!), 'generate_proof', {
               circuit: row.circuit, scope, pay_with: 'key', pay_on: plan.payOn, ...(bound ? { action } : {}),
-            } }, undefined, { timeout: 180_000 });
+            }, 180_000) as { content: Array<{ text?: string }>; isError?: boolean };
             const text = (result.content as Array<{ text?: string }>)[0]?.text ?? '';
             expect(result.isError, text).toBeFalsy();
             return JSON.parse(text);
@@ -101,7 +109,10 @@ for (const protocol of ['sdk', 'mcp'] as const) {
           expect(plainNullifier).toMatch(/^0x[0-9a-f]{64}$/i);
           expect(plainNullifier).not.toBe('0x' + '00'.repeat(32));
           expect(extractNullifierFromPublicInputs(bound.publicInputs, row.circuit)).toBe(plainNullifier);
-        } finally { await client?.close(); }
+        } finally {
+          await client?.close();
+          if (approvalDirectory) await rm(approvalDirectory, { recursive: true, force: true });
+        }
       }, 480_000);
     }
   });

@@ -12,6 +12,7 @@ on:
       - 'package.json'
       - 'packages/sdk/**'
       - 'packages/mcp/**'
+      - 'packages/approval-web/**'
 
 permissions:
   contents: write

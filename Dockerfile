@@ -23,10 +23,12 @@ WORKDIR /app
 COPY package*.json ./
 COPY packages/sdk/package.json ./packages/sdk/package.json
 COPY packages/mcp/package.json ./packages/mcp/package.json
+COPY packages/approval-web/package.json ./packages/approval-web/package.json
 RUN npm ci --ignore-scripts
 
 COPY tsconfig.json ./
 COPY src/ ./src/
+COPY packages/approval-web/ ./packages/approval-web/
 
 RUN npm run build
 
@@ -60,6 +62,7 @@ WORKDIR /app
 COPY package*.json ./
 COPY packages/sdk/package.json ./packages/sdk/package.json
 COPY packages/mcp/package.json ./packages/mcp/package.json
+COPY packages/approval-web/package.json ./packages/approval-web/package.json
 RUN npm ci --omit=dev --ignore-scripts
 
 # Copy built JavaScript from builder stage
@@ -67,6 +70,7 @@ COPY --from=builder /app/dist ./dist
 
 # Copy public static assets (agent icon, etc.)
 COPY public/ ./public/
+COPY --from=builder /app/public/approval ./public/approval
 
 # Copy AWS enclave build files (Dockerfile.enclave, enclave-server.ts, vsock-bridge.py, systemd/)
 # These are extracted by deploy-ai-aws.yml during EC2 deployment.

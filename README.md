@@ -333,16 +333,17 @@ Proves holder owns an email address at a specific domain via OIDC JWT verificati
 
 ### Arc Eligibility (`arc_eligibility`) — EXPERIMENTAL
 
-The same Coinbase attestation as `coinbase_attestation`, with the wallet signing
-a named EIP-712 action instead of an opaque signal hash. The proof then carries
+The same Coinbase attestation as `coinbase_attestation`, optionally bound to
+a named EIP-712 action signed by its credential wallet. The proof then carries
 the action's domain separator and struct hash, so a verifier checks **which**
 action was authorised rather than only that somebody eligible signed something.
 That is the difference that matters once an agent moves money: `personal_sign`
 over 32 opaque bytes shows a person a hex string.
 
 - **Aliases:** none — the canonical id only
-- **Required inputs:** `domainSeparator` and `actionHash`. A request without
-  both is refused; there is nothing to prove without them
+- **Action inputs:** `domainSeparator` and `actionHash` are provided together
+  for an action-bound proof. Without an action, the wallet signs the request
+  signal hash and the proof has no action binding.
 - **Public inputs, in order:** `signal_hash`, `domain_separator`, `action_hash`,
   `signer_list_merkle_root`, `scope`, `nullifier` — scope at fields 128–159 and
   nullifier at 160–191, which is 64 further along than every other circuit here
@@ -351,6 +352,12 @@ over 32 opaque bytes shows a person a hex string.
 - **Verifier:** `0xCbC8E63fF92659E8B44cFF117D33005Bb669a018` on Arc Testnet (chain 5042002). No Arc mainnet support is claimed.
 - **Status:** `experimental` in `@zkproofport-app/sdk` — provable and
   verifiable, but the layout and the verifier address can still change
+
+### Human wallet approval links
+
+SDK/MCP 0.3.0 introduce a human wallet approval pause for requests containing an Arc or GIWA action. The AI service serves `/approve/:id`: a responsive request page with proof conditions, domain/network details, expandable typed action fields and wallet selection. Ordinary proofs without an action retain the existing flow. See the [MCP human-approval instructions](packages/mcp/README.md#human-approval-for-actions) and [SDK examples](packages/sdk/README.md).
+
+The service stores ten-minute approval sessions in Redis. Browser and requester capabilities are separate; approval is bound to the original action and consumed once before proof preparation/payment. Build the page with `npm run build` (included in the Docker image). `A2A_BASE_URL` must identify the externally reachable AI origin. Set `WALLETCONNECT_PROJECT_ID` to enable mobile-wallet pairing; browser extensions work without it. Deploy the compatible AI service before clients use the SDK/MCP 0.3.0 approval flow. The shared application SDK remains a separate dependency.
 
 ## Contract Addresses
 
@@ -402,6 +409,8 @@ The agent auto-registers on-chain at startup via the ERC-8004 Identity contract.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `4002` | Express server port |
+| `WALLETCONNECT_PROJECT_ID` | Unset | Public WalletConnect project ID for human action approval; injected wallets remain available when unset |
+| `APPROVAL_TRUST_PROXY_HOPS` | Unset (proxy trust disabled) | Integer `1`–`16` for the verified ingress proxy count; scoped to approval creation rate limits |
 | `NODE_ENV` | `development` | Node environment |
 | `BB_PATH` | `bb` | Barretenberg CLI path |
 | `CIRCUITS_DIR` | `/app/circuits` | Circuit artifacts directory |
@@ -423,6 +432,15 @@ The agent auto-registers on-chain at startup via the ERC-8004 Identity contract.
 | `OPENAI_API_KEY` | — | OpenAI API key for chat |
 | `PHOENIX_COLLECTOR_ENDPOINT` | — | Phoenix OTLP endpoint for tracing |
 | `AGENT_VERSION` | Server package version | Optional advertised agent version override |
+
+Human action approvals expire after ten minutes and retain an authenticated
+tombstone for five more minutes. Creation allows ten requests per client IP
+per minute. On Cloud Run, configure `APPROVAL_TRUST_PROXY_HOPS` only after
+verifying the ingress proxy count and ensuring requests cannot take a shorter
+path. With the setting unset, clients behind a proxy share its socket-IP
+bucket; arbitrary `X-Forwarded-For` headers are ignored. This setting does not
+change proxy trust for other service routes. Deployment workflows do not
+enable it automatically.
 
 ### Direct payment settlement wallet
 
@@ -493,6 +511,37 @@ npm run test:unit       # Unit and integration tests
 npm run test:e2e        # E2E against Docker stack
 npm run test:watch      # Watch mode
 ```
+
+### Deployed approval HTTP smoke
+
+After deploying the approval feature, explicitly opt in to its canonical staging
+or production origin. This check uses a public deterministic fixture signer,
+creates two short-lived approval sessions, and never calls proof, payment, or
+chain RPC endpoints:
+
+```bash
+node scripts/verify-approval-deployment.mjs \
+  --allow-deployed --base-url https://stg-ai.zkproofport.app \
+  --expected-version "$(node -p 'require("./package.json").version')" \
+  --expected-assets-dir public/approval \
+  --output "${TMPDIR:-/tmp}/proofport-approval-staging-smoke.json"
+```
+
+Use `https://ai.zkproofport.app` explicitly for production. The script rejects
+other hosts, non-HTTPS origins, URL credentials, paths, queries, fragments, and
+redirects. The existing local-container approval test remains localhost-only.
+`--expected-assets-dir` compares the deployed HTML and referenced JS/CSS bytes
+with the supplied build; `--expected-index-sha256` can additionally pin an exact
+HTML digest. Output contains case results, service version, and public asset
+hashes, never capabilities, approval URLs, signatures, or response bodies.
+
+Coverage includes capability separation, signature validation, altered-request
+rejection, atomic consumption, terminal rejection, public-status privacy, and
+fixed expiry without extension. Actual expiration is reported as untested in
+the quick run because the server TTL is ten minutes. Add `--wait-for-expiry` to
+create one more fixture and observe that transition; it takes about ten minutes.
+This is a deployed HTTP check with a public test EOA, not a real human-wallet or
+paid-proof end-to-end test.
 
 ### Published SDK/MCP E2E
 

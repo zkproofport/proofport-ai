@@ -1,6 +1,7 @@
 // ─── Circuit name mappings ──────────────────────────────────────────────
 
 import { CIRCUIT_IDS, PROVABLE_CIRCUIT_IDS } from './circuits.js';
+import type { ActionApproval } from './actionApproval.js';
 
 /** Client-friendly circuit aliases. */
 export type CircuitName =
@@ -238,12 +239,16 @@ export interface ProofParams {
   /**
    * Optional for arc_eligibility and giwa_attestation; rejected for every
    * other circuit, including OIDC.
-   * The local wallet signs these exact EIP-712 fields after shape, root-type and
-   * value validation. The relying contract must compare the domain/action hashes
+   * A human wallet must approve these exact EIP-712 fields. generateProof throws
+   * ActionApprovalRequiredError with a resumable handle until approval is ready.
+   * The supplied attestation signer is never used for actions.
+   * The relying contract must compare the domain/action hashes
    * and enforce the approved actor, amount, nonce and deadline.
    * Coinbase circuits without an action use personal_sign; OIDC does not sign.
    */
   action?: TypedAction;
+  /** Private handle returned by ActionApprovalRequiredError; resume the same action with it. */
+  actionApproval?: ActionApproval;
 }
 
 export interface ProofResult {
