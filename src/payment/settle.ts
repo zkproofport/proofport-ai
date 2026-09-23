@@ -44,6 +44,7 @@ import { x402Facilitator } from '@x402/core/facilitator';
 import type { PaymentNetwork } from './networks.js';
 import { isBatchPayment } from '@circle-fin/x402-batching';
 import { BatchFacilitatorClient } from '@circle-fin/x402-batching/server';
+import { settleWithFacilitator } from './facilitator.js';
 
 /** The viem chain for one of our networks. Absence is an error, never a guess. */
 function viemChain(net: PaymentNetwork) {
@@ -180,43 +181,7 @@ export async function settlePayment(params: {
   }
 
   if (network.settlement === 'facilitator') {
-    const url = network.facilitatorUrl;
-    if (!url) {
-      throw new Error(
-        `${network.id} is marked settlement:'facilitator' with no facilitatorUrl. ` +
-        `Name the facilitator in networks.ts or mark the chain settlement:'payee'.`,
-      );
-    }
-    const res = await fetch(`${url}/settle`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ x402Version: 2, paymentPayload: payload, paymentRequirements: requirements }),
-    });
-    const text = await res.text();
-    if (!res.ok) {
-      throw new Error(`facilitator ${url} refused to settle ${network.id}: HTTP ${res.status} ${text}`);
-    }
-    let body: Record<string, unknown>;
-    try {
-      body = JSON.parse(text) as Record<string, unknown>;
-    } catch {
-      throw new Error(`facilitator ${url} answered ${network.id} settle with non-JSON: ${text}`);
-    }
-    // Checked BEFORE the hash: a facilitator can answer with a placeholder
-    // transaction alongside an error, and reading the hash first turns a
-    // failed payment into a proof handed out for nothing. This exact ordering
-    // was a comment in the version deleted in April; it is kept.
-    if (body.errorReason) {
-      throw new Error(`facilitator ${url} failed to settle ${network.id}: ${String(body.errorReason)}`);
-    }
-    const txHash =
-      (body.txHash as string) ||
-      ((body.transaction as { hash?: string })?.hash) ||
-      (typeof body.transaction === 'string' ? body.transaction : undefined);
-    if (!txHash) {
-      throw new Error(`facilitator ${url} settled ${network.id} without naming a transaction: ${text}`);
-    }
-    return { txHash, via: 'facilitator', facilitatorUrl: url };
+    return settleWithFacilitator(payload, requirements, network);
   }
 
   const facilitator = facilitatorFor(network);

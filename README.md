@@ -185,6 +185,24 @@ For Arc Gateway nanopayments, `pay_on: "arc-testnet-nano"` draws from an already
 
 Use `max_payment: "0.001"` and `approved_payment` in local MCP, or `maxPayment` and `approvedPayment` in the SDK. Exact approved terms include `network`, `scheme`, `amount` (USDC base units), `asset`, `payTo` and `extra: {name, version, verifyingContract}`. The SDK rejects a changed fee, recipient, asset, network or signing domain before signing. Proof payment and an eventual staking transaction require separate approvals.
 
+Base and Base Sepolia use Dexter first and PayAI as a backup. `--pay-with key`
+and `--pay-with cdp` still choose the buyer's signing wallet; neither selects
+the server's facilitator. Provider failover reuses the identical EIP-3009
+authorization, including its nonce, amount and recipient. Ethereum/Arc direct
+settlement and Circle Gateway nanopayments keep their own settlement routes.
+
+The server tries each configured facilitator at most once for connection
+failures, timeouts, HTTP 429/5xx or malformed responses. Payment rejections
+such as insufficient balance, invalid signatures and expired authorizations
+stop immediately. Before contacting the backup, the server checks the USDC
+authorization state on the selected chain. A pending settlement or an
+already consumed authorization is not submitted again. If that state cannot
+be established, the API reports `settlement_unknown`; known pending responses
+report `settlement_pending`, with a transaction hash when available. These
+outcomes require reconciliation, not a newly signed payment. This failover
+does not implement resumption of a proof request after its settlement response
+was lost. Final on-chain payment verification still runs before proof generation.
+
 ## REST Endpoints
 
 | Endpoint | Method | Purpose |
@@ -394,6 +412,9 @@ The agent auto-registers on-chain at startup via the ERC-8004 Identity contract.
 | `TEE_ATTESTATION` | `false` | Enable attestation verification |
 | `PAYMENT_PAY_TO` | — | Payment recipient (required when payment enabled); must match the prover wallet when direct settlement is offered |
 | `PAYMENT_PROOF_PRICE` | `$0.10` | Price per proof (USD) |
+| `X402_FACILITATOR_URL` | `https://x402.dexter.cash` | Primary Base / Base Sepolia facilitator |
+| `X402_FALLBACK_FACILITATOR_URL` | `https://facilitator.payai.network` | Backup for the same authorization; empty disables failover |
+| `X402_FACILITATOR_TIMEOUT_MS` | `15000` | Per-provider deadline including response body, integer 1–60000 ms |
 | `ARC_VERIFICATION_RPC_URL`, `ARC_VERIFICATION_CHAIN_ID` | Legacy Arc pair only when both absent | Arc proof verification RPC/chain; independent of identity registration; partial pairs are errors |
 | `GIWA_RPC_URL`, `GIWA_EXPLORER_URL` | — | GIWA Sepolia input source and proof verification endpoints |
 | `ERC8004_IDENTITY_ADDRESS` | — | ERC-8004 Identity contract |

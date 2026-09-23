@@ -7,6 +7,7 @@ import { PROVABLE_CIRCUIT_IDS, CIRCUIT_IDS } from '../config/circuitIds.js';
 import type { CircuitId } from '../config/circuitIds.js';
 import { verifyPaymentOnChain } from './paymentVerifier.js';
 import { settlePayment } from '../payment/settle.js';
+import { FacilitatorSettlementError } from '../payment/facilitator.js';
 import { buildPaymentRequirements } from '../payment/networks.js';
 import { resolvePaymentNetworks } from '../payment/networks.js';
 import { isTestnet as isTestnetConfig } from '../config/index.js';
@@ -491,6 +492,7 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
                 network: net.caip2,
                 networkName: net.id,
                 settledBy: net.settlement === 'facilitator' ? net.facilitatorUrl : 'this service',
+                ...(net.settlement === 'facilitator' && net.fallbackFacilitatorUrl ? { fallbackFacilitator: net.fallbackFacilitatorUrl } : {}),
                 buyerNeedsGas: false,
               })),
           teePublicKey,
@@ -658,15 +660,16 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
             });
             paymentTxToVerify = settled.txHash;
             log.info(
-              { action: 'prove.x402.settled', network: payNet.id, via: settled.via, txHash: settled.txHash },
+              { action: 'prove.x402.settled', network: payNet.id, via: settled.via, facilitatorUrl: settled.facilitatorUrl, txHash: settled.txHash },
               'x402 authorization settled',
             );
           } catch (e) {
             log.warn({ action: 'prove.x402.settle_failed', network: payNet.id, err: e }, 'x402 settle failed');
             res.status(402).json({
               error: 'PAYMENT_INVALID',
-              reason: 'settle_failed',
+              reason: e instanceof FacilitatorSettlementError ? e.reason : 'settle_failed',
               message: (e as Error).message,
+              ...(e instanceof FacilitatorSettlementError && e.txHash ? { txHash: e.txHash } : {}),
             });
             return;
           }

@@ -29,9 +29,8 @@
 /**
  * The facilitator for chains a third party will settle.
  *
- * `X402_FACILITATOR_URL` overrides it, which is the only knob an operator
- * needs here -- pointing at a different facilitator, or at a local one during
- * a test. It is an override of this table rather than a separate answer to the
+ * `X402_FACILITATOR_URL` selects the primary; `X402_FALLBACK_FACILITATOR_URL`
+ * selects its backup (empty disables failover). These override the table rather than a separate answer to the
  * same question: before this, the env var was published in the 402 body as
  * "the" facilitator while the table named one per chain, so the two could
  * disagree and the body was simply wrong for every chain no facilitator
@@ -41,6 +40,7 @@
  * no facilitator to point anywhere.
  */
 const DEXTER = process.env.X402_FACILITATOR_URL || 'https://x402.dexter.cash';
+const PAYAI = process.env.X402_FALLBACK_FACILITATOR_URL ?? 'https://facilitator.payai.network';
 
 /** A chain this service can be paid on. */
 /**
@@ -169,6 +169,8 @@ export interface PaymentNetwork {
   nativeUsdc: boolean;
   /** The facilitator that settles this chain, when `settlement` is 'facilitator'. */
   facilitatorUrl?: string;
+  /** Backup for the same chain and EIP-3009 authorization; never a different payment route. */
+  fallbackFacilitatorUrl?: string;
   /** Env var holding this chain's RPC. Read at request time, never guessed. */
   rpcEnv: string;
   defaultRpc: string;
@@ -187,6 +189,7 @@ const NETWORKS: Record<string, PaymentNetwork> = {
     eip3009: { name: 'USDC', version: '2' },
     settlement: 'facilitator',
     facilitatorUrl: DEXTER,
+    fallbackFacilitatorUrl: PAYAI || undefined,
     nativeUsdc: false,
     rpcEnv: 'CHAIN_RPC_URL',
     defaultRpc: 'https://sepolia.base.org',
@@ -203,6 +206,7 @@ const NETWORKS: Record<string, PaymentNetwork> = {
     eip3009: { name: 'USD Coin', version: '2' },
     settlement: 'facilitator',
     facilitatorUrl: DEXTER,
+    fallbackFacilitatorUrl: PAYAI || undefined,
     nativeUsdc: false,
     rpcEnv: 'CHAIN_RPC_URL',
     defaultRpc: 'https://mainnet.base.org',
