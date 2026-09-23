@@ -23,6 +23,7 @@ async function fixture({ behavior = 'success', status = 'pending', presentation 
     const posts = [];
     const headers = [];
     const failures = [];
+    let failNextRead = false;
     page.setDefaultTimeout(8000);
     page.on('requestfailed', request => failures.push({ path: new URL(request.url()).pathname, error: request.failure()?.errorText }));
     let current = session(status);
@@ -40,6 +41,14 @@ async function fixture({ behavior = 'success', status = 'pending', presentation 
                 if (method === 'eth_chainId')
                     return `0x${chainId.toString(16)}`;
                 if (method === 'eth_signTypedData_v4') {
+                    if (behavior === 'identical-notifications') {
+                        for (let repeat = 0; repeat < 2; repeat++) {
+                            (listeners.accountsChanged || []).forEach(f => f([address]));
+                            (listeners.chainChanged || []).forEach(f => f(chainId));
+                            (listeners.accountsChanged || []).forEach(f => f([`0x${address.slice(2).toUpperCase()}`]));
+                            (listeners.chainChanged || []).forEach(f => f(`0x${chainId.toString(16)}`));
+                        }
+                    }
                     if (behavior === 'held-sign')
                         return new Promise((_resolve, reject) => { window.releaseSignature = () => reject(Object.assign(new Error('declined'), { code: 4001 })); });
                     if (behavior === 'reject')
@@ -82,8 +91,14 @@ async function fixture({ behavior = 'success', status = 'pending', presentation 
             if (url.pathname.endsWith('/config'))
                 return route.fulfill({ json: mobileRecovery ? { walletConnectProjectId: 'offline-browser-fixture' } : {} });
             headers.push(request.headers());
+            if (request.method() === 'GET' && failNextRead) {
+                failNextRead = false;
+                return route.fulfill({ status: 503, json: { error: 'Simulated status read failure' } });
+            }
             if (request.method() === 'POST') {
                 posts.push({ path: url.pathname, body: request.postDataJSON() });
+                if (behavior === 'submit-failure' && url.pathname.endsWith('/approve'))
+                    return route.fulfill({ status: 503, json: { error: 'Simulated approval submission failure' } });
                 current = { ...current, status: url.pathname.endsWith('/reject') ? 'rejected' : 'approved' };
             }
             return route.fulfill({ json: current });
@@ -100,7 +115,7 @@ async function fixture({ behavior = 'success', status = 'pending', presentation 
         }
     });
     await page.goto(`https://approval.test/approve/demo#${token}`);
-    return { page, context, posts, headers, failures };
+    return { page, context, posts, headers, failures, failNextRead: () => { failNextRead = true; } };
 }
 test('rich request cards render escaped nested fields and desktop/mobile screenshots', async () => {
     const f = await fixture();
@@ -169,19 +184,68 @@ test('explicit selection then review/sign approves the exact action', async () =
         await f.context.close();
     }
 });
+test('identical wallet notifications during signing complete the approval without changing its payload', async () => {
+    const f = await fixture({ behavior: 'identical-notifications', presentation: true });
+    try {
+        await f.page.getByRole('button', { name: 'Simulated EVM wallet', exact: true }).click();
+        await f.page.getByRole('button', { name: 'Review and sign', exact: true }).click();
+        await f.page.getByRole('heading', { name: 'Approval complete', exact: true }).waitFor();
+        assert.equal(f.posts.length, 1);
+        assert.equal(f.posts[0].body.address, address);
+        assert.ok(f.posts[0].path.endsWith('/approve'));
+        const signed = await f.page.evaluate(() => window.walletCalls.filter(call => call.method === 'eth_signTypedData_v4'));
+        assert.equal(signed.length, 1);
+        const payload = JSON.parse(signed[0].params[1]);
+        assert.equal(payload.domain.chainId, 91342);
+        assert.equal(payload.primaryType, 'TopicPermission');
+        assert.deepEqual(payload.message, { topic: 'research / protocol-updates', permissions: { read: true, write: false }, nonce: '0' });
+        assert.equal(await f.page.getByRole('button', { name: 'Review and sign', exact: true }).count(), 0);
+        assert.equal(await f.page.getByRole('button', { name: 'Connect mobile wallet', exact: true }).count(), 0);
+        assert.equal(await f.page.getByRole('button', { name: 'Reject request', exact: true }).count(), 0);
+        assert.equal(await f.page.getByRole('alert').count(), 0);
+        await f.page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+        assert.equal(await f.page.locator('.terminal').evaluate(element => document.activeElement === element), true);
+        // Wallet discovery can render again after submission has fully settled.
+        await f.page.evaluate(() => window.dispatchEvent(new CustomEvent('eip6963:announceProvider', { detail: {
+            info: { uuid: 'late-wallet', name: 'Late simulated wallet' }, provider: { request: async () => [] },
+        } })));
+        assert.equal(await f.page.locator('.terminal').evaluate(element => document.activeElement === element), true);
+        await f.page.screenshot({ path: join(artifactDir, 'approval-complete-desktop.png'), fullPage: true });
+        await f.page.setViewportSize({ width: 360, height: 800 });
+        assert.equal(await f.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+        await f.page.getByRole('heading', { name: 'Approval complete', exact: true }).scrollIntoViewIfNeeded();
+        await f.page.screenshot({ path: join(artifactDir, 'approval-complete-mobile.png'), fullPage: true });
+    }
+    finally { await f.context.close(); }
+});
 for (const behavior of ['reject', 'account-change'])
     test(`simulated wallet ${behavior} never submits approval`, async () => {
         const f = await fixture({ behavior });
         try {
             await f.page.getByRole('button', { name: 'Simulated EVM wallet', exact: true }).click();
             await f.page.getByRole('button', { name: 'Review and sign', exact: true }).click();
-            await f.page.getByRole('alert').waitFor();
+            await f.page.locator('.actions .signing-feedback[role="alert"]').waitFor();
             assert.equal(f.posts.length, 0);
         }
         finally {
             await f.context.close();
         }
     });
+test('failed approval submission stays incomplete, reports beside signing controls, and never retries automatically', async () => {
+    const f = await fixture({ behavior: 'submit-failure' });
+    try {
+        await f.page.getByRole('button', { name: 'Simulated EVM wallet', exact: true }).click();
+        await f.page.getByRole('button', { name: 'Review and sign', exact: true }).click();
+        await f.page.locator('.actions .signing-feedback[role="alert"]').waitFor();
+        assert.equal(f.posts.length, 1);
+        assert.equal(await f.page.getByRole('heading', { name: 'Approval complete', exact: true }).count(), 0);
+        const sign = f.page.getByRole('button', { name: 'Review and sign', exact: true });
+        if (await sign.isEnabled()) await sign.click();
+        assert.equal(f.posts.length, 1);
+        assert.equal((await f.page.evaluate(() => window.walletCalls.filter(call => call.method === 'eth_signTypedData_v4'))).length, 1);
+    }
+    finally { await f.context.close(); }
+});
 test('reject works without wallet and optional mobile configuration is explicit', async () => {
     const f = await fixture();
     try {
@@ -201,7 +265,7 @@ test('mobile recovery resets without automatic pairing and removes connected-wal
     try {
         const connect = f.page.getByRole('button', { name: 'Connect mobile wallet', exact: true });
         await connect.click();
-        await f.page.getByRole('alert').waitFor();
+        await f.page.locator('.actions .signing-feedback[role="alert"]').waitFor();
         const reset = f.page.getByRole('button', { name: 'Reset mobile connection', exact: true });
         await reset.click();
         await f.page.waitForFunction(() => window.mobileFixture.resetCalls === 1);
@@ -250,6 +314,22 @@ test('status polling preserves keyboard focus while the request is unchanged', a
     finally {
         await f.context.close();
     }
+});
+test('a recovered poll removes a transient alert when approval remains approved', async () => {
+    const f = await fixture({ status: 'approved' });
+    try {
+        await f.page.getByRole('heading', { name: 'Approval complete', exact: true }).waitFor();
+        f.failNextRead();
+        await f.page.getByRole('alert').waitFor();
+        assert.equal(await f.page.getByRole('heading', { name: 'Approval complete', exact: true }).count(), 1);
+        const recovered = f.page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/action-approvals/demo' && response.status() === 200);
+        await (await recovered).finished();
+        await f.page.getByRole('alert').waitFor({ state: 'hidden' });
+        assert.equal(await f.page.getByRole('heading', { name: 'Approval complete', exact: true }).count(), 1);
+        assert.equal(await f.page.getByRole('button', { name: 'Review and sign', exact: true }).count(), 0);
+        assert.equal(f.posts.length, 0);
+    }
+    finally { await f.context.close(); }
 });
 test('local expiry removes signing controls without duplicating review cards', async () => {
     const f = await fixture({ expiresIn: 1500 });

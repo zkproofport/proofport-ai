@@ -39,8 +39,8 @@ beforeEach(async () => {
     // Spy on the installed class's external initialization boundary. Concurrent
     // dynamic imports must observe the same spy; a virtual module mock can be
     // bypassed by Vitest's overlapping-import recursion handling.
-    const { EthereumProvider } = await import('@walletconnect/ethereum-provider');
-    vi.spyOn(EthereumProvider, 'init').mockImplementation(mock.init);
+    const { ApprovalEthereumProvider } = await import('../src/mobile-provider');
+    vi.spyOn(ApprovalEthereumProvider, 'init').mockImplementation(mock.init);
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 

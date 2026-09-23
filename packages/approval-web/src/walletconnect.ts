@@ -36,8 +36,9 @@ export async function mobileWallet(projectId: string, chainId: number): Promise<
     if (current.projectId !== projectId || current.chainId !== chainId)
         throw new ApprovalError('The mobile wallet configuration changed. Reload this request before connecting.');
     if (!current.provider) {
-        current.provider = import('@walletconnect/ethereum-provider').then(({ EthereumProvider }) => EthereumProvider.init({
+        current.provider = import('./mobile-provider').then(({ ApprovalEthereumProvider }) => ApprovalEthereumProvider.init({
             projectId, optionalChains: [chainId], showQrModal: true,
+            qrModalOptions: { themeVariables: { '--wcm-font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' } },
             optionalMethods: ['eth_signTypedData_v4', 'eth_accounts', 'eth_requestAccounts', 'eth_chainId'],
             optionalEvents: ['accountsChanged', 'chainChanged'],
             metadata: { name: 'ZKProofport', description: 'Review and approve a proof action with your wallet.', url: location.origin, icons: [] },

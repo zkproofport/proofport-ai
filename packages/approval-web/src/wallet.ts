@@ -34,11 +34,12 @@ export class ApprovalWallet {
     busy = false;
     private provider?: EvmProvider;
     private epoch = 0;
+    private invalidationReason?: string;
     private submitted = false;
     private payload: string;
     private listeners = new Map<string, (...args: unknown[]) => void>();
     constructor(private action: TypedAction, private expected: string | undefined, private canSign: () => boolean, private submit: (address: string, signature: string) => Promise<void>, private changed: (message?: string) => void) { this.payload = walletPayload(action); }
-    invalidate(message?: string): void { this.epoch++; this.address = undefined; this.changed(message); }
+    invalidate(message?: string): void { this.epoch++; this.invalidationReason = message; this.address = undefined; this.changed(message); }
     dispose(): void {
         for (const [event, listener] of this.listeners)
             this.provider?.removeListener?.(event, listener);
@@ -54,8 +55,25 @@ export class ApprovalWallet {
         this.provider = provider;
         this.busy = true;
         this.changed();
-        for (const event of ['accountsChanged', 'chainChanged', 'disconnect']) {
-            const listener = () => this.invalidate('Your wallet account or network changed. Reconnect and review the request again.');
+        for (const event of ['accountsChanged', 'chainChanged', 'disconnect'] as const) {
+            const listener = (value: unknown) => {
+                // Wallets may repeat the current state during signing. Only a
+                // validated, identical state is harmless; unknown events fail closed.
+                let unchanged = false;
+                if (event === 'accountsChanged')
+                    unchanged = !!this.address && Array.isArray(value) && value.length > 0 && value.every(validAddress) && value[0].toLowerCase() === this.address.toLowerCase();
+                if (event === 'chainChanged')
+                    unchanged = matchesChain(value, this.action.domain.chainId);
+                console.info('[Wallet approval] wallet event', { event, unchanged, requestInFlight: this.busy });
+                if (unchanged)
+                    return;
+                const reasons = {
+                    accountsChanged: 'Your wallet reported a different or unavailable signing account. Connect the intended account and review again.',
+                    chainChanged: 'Your wallet reported a different or unavailable network. Reconnect on the requested chain and review again.',
+                    disconnect: 'Your wallet disconnected before approval was submitted. Reconnect and review again.',
+                };
+                this.invalidate(reasons[event]);
+            };
             this.listeners.set(event, listener);
             provider.on?.(event, listener);
         }
@@ -97,7 +115,7 @@ export class ApprovalWallet {
         this.busy = true;
         this.changed();
         const stable = () => { if (epoch !== this.epoch || !this.canSign() || this.address !== pinned)
-            throw new ApprovalError('The request or wallet changed. Reconnect and review before signing.'); };
+            throw new ApprovalError(this.invalidationReason || 'This request changed or expired before approval was submitted. Review a current request before signing.'); };
         try {
             const before = await this.check(provider);
             stable();

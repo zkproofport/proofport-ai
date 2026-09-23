@@ -123,6 +123,8 @@ function accept(value: ApprovalSession, initial = false): void {
     if (initial)
         frozenIdentity = identity(next);
     session = next;
+    if (session.status === 'approved' || session.status === 'consumed')
+        error = '';
     if (!pending() && wallet?.address)
         wallet.invalidate();
 }
@@ -132,9 +134,10 @@ async function refresh(): Promise<void> {
     polling = true;
     try {
         const previousStatus = session.status;
+        const previousError = error;
         accept(await api.read());
         // Avoid rebuilding focused controls and open disclosures on unchanged polls.
-        if (session.status !== previousStatus)
+        if (session.status !== previousStatus || error !== previousError)
             render();
     }
     catch (cause) {
@@ -173,6 +176,9 @@ function render(): void {
         }
     }
     const expanded = [...root.querySelectorAll<HTMLDetailsElement>('details[open]')].map(d => d.dataset.key);
+    const previousTerminal = root.querySelector<HTMLElement>('.terminal');
+    const previousTerminalStatus = previousTerminal?.dataset.status;
+    const terminalHadFocus = previousTerminal !== null && previousTerminal === document.activeElement;
     root.replaceChildren();
     root.setAttribute('aria-busy', 'false');
     const brand = el('header', 'brand');
@@ -281,6 +287,16 @@ function render(): void {
         }
         root.append(walletCard);
         const actions = el('section', 'actions');
+        if (error) {
+            const feedback = el('p', 'alert signing-feedback', error);
+            feedback.setAttribute('role', 'alert');
+            actions.append(feedback);
+        }
+        else if (wallet?.busy) {
+            const feedback = el('p', 'signing-feedback muted', 'Waiting for your wallet and confirmation from the server. Keep this page open.');
+            feedback.setAttribute('role', 'status');
+            actions.append(feedback);
+        }
         actions.append(button(wallet?.busy ? 'Waiting for wallet…' : 'Review and sign', 'primary', () => void (async () => { error = ''; try {
             await wallet!.sign();
         }
@@ -293,10 +309,18 @@ function render(): void {
     else {
         const terminal = card(({ approved: 'Approval complete', rejected: 'Request rejected', consumed: 'Approval used', expired: 'Request expired', pending: 'Signing unavailable' })[session.status], session.status === 'approved' ? 'check' : 'info');
         terminal.classList.add('terminal');
+        terminal.dataset.status = session.status;
+        if (session.status === 'approved' || session.status === 'consumed')
+            terminal.classList.add('success');
         terminal.setAttribute('aria-live', 'polite');
+        terminal.tabIndex = -1;
         const copy = { approved: 'The requester can now continue proof generation. This is not a transaction confirmation.', rejected: 'No approval was granted. You can close this page.', consumed: 'The requester has used this approval to continue the proof flow.', expired: 'This request can no longer be approved. Ask the requester for a new link.', pending: 'Ask the requester for a new approval link.' };
         terminal.append(el('p', 'card-note', copy[session.status]));
         root.append(terminal);
+        if (terminalHadFocus || previousTerminalStatus !== session.status)
+            terminal.focus({ preventScroll: true });
+        if (previousTerminalStatus !== session.status)
+            terminal.scrollIntoView({ block: 'center' });
     }
     const footer = el('footer');
     footer.append(icon('shield'), el('span', '', 'ZKProofport · Wallet-held credentials'));

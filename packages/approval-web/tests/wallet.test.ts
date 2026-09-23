@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ApprovalWallet } from '../src/wallet';
-import { freezeAction } from '../src/model';
+import { freezeAction, walletPayload } from '../src/model';
 const address = `0x${'a'.repeat(40)}`;
 const other = `0x${'b'.repeat(40)}`;
 const frozen = (chainId = 8453) => freezeAction({ domain: { name: 'Test', version: '1', chainId, verifyingContract: address }, types: { Action: [{ name: 'count', type: 'uint256' }] }, primaryType: 'Action', message: { count: '0' } });
@@ -29,6 +29,54 @@ function setup(chainId = 8453) {
     return { wallet, provider, submit, listeners, setAccounts: (a: string[]) => { accounts = a; }, setChain: (c: unknown) => { chain = c; } };
 }
 describe('simulated wallet approval safety', () => {
+    it.each([
+        { label: 'same account', events: [['accountsChanged', [address]]] },
+        { label: 'same account with different casing', events: [['accountsChanged', [`0x${'A'.repeat(40)}`]]] },
+        { label: 'same numeric chain', events: [['chainChanged', 91342]] },
+        { label: 'same hexadecimal chain', events: [['chainChanged', '0x164ce']] },
+        { label: 'repeated identical account and chain notifications', events: [['accountsChanged', [address]], ['chainChanged', 91342], ['accountsChanged', [`0x${'A'.repeat(40)}`]], ['chainChanged', '0x164CE']] },
+    ])('submits the exact frozen action once after $label during signing', async ({ events }) => {
+        const s = setup(91342); s.setChain(91342);
+        await s.wallet.connect(s.provider);
+        const request = s.provider.request.getMockImplementation()!;
+        s.provider.request.mockImplementation(async args => {
+            if (args.method === 'eth_signTypedData_v4')
+                for (const [event, value] of events) s.listeners.get(event as string)?.(value);
+            return request(args);
+        });
+        await s.wallet.sign();
+        expect(s.submit).toHaveBeenCalledExactlyOnceWith(address, `0x${'1'.repeat(130)}`);
+        const calls = s.provider.request.mock.calls.filter(([args]) => args.method === 'eth_signTypedData_v4');
+        expect(calls).toHaveLength(1);
+        expect(calls[0][0].params).toEqual([address, walletPayload(frozen(91342))]);
+        expect(s.wallet.address).toBe(address);
+        await expect(s.wallet.sign()).rejects.toThrow();
+        expect(s.submit).toHaveBeenCalledTimes(1);
+    });
+    it.each([
+        { label: 'different account', events: [['accountsChanged', [other]]] },
+        { label: 'account change then change back', events: [['accountsChanged', [other]], ['accountsChanged', [address]]] },
+        { label: 'empty accounts', events: [['accountsChanged', []]] },
+        { label: 'malformed account', events: [['accountsChanged', ['invalid-address']]] },
+        { label: 'missing accounts', events: [['accountsChanged', undefined]] },
+        { label: 'different chain', events: [['chainChanged', 1]] },
+        { label: 'chain change then change back', events: [['chainChanged', 1], ['chainChanged', 91342]] },
+        { label: 'malformed chain', events: [['chainChanged', '91342']] },
+        { label: 'missing chain', events: [['chainChanged', undefined]] },
+        { label: 'disconnect', events: [['disconnect', { code: 4900 }]] },
+    ])('never submits after $label even if final account and chain match', async ({ events }) => {
+        const s = setup(91342); s.setChain(91342);
+        await s.wallet.connect(s.provider);
+        const request = s.provider.request.getMockImplementation()!;
+        s.provider.request.mockImplementation(async args => {
+            if (args.method === 'eth_signTypedData_v4')
+                for (const [event, value] of events) s.listeners.get(event as string)?.(value);
+            return request(args);
+        });
+        await expect(s.wallet.sign()).rejects.toThrow();
+        expect(s.submit).not.toHaveBeenCalled();
+        expect(s.wallet.address).toBeUndefined();
+    });
     // Installed WalletConnect returns a number; injected providers commonly return hex.
     it.each([91342, '0x164ce', '0x164CE'])('accepts GIWA chain result %s and preserves the numeric signing domain', async chain => {
         const s = setup(91342);
@@ -134,6 +182,26 @@ describe('simulated wallet approval safety', () => {
         await expect(s.wallet.sign()).rejects.toThrow();
         await expect(s.wallet.sign()).rejects.toThrow();
         expect(s.submit).toHaveBeenCalledTimes(1);
+    });
+    it('rejects a request that becomes stale while the signature is pending', async () => {
+        const s = setup(); let current = true;
+        const wallet = new ApprovalWallet(frozen(), address, () => current, s.submit, vi.fn());
+        await wallet.connect(s.provider);
+        const request = s.provider.request.getMockImplementation()!;
+        s.provider.request.mockImplementation(async args => {
+            if (args.method === 'eth_signTypedData_v4') current = false;
+            return request(args);
+        });
+        await expect(wallet.sign()).rejects.toThrow(/request|changed/i);
+        expect(s.submit).not.toHaveBeenCalled();
+    });
+    it('rejects malformed signature bytes even when wallet notifications are unchanged', async () => {
+        const s = setup();
+        await s.wallet.connect(s.provider);
+        const request = s.provider.request.getMockImplementation()!;
+        s.provider.request.mockImplementation(async args => args.method === 'eth_signTypedData_v4' ? '0x1234' : request(args));
+        await expect(s.wallet.sign()).rejects.toThrow(/signature/i);
+        expect(s.submit).not.toHaveBeenCalled();
     });
     it('does not sign an expired/rejected request or accept duplicate clicks', async () => {
         const s = setup();

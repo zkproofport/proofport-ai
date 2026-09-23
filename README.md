@@ -359,6 +359,8 @@ SDK/MCP 0.3.0 introduce a human wallet approval pause for requests containing an
 
 The service stores ten-minute approval sessions in Redis. Browser and requester capabilities are separate; approval is bound to the original action and consumed once before proof preparation/payment. Build the page with `npm run build` (included in the Docker image). `A2A_BASE_URL` must identify the externally reachable AI origin. Set `WALLETCONNECT_PROJECT_ID` to enable mobile-wallet pairing; browser extensions work without it. Deploy the compatible AI service before clients use the SDK/MCP 0.3.0 approval flow. The shared application SDK remains a separate dependency.
 
+The approval UI ignores repeated, validated wallet state notifications while invalidating signatures on actual account/network changes or disconnects. Its WalletConnect 2.25.0 adapter consumes normalized chain events without echoing raw notifications back as switch commands, avoiding a request-before-provider-initialization race during pairing. Explicit network selection still uses the public provider API. Run the approval workspace tests, browser tests, and a real local wallet approval before deployment when changing this adapter. The modal uses the page's system font stack so AppKit does not preload unused remote font variants.
+
 ## Contract Addresses
 
 ### Arc Testnet — EXPERIMENTAL (5042002)

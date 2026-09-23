@@ -458,6 +458,23 @@ summary::-webkit-details-marker {
 .terminal {
   border-color: #39586a;
 }
+.signing-feedback {
+  margin-bottom: 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.terminal.success {
+  border-color: #397a61;
+  background: #19392e;
+}
+.terminal.success .section-heading {
+  color: #90e1be;
+  font-size: 20px;
+}
+.terminal.success .section-heading svg {
+  width: 28px;
+  height: 28px;
+}
 .terminal .section-heading {
   margin-bottom: 9px;
 }
