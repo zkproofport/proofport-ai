@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.1](https://github.com/zkproofport/proofport-ai/compare/server-v0.3.0...server-v0.3.1) (2026-09-23)
+
+
+### Bug Fixes
+
+* **approval:** preserve signatures across wallet notifications ([58da692](https://github.com/zkproofport/proofport-ai/commit/58da6920e461e3cda0fc1e0d1d2a65fc3afb9a66))
+* **approval:** reuse wallet sessions and accept numeric chain IDs ([8078bed](https://github.com/zkproofport/proofport-ai/commit/8078beddaa62e4efa3b6c4c4982e0e9bc9984a05))
+* **approval:** synchronize wallet chains and expose session reset ([2c387e0](https://github.com/zkproofport/proofport-ai/commit/2c387e0b1a9c1bf65a1797f636c12e8c05c92aa7))
+* **server:** allow WalletConnect verification frames on approval pages ([b0f7a10](https://github.com/zkproofport/proofport-ai/commit/b0f7a10b30b2b083579e2a44c59cbb6b8272aab4))
+
 ## [0.3.0](https://github.com/zkproofport/proofport-ai/compare/server-v0.2.12...server-v0.3.0) (2026-09-23)
 
 
