@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.3.0](https://github.com/zkproofport/proofport-ai/compare/server-v0.2.12...server-v0.3.0) (2026-09-23)
+
+
+### ⚠ BREAKING CHANGES
+
+* Arc and GIWA action proof calls now pause for a human wallet signature instead of signing through the local attestation key. SDK callers must handle ActionApprovalRequiredError and resume the unchanged request.
+
+### Features
+
+* require human approval for action proofs ([09ad249](https://github.com/zkproofport/proofport-ai/commit/09ad24913c75534f2f549cd777e90db6f0723b7f))
+
+
+### Bug Fixes
+
+* fall back to PayAI for Base payment settlement ([38f9448](https://github.com/zkproofport/proofport-ai/commit/38f94485978586f0ec91e164c0989e775606c53c))
+* publish this deployment's own name, not the mainnet one ([b1db65d](https://github.com/zkproofport/proofport-ai/commit/b1db65db5e1f8e0b7884f9ab62b7bfd711ae1207))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @zkproofport-ai/mcp bumped from ^0.2.17 to ^0.3.0
+    * @zkproofport-ai/sdk bumped from ^0.2.17 to ^0.3.0
+
 ## [0.2.12](https://github.com/zkproofport/proofport-ai/compare/server-v0.2.11...server-v0.2.12) (2026-09-22)
 
 
