@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.4.0](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.3.0...mcp-v0.4.0) (2026-10-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* arc_eligibility is no longer a circuit, the arc-testnet and arc-testnet-nano payment networks are gone, and the MCP drops its Circle Gateway tools. Buyers pay from a private key (`key`) or a Coinbase CDP wallet (`cdp`); `walletFromCircle` and `pay_with: circle` are removed. The app SDK dependency moves to @zkproofport-app/sdk 0.4.0.
+
+### Features
+
+* remove Arc and the Circle payment wallet ([786c0b7](https://github.com/zkproofport/proofport-ai/commit/786c0b72d40cff49e2e5ae0276e348ca0d86be40))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @zkproofport-ai/sdk bumped from ^0.3.0 to ^0.4.0
+
 ## [0.3.0](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.2.17...mcp-v0.3.0) (2026-09-23)
 
 

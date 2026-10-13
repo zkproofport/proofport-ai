@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.4.0](https://github.com/zkproofport/proofport-ai/compare/server-v0.3.0...server-v0.4.0) (2026-10-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* arc_eligibility is no longer a circuit, the arc-testnet and arc-testnet-nano payment networks are gone, and the MCP drops its Circle Gateway tools. Buyers pay from a private key (`key`) or a Coinbase CDP wallet (`cdp`); `walletFromCircle` and `pay_with: circle` are removed. The app SDK dependency moves to @zkproofport-app/sdk 0.4.0.
+
+### Features
+
+* remove Arc and the Circle payment wallet ([786c0b7](https://github.com/zkproofport/proofport-ai/commit/786c0b72d40cff49e2e5ae0276e348ca0d86be40))
+
+
+### Bug Fixes
+
+* **approval:** preserve signatures across wallet notifications ([58da692](https://github.com/zkproofport/proofport-ai/commit/58da6920e461e3cda0fc1e0d1d2a65fc3afb9a66))
+* **approval:** reuse wallet sessions and accept numeric chain IDs ([8078bed](https://github.com/zkproofport/proofport-ai/commit/8078beddaa62e4efa3b6c4c4982e0e9bc9984a05))
+* **approval:** synchronize wallet chains and expose session reset ([2c387e0](https://github.com/zkproofport/proofport-ai/commit/2c387e0b1a9c1bf65a1797f636c12e8c05c92aa7))
+* **sdk:** retry a dropped connection to the GIWA explorer ([9f325dc](https://github.com/zkproofport/proofport-ai/commit/9f325dcc0ef7a79b924a9f5c5f2396c79e99d883))
+* **server:** allow WalletConnect verification frames on approval pages ([b0f7a10](https://github.com/zkproofport/proofport-ai/commit/b0f7a10b30b2b083579e2a44c59cbb6b8272aab4))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @zkproofport-ai/mcp bumped from ^0.3.0 to ^0.4.0
+    * @zkproofport-ai/sdk bumped from ^0.3.0 to ^0.4.0
+
 ## [0.3.0](https://github.com/zkproofport/proofport-ai/compare/server-v0.2.12...server-v0.3.0) (2026-09-23)
 
 
