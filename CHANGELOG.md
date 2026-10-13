@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/zkproofport/proofport-ai/compare/server-v0.4.0...server-v0.4.1) (2026-10-13)
+
+
+### Bug Fixes
+
+* **identity:** send transactions one request at a time ([e5094dc](https://github.com/zkproofport/proofport-ai/commit/e5094dc452d8ca93df49df37d8faad0afb99fee5)), closes [#30](https://github.com/zkproofport/proofport-ai/issues/30)
+
 ## [0.4.0](https://github.com/zkproofport/proofport-ai/compare/server-v0.3.0...server-v0.4.0) (2026-10-13)
 
 
