@@ -1,3 +1,4 @@
+// e2e-phase: paid
 /**
  * Paying for a proof, from each wallet a customer can pay with.
  *

@@ -1,3 +1,4 @@
+// e2e-phase: paid
 /** Real published MCP payments: both staging networks, one proof per network.
  * Requires ATTESTATION_KEY and an existing funded E2E_PAYER_WALLET_KEY (or
  * explicit E2E_PAYER_KEY_BASE_SEPOLIA / E2E_PAYER_KEY_ETHEREUM_SEPOLIA

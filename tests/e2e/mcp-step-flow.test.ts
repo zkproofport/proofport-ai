@@ -1,3 +1,4 @@
+// e2e-phase: paid
 /** Published stdio MCP: CDP-paid all-in-one proof and unpaid step-flow refusal.
  * No wallet creation/funding. Requires the existing CDP wallet and credentials,
  * ATTESTATION_KEY, and the isolated published runner (E2E_MCP_ENTRY/SDK_ENTRY).

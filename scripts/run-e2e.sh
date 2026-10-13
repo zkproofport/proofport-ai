@@ -114,15 +114,23 @@ COMPOSE_PAYMENT="docker compose -f docker-compose.yml -f docker-compose.e2e-paym
 # Derived from the directory, never a hand-kept list: this script spent months
 # pointing at tests/e2e/x402-e2e.test.ts and tests/e2e/a2a-llm-inference.test.ts
 # after both were deleted, so its paid phase could only ever report FAILED.
-PAID_SUITE="tests/e2e/payment.test.ts"
+#
+# A suite that pays says so in its own file with the line
+#     // e2e-phase: paid
+# It used to be one hardcoded name, payment.test.ts, so the two paying suites
+# added later (mcp-payment, mcp-step-flow) ran in the payment-disabled phase
+# and failed there on "this suite must exercise a paid deployment" every time.
+PAID_MARKER='^// e2e-phase: paid$'
 FREE_SUITES=()
+PAID_SUITES=()
 while IFS= read -r f; do
-  [ "$f" = "$PAID_SUITE" ] && continue
   [ -n "$ONLY" ] && [[ "$f" != *"$ONLY"* ]] && continue
-  FREE_SUITES+=("$f")
+  if grep -q "$PAID_MARKER" "$f"; then PAID_SUITES+=("$f"); else FREE_SUITES+=("$f"); fi
 done < <(ls tests/e2e/*.test.ts)
+grep -q "$PAID_MARKER" tests/e2e/payment.test.ts \
+  || { echo "tests/e2e/payment.test.ts lost its '// e2e-phase: paid' line" >&2; exit 1; }
 
-if [ -n "$ONLY" ] && [ ${#FREE_SUITES[@]} -eq 0 ] && [[ "$PAID_SUITE" != *"$ONLY"* ]]; then
+if [ -n "$ONLY" ] && [ ${#FREE_SUITES[@]} -eq 0 ] && [ ${#PAID_SUITES[@]} -eq 0 ]; then
   err "--only '$ONLY' matches no file in tests/e2e/"
   ls tests/e2e/*.test.ts
   exit 1
@@ -311,11 +319,11 @@ PAYMENT_RAN=false
 
 if [ "$WANT_PAYMENT" != true ]; then
   warn "Paying suite not run: local runs do not spend. Pay on staging, or pass --with-payment"
-elif [ -n "$ONLY" ] && [[ "$PAID_SUITE" != *"$ONLY"* ]]; then
-  warn "Skipping the paying suite (--only '$ONLY' does not match it)"
+elif [ ${#PAID_SUITES[@]} -eq 0 ]; then
+  warn "Skipping the paying suites (--only '$ONLY' matches none of them)"
 elif [ "$REMOTE" = true ]; then
   PAYMENT_RAN=true
-  run_suites "as the deployment has it" "$PAID_SUITE" || PAYMENT_RESULT=$?
+  run_suites "as the deployment has it" "${PAID_SUITES[@]}" || PAYMENT_RESULT=$?
 elif [ "$CONTAINER" = false ]; then
   warn "Paying suite not run: the server on this Mac is started with payment off"
 else
@@ -323,7 +331,7 @@ else
   $COMPOSE_PAYMENT up -d ai 2>&1 | tail -3
   if wait_for_mode testnet; then
     PAYMENT_RAN=true
-    run_suites testnet "$PAID_SUITE" || PAYMENT_RESULT=$?
+    run_suites testnet "${PAID_SUITES[@]}" || PAYMENT_RESULT=$?
   else
     PAYMENT_RESULT=1
   fi

@@ -37,6 +37,44 @@ const EAS_ATTESTATIONS_QUERY = `
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1000;
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+/**
+ * Network failures worth another attempt. `UND_ERR_CONNECT_TIMEOUT` is what
+ * Node's fetch reports when a TCP connect never completes; it was missing, so a
+ * single slow handshake to the GIWA explorer failed a whole proof.
+ */
+const TRANSIENT_NETWORK_CODES = new Set([
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'EAI_AGAIN',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_SOCKET',
+]);
+
+function isTransientNetworkError(err: unknown): boolean {
+  const code = (err as { cause?: { code?: unknown } })?.cause?.code;
+  return typeof code === 'string' && TRANSIENT_NETWORK_CODES.has(code);
+}
+
+/**
+ * GET a URL, retrying a transient network failure or a 429/5xx answer.
+ * Any other answer, including a 4xx, is returned to the caller on the first try.
+ */
+export async function fetchWithTransientRetry(url: string): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    const last = attempt === MAX_RETRIES - 1;
+    try {
+      const response = await fetch(url);
+      if (!last && RETRYABLE_STATUS.has(response.status)) {
+        await new Promise(r => setTimeout(r, RETRY_DELAY_MS * (attempt + 1)));
+        continue;
+      }
+      return response;
+    } catch (err) {
+      if (last || !isTransientNetworkError(err)) throw err;
+      await new Promise(r => setTimeout(r, RETRY_DELAY_MS * (attempt + 1)));
+    }
+  }
+}
 
 // Public RPCs (e.g. base.org, base-sepolia) can take 5-30s to index a freshly
 // submitted attestation tx. Retry the "result is null" case separately with a
@@ -96,7 +134,7 @@ export async function fetchAttestationFromEAS(
  * Fetch raw transaction via eth_getTransactionByHash from an RPC endpoint.
  *
  * Retry policy:
- *   - HTTP 429/5xx, ECONNRESET, ETIMEDOUT: MAX_RETRIES (3) attempts, 1s base delay (transient network).
+ *   - HTTP 429/5xx or a TRANSIENT_NETWORK_CODES failure: MAX_RETRIES (3) attempts, 1s base delay.
  *   - data.result === null (tx not yet indexed): TX_INDEX_MAX_RETRIES (15) attempts, 2s delay.
  *     Public RPCs (base.org, base-sepolia) need 5-30s to index a freshly submitted attestation tx.
  */
@@ -152,8 +190,7 @@ export async function fetchRawTransaction(
       return reconstructRawTransaction(data.result);
     } catch (err) {
       lastError = err as Error;
-      const cause = (err as any)?.cause?.code;
-      if (attempt < MAX_RETRIES - 1 && (cause === 'ECONNRESET' || cause === 'ETIMEDOUT')) {
+      if (attempt < MAX_RETRIES - 1 && isTransientNetworkError(err)) {
         await new Promise(r => setTimeout(r, RETRY_DELAY_MS * (attempt + 1)));
         continue;
       }
@@ -314,7 +351,7 @@ async function fetchGiwaAttestation(
   const listUrl =
     `${source.explorer}/api?module=account&action=txlist` +
     `&address=${attester}&sort=desc&page=1&offset=100`;
-  const listResponse = await fetch(listUrl);
+  const listResponse = await fetchWithTransientRetry(listUrl);
   if (!listResponse.ok) {
     throw new Error(`GIWA explorer request failed: HTTP ${listResponse.status}`);
   }
