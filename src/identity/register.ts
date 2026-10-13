@@ -6,6 +6,7 @@ import type {
   AgentIdentityInfo,
 } from './types.js';
 import { createLogger } from '../logger.js';
+import { signingProvider } from '../chain/signingProvider.js';
 
 const log = createLogger('Identity');
 
@@ -47,7 +48,7 @@ export class AgentRegistration {
     }
 
     this.identityAddress = config.identityContractAddress;
-    this.provider = new ethers.JsonRpcProvider(config.chainRpcUrl, undefined, { cacheTimeout: -1 });
+    this.provider = signingProvider(config.chainRpcUrl, { cacheTimeout: -1 });
     this.signer = new ethers.Wallet(config.privateKey, this.provider);
     this.contract = new ethers.Contract(
       config.identityContractAddress,

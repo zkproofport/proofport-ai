@@ -67,6 +67,7 @@ export const A2A_TOOLS: LLMTool[] = [
 ];
 import type { TeeProvider } from '../tee/types.js';
 import type { RedisTaskStore } from './redisTaskStore.js';
+import { signingProvider } from '../chain/signingProvider.js';
 
 const tracer = trace.getTracer('a2a-executor');
 
@@ -327,7 +328,7 @@ export class ProofportExecutor implements AgentExecutor {
 
       // ERC-8004 reputation (non-blocking)
       if (skill === 'prove' && this.deps.config.erc8004ReputationAddress) {
-        const provider = new ethers.JsonRpcProvider(this.deps.config.chainRpcUrl);
+        const provider = signingProvider(this.deps.config.chainRpcUrl);
         const signer = new ethers.Wallet(this.deps.config.proverPrivateKey, provider);
         handleProofCompleted(
           {

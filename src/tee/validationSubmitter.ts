@@ -19,6 +19,7 @@ import type { TeeProvider } from './types.js';
 import { AgentRegistration } from '../identity/register.js';
 import { CIRCUIT_IDS } from '../config/circuitIds.js';
 import { createLogger } from '../logger.js';
+import { signingProvider } from '../chain/signingProvider.js';
 
 const log = createLogger('TeeValidation');
 
@@ -93,7 +94,7 @@ async function doValidation(
   agentTokenId: bigint,
   teeProvider: TeeProvider
 ): Promise<void> {
-  const provider = new ethers.JsonRpcProvider(config.chainRpcUrl);
+  const provider = signingProvider(config.chainRpcUrl);
   const signer = new ethers.Wallet(config.proverPrivateKey, provider);
   const contract = new ethers.Contract(
     config.erc8004ValidationAddress,
