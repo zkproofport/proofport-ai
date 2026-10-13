@@ -32,7 +32,7 @@ export default defineConfig({
           include: ['tests/e2e/**/*.test.ts'],
           globals: true,
           environment: 'node',
-          setupFiles: ['./tests/setup.ts'],
+          setupFiles: ['./tests/setup.ts', './tests/e2e/deploymentsUsePublishedPackages.setup.ts'],
           fileParallelism: false,
           poolOptions: {
             forks: {

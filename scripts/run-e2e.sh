@@ -218,6 +218,10 @@ ensure_published_packages() {
       "@zkproofport-ai/mcp@$ver" "@zkproofport-ai/sdk@$ver" \
       "@coinbase/cdp-sdk@>=1.55.0" "@x402/extensions@>=2.25.0" \
       "@x402/core@>=2.25.0" "@x402/evm@>=2.25.0" "@x402/svm@>=2.25.0" >/dev/null 2>&1); then
+      if [ "$REMOTE" = true ]; then
+        err "Could not install $ver from the registry. A deployment is only tested with the published packages; publish $ver first."
+        exit 1
+      fi
       warn "Could not install version $ver from the registry — is it published yet?"
       warn "The published MCP step-flow suite will refuse to run, which is the honest outcome."
       return 0
@@ -233,7 +237,12 @@ run_suites() {
   [ $# -eq 0 ] && { warn "no suites to run in the $mode phase"; return 0; }
   log "Running against $BASE_URL with payment $mode:"
   printf '         %s\n' "$@"
-  E2E_BASE_URL="$BASE_URL" npx vitest run --project e2e "$@" --reporter=verbose 2>&1
+  # A deployment is tested with the registry packages (the published config
+  # aliases @zkproofport-ai/sdk to them); only a server on this Mac uses the
+  # workspace source.
+  local config=()
+  [ "$REMOTE" = true ] && config=(--config vitest.published.config.ts)
+  E2E_BASE_URL="$BASE_URL" npx vitest run ${config[@]+"${config[@]}"} --project e2e "$@" --reporter=verbose 2>&1
 }
 
 # ─── The server on this Mac, against the native prover ───────────────────
