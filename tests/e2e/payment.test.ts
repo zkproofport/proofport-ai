@@ -189,28 +189,30 @@ describe('each staging payment network independently', () => {
   }
 });
 
-describe('paying from a Coinbase CDP wallet', () => {
-  it('signs through CDP and buys a proof', async (context) => {
-    if (!reachable) return expect.soft(reachable, `${BASE_URL} unreachable`).toBe(true);
-    if (!challenge!.requiresPayment) { console.warn('  SKIP: this deployment is not charging'); return context.skip(); }
-    const { CDP_API_KEY_ID, CDP_API_KEY_SECRET, CDP_WALLET_SECRET } = process.env;
-    if (!CDP_API_KEY_ID || !CDP_API_KEY_SECRET || !CDP_WALLET_SECRET) {
-      { console.warn('  SKIP: CDP_API_KEY_ID / CDP_API_KEY_SECRET / CDP_WALLET_SECRET not set'); return context.skip(); }
-    }
-    const wallet = await walletFromCdp({
-      apiKeyId: CDP_API_KEY_ID,
-      apiKeySecret: CDP_API_KEY_SECRET,
-      walletSecret: CDP_WALLET_SECRET,
-      walletName: process.env.CDP_WALLET_NAME,
-    });
-    // CDP's wallets live on Base; Base Sepolia when one is offered.
-    const offers = paymentOffers(challenge!);
-    const network =
-      offers.find((o) => o.networkName === 'base-sepolia')?.networkName ??
-      offers.find((o) => o.networkName === 'base')?.networkName;
-    if (!network) { console.warn('  SKIP: this deployment offers no Base chain for the CDP wallet'); return context.skip(); }
-    await paysAndProves(wallet, network);
-  }, 180_000);
+describe('paying from a Coinbase CDP wallet, on each staging payment network', () => {
+  // A CDP server wallet is an ordinary EVM signer on any chain CDP supports,
+  // Base Sepolia and Ethereum Sepolia included. This used to pay on Base only,
+  // under a comment saying "CDP's wallets live on Base", so the Ethereum
+  // Sepolia route -- the one this service settles itself -- was never paid
+  // from CDP. Each network is its own case so one cannot hide the other.
+  for (const network of ['base-sepolia', 'ethereum-sepolia']) {
+    it(`signs through CDP and buys a proof on ${network}`, async (context) => {
+      expect(reachable, `${BASE_URL} unreachable`).toBe(true);
+      if (!challenge!.requiresPayment) { console.warn('  SKIP: this deployment is not charging'); return context.skip(); }
+      const { CDP_API_KEY_ID, CDP_API_KEY_SECRET, CDP_WALLET_SECRET } = process.env;
+      if (!CDP_API_KEY_ID || !CDP_API_KEY_SECRET || !CDP_WALLET_SECRET) {
+        console.warn('  SKIP: CDP_API_KEY_ID / CDP_API_KEY_SECRET / CDP_WALLET_SECRET not set'); return context.skip();
+      }
+      expect(paymentOffers(challenge!).some(o => o.networkName === network), `Required staging network ${network} not offered`).toBe(true);
+      const wallet = await walletFromCdp({
+        apiKeyId: CDP_API_KEY_ID,
+        apiKeySecret: CDP_API_KEY_SECRET,
+        walletSecret: CDP_WALLET_SECRET,
+        walletName: process.env.CDP_WALLET_NAME,
+      });
+      await paysAndProves(wallet, network);
+    }, 180_000);
+  }
 });
 
 describe('what the service refuses', () => {
