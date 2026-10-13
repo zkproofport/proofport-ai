@@ -44,12 +44,10 @@ vi.mock('@zkproofport-ai/sdk', async () => ({
     coinbase_attestation: { displayName: 'Coinbase KYC', easSchemaId: '0xschema1', functionSelector: '0xfunc1' },
     coinbase_country_attestation: { displayName: 'Coinbase Country', easSchemaId: '0xschema2', functionSelector: '0xfunc2' },
     oidc_domain_attestation: { displayName: 'OIDC Domain', inputType: 'oidc' },
-    arc_eligibility: { displayName: 'Arc Eligibility', inputType: 'eas' },
     giwa_attestation: { displayName: 'GIWA Attestation', inputType: 'eas' },
   },
   AUTHORIZED_SIGNERS: ['0x952f32128AF084422539C4Ff96df5C525322E564'],
   CIRCUIT_NAME_MAP: {
-    arc_eligibility: 'arc_eligibility',
     giwa_attestation: 'giwa_attestation',
     coinbase_kyc: 'coinbase_attestation',
     coinbase_country: 'coinbase_country_attestation',
@@ -173,7 +171,7 @@ describe('human action approval orchestration', () => {
     mockGenerateProof.mockResolvedValue({ proof: '0xproof' });
     const resume = { ...params, approval_id: approval.approvalId };
     const pending = callTool('generate_proof', resume);
-    resume.circuit = 'arc_eligibility';
+    resume.circuit = 'coinbase_kyc';
     resume.max_payment = '100';
     const result = await pending;
     expect(result.isError).toBeUndefined();
@@ -217,7 +215,7 @@ describe('human action approval orchestration', () => {
   });
 
   it('step-by-step action preparation also waits instead of using the private key', async () => {
-    const result = await callTool('prepare_inputs', { circuit: 'arc_eligibility', action: CUSTOM_ACTION });
+    const result = await callTool('prepare_inputs', { circuit: 'giwa_attestation', action: CUSTOM_ACTION });
     expect(result.isError).toBeUndefined();
     expect(parseToolResult(result).status).toBe('awaiting_approval');
     expect(mockSigner.signTypedData).not.toHaveBeenCalled();
@@ -229,9 +227,11 @@ describe('human action approval orchestration', () => {
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe('registerTools', () => {
-  it('registers proof operations and both Gateway balance tools', () => {
+  it('registers proof operations and no Arc Gateway tools', () => {
     const expected = ['generate_proof', 'get_supported_circuits', 'request_challenge',
-      'prepare_inputs', 'submit_proof', 'verify_proof', 'deposit_to_gateway', 'gateway_balance', 'get_action_approval'];
+      'prepare_inputs', 'submit_proof', 'verify_proof', 'get_action_approval'];
+    expect(Object.keys(toolHandlers)).not.toContain('deposit_to_gateway');
+    expect(Object.keys(toolHandlers)).not.toContain('gateway_balance');
     expect(mockServer.tool).toHaveBeenCalledTimes(expected.length);
     expect(Object.keys(toolHandlers).sort()).toEqual(expected.sort());
   });
@@ -240,6 +240,44 @@ describe('registerTools', () => {
     expect(mockServer.resource).toHaveBeenCalledTimes(1);
     expect(resourceHandlers['config']).toBeDefined();
     expect(resourceHandlers['config'].uri).toBe('proofport://config');
+  });
+});
+
+describe('generate_proof payment wallet choice', () => {
+  const payWith = () => z.object(toolHandlers['generate_proof'].schema as z.ZodRawShape).shape.pay_with;
+
+  it('accepts only key and cdp', () => {
+    expect(payWith().safeParse('key').success).toBe(true);
+    expect(payWith().safeParse('cdp').success).toBe(true);
+    expect(payWith().safeParse(undefined).success).toBe(true);
+  });
+
+  it.each(['circle', 'CIRCLE', '', 'Key'])('rejects pay_with %j at the schema', (value) => {
+    const parsed = z.object(toolHandlers['generate_proof'].schema as z.ZodRawShape)
+      .safeParse({ circuit: 'coinbase_kyc', pay_with: value });
+    expect(parsed.success).toBe(false);
+    expect(parsed.error!.issues.some((issue) => issue.path[0] === 'pay_with')).toBe(true);
+  });
+
+  it('does not treat a Circle credential as a configured payment wallet', async () => {
+    vi.stubEnv('PAYMENT_PRIVATE_KEY', '');
+    vi.stubEnv('CDP_API_KEY_ID', '');
+    vi.stubEnv('CIRCLE_API_KEY', 'circle-key');
+    mockGenerateProof.mockResolvedValue({ proof: '0x' });
+    const result = await callTool('generate_proof', { circuit: 'coinbase_kyc', scope: 'scope' });
+    expect(result.isError).toBeUndefined();
+    expect(mockGenerateProof.mock.calls[0][1]).toEqual({ attestation: mockSigner, payment: undefined });
+  });
+});
+
+describe('the removed arc_eligibility circuit', () => {
+  it('is refused by prepare_inputs before any signing, naming the known circuits', async () => {
+    const result = await callTool('prepare_inputs', { circuit: 'arc_eligibility', scope: 'scope' });
+    expect(result.isError).toBe(true);
+    expect(parseToolResult(result).error).toBe("Unknown circuit 'arc_eligibility'. Known: giwa_attestation, coinbase_kyc, coinbase_country, oidc_domain.");
+    expect(mockSigner.signMessage).not.toHaveBeenCalled();
+    expect(mockSigner.signTypedData).not.toHaveBeenCalled();
+    expect(mockPrepareInputs).not.toHaveBeenCalled();
   });
 });
 
@@ -260,9 +298,9 @@ describe('get_supported_circuits', () => {
 describe('generate_proof', () => {
   it('preserves user-approved payment terms through the MCP to SDK boundary',async()=>{
     mockGenerateProof.mockResolvedValue({proof:'0x'});
-    const approved={network:'eip155:5042002',scheme:'exact',amount:'1000',asset:'0x3600000000000000000000000000000000000000',payTo:'0x'+'11'.repeat(20),extra:{name:'GatewayWalletBatched',version:'1',verifyingContract:'0x'+'22'.repeat(20)}};
-    await callTool('generate_proof',{circuit:'arc_eligibility',pay_on:'arc-testnet-nano',max_payment:'0.001',approved_payment:approved});
-    expect(mockGenerateProof.mock.calls[0][2]).toMatchObject({payOn:'arc-testnet-nano',maxPayment:'0.001',approvedPayment:approved});
+    const approved={network:'eip155:11155111',scheme:'exact',amount:'1000',asset:'0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238',payTo:'0x'+'11'.repeat(20),extra:{name:'USDC',version:'2',verifyingContract:'0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238'}};
+    await callTool('generate_proof',{circuit:'giwa_attestation',pay_on:'ethereum-sepolia',max_payment:'0.001',approved_payment:approved});
+    expect(mockGenerateProof.mock.calls[0][2]).toMatchObject({payOn:'ethereum-sepolia',maxPayment:'0.001',approvedPayment:approved});
   });
   it('calls generateProof with correct params', async () => {
     const mockResult = { proof: '0xabc', publicInputs: '0xdef' };
@@ -616,7 +654,7 @@ describe('proofport://config resource', () => {
 });
 
 const CUSTOM_ACTION = {
-  domain: { name: 'Custom Service', version: '1', chainId: 5042002, verifyingContract: '0x0000000000000000000000000000000000000001' },
+  domain: { name: 'Custom Service', version: '1', chainId: 91342, verifyingContract: '0x0000000000000000000000000000000000000001' },
   types: {
     Instruction: [{ name: 'terms', type: 'Terms' }, { name: 'tags', type: 'string[]' }],
     Terms: [{ name: 'quantity', type: 'uint256' }, { name: 'description', type: 'string' }],
@@ -626,7 +664,7 @@ const CUSTOM_ACTION = {
 };
 
 describe('prepare_inputs action authorization', () => {
-  it.each(['arc_eligibility', 'giwa_attestation'])('%s uses the human signature and keeps the action witness behind a private handle', async (circuit) => {
+  it.each(['giwa_attestation'])('%s uses the human signature and keeps the action witness behind a private handle', async (circuit) => {
     mockResolveApproval.mockResolvedValue({ address: '0xHumanAddress', signature: '0xHumanSignature' });
     mockPrepareInputs.mockResolvedValue({ field: 'prepared', user_signature: '0xHumanSignature' });
     const params = { circuit, action: CUSTOM_ACTION };
@@ -649,7 +687,7 @@ describe('prepare_inputs action authorization', () => {
     expect(mockSubmitProof.mock.lastCall?.[1].inputs).toMatchObject({ field: 'prepared', user_signature: '0xHumanSignature', action_hash: actionHash });
   });
 
-  it.each(['arc_eligibility', 'giwa_attestation'])('%s without action signs only the request signal hash', async (circuit) => {
+  it.each(['giwa_attestation'])('%s without action signs only the request signal hash', async (circuit) => {
     mockPrepareInputs.mockResolvedValue({ field: 'prepared' });
     const schema = z.object(toolHandlers.prepare_inputs.schema as z.ZodRawShape);
     const params = schema.parse({ circuit, scope: 'optional-action-scope' });
@@ -667,11 +705,11 @@ describe('prepare_inputs action authorization', () => {
 
   it.each([
     ['GIWA missing field', 'giwa_attestation', { ...CUSTOM_ACTION, message: {} }, /missing/],
-    ['missing field', 'arc_eligibility', { ...CUSTOM_ACTION, message: {} }, /missing/],
-    ['malformed value', 'arc_eligibility', { ...CUSTOM_ACTION, message: { ...CUSTOM_ACTION.message, terms: { quantity: 'bad', description: 'bad' } } }, /./],
-    ['wrong root', 'arc_eligibility', { ...CUSTOM_ACTION, primaryType: 'Terms', message: { quantity: '1', description: 'bad' } }, /primaryType.*root|root.*primaryType/],
-    ['Coinbase action', 'coinbase_kyc', CUSTOM_ACTION, /only arc_eligibility|rejected/],
-    ['OIDC action', 'oidc_domain', CUSTOM_ACTION, /only arc_eligibility|rejected/],
+    ['missing field', 'giwa_attestation', { ...CUSTOM_ACTION, message: {} }, /missing/],
+    ['malformed value', 'giwa_attestation', { ...CUSTOM_ACTION, message: { ...CUSTOM_ACTION.message, terms: { quantity: 'bad', description: 'bad' } } }, /./],
+    ['wrong root', 'giwa_attestation', { ...CUSTOM_ACTION, primaryType: 'Terms', message: { quantity: '1', description: 'bad' } }, /primaryType.*root|root.*primaryType/],
+    ['Coinbase action', 'coinbase_kyc', CUSTOM_ACTION, /only giwa_attestation|rejected/],
+    ['OIDC action', 'oidc_domain', CUSTOM_ACTION, /only giwa_attestation|rejected/],
   ])('rejects %s before any signing or input preparation', async (_name, circuit, action, error) => {
     const result = await callTool('prepare_inputs', { circuit, action });
     expect(result.isError).toBe(true);
@@ -702,7 +740,7 @@ it('snapshots the MCP action before waiting for human approval', async () => {
     return { address: '0xHumanAddress', signature: '0xHumanSignature' };
   });
   mockPrepareInputs.mockResolvedValue({ field: 'prepared' });
-  const result = await callTool('prepare_inputs', { circuit: 'arc_eligibility', action });
+  const result = await callTool('prepare_inputs', { circuit: 'giwa_attestation', action });
   expect(result.isError).toBeUndefined();
   expect(mockResolveApproval.mock.calls[0][1].action).toEqual(approved);
   expect(mockSigner.signTypedData).not.toHaveBeenCalled();
@@ -728,7 +766,7 @@ describe('nested action field validation in MCP', () => {
     ['missing bool in nested array', { ...BOOLEAN_ACTION.message, batches: [[{}]] }],
     ['malformed bool in nested array', { ...BOOLEAN_ACTION.message, batches: [[{ enabled: 'false' }]] }],
   ])('rejects %s before local signing', async (_name, message) => {
-    const result = await callTool('prepare_inputs', { circuit: 'arc_eligibility', action: { ...BOOLEAN_ACTION, message } });
+    const result = await callTool('prepare_inputs', { circuit: 'giwa_attestation', action: { ...BOOLEAN_ACTION, message } });
     expect(result.isError).toBe(true);
     expect(parseToolResult(result).error).toMatch(/action.message.*enabled.*required|action.message.*enabled.*boolean/);
     expect(mockSigner.getAddress).not.toHaveBeenCalled();
@@ -740,7 +778,7 @@ describe('nested action field validation in MCP', () => {
   it('preserves actual booleans in custom nested structs and arrays', async () => {
     mockResolveApproval.mockResolvedValue({ address: '0xHumanAddress', signature: '0xHumanSignature' });
     mockPrepareInputs.mockResolvedValue({ field: 'prepared' });
-    const result = await callTool('prepare_inputs', { circuit: 'arc_eligibility', action: BOOLEAN_ACTION });
+    const result = await callTool('prepare_inputs', { circuit: 'giwa_attestation', action: BOOLEAN_ACTION });
     expect(result.isError).toBeUndefined();
     expect(mockResolveApproval.mock.calls[0][1].action).toEqual(BOOLEAN_ACTION);
     expect(mockSigner.signTypedData).not.toHaveBeenCalled();

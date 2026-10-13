@@ -1,9 +1,9 @@
 /** Wallet peers are optional for SDK consumers, but required by this E2E matrix.
- * Reuse the tested root lock pins for CDP/x402; Circle's developer SDK is a
- * test-only exact pin. Refuse an added optional peer until the harness covers it.
+ * Reuse the tested root lock pins for CDP/x402. Refuse an added optional peer
+ * until the harness covers it.
  */
 export function publishedWalletDependencies(lock, sdkManifest) {
-  const dependencies = { '@circle-fin/developer-controlled-wallets': '10.8.1' };
+  const dependencies = {};
   const cdpPeers = Object.keys(lock.packages?.['node_modules/@coinbase/cdp-sdk']?.peerDependencies ?? {});
   // CDP's x402 entry eagerly exports SVM helpers even for EVM callers. Its
   // own optional peers must be installed too, otherwise importing the EVM
@@ -31,10 +31,8 @@ export const walletImportPreflight = `
 const cdp = await import('@coinbase/cdp-sdk');
 const adapter = await import('@coinbase/cdp-sdk/x402');
 const extensions = await import('@x402/extensions');
-const circle = await import('@circle-fin/developer-controlled-wallets');
 if (typeof cdp.CdpClient !== 'function') throw new Error('CDP client export missing');
 if (typeof adapter.fromCdpEvmAccount !== 'function') throw new Error('CDP x402 adapter export missing');
 if (Object.keys(extensions).length === 0) throw new Error('x402 extensions exports missing');
-if (typeof circle.initiateDeveloperControlledWalletsClient !== 'function') throw new Error('Circle developer wallet client export missing');
-console.log('[published E2E] optional CDP/x402/Circle wallet adapters imported successfully');
+console.log('[published E2E] optional CDP/x402 wallet adapters imported successfully');
 `;

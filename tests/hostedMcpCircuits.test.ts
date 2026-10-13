@@ -30,7 +30,12 @@ describe('hosted MCP circuit parity', () => {
     }
     expect((tools.find(tool => tool.name === 'prove')!.inputSchema.properties!.inputs as any).required).toBeUndefined();
   });
-  it.each(['giwa_attestation', 'oidc_domain_attestation', 'arc_eligibility', 'oidc_domain'])(
+  it('refuses the removed arc_eligibility circuit', async () => {
+    const result = await client.callTool({ name: 'prove', arguments: { circuit: 'arc_eligibility', inputs: { scope: 'test' } } });
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result)).toContain('arc_eligibility');
+  });
+  it.each(['giwa_attestation', 'oidc_domain_attestation', 'oidc_domain'])(
     'accepts %s and returns the current deployment REST redirect', async circuit => {
       const result = await client.callTool({ name: 'prove', arguments: { circuit, inputs: { scope: 'test' } } });
       expect(result.isError).not.toBe(true);

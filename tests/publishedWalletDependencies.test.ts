@@ -13,7 +13,7 @@ describe('published E2E includes all optional wallet adapters', () => {
     }
     expect(dependencies['@coinbase/cdp-sdk']).toBe(lock.packages['node_modules/@coinbase/cdp-sdk'].version);
     expect(dependencies['@x402/extensions']).toBe(lock.packages['node_modules/@x402/extensions'].version);
-    expect(dependencies['@circle-fin/developer-controlled-wallets']).toBe('10.8.1');
+    expect(dependencies).not.toHaveProperty('@circle-fin/developer-controlled-wallets');
     for (const name of Object.keys(lock.packages['node_modules/@coinbase/cdp-sdk'].peerDependencies)) {
       expect(dependencies[name], `CDP adapter eagerly needs ${name}`).toBe(lock.packages[`node_modules/${name}`].version);
     }

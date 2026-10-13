@@ -9,10 +9,10 @@
  *     with `.address`. viem then reported `Address "undefined" is invalid`,
  *     which names neither the wallet nor the mix-up. The tests are not
  *     typechecked (tsconfig covers src only), so nothing caught it.
- *   - they named `payOn: 'base-sepolia'` while that deployment offers only
- *     `arc-testnet-nano`. A test may not decide which chain a service takes.
- *   - when the payer cannot settle, the failure has to SAY so. "Circle Gateway
- *     failed to settle arc-testnet-nano: insufficient_balance" is the useful
+ *   - they named `payOn: 'base-sepolia'` while that deployment offered a
+ *     different single chain. A test may not decide which chain a service takes.
+ *   - when the payer cannot settle, the failure has to SAY so. The settlement
+ *     error naming the chain and `insufficient_balance` is the useful
  *     sentence; an assertion on `isError` is not.
  */
 import { requestChallenge, walletFromPrivateKey, type ClientConfig, type PaymentWallet } from '@zkproofport-ai/sdk';
@@ -65,7 +65,7 @@ export function unfundedReason(error: unknown, payOn: string, payer?: string): s
   return (
     `the payer has nothing to spend on ${payOn}` +
     (payer ? ` (${payer})` : '') +
-    (payOn === 'arc-testnet-nano' ? '. Deposit USDC into Circle Gateway.' : '. Fund its USDC balance on the selected chain.') +
+    '. Fund its USDC balance on the selected chain.' +
     ` Service said: ${text.slice(0, 200)}`
   );
 }

@@ -62,7 +62,7 @@ function publicState(body, capabilities, signature) {
   const serialized = JSON.stringify(body);
   requireThat(capabilities.every(token => !serialized.includes(token)) && (!signature || !serialized.includes(signature)), 'private_value_in_public_state');
 }
-const FIXTURE_CHAINS = { giwa_attestation: 91342, arc_eligibility: 5042002 };
+const FIXTURE_CHAINS = { giwa_attestation: 91342 };
 function fixture(circuit) {
   requireThat(Object.hasOwn(FIXTURE_CHAINS, circuit), 'unknown_fixture_circuit');
   return {
@@ -200,7 +200,7 @@ export async function runReleaseSmoke(options, dependencies = {}) {
       await request(approval.path + '/consume', [409], { method: 'POST', body: approval.payload, token: approval.requesterToken });
     });
     await check('reject-and-terminal-state', async () => {
-      const rejected = await create('arc_eligibility');
+      const rejected = await create('giwa_attestation');
       const { body } = await json(rejected.path + '/reject', [200], { method: 'POST', body: {}, token: rejected.browserToken });
       rejected.status = 'rejected'; publicState(body, [rejected.browserToken, rejected.requesterToken]);
       requireThat(body.status === 'rejected' && (await read(rejected)).status === 'rejected', 'rejection_not_recorded');

@@ -19,7 +19,6 @@ import { join } from 'node:path';
 const baseUrl = process.env.E2E_BASE_URL || 'http://localhost:4002';
 const payerKey = process.env.E2E_PAYER_WALLET_KEY;
 const rows = [
-  { circuit: 'arc_eligibility' as const, key: process.env.ATTESTATION_KEY, keyName: 'ATTESTATION_KEY', chainId: 5042002 },
   { circuit: 'giwa_attestation' as const, key: process.env.GIWA_ATTESTATION_KEY, keyName: 'GIWA_ATTESTATION_KEY', chainId: 91342 },
 ];
 for (const row of rows) if (!row.key) console.warn(`SKIP ${row.circuit}: missing ${row.keyName}`);

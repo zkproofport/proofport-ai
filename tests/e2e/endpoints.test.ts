@@ -38,9 +38,9 @@ if (!['staging', 'production'].includes(deploymentEnvironment)) {
 }
 const expectedIdentities = deploymentEnvironment === 'production'
   ? [{ chainId: 1, agentId: 31921 }, { chainId: 8453, agentId: 25331 }]
-  : [{ chainId: 11155111, agentId: 3288 }, { chainId: 84532, agentId: 592 }, { chainId: 5042002, agentId: 894776 }];
+  : [{ chainId: 11155111, agentId: 3288 }, { chainId: 84532, agentId: 592 }];
 const primaryIdentity = expectedIdentities[0];
-const canonicalCircuits = ['coinbase_attestation', 'coinbase_country_attestation', 'oidc_domain_attestation', 'arc_eligibility', 'giwa_attestation'];
+const canonicalCircuits = ['coinbase_attestation', 'coinbase_country_attestation', 'oidc_domain_attestation', 'giwa_attestation'];
 
 function assertCompleteRegistrations(registrations: any[]) {
   expect(Array.isArray(registrations)).toBe(true);
@@ -187,7 +187,7 @@ describe('Discovery Endpoints', () => {
   it('GET /.well-known/agent-card.json returns A2A agent card with 3 skills', async () => {
     const { status, json } = await jsonGet('/.well-known/agent-card.json');
     expect(status).toBe(200);
-    const namesByChain: Record<number, string> = { 1: 'proveragent.eth', 11155111: 'proveragent.sepolia', 8453: 'proveragent.base.eth', 84532: 'proveragent.base.sepolia', 5042002: 'proveragent.arc' };
+    const namesByChain: Record<number, string> = { 1: 'proveragent.eth', 11155111: 'proveragent.sepolia', 8453: 'proveragent.base.eth', 84532: 'proveragent.base.sepolia' };
     const card = json.identity?.erc8004 ? json : (await jsonGet('/.well-known/agent-card.json')).json;
     const expectedName = namesByChain[card.identity?.erc8004?.chainId];
     expect(expectedName, 'identity chain must have a known agent name').toBeDefined();
@@ -207,7 +207,7 @@ describe('Discovery Endpoints', () => {
     const { status, json } = await jsonGet('/.well-known/agent.json');
     expect(status).toBe(200);
     expect(json.name).toBeDefined();
-    const namesByChain: Record<number, string> = { 1: 'proveragent.eth', 11155111: 'proveragent.sepolia', 8453: 'proveragent.base.eth', 84532: 'proveragent.base.sepolia', 5042002: 'proveragent.arc' };
+    const namesByChain: Record<number, string> = { 1: 'proveragent.eth', 11155111: 'proveragent.sepolia', 8453: 'proveragent.base.eth', 84532: 'proveragent.base.sepolia' };
     const card = json.identity?.erc8004 ? json : (await jsonGet('/.well-known/agent-card.json')).json;
     const expectedName = namesByChain[card.identity?.erc8004?.chainId];
     expect(expectedName, 'identity chain must have a known agent name').toBeDefined();
@@ -265,7 +265,7 @@ describe('Deployment Identity & Verification', () => {
     assertCompleteRegistrations(json.registrations);
   });
 
-  it('ready identity status requires all identities, including Base and staging Arc', async () => {
+  it('ready identity status requires all identities, including Base', async () => {
     const { status, json } = await jsonGet('/identity/status');
     expect(status).toBe(200);
     expect(json.status).toBe('ready');
@@ -282,7 +282,7 @@ describe('Deployment Identity & Verification', () => {
     expect(JSON.stringify(json)).toMatch(new RegExp(`chainId=${primaryIdentity.chainId}(?![0-9])`));
   });
 
-  it('get_supported_circuits requires all five circuits and the selected Ethereum chain', async () => {
+  it('get_supported_circuits requires all four circuits and the selected Ethereum chain', async () => {
     const task = await a2aClient.sendMessage({
       message: makeDataPartMessage({ skill: 'get_supported_circuits' }).message,
     }) as Task;
@@ -295,7 +295,7 @@ describe('Deployment Identity & Verification', () => {
     for (const id of canonicalCircuits.slice(0, 3)) {
       expect(circuits.find(circuit => circuit.id === id).verifierAddress).toMatch(/^0x[0-9a-fA-F]{40}$/);
     }
-    // Arc/GIWA use dedicated networks, not the default Ethereum verifier map.
+    // GIWA uses a dedicated network, not the default Ethereum verifier map.
     for (const id of canonicalCircuits.slice(3)) {
       expect(circuits.find(circuit => circuit.id === id).guide_url).toBe(`${BASE_URL}/api/v1/guide/${id}`);
     }
@@ -330,8 +330,8 @@ describe('REST API — x402 Single-Step Flow', () => {
     const decoded = JSON.parse(Buffer.from(paymentHeader!, 'base64').toString());
     expect(decoded.accepts.length).toBeGreaterThan(0);
     expect(decoded.accepts[0].scheme).toBe('exact');
-    // The application nonce is returned in the body; Gateway's signing domain
-    // intentionally carries only name/version/verifyingContract.
+    // The application nonce is returned in the body; the signing domain is
+    // the offer's USDC name/version.
     expect(decoded.accepts[0].extra.name).toBeTruthy();
     expect(decoded.accepts[0].extra.version).toBeTruthy();
   });
@@ -504,7 +504,7 @@ describe('REST API — x402 Single-Step Flow', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('A2A message/send — get_supported_circuits', () => {
-  it('get_supported_circuits returns completed task with all five circuits', async () => {
+  it('get_supported_circuits returns completed task with all four circuits', async () => {
     const result = await a2aClient.sendMessage(
       makeDataPartMessage({ skill: 'get_supported_circuits', chainId: '84532' }),
     );
@@ -521,7 +521,7 @@ describe('A2A message/send — get_supported_circuits', () => {
     expect(dataArtifact).toBeDefined();
     const circuits = (dataArtifact!.parts.find((p: Part) => p.kind === 'data' && (p as any).data?.circuits) as any).data.circuits;
     expect(circuits.find((c: any) => c.id === 'coinbase_attestation')).toBeDefined();
-    expect(circuits.map((c: any) => c.id)).toEqual(expect.arrayContaining(['coinbase_attestation', 'coinbase_country_attestation', 'oidc_domain_attestation', 'arc_eligibility', 'giwa_attestation']));
+    expect(circuits.map((c: any) => c.id)).toEqual(expect.arrayContaining(['coinbase_attestation', 'coinbase_country_attestation', 'oidc_domain_attestation', 'giwa_attestation']));
   });
 });
 
@@ -735,7 +735,7 @@ describe('MCP StreamableHTTP', () => {
     }
   });
 
-  it('tools/call get_supported_circuits returns all five circuits', async () => {
+  it('tools/call get_supported_circuits returns all four circuits', async () => {
     const { client, transport } = await createMcpClient();
     try {
       const result = await client.callTool({ name: 'get_supported_circuits', arguments: {} });
@@ -747,7 +747,7 @@ describe('MCP StreamableHTTP', () => {
 
       const circuitIds = parsed.circuits.map((c: any) => c.id);
       expect(circuitIds).toContain('coinbase_attestation');
-      expect(circuitIds).toEqual(expect.arrayContaining(['coinbase_attestation', 'coinbase_country_attestation', 'oidc_domain_attestation', 'arc_eligibility', 'giwa_attestation']));
+      expect(circuitIds).toEqual(expect.arrayContaining(['coinbase_attestation', 'coinbase_country_attestation', 'oidc_domain_attestation', 'giwa_attestation']));
     } finally {
       await transport.close();
     }
@@ -902,7 +902,7 @@ describe(
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('SKILL.md & Guide Endpoints', () => {
-  it.each(['coinbase_attestation', 'coinbase_country_attestation', 'oidc_domain_attestation', 'arc_eligibility', 'giwa_attestation'])('publishes the canonical %s guide', async circuit => {
+  it.each(['coinbase_attestation', 'coinbase_country_attestation', 'oidc_domain_attestation', 'giwa_attestation'])('publishes the canonical %s guide', async circuit => {
     const res = await fetch(`${BASE_URL}/api/v1/guide/${circuit}`);
     expect(res.status).toBe(200);
     const guide = await res.json();

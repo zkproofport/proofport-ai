@@ -10,10 +10,10 @@ const expected = {
   environment: 'staging',
   version: '0.2.9',
   baseUrl: 'https://stg-ai.zkproofport.app',
-  paymentNetworks: 'base-sepolia,arc-testnet,ethereum-sepolia,arc-testnet-nano',
+  paymentNetworks: 'base-sepolia,ethereum-sepolia',
   payTo: '0x5A3E649208Ae15ec52496c1Ae23b2Ff89Ac02f0c',
   price: '$0.001',
-  identities: [{ chainId: 84532, agentId: '592', registry }, { chainId: 11155111, agentId: '3288', registry }, { chainId: 5042002, agentId: '894776', registry }],
+  identities: [{ chainId: 84532, agentId: '592', registry }, { chainId: 11155111, agentId: '3288', registry }],
 };
 function snapshot() {
   const offers = buildPaymentRequirements({ networks: resolvePaymentNetworks(expected.paymentNetworks), price: '0.001', payTo: expected.payTo, resource: expected.baseUrl + '/api/v1/prove', nonce: '0x' + '11'.repeat(32), parseUnits });
@@ -48,10 +48,10 @@ describe('deployment verifies the entire configured service', () => {
       expect(() => validateDeploymentSnapshot(expected, value)).toThrow(/version/i);
     }
   });
-  it('accepts all configured identities, circuits and four distinct payment methods', () => {
+  it('accepts all configured identities, circuits and both distinct payment methods', () => {
     expect(() => validateDeploymentSnapshot(expected, snapshot())).not.toThrow();
   });
-  it.each([84532, 11155111, 5042002])('rejects missing identity %s even when status says ready', chainId => {
+  it.each([84532, 11155111])('rejects missing identity %s even when status says ready', chainId => {
     const value = snapshot();
     value.identity.registrations = value.identity.registrations.filter(row => row.chainId !== chainId);
     expect(() => validateDeploymentSnapshot(expected, value)).toThrow(/identit/i);
@@ -66,10 +66,10 @@ describe('deployment verifies the entire configured service', () => {
     value.challenges[circuit].body.accepts.pop();
     expect(() => validateDeploymentSnapshot(expected, value)).toThrow(/payment/i);
   });
-  it('distinguishes ordinary Arc payments from Arc nanopayments on the same chain', () => {
+  it('distinguishes the two offered payment chains', () => {
     const value = snapshot();
     const rows = value.challenges.giwa_attestation.body.accepts;
-    rows[3] = structuredClone(rows[1]);
+    rows[1] = structuredClone(rows[0]);
     expect(() => validateDeploymentSnapshot(expected, value)).toThrow(/payment/i);
   });
   it('rejects a wrong recipient or amount before asking anyone to pay', () => {
@@ -81,11 +81,17 @@ describe('deployment verifies the entire configured service', () => {
   });
   it('rejects an unadvertised circuit and a different environment URL', () => {
     const value = snapshot();
-    value.card.skills[0].description = 'arc_eligibility';
+    value.card.skills[0].description = 'giwa_attestation';
     expect(() => validateDeploymentSnapshot(expected, value)).toThrow(/circuit/i);
     const wrongUrl = snapshot();
     wrongUrl.card.url = 'https://ai.zkproofport.app/a2a';
     expect(() => validateDeploymentSnapshot(expected, wrongUrl)).toThrow(/URL/);
+  });
+  it('refuses a deployment that still expects a removed Arc payment network', () => {
+    for (const removed of ['arc-testnet', 'arc-testnet-nano']) {
+      expect(() => validateDeploymentSnapshot({ ...expected, paymentNetworks: `base-sepolia,${removed}` }, snapshot()))
+        .toThrow(new RegExp(`Unknown payment network\\(s\\): ${removed}\\.`));
+    }
   });
   it('does not accept testnet registrations when production identities are expected', () => {
     const production = { ...expected, identities: [{ chainId: 1, agentId: '31921', registry: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432' }, { chainId: 8453, agentId: '25331', registry: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432' }] };

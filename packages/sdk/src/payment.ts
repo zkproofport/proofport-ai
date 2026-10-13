@@ -10,8 +10,8 @@
  * 3. The service settles the authorization and returns the proof.
  *
  * The buyer signs. It never submits a transaction, so it needs no gas and no
- * native balance on the chain it pays on -- only USDC. That holds on Base, on
- * Ethereum and on Arc alike.
+ * native balance on the chain it pays on -- only USDC. That holds on Base and
+ * on Ethereum alike.
  *
  * ## Why this file is short
  *
@@ -31,20 +31,17 @@
  * ## Which chains
  *
  * Any EVM chain the service offers. The v2 scheme registers as an `eip155:*`
- * wildcard, so nothing here holds a chain list -- Arc included, which is the
- * reason the offer is CAIP-2 (`eip155:5042002`) rather than a bare name. The
- * bare names are a fixed 24-chain table inside `@x402/evm` and Arc is not in
- * it.
+ * wildcard, so nothing here holds a chain list, and the offer is CAIP-2
+ * (`eip155:84532`) rather than a bare name.
  */
 
-import { supportsBatching } from '@circle-fin/x402-batching';
 import type { PaymentWallet, PaymentOffer, PaidRequest, ApprovedPayment } from './types.js';
 import { usdcSpendControls, isKnownUsdc, knownUsdc, DEFAULT_MAX_PAYMENT } from './usdc.js';
 
 /**
  * The chains a 402 answer will take payment on, in the order offered.
  *
- * Reading this before paying is what lets a caller choose -- "pay on Arc" is a
+ * Reading this before paying is what lets a caller choose -- "pay on Base" is a
  * filter over this list, not a separate code path.
  */
 export function paymentOffers(challenge: {
@@ -71,13 +68,13 @@ export function paymentOffers(challenge: {
  * Sign payment for one of the offers and return the headers to retry with.
  *
  * `network` names the chain to pay on, as either the CAIP-2 id
- * (`eip155:5042002`) or the plain name (`arc-testnet`). Omitting it takes the
+ * (`eip155:84532`) or the plain name (`base-sepolia`). Omitting it takes the
  * first offer, which is the order the service listed its chains in.
  *
  * An unmatched name is an error listing what was offered. It is never a
  * silent fall back to the first chain: paying on a chain the caller did not
  * ask for spends real money in the wrong place, and the caller who typed
- * `--network arc` would be told the payment succeeded.
+ * `--network base` would be told the payment succeeded.
  */
 export function assertApprovedPayment(offer: PaymentOffer, approved: ApprovedPayment): void {
   const extra = offer.raw.extra as Record<string, unknown> | undefined;
@@ -85,18 +82,18 @@ export function assertApprovedPayment(offer: PaymentOffer, approved: ApprovedPay
     typeof value === 'string' && /^0x[0-9a-fA-F]{40}$/.test(value);
   const sameAddress = (a: unknown, b: unknown) =>
     isAddress(a) && isAddress(b) && a.toLowerCase() === b.toLowerCase();
-  const batched = supportsBatching(offer.raw as { extra?: Record<string, unknown> });
-  // Match the signing libraries, not an optional hint in the 402 response:
-  // exact EIP-3009 uses the token asset; Circle Gateway requires its own
-  // explicit contract. Permit2 has another domain and is not approved here.
-  const verifyingContract = batched ? extra?.verifyingContract : offer.asset;
+  // Match the signing library, not an optional hint in the 402 response:
+  // exact EIP-3009 signs against the token asset. Permit2 has another domain
+  // and is not approved here, and neither is a Circle Gateway batched domain
+  // (`GatewayWalletBatched`), which this SDK does not sign.
+  const verifyingContract = offer.asset;
   const supportedDomain = offer.raw.scheme === 'exact' && /^eip155:[1-9]\d*$/.test(offer.network) &&
     typeof extra?.name === 'string' && extra.name.length > 0 &&
     typeof extra?.version === 'string' && extra.version.length > 0 &&
     (extra.assetTransferMethod === undefined || extra.assetTransferMethod === 'eip3009') &&
-    (batched || extra.name !== 'GatewayWalletBatched') &&
+    extra.name !== 'GatewayWalletBatched' &&
     isAddress(verifyingContract) &&
-    (batched || extra.verifyingContract === undefined || sameAddress(extra.verifyingContract, offer.asset));
+    (extra.verifyingContract === undefined || sameAddress(extra.verifyingContract, offer.asset));
   if (!supportedDomain || offer.network !== approved.network || offer.raw.scheme !== approved.scheme ||
       offer.amount !== approved.amount || !sameAddress(offer.asset, approved.asset) ||
       !sameAddress(offer.payTo, approved.payTo) || extra?.name !== approved.extra.name ||
@@ -144,9 +141,9 @@ export async function signPayment(
     );
   }
 
-  // x402's top-level USD cap does not cover custom allowed assets such as
-  // Arc USDC. Enforce the same six-decimal limit on the selected offer here,
-  // before invoking any signer, whether or not exact terms were supplied.
+  // x402's top-level USD cap does not cover custom allowed assets. Enforce
+  // the same six-decimal limit on the selected offer here, before invoking
+  // any signer, whether or not exact terms were supplied.
   const maximum = opts.maxPayment ?? DEFAULT_MAX_PAYMENT;
   const match = /^\$?(\d+)(?:\.(\d{1,6}))?$/.exec(maximum);
   if (!match) throw new Error('Invalid maximum USDC payment: use a non-negative decimal with up to six places.');
@@ -158,36 +155,17 @@ export async function signPayment(
 
   const { x402Client, x402HTTPClient } = await import('@x402/core/client');
   const { registerExactEvmScheme } = await import('@x402/evm/exact/client');
-  const { registerBatchScheme } = await import('@circle-fin/x402-batching/client');
 
-  // Spend controls stay ON. Arc's USDC is not among the library's default
-  // assets, so paying there needs the assets named -- not the control
+  // Spend controls stay ON, with the USDC assets named -- not the control
   // disabled, which would allow any token on any chain.
   const client = new x402Client();
   client.setSpendControls(usdcSpendControls(opts.maxPayment) as never);
 
-  // How the authorization gets signed depends on the offer.
-  //
-  // A batched offer is signed against Circle Gateway's wallet contract, not
-  // against USDC, and the two signatures are not interchangeable: registering
-  // the ordinary scheme and then the batched one leaves the ordinary one
-  // signing, which Gateway rejects as `unauthorized` -- a valid signature over
-  // the wrong thing. Circle's own way is to hand the ordinary scheme in as the
-  // fallback, so ONE composite scheme picks per offer.
-  const batched = supportsBatching(offer.raw as { extra?: Record<string, unknown> });
   const signer = {
-    address: batched ? (wallet.gatewayAddress ?? wallet.address) : wallet.address,
+    address: wallet.address,
     signTypedData: wallet.signTypedData.bind(wallet),
   };
-  if (batched) {
-    const { ExactEvmScheme } = await import('@x402/evm/exact/client');
-    registerBatchScheme(client as never, {
-      signer: signer as never,
-      fallbackScheme: new (ExactEvmScheme as never as new (s: unknown) => unknown)(wallet) as never,
-    } as never);
-  } else {
-    registerExactEvmScheme(client, { signer: signer as never });
-  }
+  registerExactEvmScheme(client, { signer: signer as never });
   const http = new x402HTTPClient(client);
 
   const payload = await client.createPaymentPayload({

@@ -89,8 +89,8 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
   });
 
   describe('CIRCUITS constant', () => {
-    it('should export all 5 circuits', () => {
-      expect(Object.keys(CIRCUITS).sort()).toEqual(['arc_eligibility', 'coinbase_attestation', 'coinbase_country_attestation', 'giwa_attestation', 'oidc_domain_attestation']);
+    it('should export all 4 circuits', () => {
+      expect(Object.keys(CIRCUITS).sort()).toEqual(['coinbase_attestation', 'coinbase_country_attestation', 'giwa_attestation', 'oidc_domain_attestation']);
       expect(CIRCUITS.coinbase_attestation).toBeDefined();
       expect(CIRCUITS.coinbase_country_attestation).toBeDefined();
       expect(CIRCUITS.oidc_domain_attestation).toBeDefined();

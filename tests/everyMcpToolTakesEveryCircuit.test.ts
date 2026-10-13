@@ -8,8 +8,8 @@ import { CIRCUIT_NAME_MAP } from '../packages/sdk/src/types.js';
  *
  * Four tools typed the circuit list out by hand, and two of them had fallen
  * behind: on 2026-09-12 `generate_proof`, `request_challenge` and `submit_proof`
- * did not list `arc_eligibility`, while `prepare_inputs` did — so an agent could
- * prepare an Arc proof and then had nowhere to send it. The list now comes from
+ * did not list a circuit `prepare_inputs` did — so an agent could prepare a
+ * proof and then had nowhere to send it. The list now comes from
  * the map the SDK owns, and this is what says so.
  */
 const source = readFileSync(path.join(__dirname, '..', 'packages', 'mcp', 'src', 'tools.ts'), 'utf8');
@@ -29,14 +29,15 @@ describe('every MCP tool takes every circuit', () => {
     expect(withCircuit.length).toBe(4);
   });
 
-  it('knows Arc, and that Arc is the circuit carrying an action', () => {
-    expect(Object.keys(CIRCUIT_NAME_MAP)).toContain('arc_eligibility');
-    expect(source).toContain('arc_eligibility');
+  it('knows GIWA as the circuit carrying an action, and no longer knows Arc', () => {
+    expect(Object.keys(CIRCUIT_NAME_MAP)).toContain('giwa_attestation');
+    expect(Object.keys(CIRCUIT_NAME_MAP)).not.toContain('arc_eligibility');
+    expect(source).not.toMatch(/arc_eligibility|deposit_to_gateway|gateway_balance|arc-testnet/);
     expect(source).toContain('action: z');
     expect(source).toContain('primaryType: z.string()');
   });
 
   it('describes the action as something the agent supplies, not a default', () => {
-    expect(source).toMatch(/Optional for arc_eligibility and giwa_attestation; rejected for other circuits/);
+    expect(source).toMatch(/Optional for giwa_attestation; rejected for other circuits/);
   });
 });

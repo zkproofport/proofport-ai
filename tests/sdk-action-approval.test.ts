@@ -103,7 +103,7 @@ beforeEach(() => { vi.clearAllMocks(); boundary.order.length = 0; });
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('human approval before action proof work', () => {
-  it.each(['giwa_attestation', 'arc_eligibility'] as const)('creates pending approval for %s without key signing or payment', async (circuit) => {
+  it.each(['giwa_attestation'] as const)('creates pending approval for %s without key signing or payment', async (circuit) => {
     const fetcher = transport();
     const keySigner = signer();
     await expect(prove({ ...request, circuit }, keySigner)).rejects.toMatchObject({
@@ -148,7 +148,7 @@ describe('human approval before action proof work', () => {
   });
 
   it.each([
-    ['circuit', { circuit: 'arc_eligibility' }],
+    ['circuit', { circuit: 'coinbase_attestation' }],
     ['scope', { scope: 'different-scope' }],
     ['message', { action: { ...action, message: { ...action.message, labels: ['changed'] } } }],
     ['domain', { action: { ...action, domain: { ...action.domain, chainId: 1 } } }],
@@ -192,7 +192,7 @@ describe('human approval before action proof work', () => {
 
   it('keeps the requested circuit stable while waiting for approval', async () => {
     const params: ProofParams = { ...request, actionApproval: approval };
-    const fetcher = transport({ onStatus: () => { params.circuit = 'arc_eligibility'; } });
+    const fetcher = transport({ onStatus: () => { params.circuit = 'coinbase_kyc'; } });
     await prove(params);
     const proofCalls = fetcher.mock.calls.filter(([url]) => String(url).endsWith('/prove'));
     expect(proofCalls.map(([, init]) => JSON.parse(init!.body as string).circuit)).toEqual(['giwa_attestation', 'giwa_attestation']);
@@ -371,7 +371,13 @@ describe('existing proof paths without action', () => {
     await expect(generateProof(config, {}, { circuit: 'giwa_attestation' })).rejects.toThrow(/attestation signer.*without an action/);
     expect(fetcher).not.toHaveBeenCalled();
   });
-  it.each(['coinbase_kyc', 'coinbase_country', 'giwa_attestation', 'arc_eligibility'] as const)('keeps personal signing and payment for %s', async (circuit) => {
+  it('refuses the removed arc_eligibility circuit before any network call', async () => {
+    const fetcher = transport();
+    await expect(generateProof(config, { attestation: signer() }, { circuit: 'arc_eligibility' as never, scope: request.scope }))
+      .rejects.toThrow("Unknown circuit 'arc_eligibility'. Known: coinbase_kyc, coinbase_country, oidc_domain, giwa_attestation.");
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  it.each(['coinbase_kyc', 'coinbase_country', 'giwa_attestation'] as const)('keeps personal signing and payment for %s', async (circuit) => {
     transport();
     const local = signer();
     await prove({ circuit, scope: request.scope, countryList: ['KR'], isIncluded: true }, local);

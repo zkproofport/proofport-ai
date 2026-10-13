@@ -7,29 +7,13 @@ const log = createLogger('PaymentVerifier');
 
 /**
  * The USDC contract to look for a Transfer event on, per network.
- *
- * Arc is the odd one. USDC is its NATIVE gas asset, and the address below is
- * its ERC-20 interface over the same balance -- one balance, two views, per
- * docs.arc.io/arc/references/evm-differences. A `transfer()` through that
- * interface still emits a Transfer event, so the check below works unchanged;
- * a native value send would NOT, and is handled separately.
  */
-const USDC_ADDRESSES: Record<string, string> = {
+const USDC_ADDRESSES: Record<PaymentNetworkId, string> = {
   'base-sepolia': '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
   'base': '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-  'arc-testnet': '0x3600000000000000000000000000000000000000',
   ethereum: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
   'ethereum-sepolia': '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238',
 };
-
-/**
- * Networks where USDC is the native gas asset, so a payment can arrive with no
- * Transfer event at all -- as `tx.value` on a plain send.
- *
- * Checking only for the event on such a chain rejects a payment that plainly
- * happened, which reads to the caller as "we did not receive it".
- */
-const NATIVE_USDC_NETWORKS = new Set(['arc-testnet']);
 
 // ERC-20 Transfer event topic
 const TRANSFER_TOPIC = ethers.id('Transfer(address,address,uint256)');
@@ -61,6 +45,9 @@ export async function verifyPaymentOnChain(params: {
     settledByUs,
   } = params;
   const usdcAddress = USDC_ADDRESSES[network];
+  if (!usdcAddress) {
+    throw new Error(`Unknown payment network '${network}'. Known: ${Object.keys(USDC_ADDRESSES).join(', ')}.`);
+  }
 
   try {
     const provider = new ethers.JsonRpcProvider(rpcUrl);
@@ -108,20 +95,13 @@ export async function verifyPaymentOnChain(params: {
       // Decode Transfer event: Transfer(from, to, amount)
       toAddress = ethers.getAddress('0x' + transferLog.topics[2].slice(26));
       amount = BigInt(transferLog.data);
-    } else if (NATIVE_USDC_NETWORKS.has(network) && tx.to && tx.value > 0n) {
-      // A native USDC send on Arc: the value rides on the transaction and
-      // there is no event to read. Requiring one here would reject a payment
-      // that plainly happened.
-      toAddress = ethers.getAddress(tx.to);
-      amount = tx.value;
     } else {
       // Nothing moved. Distinct from paying the wrong address, which this used
       // to be reported as -- see the reason codes in ./types.ts.
       log.warn({ action: 'payment.no_transfer', txHash, network, usdcAddress }, 'Transaction moved no USDC');
       return {
         valid: false,
-        error: `No USDC transfer found in ${txHash}: no Transfer event from ${usdcAddress}` +
-          (NATIVE_USDC_NETWORKS.has(network) ? ' and no native value sent' : ''),
+        error: `No USDC transfer found in ${txHash}: no Transfer event from ${usdcAddress}`,
         reason: 'no_transfer',
       };
     }

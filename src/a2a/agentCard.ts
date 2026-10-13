@@ -19,7 +19,7 @@ function paymentNetworks(config: Config): string {
 }
 
 function serviceDescription(config: Config): string {
-  return `ZK proof generation for Coinbase KYC, country verification, OIDC domain verification, Arc eligibility, and GIWA attestations with optional action authorization. ` +
+  return `ZK proof generation for Coinbase KYC, country verification, OIDC domain verification, and GIWA attestations with optional action authorization. ` +
     `Provable circuits: ${PROVABLE_CIRCUIT_IDS.join(', ')}. Noir circuits execute in ${executionDescription(config)}. ` +
     `Configured x402 USDC payment networks: ${paymentNetworks(config)}. See /identity/status for verified ERC-8004 registrations.`;
 }
@@ -92,7 +92,7 @@ export type AgentCard = SDKAgentCard & {
  * Built from PROVABLE_CIRCUIT_IDS rather than two hand-named circuits. The
  * hand-written version listed Coinbase KYC and Coinbase country only, so an
  * agent was never told this server also proves OIDC domain — which it has done
- * for months — nor arc_eligibility.
+ * for months.
  *
  * A circuit with no verifier on this chain is named as such instead of being
  * dressed up. The previous `?? '(address not yet loaded)'` published a string
@@ -155,7 +155,7 @@ ${PROVABLE_CIRCUIT_IDS.join(', ')}
 
 REQUIRED INPUTS:
 Inputs are circuit-specific. Read /api/v1/guide/{circuit} and prepare them with the client SDK.
-Coinbase circuits use wallet/attestation witnesses. arc_eligibility and giwa_attestation support optional EIP-712 action binding: provide both domain_separator and action_hash for a signed action, or omit both for an identity-only proof. GIWA uses its own configured attester. OIDC domain verification uses its OIDC witness.
+Coinbase circuits use wallet/attestation witnesses. giwa_attestation supports optional EIP-712 action binding: provide both domain_separator and action_hash for a signed action, or omit both for an identity-only proof. GIWA uses its own configured attester. OIDC domain verification uses its OIDC witness.
 
 PAYMENT: ${config.paymentProofPrice} USDC. Configured networks: ${paymentNetworks(config)}. Read the returned x402 offers.
 
@@ -248,7 +248,7 @@ export function buildMcpDiscovery(config: Config) {
     tools: [
       {
         name: 'prove',
-        description: `[SINGLE-STEP x402] Generate a zero-knowledge proof via x402 single-step flow. POST circuit + inputs → receive 402 with nonce → pay USDC → retry with X-Payment-TX and X-Payment-Nonce headers. Generates the ZK proof in ${executionDescription(config)}. Configured payment networks: ${paymentNetworks(config)}. Takes 30-90 seconds. Provable circuits: ${PROVABLE_CIRCUIT_IDS.join(', ')}. EAS schemas — coinbase_attestation 0xf8b05c79f090979bf4a80270aba232dff11a10d9ca55c4f88de95317970f0de9, coinbase_country_attestation 0x1801901fabd0e6189356b4fb52bb0ab855276d84f7ec140839fbd1f6801ca065. arc_eligibility and giwa_attestation support optional EIP-712 action binding; omit the action for an identity-only proof. Arc uses Coinbase attestations and GIWA uses its configured attester. Read each circuit guide for its verification chain and witness fields. Authorized signers: [0x952f32128AF084422539C4Ff96df5C525322E564, 0x8844591D47F17bcA6F5dF8f6B64F4a739F1C0080, 0x88fe64ea2e121f49bb77abea6c0a45e93638c3c5, 0x44ace9abb148e8412ac4492e9a1ae6bd88226803]. Returns proof (hex), publicInputs, proofWithInputs (for on-chain verification)${config.teeMode === 'nitro' && config.teeAttestationEnabled ? ", hardware TEE attestation when requested" : ". No hardware TEE attestation is advertised"}. ${verifiers}.`,
+        description: `[SINGLE-STEP x402] Generate a zero-knowledge proof via x402 single-step flow. POST circuit + inputs → receive 402 with nonce → pay USDC → retry with X-Payment-TX and X-Payment-Nonce headers. Generates the ZK proof in ${executionDescription(config)}. Configured payment networks: ${paymentNetworks(config)}. Takes 30-90 seconds. Provable circuits: ${PROVABLE_CIRCUIT_IDS.join(', ')}. EAS schemas — coinbase_attestation 0xf8b05c79f090979bf4a80270aba232dff11a10d9ca55c4f88de95317970f0de9, coinbase_country_attestation 0x1801901fabd0e6189356b4fb52bb0ab855276d84f7ec140839fbd1f6801ca065. giwa_attestation supports optional EIP-712 action binding; omit the action for an identity-only proof. GIWA uses its configured attester. Read each circuit guide for its verification chain and witness fields. Authorized signers: [0x952f32128AF084422539C4Ff96df5C525322E564, 0x8844591D47F17bcA6F5dF8f6B64F4a739F1C0080, 0x88fe64ea2e121f49bb77abea6c0a45e93638c3c5, 0x44ace9abb148e8412ac4492e9a1ae6bd88226803]. Returns proof (hex), publicInputs, proofWithInputs (for on-chain verification)${config.teeMode === 'nitro' && config.teeAttestationEnabled ? ", hardware TEE attestation when requested" : ". No hardware TEE attestation is advertised"}. ${verifiers}.`,
         inputSchema: {
           type: 'object',
           properties: {
@@ -320,7 +320,7 @@ export function buildOasfAgent(config: Config, tokenId?: bigint | null) {
     description: serviceDescription(config),
     image: `${config.a2aBaseUrl}/icon.png`,
     agentType: 'service',
-    tags: ['ZK', 'Privacy', 'Proof', 'Coinbase', 'KYC', 'Attestation', 'x402', 'Identity', 'Country', 'Verification', 'Base', 'USDC', ...(config.teeMode === 'nitro' ? ['TEE'] : []), 'Arc', 'Noir', 'EAS', 'Zero-Knowledge'],
+    tags: ['ZK', 'Privacy', 'Proof', 'Coinbase', 'KYC', 'Attestation', 'x402', 'Identity', 'Country', 'Verification', 'Base', 'USDC', ...(config.teeMode === 'nitro' ? ['TEE'] : []), 'Noir', 'EAS', 'Zero-Knowledge'],
     domains: [
       { name: 'technology/blockchain', id: 109 },
       { name: 'technology/security', id: 107 },
@@ -544,26 +544,23 @@ Set PROOFPORT_URL=${config.a2aBaseUrl} in that local process.
 Load the existing ATTESTATION_KEY only into the local signer process; never send credentials to an LLM.
 Connect and call \`tools/list\`; use the returned inputSchema for \`tools/call\`.
 
-Local tools: generate_proof, deposit_to_gateway, gateway_balance, get_supported_circuits,
+Local tools: generate_proof, get_supported_circuits,
 request_challenge, prepare_inputs, submit_proof, verify_proof.
 Read guides with HTTPS GET; get_guide is a remote service tool, not a local SDK tool.
 
 For a single attestation + exact-action authorization proof, select \`generate_proof\` with:
-- circuit: \`arc_eligibility\` or \`giwa_attestation\`
+- circuit: \`giwa_attestation\`
 - action: the application's complete EIP-712 typed action (optional; omit for an identity-only proof)
-- scope: the application's scope, e.g. \`ledger-house\`
-- pay_with: \`arc\` for an existing Circle Agent Wallet
-- pay_on: \`arc-testnet-nano\` only when present in the live offered networks below
+- scope: the application's scope, e.g. \`myapp:membership\`
+- pay_with: \`key\` or \`cdp\` for an existing funded payment wallet
+- pay_on: one of the live offered networks below
 
-Circle Agent Wallet uses an existing authenticated Circle CLI session and optional ARC_AGENT_WALLET.
-The key-based adapter instead uses PAYMENT_PRIVATE_KEY with pay_with=key. These are separate choices;
-there is no automatic payment fallback to the KYC signer's key.
-The deposit_to_gateway and gateway_balance convenience tools use the key-based adapter;
-for an Agent Wallet inspect its Gateway balance through the Circle CLI.
+The key-based adapter uses PAYMENT_PRIVATE_KEY with pay_with=key. Payment wallets are separate choices;
+there is no automatic payment fallback to the attestation signer's key.
 
 After proof generation, call \`verify_proof\` with the proof result. The application must also bind
-its domain, delegate, amount, action, expiry, nonce, scope and trusted attester root before staking.
-Arc and GIWA prove the configured attestation and, when an action is supplied, that same wallet's authorization in one circuit. Without an action, the wallet signs the challenge instead; an identity-only proof does not authorize an application action. Coinbase KYC, Coinbase country and OIDC domain circuits do not take an action.
+its domain, action, expiry, nonce, scope and trusted attester root before acting on it.
+GIWA proves the configured attestation and, when an action is supplied, that same wallet's authorization in one circuit. Without an action, the wallet signs the challenge instead; an identity-only proof does not authorize an application action. Coinbase KYC, Coinbase country and OIDC domain circuits do not take an action.
 
 ## x402 payment
 
@@ -573,16 +570,14 @@ POST ${config.a2aBaseUrl}/api/v1/prove with circuit and prepared inputs to recei
 Read the live \`accepts\` list and \`PAYMENT-REQUIRED\` header; do not substitute a static payment domain.
 The SDK signs the selected offer and retries with \`PAYMENT-SIGNATURE\` and \`X-Payment-Nonce\`.
 
-For arc-testnet-nano, @circle-fin/x402-batching selects the GatewayWalletBatched domain.
-The Circle Agent Wallet's backing EOA signs against its deposited Gateway balance; Gateway verifies
-and settles the payment. A proof purchase does not require a separate buyer transfer transaction.
-USDC held in the Agent Wallet and USDC deposited in Gateway are different balances.
+The buyer signs an EIP-3009 authorization; a proof purchase does not require a separate buyer
+transfer transaction.
 
 ## CLI equivalent
 
-Choose any canonical circuit above and its guide. For GIWA, replace arc_eligibility below with giwa_attestation; omit --action for an identity-only proof. With the existing signer environment loaded and an offered Arc nanopayment network:
+Choose any canonical circuit above and its guide; omit --action for an identity-only proof. With the existing signer environment loaded and an offered payment network:
 
-\`PROOFPORT_URL=${config.a2aBaseUrl} zkproofport-prove arc_eligibility --action action.json --scope ledger-house --pay-with arc --pay-on arc-testnet-nano --max-payment 0.001 --silent\`
+\`PROOFPORT_URL=${config.a2aBaseUrl} zkproofport-prove giwa_attestation --action action.json --scope myapp:membership --pay-with key --pay-on <offered network> --max-payment 0.001 --silent\`
 
 This CLI calls the local MCP generate_proof tool. An agent already connected to the local MCP
 server can call that tool directly without spawning the prove CLI.

@@ -49,9 +49,9 @@ function challengeOffering(...networks: string[]) {
 }
 
 describe('signing what this service asks for', () => {
-  it('signs an Arc requirement, extra fields and all', async () => {
+  it('signs an Ethereum Sepolia requirement, extra fields and all', async () => {
     const wallet = await walletFromPrivateKey(KEY);
-    const paid = await signPayment(challengeOffering('arc-testnet'), wallet, { network: 'arc-testnet' });
+    const paid = await signPayment(challengeOffering('ethereum-sepolia'), wallet, { network: 'ethereum-sepolia' });
 
     // `PAYMENT-SIGNATURE` is the v2 header name, paired with the
     // `PAYMENT-REQUIRED` header the 402 carries. Asserted by name rather than
@@ -62,7 +62,7 @@ describe('signing what this service asks for', () => {
     expect(header, `headers were ${Object.keys(paid.headers).join(', ')}`).toBeTruthy();
     const decoded = JSON.parse(Buffer.from(header, 'base64').toString('utf8'));
     expect(JSON.stringify(decoded)).toMatch(/0x[0-9a-fA-F]{130}/); // a signature is in there
-    expect(paid.paidOn).toBe('arc-testnet');
+    expect(paid.paidOn).toBe('ethereum-sepolia');
     expect(paid.payer).toBe(new ethers.Wallet(KEY).address);
     // Our own challenge nonce rides alongside, not inside, the x402 payload.
     expect(paid.headers['X-Payment-Nonce']).toBe(NONCE);
@@ -70,7 +70,7 @@ describe('signing what this service asks for', () => {
 
   it('signs every chain this service can offer', async () => {
     const wallet = await walletFromPrivateKey(KEY);
-    for (const chain of ['base-sepolia', 'base', 'ethereum', 'ethereum-sepolia', 'arc-testnet']) {
+    for (const chain of ['base-sepolia', 'base', 'ethereum', 'ethereum-sepolia']) {
       const paid = await signPayment(challengeOffering(chain), wallet, { network: chain });
       expect(paid.paidOn, `signing failed for ${chain}`).toBe(chain);
     }
@@ -78,44 +78,53 @@ describe('signing what this service asks for', () => {
 
   it('signs the chain asked for, not the first offered', async () => {
     const wallet = await walletFromPrivateKey(KEY);
-    const challenge = challengeOffering('base-sepolia', 'arc-testnet', 'ethereum-sepolia');
-    const paid = await signPayment(challenge, wallet, { network: 'arc-testnet' });
-    expect(paid.paidOn).toBe('arc-testnet');
+    const challenge = challengeOffering('base-sepolia', 'ethereum-sepolia');
+    const paid = await signPayment(challenge, wallet, { network: 'ethereum-sepolia' });
+    expect(paid.paidOn).toBe('ethereum-sepolia');
 
     // Named by CAIP-2 too, since that is what the offer carries.
-    const byCaip2 = await signPayment(challenge, wallet, { network: 'eip155:5042002' });
-    expect(byCaip2.paidOn).toBe('arc-testnet');
+    const byCaip2 = await signPayment(challenge, wallet, { network: 'eip155:11155111' });
+    expect(byCaip2.paidOn).toBe('ethereum-sepolia');
   });
 
   it('refuses a chain that was not offered instead of paying elsewhere', async () => {
     const wallet = await walletFromPrivateKey(KEY);
     await expect(
-      signPayment(challengeOffering('base-sepolia'), wallet, { network: 'arc-testnet' }),
-    ).rejects.toThrow(/does not take payment on 'arc-testnet'/);
+      signPayment(challengeOffering('base-sepolia'), wallet, { network: 'ethereum-sepolia' }),
+    ).rejects.toThrow(/does not take payment on 'ethereum-sepolia'/);
+  });
+
+  it('refuses to sign an Arc USDC offer: that token is no longer one this SDK knows', async () => {
+    const wallet = await walletFromPrivateKey(KEY);
+    const arc = {
+      ...challengeOffering('base-sepolia').accepts[0],
+      network: 'eip155:5042002', networkName: 'arc-testnet', asset: '0x3600000000000000000000000000000000000000',
+    };
+    await expect(signPayment({ nonce: NONCE, accepts: [arc] }, wallet, { network: 'arc-testnet' }))
+      .rejects.toThrow(/no USDC known for it at all/);
   });
 
   it('takes the first offer when no chain is named', async () => {
     const wallet = await walletFromPrivateKey(KEY);
-    const paid = await signPayment(challengeOffering('arc-testnet', 'base'), wallet);
-    expect(paid.paidOn).toBe('arc-testnet');
+    const paid = await signPayment(challengeOffering('ethereum-sepolia', 'base'), wallet);
+    expect(paid.paidOn).toBe('ethereum-sepolia');
   });
 });
 
 describe('what the offer says', () => {
   it('prices each chain in its own units', () => {
-    const offers = paymentOffers(challengeOffering('arc-testnet', 'base'));
-    // Both are 6-decimal USDC, Arc included -- its 18 decimals belong to a
-    // native send, not to a quote. 0.01 USDC is 10000 either way.
+    const offers = paymentOffers(challengeOffering('ethereum-sepolia', 'base'));
+    // Both are 6-decimal USDC. 0.01 USDC is 10000 either way.
     for (const o of offers) {
       expect(BigInt(o.amount), `${o.networkName} priced at ${o.amount}`).toBe(10_000n);
     }
   });
 
-  it('names chains in CAIP-2, which is the only form that can carry Arc', () => {
-    for (const o of paymentOffers(challengeOffering('arc-testnet', 'base', 'ethereum'))) {
+  it('names chains in CAIP-2', () => {
+    for (const o of paymentOffers(challengeOffering('ethereum-sepolia', 'base', 'ethereum'))) {
       expect(o.network).toMatch(/^eip155:\d+$/);
     }
-    expect(paymentOffers(challengeOffering('arc-testnet'))[0].network).toBe('eip155:5042002');
+    expect(paymentOffers(challengeOffering('ethereum-sepolia'))[0].network).toBe('eip155:11155111');
   });
 
   it('rebuilds a requirement identically, which is what settling depends on', () => {
@@ -123,8 +132,8 @@ describe('what the offer says', () => {
     // server-side. One differing field -- a re-rounded price, a regenerated
     // nonce -- fails as an invalid signature and reads like the buyer signed
     // wrongly.
-    const first = challengeOffering('arc-testnet').accepts;
-    const second = challengeOffering('arc-testnet').accepts;
+    const first = challengeOffering('ethereum-sepolia').accepts;
+    const second = challengeOffering('ethereum-sepolia').accepts;
     expect(JSON.stringify(second)).toBe(JSON.stringify(first));
   });
 });

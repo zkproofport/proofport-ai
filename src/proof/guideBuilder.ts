@@ -4,7 +4,7 @@ import { CIRCUIT_IDS } from '../config/circuitIds.js';
 import { AUTHORIZED_SIGNERS, COINBASE_ATTESTER_CONTRACT, ATTESTATION_SOURCES, GIWA_CHAIN_ID } from '../config/contracts.js';
 import { getChainVerifiers } from '../config/deployments.js';
 import { resolvePaymentNetworks, type PaymentNetwork } from '../payment/networks.js';
-import { type Config, getPaymentChainId, isTestnet, getArcVerificationConfig } from '../config/index.js';
+import { type Config, getPaymentChainId, isTestnet } from '../config/index.js';
 import { parseUnits } from 'ethers';
 
 const require = createRequire(import.meta.url);
@@ -36,13 +36,10 @@ function paymentGuide(config: Config, networks: PaymentNetwork[]) {
     chains: networks.map(network => ({
       network: network.caip2, network_name: network.id, asset: network.usdc, decimals: network.decimals,
       settlement: network.settlement,
-      eip712_domain: network.batching
-        ? { name: network.batching.name, version: network.batching.version, chainId: network.chainId, verifyingContract: network.batching.gatewayWallet }
-        : { name: network.eip3009.name, version: network.eip3009.version, chainId: network.chainId, verifyingContract: network.usdc },
+      eip712_domain: { name: network.eip3009.name, version: network.eip3009.version, chainId: network.chainId, verifyingContract: network.usdc },
     })),
     single_step_flow: 'POST /api/v1/prove → 402 PAYMENT-REQUIRED and accepts → sign the selected offer → retry with PAYMENT-SIGNATURE. Return X-Payment-Nonce when the challenge supplied one.',
     nonce_details: 'X-Payment-Nonce is single-use and circuit-bound; required with X-Payment-TX. Signed authorization payments also have their own replay protection.',
-    nanopayments: 'For arc-testnet-nano, use @circle-fin/x402-batching. Circle Agent Wallet backing EOA signs GatewayWalletBatched; Gateway settles against deposited balance. USDC in the wallet and deposited Gateway balance are separate.',
   };
 }
 
@@ -51,7 +48,6 @@ function circuitAlias(circuitId: CircuitId): string {
     [CIRCUIT_IDS.COINBASE_ATTESTATION]: 'coinbase_kyc',
     [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: 'coinbase_country',
     [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: 'oidc_domain',
-    [CIRCUIT_IDS.ARC_ELIGIBILITY]: 'arc_eligibility',
     [CIRCUIT_IDS.GIWA_ATTESTATION]: 'giwa_attestation',
   };
   const alias = aliases[circuitId];
@@ -347,14 +343,12 @@ function buildEndpoints(config: Config, circuitId: CircuitId) {
 }
 
 
-/** Both action-capable circuits also support identity-only proofs. */
+/** The action-capable circuit also supports identity-only proofs. */
 function buildActionGuide(circuitId: CircuitId, config: Config) {
   const circuit = CIRCUITS[circuitId];
   const source = ATTESTATION_SOURCES[circuitId];
   if (!source) throw new Error(`No attestation source for ${circuitId}`);
-  const arc = circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY ? getArcVerificationConfig(config) : undefined;
   const targets: Partial<Record<CircuitId, { chainId: number; name: string; rpc: string }>> = {
-    [CIRCUIT_IDS.ARC_ELIGIBILITY]: arc ? { chainId: arc.chainId, name: `Arc (${arc.chainId})`, rpc: arc.rpcUrl } : undefined,
     [CIRCUIT_IDS.GIWA_ATTESTATION]: { chainId: GIWA_CHAIN_ID, name: 'GIWA Sepolia', rpc: config.giwaRpcUrl },
   };
   const target = targets[circuitId];
@@ -363,9 +357,8 @@ function buildActionGuide(circuitId: CircuitId, config: Config) {
   const verifier = getChainVerifiers(String(target.chainId))[circuitId];
   if (!verifier) throw new Error(`No ${circuitId} verifier configured on chain ${target.chainId}`);
   const networks = resolvePaymentNetworks(config.paymentNetworks);
-  const nano = networks.find(network => network.id === 'arc-testnet-nano');
   const isGiwa = source.kind === 'giwa-sepolia';
-  const cliBase = `PROOFPORT_URL=${config.a2aBaseUrl} zkproofport-prove ${circuitId} --scope myapp:membership${nano ? ' --pay-with arc --pay-on arc-testnet-nano' : ''}`;
+  const cliBase = `PROOFPORT_URL=${config.a2aBaseUrl} zkproofport-prove ${circuitId} --scope myapp:membership`;
   return {
     circuit_id: circuit.id, display_name: circuit.displayName,
     description: `Prove the configured ${isGiwa ? 'GIWA' : 'Coinbase KYC'} attestation, optionally authorizing one exact EIP-712 action with the same wallet.`,
@@ -375,19 +368,19 @@ function buildActionGuide(circuitId: CircuitId, config: Config) {
       install: 'npm install -g @zkproofport-ai/mcp@latest', command: 'zkproofport-mcp', transport: 'stdio',
       discovery: 'Connect, call tools/list, and follow generate_proof inputSchema. Keys stay in the local signer process.',
       required_arguments: ['circuit'], optional_arguments: ['scope', 'action', 'pay_with', 'pay_on', 'max_payment'],
-      generate_proof: { circuit: circuitId, scope: 'myapp:membership', ...(nano ? { pay_with: 'arc', pay_on: nano.id } : {}) },
+      generate_proof: { circuit: circuitId, scope: 'myapp:membership' },
       action_bound_example: { circuit: circuitId, scope: 'myapp:membership', action: '<complete EIP-712 typed action supplied by the trusted application>' },
       verification: `Call verify_proof with the returned result. Check the proof on ${target.name}; action authorization additionally requires application policy checks.`,
       credentials: `ATTESTATION_KEY stays local.${isGiwa ? ' The SDK uses its built-in GIWA Sepolia RPC and explorer for witness preparation; server GIWA_RPC_URL/GIWA_EXPLORER_URL configure the server-side path.' : ''} PAYMENT_PRIVATE_KEY is a separate key-based payment option, not a fallback to the attestation signer.`,
     },
     sdk: {
       package: '@zkproofport-ai/sdk',
-      quick_start: `import { createConfig, generateProof${nano ? ', walletFromArcAgent' : ''} } from '@zkproofport-ai/sdk';
-${nano ? "const payment = await walletFromArcAgent({ address: agentWalletB, chain: 'ARC-TESTNET' });" : '// Supply an explicitly selected funded payment wallet when this service charges.'}
+      quick_start: `import { createConfig, generateProof } from '@zkproofport-ai/sdk';
+// Supply an explicitly selected funded payment wallet when this service charges.
 const result = await generateProof(
   createConfig({ baseUrl: '${config.a2aBaseUrl}' }),
   { attestation: existingAttestationSigner, payment },
-  { circuit: '${circuitId}', scope: 'myapp:membership', action${nano ? ", payOn: 'arc-testnet-nano'" : ''} },
+  { circuit: '${circuitId}', scope: 'myapp:membership', action },
 );
 // Omit action above for an identity-only proof.`,
       cli: `${cliBase} --action action.json --silent`,
@@ -433,7 +426,7 @@ const result = await generateProof(
 export function buildGuide(circuitId: CircuitId, config: Config): object {
   const circuit = CIRCUITS[circuitId];
   if (!circuit) throw new Error(`Unknown circuit '${circuitId}'.`);
-  if (circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY || circuitId === CIRCUIT_IDS.GIWA_ATTESTATION) return buildActionGuide(circuitId, config);
+  if (circuitId === CIRCUIT_IDS.GIWA_ATTESTATION) return buildActionGuide(circuitId, config);
   const oidc = circuitId === CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION;
   const country = circuitId === CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION;
   if (!oidc && !country && circuitId !== CIRCUIT_IDS.COINBASE_ATTESTATION) throw new Error(`No guide builder for '${circuitId}'.`);
@@ -466,7 +459,7 @@ const result = await generateProof(
       cli: oidc
         ? 'Use local MCP generate_proof with jwt and provider, or the SDK example. Keep JWTs out of shell history.'
         : `PROOFPORT_URL=${config.a2aBaseUrl} zkproofport-prove ${circuitAlias(circuitId)} --scope myapp:membership${country ? ' --countries KR --included true' : ''} --silent`,
-      payment_selection: 'Load PAYMENT_PRIVATE_KEY for pay_with=key, or select an existing Circle/CDP payment wallet. The attestation signer is not a payment fallback.',
+      payment_selection: 'Load PAYMENT_PRIVATE_KEY for pay_with=key, or select an existing CDP payment wallet with pay_with=cdp. The attestation signer is not a payment fallback.',
     },
     constants: buildConstants(config, circuitId), formulas: buildFormulas(circuitId), input_schema: buildInputSchema(circuitId), endpoints: buildEndpoints(config, circuitId),
   };

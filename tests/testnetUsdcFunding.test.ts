@@ -8,7 +8,7 @@ function dependencies(balance = 0n) {
 }
 
 describe('explicit existing-wallet testnet USDC funding', () => {
-  it.each(['base', 'ethereum', 'arc-testnet', '', 'Ethereum-sepolia'])('rejects unsupported network %s before any RPC or faucet', async network => {
+  it.each(['base', 'ethereum', 'arc-testnet', 'arc-testnet-nano', '', 'Ethereum-sepolia'])('rejects unsupported network %s before any RPC or faucet', async network => {
     const deps = dependencies();
     await expect(ensureTestnetUsdc({ network, address, credentials }, deps)).rejects.toThrow(/base-sepolia.*ethereum-sepolia/);
     expect(deps.balanceOf).not.toHaveBeenCalled(); expect(deps.requestFaucet).not.toHaveBeenCalled();

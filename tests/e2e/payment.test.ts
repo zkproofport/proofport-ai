@@ -11,23 +11,18 @@
  * So these send real money. They are slow, they cost testnet USDC, and they
  * are the only tests here that can say "a paid request returns a proof".
  *
- * ## Three wallets, and why each is here rather than parameterised away
+ * ## Two wallets, and why each is here rather than parameterised away
  *
  * | Paying from | Why it needs its own case |
  * |---|---|
  * | a raw private key | the baseline; signs locally with no service in the middle |
  * | a Coinbase CDP wallet | the key never exists locally -- signing is an API call, and CDP's own x402 adapter does the signing, so a change on their side breaks here first |
- * | a Circle developer wallet | remote signing is a separate integration from a locally held key |
- * | a Circle Agent Wallet | optional E2E_ARC_AGENT_ADDRESS selects CLI-backed signing for both Arc payment cases |
  *
  * The claim they share -- the buyer signs and never sends a transaction, so it
  * needs no gas -- is checked directly on chain by
  * `scripts/verify-payment.ts`, which measures that the buyer's balance falls
- * by exactly the price. It passed on arc-testnet on 2026-09-09 in
- * 0x3c2e1f5a1ac05a28bbe2f9d2efcfdc19088231550c8c1961d7789a767bb3706c: the
- * recipient received 0.01 USDC, the buyer spent 0.01 and no gas, and the
- * settler spent 0.00245 USDC of gas. These tests check the same thing through
- * the service instead of directly.
+ * by exactly the price. These tests check the same thing through the service
+ * instead of directly.
  *
  * ## Skips are stated, never silent
  *
@@ -40,13 +35,11 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import {
   walletFromPrivateKey,
   walletFromCdp,
-  walletFromCircle,
   signPayment,
   paymentOffers,
-  createConfig, generateProof, fromPrivateKey, verifyProof, gatewayBalance, walletFromArcAgent,
+  createConfig, generateProof, fromPrivateKey, verifyProof,
 } from '@zkproofport-ai/sdk';
 import type { PaymentWallet } from '@zkproofport-ai/sdk';
-import { createPublicClient, http, parseAbi, parseSignature, recoverTypedDataAddress } from 'viem';
 
 const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:4002';
 const CIRCUIT = 'coinbase_kyc';
@@ -58,7 +51,6 @@ const CIRCUIT = 'coinbase_kyc';
 const RPC_BY_CAIP2: Record<string, string> = {
   'eip155:84532': process.env.CHAIN_RPC_URL || 'https://sepolia.base.org',
   'eip155:8453': 'https://mainnet.base.org',
-  'eip155:5042002': process.env.ARC_RPC_URL || 'https://rpc.testnet.arc.io',
   'eip155:11155111': process.env.ETHEREUM_RPC_URL || 'https://ethereum-sepolia-rpc.publicnode.com',
   'eip155:1': 'https://ethereum-rpc.publicnode.com',
 };
@@ -124,23 +116,10 @@ describe('what the service offers', () => {
     const offers = paymentOffers(challenge!);
     expect(offers.length).toBeGreaterThan(0);
     for (const o of offers) {
-      // CAIP-2, not a bare name. The bare names are a fixed 24-chain list
-      // inside @x402/evm with no Arc in it, so a bare-name offer cannot be
-      // paid on Arc at all.
+      // CAIP-2, not a bare name: the v2 scheme registers against CAIP-2.
       expect(o.network, `${o.networkName} offered as '${o.network}'`).toMatch(/^eip155:\d+$/);
       expect(o.asset).toMatch(/^0x[0-9a-fA-F]{40}$/);
     }
-  });
-
-  it('prices Arc in 6 decimals, not 18', (context) => {
-    if (!reachable) return expect.soft(reachable, `${BASE_URL} unreachable`).toBe(true);
-    const arc = paymentOffers(challenge!).find((o) => o.networkName === 'arc-testnet');
-    if (!arc) { console.warn('  SKIP: this deployment offers no Arc chain'); return context.skip(); }
-    if (!challenge!.requiresPayment) { console.warn('  SKIP: payment disabled, every price is 0'); return context.skip(); }
-    // 0.01 USDC is 10000 in 6 decimals and 10000000000000000 in 18. Quoting
-    // the 18-decimal figure would ask for a ten-trillionth of the intended
-    // price while still passing a minimum-amount check.
-    expect(BigInt(arc.amount)).toBeLessThan(10n ** 12n);
   });
 });
 
@@ -161,19 +140,10 @@ async function paysAndProves(wallet: PaymentWallet, network: string) {
   // says so, instead of failing several seconds later as a facilitator's
   // "ERC20: transfer amount exceeds balance" buried in a settle error — which
   // reads like the payment code is broken when the only thing missing is money.
-  // Nano spends Gateway balance, not the wallet's on-chain USDC balance.
-  let held: bigint | null = null;
-  if (network === 'arc-testnet-nano') {
-    const key = networkPayerKey(network);
-    if (key && wallet.address.toLowerCase() === (await walletFromPrivateKey(key)).address.toLowerCase()) {
-      held = (await gatewayBalance({ privateKey: key as `0x${string}`, rpcUrl: process.env.ARC_RPC_URL || 'https://rpc.testnet.arc.io' })).available;
-    }
-  } else {
-    held = await usdcBalance(wanted!.asset, wallet.address, wanted!.network);
-  }
+  const held = await usdcBalance(wanted!.asset, wallet.address, wanted!.network);
   if (held !== null && held < BigInt(wanted!.amount)) {
     throw new Error(`${wallet.describe()} has ${held} atomic USDC on ${network}; price ${wanted!.amount}. ` +
-      (network === 'arc-testnet-nano' ? 'Fund its Circle Gateway balance.' : 'Fund its USDC token balance on this network.'));
+      'Fund its USDC token balance on this network.');
   }
 
   const attestationKey = process.env.ATTESTATION_KEY;
@@ -206,18 +176,14 @@ function networkPayerKey(network: string): string | undefined {
 }
 
 describe('each staging payment network independently', () => {
-  for (const network of ['base-sepolia', 'arc-testnet', 'ethereum-sepolia', 'arc-testnet-nano']) {
+  for (const network of ['base-sepolia', 'ethereum-sepolia']) {
     it(`settles ${network} and returns an on-chain-verifiable proof`, async (context) => {
       expect(reachable, `${BASE_URL} unreachable`).toBe(true);
       if (!challenge!.requiresPayment) { console.warn('SKIP: payment disabled'); return context.skip(); }
       expect(paymentOffers(challenge!).some(o => o.networkName === network), `Required staging network ${network} not offered`).toBe(true);
-      if ((network === 'arc-testnet' || network === 'arc-testnet-nano') && process.env.E2E_ARC_AGENT_ADDRESS) {
-        await paysAndProves(await walletFromArcAgent({ address: process.env.E2E_ARC_AGENT_ADDRESS }), network);
-      } else {
-        const key = networkPayerKey(network);
-        if (!key) throw new Error(`Missing payer key for ${network}`);
-        await paysAndProves(await walletFromPrivateKey(key), network);
-      }
+      const key = networkPayerKey(network);
+      if (!key) throw new Error(`Missing payer key for ${network}`);
+      await paysAndProves(await walletFromPrivateKey(key), network);
     }, 180_000);
   }
 });
@@ -243,26 +209,6 @@ describe('paying from a Coinbase CDP wallet', () => {
       offers.find((o) => o.networkName === 'base')?.networkName;
     if (!network) { console.warn('  SKIP: this deployment offers no Base chain for the CDP wallet'); return context.skip(); }
     await paysAndProves(wallet, network);
-  }, 180_000);
-});
-
-describe('paying from a Circle wallet on Arc', () => {
-  it('signs through Circle and buys a proof', async (context) => {
-    if (!reachable) return expect.soft(reachable, `${BASE_URL} unreachable`).toBe(true);
-    if (!challenge!.requiresPayment) { console.warn('  SKIP: this deployment is not charging'); return context.skip(); }
-    const { CIRCLE_API_KEY, CIRCLE_ENTITY_SECRET, CIRCLE_WALLET_ID } = process.env;
-    if (!CIRCLE_API_KEY || !CIRCLE_ENTITY_SECRET || !CIRCLE_WALLET_ID) {
-      { console.warn('  SKIP: CIRCLE_API_KEY / CIRCLE_ENTITY_SECRET / CIRCLE_WALLET_ID not set'); return context.skip(); }
-    }
-    const wallet = await walletFromCircle({
-      apiKey: CIRCLE_API_KEY,
-      entitySecret: CIRCLE_ENTITY_SECRET,
-      walletId: CIRCLE_WALLET_ID,
-      address: process.env.CIRCLE_WALLET_ADDRESS,
-    });
-    const arc = paymentOffers(challenge!).find((o) => o.networkName === 'arc-testnet');
-    if (!arc) { console.warn('  SKIP: this deployment offers no Arc chain'); return context.skip(); }
-    await paysAndProves(wallet, arc.networkName!);
   }, 180_000);
 });
 
@@ -307,51 +253,4 @@ describe('what the service refuses', () => {
     const body = (await res.json()) as { error?: string };
     expect(body.error).toBe('INVALID_NONCE');
   }, 240_000);
-});
-
-
-// Signature and eth_call only: these never submit a paid proof or transaction.
-describe('Circle agent payment signing preflight', () => {
-  for (const network of ['arc-testnet', 'arc-testnet-nano']) it(`verifies ${network} against its actual owner without settlement`, async context => {
-    if (!process.env.E2E_ARC_AGENT_ADDRESS) {
-      console.warn('SKIP: E2E_ARC_AGENT_ADDRESS and an existing Circle CLI login are required');
-      return context.skip();
-    }
-    expect(reachable, `${BASE_URL} unreachable`).toBe(true);
-    expect(challenge?.requiresPayment, 'staging must advertise payment offers').toBe(true);
-    const wallet = await walletFromArcAgent({ address: process.env.E2E_ARC_AGENT_ADDRESS });
-    let typed: Parameters<PaymentWallet['signTypedData']>[0] | undefined;
-    let signature: `0x${string}` | undefined;
-    const sign = wallet.signTypedData.bind(wallet);
-    wallet.signTypedData = async message => {
-      typed = message;
-      signature = await sign(message);
-      return signature;
-    };
-    const paid = await signPayment(challenge!, wallet, { network });
-    expect(typed).toBeDefined();
-    expect(signature).toBeDefined();
-    expect(String(typed!.message.from).toLowerCase()).toBe(paid.payer.toLowerCase());
-    if (network.endsWith('-nano')) {
-      const recovered = await recoverTypedDataAddress({ ...typed!, signature: signature! } as Parameters<typeof recoverTypedDataAddress>[0]);
-      expect(recovered.toLowerCase()).toBe(paid.payer.toLowerCase());
-      expect(paid.payer.toLowerCase()).not.toBe(process.env.E2E_ARC_AGENT_ADDRESS.toLowerCase());
-    } else {
-      expect(paid.payer.toLowerCase()).toBe(process.env.E2E_ARC_AGENT_ADDRESS.toLowerCase());
-      const rpc = createPublicClient({ transport: http(RPC_BY_CAIP2['eip155:5042002']) });
-      expect(await rpc.verifyTypedData({ ...typed!, address: paid.payer, signature: signature! } as Parameters<typeof rpc.verifyTypedData>[0])).toBe(true);
-      const m = typed!.message;
-      const args = [m.from as `0x${string}`, m.to as `0x${string}`, BigInt(String(m.value)), BigInt(String(m.validAfter)), BigInt(String(m.validBefore)), m.nonce as `0x${string}`] as const;
-      const parsed = parseSignature(signature!);
-      // The pinned x402 facilitator uses v/r/s for a 65-byte Circle signature.
-      // Check that actual overload too, not only the ERC-1271 bytes overload.
-      await rpc.simulateContract({
-        address: typed!.domain.verifyingContract as `0x${string}`,
-        abi: parseAbi(['function transferWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce,uint8 v,bytes32 r,bytes32 s)']),
-        functionName: 'transferWithAuthorization',
-        args: [...args, Number(parsed.v ?? (BigInt(parsed.yParity!) + 27n)), parsed.r, parsed.s],
-        account: m.to as `0x${string}`,
-      });
-    }
-  }, 30_000);
 });

@@ -65,7 +65,8 @@ describe('artifactManager', () => {
 
       const calls = mockFetch.mock.calls.map(call => call[0]);
       expect(calls).toContain(`${repoBaseUrl}/coinbase-attestation/target/coinbase_attestation.json`);
-      expect(calls).toContain(`${repoBaseUrl}/arc-eligibility/target/arc_eligibility.json`);
+      expect(calls).toContain(`${repoBaseUrl}/giwa-attestation/target/giwa_attestation.json`);
+      expect(calls.some(url => String(url).includes('arc-eligibility'))).toBe(false);
       expect(calls).toContain(`${repoBaseUrl}/coinbase-attestation/target/vk/vk`);
       expect(calls).toContain(`${repoBaseUrl}/coinbase-country-attestation/target/coinbase_country_attestation.json`);
       expect(calls).toContain(`${repoBaseUrl}/coinbase-country-attestation/target/vk/vk`);
@@ -83,13 +84,13 @@ describe('artifactManager', () => {
 
       await downloadArtifacts(circuitsDir, repoBaseUrl);
 
-      // Check directory structure for all 3 circuits
+      // Check directory structure for every provable circuit
       const circuit1Dir = path.join(circuitsDir, 'coinbase-attestation', 'target');
       const circuit1VkDir = path.join(circuit1Dir, 'vk');
       const circuit2Dir = path.join(circuitsDir, 'coinbase-country-attestation', 'target');
       const circuit2VkDir = path.join(circuit2Dir, 'vk');
       const circuit3Dir = path.join(circuitsDir, 'oidc-domain-attestation', 'target');
-      const circuit4Dir = path.join(circuitsDir, 'arc-eligibility', 'target');
+      const circuit4Dir = path.join(circuitsDir, 'giwa-attestation', 'target');
       const circuit3VkDir = path.join(circuit3Dir, 'vk');
 
       await expect(fs.stat(circuit1Dir)).resolves.toBeDefined();
@@ -98,6 +99,8 @@ describe('artifactManager', () => {
       await expect(fs.stat(circuit2VkDir)).resolves.toBeDefined();
       await expect(fs.stat(circuit3Dir)).resolves.toBeDefined();
       await expect(fs.stat(circuit3VkDir)).resolves.toBeDefined();
+      await expect(fs.stat(circuit4Dir)).resolves.toBeDefined();
+      await expect(fs.stat(path.join(circuitsDir, 'arc-eligibility'))).rejects.toThrow('ENOENT');
     });
 
     it('throws if fetch fails', async () => {
@@ -158,7 +161,7 @@ describe('artifactManager', () => {
       const jsonHash = crypto.createHash('sha256').update(jsonContent).digest('hex');
       const vkHash = crypto.createHash('sha256').update(vkContent).digest('hex');
       // Derived from the id list, not typed out. A hardcoded list here missed
-      // arc_eligibility when it was added: that circuit had no stored hash, so
+      // a fourth circuit when it was added: that circuit had no stored hash, so
       // ensureArtifacts re-downloaded EVERY circuit and the call count went
       // from 3 to 11 -- a failure that names a number and not the cause.
       const meta: Record<string, { jsonHash: string; vkHash: string; downloadedAt: string }> = {};

@@ -88,9 +88,9 @@ export class AgentRegistration {
     const network = await this.provider.getNetwork();
     const chainId = Number(network.chainId);
 
-    // Arc stores the complete metadata URI; use real gas estimation rather
-    // than the Ethereum workaround, whose fixed limit can underprice storage.
-    if (chainId === 8453 || chainId === 84532 || chainId === 5042002) {
+    // Base chains: use real gas estimation rather than the Ethereum
+    // workaround, whose fixed limit can underprice storing the metadata URI.
+    if (chainId === 8453 || chainId === 84532) {
       return { nonce };
     }
 
@@ -182,7 +182,7 @@ export class AgentRegistration {
       tokenId = await this.findTokenId();
     }
     if (tokenId === null) {
-      throw new Error('Registered agent tokenId could not be resolved; configure an owned AGENT_TOKEN_ID (ARC_AGENT_TOKEN_ID for Arc)');
+      throw new Error('Registered agent tokenId could not be resolved; configure an owned AGENT_TOKEN_ID');
     }
     await this.assertTokenOwner(tokenId);
     log.info({ action: 'identity.token.resolved', tokenId: tokenId.toString() }, 'Resolved tokenId');

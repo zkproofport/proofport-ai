@@ -133,19 +133,9 @@ describe('transactions that did not happen or did not work', () => {
   });
 });
 
-describe('Arc, where USDC is the native asset', () => {
-  it('accepts a plain native send, scaled from 18 decimals', async () => {
-    // Nobody is asked to pay this way -- the offer is an authorization -- but
-    // a wallet can do it, and 0.01 USDC then arrives as 1e16 rather than 1e4.
-    stubRpc(
-      { data: '0x', to: PAY_TO, value: ethers.parseUnits('0.01', 18) },
-      { status: 1, logs: [] },
-    );
-    const r = await verifyPaymentOnChain({
-      ...base,
-      network: 'arc-testnet',
-      settledByUs: true,
-    });
-    expect(r, `native Arc send was rejected: ${JSON.stringify(r)}`).toEqual({ valid: true });
+describe('a removed Arc payment network', () => {
+  it.each(['arc-testnet', 'arc-testnet-nano'])('is refused by name, not checked against another chain: %s', async (network) => {
+    await expect(verifyPaymentOnChain({ ...base, network: network as never, settledByUs: true }))
+      .rejects.toThrow(`Unknown payment network '${network}'. Known: base-sepolia, base, ethereum, ethereum-sepolia.`);
   });
 });

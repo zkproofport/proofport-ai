@@ -22,7 +22,7 @@ const COUNTRY_CODE_BYTES = 2;
 const COINBASE_ATTESTATION_INPUT_LENGTH = 899;
 const COINBASE_COUNTRY_ATTESTATION_INPUT_LENGTH = 921;
 // The KYC vector plus the two 32-byte EIP-712 hashes.
-const ARC_ELIGIBILITY_INPUT_LENGTH = 899 + 64;
+const ACTION_CAPABLE_INPUT_LENGTH = 899 + 64;
 
 // ─── Utility functions ───────────────────────────────────────────────────
 
@@ -213,12 +213,12 @@ export function computeScope(scopeString: string): Uint8Array {
  * The nullifier for a circuit whose secret material is the WALLET and a
  * constant compiled into that circuit -- not `signal_hash`.
  *
- * `arc_eligibility` and `giwa_attestation` derive it this way. They had to:
- * both branch on whether an action was supplied, and `signal_hash` is zero in
- * action mode, so a nullifier taken from it would differ between the two modes
- * for one wallet in one scope. It was already wrong before the branch --
- * nothing in those circuits constrains `signal_hash`, and in action mode
- * nobody signs it, so a prover could mint identities by varying bytes.
+ * `giwa_attestation` derives it this way. It had to: it branches on whether an
+ * action was supplied, and `signal_hash` is zero in action mode, so a
+ * nullifier taken from it would differ between the two modes for one wallet in
+ * one scope. Nothing in that circuit constrains `signal_hash`, and in action
+ * mode nobody signs it, so a prover could otherwise mint identities by varying
+ * bytes.
  *
  * MUST match `verify_wallet_nullifier` in coinbase-libs/src/nullifier.nr. If
  * the two disagree the proof fails with "Nullifier mismatch" and nothing
@@ -247,7 +247,6 @@ export function computeWalletNullifier(
 const NULLIFIER_FROM_WALLET_AND_TAG: Readonly<Record<string, boolean>> = Object.freeze({
   coinbase_attestation: false,
   coinbase_country_attestation: false,
-  arc_eligibility: true,
   giwa_attestation: true,
 });
 
@@ -407,11 +406,11 @@ export function assembleKycInputs(params: {
  *   coinbase_signer_merkle_proof[256] ++ coinbase_signer_leaf_index[1] ++ merkle_proof_depth[1]
  */
 /**
- * The `arc_eligibility` flat vector.
+ * The flat vector of the action-capable circuit (`giwa_attestation`).
  *
  * Identical to the KYC one except that `domain_separator` and `action_hash`
  * sit between `signal_hash` and `signer_list_merkle_root`, which is the
- * parameter order in arc-eligibility/src/main.nr. bb reads this list
+ * parameter order in giwa-attestation/src/main.nr. bb reads this list
  * positionally, so a field in the wrong place makes a proof that fails to
  * verify with nothing naming the cause.
  */
@@ -419,14 +418,10 @@ const EMPTY_32 = new Array(32).fill(0);
 
 export function assembleActionInputs(params: CircuitParams): string[] {
   /*
-   * An action is OPTIONAL for both circuits that use this vector.
-   *
-   * It used to be required, because `arc_eligibility` had no second path: it
-   * always verified an EIP-712 signature, so a request without an action built
-   * a vector 64 bytes short and the prover died naming none of it. Both
-   * circuits branch now -- with an action the wallet signs the typed data and
-   * `signal_hash` must be empty; without one it personal_signs `signal_hash`
-   * and the pair must be empty. The circuit refuses a vector that fills both.
+   * An action is OPTIONAL for the circuit that uses this vector. It branches:
+   * with an action the wallet signs the typed data and `signal_hash` must be
+   * empty; without one it personal_signs `signal_hash` and the pair must be
+   * empty. The circuit refuses a vector that fills both.
    */
   const bound = Boolean(params.domainSeparator) && Boolean(params.actionHash);
   if (Boolean(params.domainSeparator) !== Boolean(params.actionHash)) {
@@ -531,14 +526,15 @@ export interface BuildInputsRequest {
   countryList?: string[];
   isIncluded?: boolean;
   /**
-   * EIP-712 domain hash. Required for `arc_eligibility`, absent otherwise.
+   * EIP-712 domain hash. Optional for `giwa_attestation` (paired with
+   * `actionHash`), absent otherwise.
    *
    * The server does NOT derive it: the domain names a verifying contract and a
    * chain that only the caller knows, and guessing one here would produce a
    * proof bound to the wrong contract.
    */
   domainSeparator?: string;
-  /** EIP-712 hashStruct of the action. Required for `arc_eligibility`. */
+  /** EIP-712 hashStruct of the action. Optional for `giwa_attestation`. */
   actionHash?: string;
 }
 
@@ -597,7 +593,7 @@ export async function computeCircuitParams(
 
   // Validate circuit
   if (!(circuitId in CIRCUITS)) {
-    throw new Error(`Unknown circuit: ${circuitId}`);
+    throw new Error(`Unknown circuit: ${circuitId}. Known: ${Object.keys(CIRCUITS).join(', ')}.`);
   }
 
   // Validate country fields for country circuit
@@ -616,8 +612,8 @@ export async function computeCircuitParams(
   // Step 2: Recover user public key.
   //
   /*
-   * What was signed follows the ACTION, not the circuit id. Arc and GIWA both
-   * accept either; asking the circuit gave the wrong answer the moment the
+   * What was signed follows the ACTION, not the circuit id. GIWA accepts
+   * either; asking the circuit gave the wrong answer the moment the
    * action became optional, and recovering against the wrong digest yields a
    * well-formed key for a wallet nobody controls -- which the circuit reports
    * as "User pubkey does not match address", pointing at the address.
@@ -749,17 +745,12 @@ export async function buildCircuitInputs(
         `coinbase_country_attestation input vector has ${inputs.length} entries, expected ${COINBASE_COUNTRY_ATTESTATION_INPUT_LENGTH}`
       );
     }
-  } else if (
-    circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY ||
-    circuitId === CIRCUIT_IDS.GIWA_ATTESTATION
-  ) {
-    // One vector for both: the two circuits take the same public inputs in the
-    // same order, and both make the action optional.
+  } else if (circuitId === CIRCUIT_IDS.GIWA_ATTESTATION) {
     inputs = assembleActionInputs(params);
 
-    if (inputs.length !== ARC_ELIGIBILITY_INPUT_LENGTH) {
+    if (inputs.length !== ACTION_CAPABLE_INPUT_LENGTH) {
       throw new Error(
-        `${circuitId} input vector has ${inputs.length} entries, expected ${ARC_ELIGIBILITY_INPUT_LENGTH}`
+        `${circuitId} input vector has ${inputs.length} entries, expected ${ACTION_CAPABLE_INPUT_LENGTH}`
       );
     }
   } else {

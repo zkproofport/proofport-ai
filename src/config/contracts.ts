@@ -51,11 +51,6 @@ export const ATTESTATION_SOURCES: Record<
     contract: COINBASE_ATTESTER_CONTRACT,
     signers: AUTHORIZED_SIGNERS,
   },
-  [CIRCUIT_IDS.ARC_ELIGIBILITY]: {
-    kind: 'eas-base',
-    contract: COINBASE_ATTESTER_CONTRACT,
-    signers: AUTHORIZED_SIGNERS,
-  },
   [CIRCUIT_IDS.GIWA_ATTESTATION]: {
     kind: 'giwa-sepolia',
     contract: GIWA_ATTESTER_CONTRACT,
@@ -85,10 +80,6 @@ export const FALLBACK_VERIFIERS: Record<string, Record<CircuitId, string | null>
   '1': {
     [CIRCUIT_IDS.COINBASE_ATTESTATION]: '0xF3D5A09d2C85B28C52EF2905c1BE3a852b609D0C',
     [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: '0x78792554E1582cB49D858eACb5C3607B42d28224',
-    // Deployed on Arc Testnet (5042002) and nowhere else -- see that entry
-    // below. `null` here says this chain has no verifier for it, which is what
-    // a caller needs to hear rather than an address that reverts.
-    [CIRCUIT_IDS.ARC_ELIGIBILITY]: null,
     [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: '0x440EaA25603eD5480caD0ee51d9808a1993eF267',
     // Deployed on GIWA Sepolia (91342) and nowhere else.
     [CIRCUIT_IDS.GIWA_ATTESTATION]: null,
@@ -96,10 +87,6 @@ export const FALLBACK_VERIFIERS: Record<string, Record<CircuitId, string | null>
   '8453': {
     [CIRCUIT_IDS.COINBASE_ATTESTATION]: '0xF7dED73E7a7fc8fb030c35c5A88D40ABe6865382',
     [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: '0xF3D5A09d2C85B28C52EF2905c1BE3a852b609D0C',
-    // Deployed on Arc Testnet (5042002) and nowhere else -- see that entry
-    // below. `null` here says this chain has no verifier for it, which is what
-    // a caller needs to hear rather than an address that reverts.
-    [CIRCUIT_IDS.ARC_ELIGIBILITY]: null,
     [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: '0x9677ba46ad226ce8b3c4517d9c0143e4d458beae',
     // Deployed on GIWA Sepolia (91342) and nowhere else.
     [CIRCUIT_IDS.GIWA_ATTESTATION]: null,
@@ -107,41 +94,20 @@ export const FALLBACK_VERIFIERS: Record<string, Record<CircuitId, string | null>
   '11155111': {
     [CIRCUIT_IDS.COINBASE_ATTESTATION]: '0xCbC8E63fF92659E8B44cFF117D33005Bb669a018',
     [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: '0x6646d970499BBeD728636823A5A7e551E811b414',
-    // Deployed on Arc Testnet (5042002) and nowhere else -- see that entry
-    // below. `null` here says this chain has no verifier for it, which is what
-    // a caller needs to hear rather than an address that reverts.
-    [CIRCUIT_IDS.ARC_ELIGIBILITY]: null,
     [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: '0x07121eb50b2Ebe1675E7Cb96c84B580A3fF6589e',
     // Deployed on GIWA Sepolia (91342) and nowhere else.
     [CIRCUIT_IDS.GIWA_ATTESTATION]: null,
-  },
-  // Arc Testnet. The only chain arc_eligibility is deployed on; the other
-  // circuits have no verifier here, which is what `null` says.
-  '5042002': {
-    [CIRCUIT_IDS.COINBASE_ATTESTATION]: null,
-    [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: null,
-    [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: null,
-    [CIRCUIT_IDS.GIWA_ATTESTATION]: null,
-    // Redeployed 2026-09-22 for the circuit that makes its EIP-712 action
-    // optional. The previous contract is still live and still verifies the
-    // OLD circuit, so a stale address here fails every new proof.
-    [CIRCUIT_IDS.ARC_ELIGIBILITY]: '0x2aEB66292f631ceb6225ffA2439B1f2b4b15e44a',
   },
   // GIWA Sepolia. The only chain giwa_attestation is deployed on.
   '91342': {
     [CIRCUIT_IDS.COINBASE_ATTESTATION]: null,
     [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: null,
     [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: null,
-    [CIRCUIT_IDS.ARC_ELIGIBILITY]: null,
     [CIRCUIT_IDS.GIWA_ATTESTATION]: '0x5Da234546874304F8c51BBEed00fC632938211c1',
   },
   '84532': {
     [CIRCUIT_IDS.COINBASE_ATTESTATION]: '0x0036B61dBFaB8f3CfEEF77dD5D45F7EFBFE2035c',
     [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: '0xdEe363585926c3c28327Efd1eDd01cf4559738cf',
-    // Deployed on Arc Testnet (5042002) and nowhere else -- see that entry
-    // below. `null` here says this chain has no verifier for it, which is what
-    // a caller needs to hear rather than an address that reverts.
-    [CIRCUIT_IDS.ARC_ELIGIBILITY]: null,
     [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: '0x27aFDEa349f247CF698F97FdFAb59E1BF8bD0550',
     // Deployed on GIWA Sepolia (91342) and nowhere else.
     [CIRCUIT_IDS.GIWA_ATTESTATION]: null,

@@ -1,10 +1,10 @@
 # proofport-ai
 
-Agent-native ZK proof infrastructure for ZKProofport, with a TEE-based proving architecture, SDK and local MCP package. Supported Nitro deployments encrypt inputs to the enclave; encryption and hardware-attestation guarantees depend on the selected endpoint and actual returned evidence. Arc exact-action authorization remains **EXPERIMENTAL on Arc Testnet (5042002)**.
+Agent-native ZK proof infrastructure for ZKProofport, with a TEE-based proving architecture, SDK and local MCP package. Supported Nitro deployments encrypt inputs to the enclave; encryption and hardware-attestation guarantees depend on the selected endpoint and actual returned evidence. GIWA exact-action authorization remains **EXPERIMENTAL on GIWA Sepolia (91342)**.
 
 ## Architecture
 
-The following diagram describes the Nitro deployment. Endpoints without an attested enclave key receive readable inputs over HTTPS; the current Arc staging demo uses that mode and does not supply hardware attestation. A valid proof alone is not evidence of enclave execution.
+The following diagram describes the Nitro deployment. Endpoints without an attested enclave key receive readable inputs over HTTPS; the current GCP Cloud Run deployments use that mode and do not supply hardware attestation. A valid proof alone is not evidence of enclave execution.
 
 ```
 Client (AI Agent / SDK)
@@ -181,15 +181,15 @@ For the supported Nitro deployment, proof inputs are encrypted between the clien
 
 The live `402` challenge determines the offered routes, price, asset, recipient and signing domain. Select a compatible wallet and explicit route, obtain user approval, then sign the exact terms and retry the request using the SDK's payment headers. Do not assume every endpoint is free or that every wallet works on every offered chain.
 
-For Arc Gateway nanopayments, `pay_on: "arc-testnet-nano"` draws from an already funded Gateway balance. The initial direct deposit is an on-chain operation requiring gas; each proof payment signs an authorization against that balance. The demo proof fee is 0.001 USDC, but callers must validate the live offer rather than substitute a documentation price.
+Callers must validate the live offer rather than substitute a documentation price.
 
-Use `max_payment: "0.001"` and `approved_payment` in local MCP, or `maxPayment` and `approvedPayment` in the SDK. Exact approved terms include `network`, `scheme`, `amount` (USDC base units), `asset`, `payTo` and `extra: {name, version, verifyingContract}`. The SDK rejects a changed fee, recipient, asset, network or signing domain before signing. Proof payment and an eventual staking transaction require separate approvals.
+Use `max_payment: "0.001"` and `approved_payment` in local MCP, or `maxPayment` and `approvedPayment` in the SDK. Exact approved terms include `network`, `scheme`, `amount` (USDC base units), `asset`, `payTo` and `extra: {name, version, verifyingContract}`. The SDK rejects a changed fee, recipient, asset, network or signing domain before signing. Proof payment and any application transaction that relies on the proof require separate approvals.
 
 Base and Base Sepolia use Dexter first and PayAI as a backup. `--pay-with key`
 and `--pay-with cdp` still choose the buyer's signing wallet; neither selects
 the server's facilitator. Provider failover reuses the identical EIP-3009
-authorization, including its nonce, amount and recipient. Ethereum/Arc direct
-settlement and Circle Gateway nanopayments keep their own settlement routes.
+authorization, including its nonce, amount and recipient. Ethereum direct
+settlement keeps its own settlement route.
 
 The server tries each configured facilitator at most once for connection
 failures, timeouts, HTTP 429/5xx or malformed responses. Payment rejections
@@ -230,8 +230,7 @@ Remote `/mcp` and the local npm MCP server have separate tool surfaces. Consult 
 | `request_challenge` | Request 402 challenge (step-by-step flow) |
 | `submit_proof` | Submit proof inputs (step-by-step flow) |
 | `prepare_inputs` | Prepare circuit inputs (step-by-step flow) |
-| `gateway_balance` | Read Gateway balance using `PAYMENT_PRIVATE_KEY` only |
-| `deposit_to_gateway` | Deposit to Gateway using `PAYMENT_PRIVATE_KEY` only; on-chain |
+| `get_action_approval` | Read the state of a human action approval |
 
 ## npm Packages
 
@@ -247,25 +246,7 @@ npm install @zkproofport-ai/mcp@latest @zkproofport-ai/sdk@latest ethers
 npx zkproofport-mcp    # Starts stdio MCP server
 ```
 
-Arc/GIWA optional-action support requires **SDK 0.2.14 or later** and **MCP 0.2.15 or later** for the step-by-step input preparation path. MCP 0.2.14 has input-validation bugs in that path; its all-in-one tool delegates to the SDK. Install from npm and check the resolved version. Release Please manages package versions and the release workflow publishes them; repository source changes alone do not update `@latest`.
-
-### Circle Agent Wallet on Arc — EXPERIMENTAL
-
-Use the existing Circle CLI login and wallet. `walletFor('arc')` / `walletFromArcAgent` wraps that CLI; MCP selects it with `pay_with: "arc"`. This differs from `pay_with: "circle"`, which uses Circle developer-controlled wallet credentials. Keep credential keys and login secrets out of model prompts and logs.
-
-```bash
-# Inspect the existing wallet; do not replace it or create a new one.
-circle wallet list --chain ARC-TESTNET --type agent
-circle gateway balance --address "$ARC_AGENT_WALLET" --chain ARC-TESTNET --output json
-# Execute only after the user approves this funding amount:
-circle gateway deposit --amount 0.1 --address "$ARC_AGENT_WALLET" --chain ARC-TESTNET --method direct
-```
-
-The local `gateway_balance` and `deposit_to_gateway` tools remain **`PAYMENT_PRIVATE_KEY` only**. Use Circle CLI for the Circle Agent Wallet instead of substituting another wallet. Circle's backing EOA signs Gateway authorizations internally; the exact action still names the operational Wallet B.
-
-The supported flow is: discover the dApp policy and prover → prepare the exact action → approve the action and live payment terms → call `generate_proof` with `arc_eligibility`, `action`, `pay_with: "arc"`, `pay_on: "arc-testnet-nano"`, `max_payment` and `approved_payment` → verify the actual proof → obtain separate stake approval → submit from Wallet B and check the receipt. No all-chain wallet compatibility is implied.
-
-See the [SDK Arc example](packages/sdk/README.md#arc-circle-agent-wallet-path--experimental) and [MCP setup and arguments](packages/mcp/README.md#arc-testnet--experimental). User-facing **exact-action authorization** retains the existing `CredentialDelegation` / `delegate` wire fields.
+GIWA optional-action support requires **SDK 0.2.14 or later** and **MCP 0.2.15 or later** for the step-by-step input preparation path. MCP 0.2.14 has input-validation bugs in that path; its all-in-one tool delegates to the SDK. Install from npm and check the resolved version. Release Please manages package versions and the release workflow publishes them; repository source changes alone do not update `@latest`.
 
 ## Guide System
 
@@ -277,7 +258,7 @@ See the [SDK Arc example](packages/sdk/README.md#arc-circle-agent-wallet-path--e
 - Input schema with types and descriptions
 - EAS GraphQL query templates
 
-Circuits use aliases: `coinbase_kyc` → `coinbase_attestation`, `coinbase_country` → `coinbase_country_attestation`, `oidc_domain` → `oidc_domain_attestation`. `arc_eligibility` has no alias — it is named canonically or not at all.
+Circuits use aliases: `coinbase_kyc` → `coinbase_attestation`, `coinbase_country` → `coinbase_country_attestation`, `oidc_domain` → `oidc_domain_attestation`. `giwa_attestation` has no alias — it is named canonically or not at all.
 
 ## A2A Protocol
 
@@ -331,46 +312,15 @@ Proves holder owns an email address at a specific domain via OIDC JWT verificati
 - **Public Inputs:** domain hash, scope
 - **Nullifier:** Yes (privacy, replay prevention)
 
-### Arc Eligibility (`arc_eligibility`) — EXPERIMENTAL
-
-The same Coinbase attestation as `coinbase_attestation`, optionally bound to
-a named EIP-712 action signed by its credential wallet. The proof then carries
-the action's domain separator and struct hash, so a verifier checks **which**
-action was authorised rather than only that somebody eligible signed something.
-That is the difference that matters once an agent moves money: `personal_sign`
-over 32 opaque bytes shows a person a hex string.
-
-- **Aliases:** none — the canonical id only
-- **Action inputs:** `domainSeparator` and `actionHash` are provided together
-  for an action-bound proof. Without an action, the wallet signs the request
-  signal hash and the proof has no action binding.
-- **Public inputs, in order:** `signal_hash`, `domain_separator`, `action_hash`,
-  `signer_list_merkle_root`, `scope`, `nullifier` — scope at fields 128–159 and
-  nullifier at 160–191, which is 64 further along than every other circuit here
-- **Nullifier:** Yes, derived from `signal_hash` exactly as on Base, so it stays
-  one-per-person rather than one-per-action
-- **Verifier:** `0xCbC8E63fF92659E8B44cFF117D33005Bb669a018` on Arc Testnet (chain 5042002). No Arc mainnet support is claimed.
-- **Status:** `experimental` in `@zkproofport-app/sdk` — provable and
-  verifiable, but the layout and the verifier address can still change
-
 ### Human wallet approval links
 
-SDK/MCP 0.3.0 introduce a human wallet approval pause for requests containing an Arc or GIWA action. The AI service serves `/approve/:id`: a responsive request page with proof conditions, domain/network details, expandable typed action fields and wallet selection. Ordinary proofs without an action retain the existing flow. See the [MCP human-approval instructions](packages/mcp/README.md#human-approval-for-actions) and [SDK examples](packages/sdk/README.md).
+SDK/MCP 0.3.0 introduce a human wallet approval pause for requests containing a GIWA action. The AI service serves `/approve/:id`: a responsive request page with proof conditions, domain/network details, expandable typed action fields and wallet selection. Ordinary proofs without an action retain the existing flow. See the [MCP human-approval instructions](packages/mcp/README.md#human-approval-for-actions) and [SDK examples](packages/sdk/README.md).
 
 The service stores ten-minute approval sessions in Redis. Browser and requester capabilities are separate; approval is bound to the original action and consumed once before proof preparation/payment. Build the page with `npm run build` (included in the Docker image). `A2A_BASE_URL` must identify the externally reachable AI origin. Set `WALLETCONNECT_PROJECT_ID` to enable mobile-wallet pairing; browser extensions work without it. Deploy the compatible AI service before clients use the SDK/MCP 0.3.0 approval flow. The shared application SDK remains a separate dependency.
 
 The approval UI ignores repeated, validated wallet state notifications while invalidating signatures on actual account/network changes or disconnects. Its WalletConnect 2.25.0 adapter consumes normalized chain events without echoing raw notifications back as switch commands, avoiding a request-before-provider-initialization race during pairing. Explicit network selection still uses the public provider API. Run the approval workspace tests, browser tests, and a real local wallet approval before deployment when changing this adapter. The modal uses the page's system font stack so AppKit does not preload unused remote font variants.
 
 ## Contract Addresses
-
-### Arc Testnet — EXPERIMENTAL (5042002)
-
-| Contract | Address |
-|---|---|
-| Arc eligibility verifier | `0xCbC8E63fF92659E8B44cFF117D33005Bb669a018` |
-| Ledger House EligibilityGate | `0xD0F3eE648386B59B484157332E736388Fcc41F47` |
-
-The gate checks the credential policy, authorized actor, exact action, unused nonce and deadline together with proof verification. Its deployed EIP-712 action shape is described in the package READMEs. The layout and deployments remain experimental; do not treat this as a mainnet guarantee.
 
 ### Base Sepolia (Testnet)
 
@@ -426,7 +376,6 @@ The agent auto-registers on-chain at startup via the ERC-8004 Identity contract.
 | `X402_FACILITATOR_URL` | `https://x402.dexter.cash` | Primary Base / Base Sepolia facilitator |
 | `X402_FALLBACK_FACILITATOR_URL` | `https://facilitator.payai.network` | Backup for the same authorization; empty disables failover |
 | `X402_FACILITATOR_TIMEOUT_MS` | `15000` | Per-provider deadline including response body, integer 1–60000 ms |
-| `ARC_VERIFICATION_RPC_URL`, `ARC_VERIFICATION_CHAIN_ID` | Legacy Arc pair only when both absent | Arc proof verification RPC/chain; independent of identity registration; partial pairs are errors |
 | `GIWA_RPC_URL`, `GIWA_EXPLORER_URL` | — | GIWA Sepolia input source and proof verification endpoints |
 | `ERC8004_IDENTITY_ADDRESS` | — | ERC-8004 Identity contract |
 | `ERC8004_REPUTATION_ADDRESS` | — | ERC-8004 Reputation contract |
@@ -451,7 +400,7 @@ direct x402 settlement. No separate `PAYMENT_SETTLER_PRIVATE_KEY` is read.
 When a configured payment network uses payee settlement, startup checks that the
 prover key is valid and its address matches `PAYMENT_PAY_TO`. A mismatch stops
 startup before the service offers payment. Fund this wallet for transaction gas
-on each directly settled network. Facilitator and Gateway settlement do not use
+on each directly settled network. Facilitator settlement does not use
 this wallet to submit each payment; payment-disabled operation skips this check.
 
 For local paid-path tests, provide `PROVER_PRIVATE_KEY` and its public address as
@@ -554,14 +503,12 @@ npm run test:e2e:published
 ```
 
 This installs the exact SDK/MCP versions from their package manifests into an
-isolated temporary directory, together with the supported Circle CLI **1.1.4**.
-It also installs the SDK's optional wallet adapters: CDP and x402 extensions
-use the tested versions in the root lockfile, and Circle developer-controlled
-wallets uses the exact test pin 10.8.1. All adapter modules are imported from the
+isolated temporary directory. It also installs the SDK's optional wallet adapters: CDP and x402 extensions
+use the tested versions in the root lockfile. All adapter modules are imported from the
 isolated installation before any paid test begins. Missing or newly added
 optional peers fail this preflight instead of failing after a proof starts.
-It verifies those versions and gives every test subprocess that CLI through its
-PATH; the global installation is neither used nor changed. SDK imports and the
+It verifies those versions and puts the installation's binaries first on every
+test subprocess's PATH; the global installation is neither used nor changed. SDK imports and the
 MCP process use the installed registry artifacts, not workspace links. The
 installation is removed after testing. Use `-- --sdk-version X.Y.Z --mcp-version
 X.Y.Z` to validate a specific already published release.
@@ -570,15 +517,11 @@ The full run creates paid testnet proofs. Supply credentials in the untracked
 `.env.test` or process environment: `ATTESTATION_KEY`, `GIWA_ATTESTATION_KEY`,
 `E2E_PAYER_WALLET_KEY`, and `E2E_OIDC_JWT` (or an authenticated gcloud account).
 `E2E_PAYMENT_NETWORK` selects the proof suites' payment network. The separate
-payment matrix checks Base Sepolia, Arc immediate settlement, Ethereum Sepolia,
-and Arc nano individually. Give it funded test wallets using explicit
-`E2E_PAYER_KEY_BASE_SEPOLIA`, `E2E_PAYER_KEY_ARC_TESTNET`,
-`E2E_PAYER_KEY_ETHEREUM_SEPOLIA`, and `E2E_PAYER_KEY_ARC_TESTNET_NANO` overrides
-when the common payer cannot pay on those networks. Alternatively,
-`E2E_ARC_AGENT_ADDRESS` selects an existing, authenticated Circle Agent Wallet
-for both Arc cases. Immediate settlement needs on-chain USDC; nano needs Gateway
-USDC. The runner never derives a payer from the prover key, transfers funds,
-or deposits automatically.
+payment matrix checks Base Sepolia and Ethereum Sepolia individually. Give it
+funded test wallets using explicit `E2E_PAYER_KEY_BASE_SEPOLIA` and
+`E2E_PAYER_KEY_ETHEREUM_SEPOLIA` overrides when the common payer cannot pay on
+those networks. The runner never derives a payer from the prover key or
+transfers funds automatically.
 
 For an existing Base Sepolia or Ethereum Sepolia payer that lacks USDC, use the
 explicit faucet helper below. Put `CDP_API_KEY_ID` and `CDP_API_KEY_SECRET` in the

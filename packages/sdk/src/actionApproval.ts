@@ -82,7 +82,7 @@ function address(value: unknown): string {
 function snapshotRequest(request: ActionApprovalRequest): ActionApprovalRequest {
   try {
     const copy = structuredClone(request);
-    if (copy.circuit !== 'giwa_attestation' && copy.circuit !== 'arc_eligibility') throw invalid();
+    if (copy.circuit !== 'giwa_attestation') throw invalid();
     if (typeof copy.scope !== 'string' || !copy.scope.trim()) throw invalid();
     canonical(copy.action);
     hashTypedAction(copy.action);

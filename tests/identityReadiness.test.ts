@@ -16,11 +16,10 @@ vi.mock('../src/identity/autoRegister.js', async (importOriginal) => ({
 }));
 
 const config = {
-  paymentMode: 'disabled', paymentNetworks: 'arc-testnet-nano', paymentProofPrice: '$0.1',
+  paymentMode: 'disabled', paymentNetworks: 'base-sepolia', paymentProofPrice: '$0.1',
   teeMode: 'local', teeAttestationEnabled: false, a2aBaseUrl: 'https://proof.example.com',
   websiteUrl: 'https://example.com', chainRpcUrl: 'https://sepolia.base.org',
-  erc8004IdentityAddress: '', arcRpcUrl: 'https://rpc.example.com', arcChainId: 5042002,
-  arcIdentityAddress: '0x0000000000000000000000000000000000000011', arcAgentTokenId: '',
+  erc8004IdentityAddress: '0x0000000000000000000000000000000000000011',
   proverPrivateKey: '0x' + '11'.repeat(32), agentVersion: '1.0.0', redisUrl: 'redis://example.invalid',
   circuitsDir: 'circuits', bbPath: 'bb',
 } as Config;
@@ -38,12 +37,12 @@ describe('identity readiness HTTP integration', () => {
 
   it('publishes verified registrations with lossless bigint strings', async () => {
     const bundle = createApp(config);
-    vi.mocked(ensureAgentRegistered).mockResolvedValue(new Map([[5042002, 9007199254740993n]]));
+    vi.mocked(ensureAgentRegistered).mockResolvedValue(new Map([[84532, 9007199254740993n]]));
     await initializeIdentity(config, bundle.tokenIdRef, bundle.identityState);
     const response = await request(bundle.app).get('/identity/status');
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({ status: 'ready', registrations: [{ chainId: 5042002, agentId: '9007199254740993' }] });
-    expect(bundle.tokenIdRef.chains.get(5042002)).toBe(9007199254740993n);
+    expect(response.body).toEqual({ status: 'ready', registrations: [{ chainId: 84532, agentId: '9007199254740993' }] });
+    expect(bundle.tokenIdRef.chains.get(84532)).toBe(9007199254740993n);
     expect(ensureAgentRegistered).toHaveBeenCalledWith(config, undefined);
   });
 
@@ -53,14 +52,14 @@ describe('identity readiness HTTP integration', () => {
     vi.mocked(ensureAgentRegistered).mockReturnValue(new Promise(done => { resolve = done; }));
     const task = initializeIdentity(config, bundle.tokenIdRef, bundle.identityState);
     expect((await request(bundle.app).get('/identity/status')).status).toBe(503);
-    resolve(new Map([[5042002, 0n]]));
+    resolve(new Map([[84532, 0n]]));
     await task;
-    expect((await request(bundle.app).get('/identity/status')).body.registrations).toEqual([{ chainId: 5042002, agentId: '0' }]);
+    expect((await request(bundle.app).get('/identity/status')).body.registrations).toEqual([{ chainId: 84532, agentId: '0' }]);
   });
 
   it('converts rejected registration into redacted failure status and clears old claims', async () => {
     const bundle = createApp(config);
-    bundle.tokenIdRef.chains.set(5042002, 1n);
+    bundle.tokenIdRef.chains.set(84532, 1n);
     vi.mocked(ensureAgentRegistered).mockRejectedValue(new Error('private-key rpc-url SECRET'));
     await initializeIdentity(config, bundle.tokenIdRef, bundle.identityState);
     const response = await request(bundle.app).get('/identity/status');
@@ -86,8 +85,14 @@ describe('identity readiness HTTP integration', () => {
     expect(ensureAgentRegistered).not.toHaveBeenCalled();
   });
 
+  it.each(['arc-testnet', 'arc-testnet-nano'])('refuses to start with the removed %s payment network, even with payment disabled', (paymentNetworks) => {
+    expect(() => createApp({ ...config, paymentNetworks })).toThrow(`Unknown payment network(s): ${paymentNetworks}.`);
+    expect(() => createApp({ ...config, paymentMode: 'testnet', paymentPayTo: '0x' + '12'.repeat(20), paymentNetworks }))
+      .toThrow(`Unknown payment network(s): ${paymentNetworks}.`);
+  });
+
   it('disables registration when no identity chains are configured', async () => {
-    const bundle = createApp({ ...config, arcRpcUrl: '' });
+    const bundle = createApp({ ...config, erc8004IdentityAddress: '' });
     expect((await request(bundle.app).get('/identity/status')).body.status).toBe('disabled');
   });
 });

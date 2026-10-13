@@ -86,7 +86,7 @@ export type { ProofportSigner } from './signer.js';
 
 // Paying for a proof. The wallet and the chain are chosen separately: any of
 // the three wallets can pay on any chain the service offers.
-export { walletFromPrivateKey, walletFromCdp, walletFromCircle, walletFromEnv, walletFor } from './wallets.js';
+export { walletFromPrivateKey, walletFromCdp, walletFromEnv, walletFor } from './wallets.js';
 export { signPayment, paymentOffers } from './payment.js';
 export type { PaymentWallet, PaymentOffer, PaidRequest } from './types.js';
 export { CdpWalletSigner } from './cdp.js';
@@ -106,44 +106,10 @@ export {
   getSignerAddress,
 } from './attestation.js';
 
-// Checking the EIP-712 action an arc_eligibility proof binds to. Mirrored from
-// the customer SDK; see the note in typedAction.ts for why, and
+// Checking the EIP-712 action a giwa_attestation proof can bind to. Mirrored
+// from the customer SDK; see the note in typedAction.ts for why, and
 // tests/typedAction.test.ts for the guard that keeps them equal.
 export { validateTypedAction } from './typedAction.js';
-
-// Arc nanopayments: deposit into Circle Gateway once, then pay per request for
-// almost no gas. See ./nanopayment.ts for why this is separate from the
-// ordinary x402 path.
-export {
-  ARC_GATEWAY_CHAIN,
-  gatewayBalance,
-  ensureGatewayBalance,
-  payWithNanopayments,
-  type NanopaymentWallet,
-  type GatewayBalances,
-} from './nanopayment.js';
-
-// Authorizing another wallet to act while the KYC holder stays hidden.
-// This generic legacy schema has no amount; see ./delegation.ts for Gate limits.
-export {
-  buildDelegationAction,
-  delegationActionHash,
-  delegationDomainSeparator,
-  delegationMatchesProof,
-  delegateOf,
-  DELEGATION_PRIMARY_TYPE,
-  DELEGATION_TYPES,
-  type Delegation,
-} from './delegation.js';
-
-// Paying from an Arc agent wallet — Circle holds it and its CLI signs.
-export {
-  walletFromArcAgent,
-  listArcAgentWallets,
-  createArcAgentWallet,
-  ARC_CLI_CHAINS,
-  type ArcCliChain,
-} from './arcWallet.js';
 
 // Validate and hash caller-owned actions before local signing.
 export { hashTypedAction } from './action.js';

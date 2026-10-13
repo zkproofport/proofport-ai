@@ -46,8 +46,8 @@ export interface CoinbaseProveInputs {
    * contract and chain, so it is the caller's to supply -- deriving one here
    * would bind the proof to a contract nobody asked for.
    */
-  domain_separator?: string;   // "0x..." 32 bytes, arc_eligibility only
-  /** EIP-712 hashStruct of the action. arc_eligibility only. */
+  domain_separator?: string;   // "0x..." 32 bytes, giwa_attestation only
+  /** EIP-712 hashStruct of the action. giwa_attestation only. */
   action_hash?: string;        // "0x..." 32 bytes
 }
 

@@ -4,20 +4,18 @@
  * The claim this checks is the whole basis of the payment design: the buyer
  * signs an EIP-3009 authorization and somebody else submits it, so the buyer
  * needs USDC and nothing else -- no native gas token, no balance beyond the
- * price. On Arc that claim is load-bearing, because no public x402 facilitator
- * settles Arc, so this service settles it and the buyer has no third party to
- * fall back on.
+ * price. On Ethereum that claim is load-bearing, because no public x402
+ * facilitator settles Ethereum, so this service settles it and the buyer has
+ * no third party to fall back on.
  *
  * It is a script and not a hand-typed sequence because the sequence is fiddly
- * (three wallets, two decimal views of one balance, a gas measurement that is
- * only meaningful if read at the right moment) and because a future session
- * asking "does paying on Arc actually work" should be able to run it rather
- * than reconstruct it.
+ * (three wallets, a gas measurement that is only meaningful if read at the
+ * right moment) and because a future session asking "does paying on Ethereum
+ * actually work" should be able to run it rather than reconstruct it.
  *
  * ## What it does
  *
- *   1. Funds a settler wallet, if it needs it. On Arc the gas asset IS USDC,
- *      so this is a plain transfer.
+ *   1. Checks that the settler wallet, when one is needed, holds gas.
  *   2. Builds the payment requirement with `buildPaymentRequirements` -- the
  *      same function that answers 402 -- and signs it with `signPayment` from
  *      the SDK. The buyer never touches the chain.
@@ -33,26 +31,23 @@
  * proved the CHAIN supports the flow and said nothing about whether this
  * service's code does. Three bugs that would have broken every payment lived
  * in exactly that gap -- the v2 amount field name, the v2 header name, and
- * spend controls refusing Arc's USDC -- and none of them were visible to a
- * hand-built check.
+ * spend controls refusing an unlisted USDC -- and none of them were visible
+ * to a hand-built check.
  *
  * ## Prerequisites
  *
  *   PAYMENT_BUYER_KEY     a wallet with USDC on the chain being tested.
- *                         On arc-testnet this is the wallet Arc's faucet
- *                         funded; `circuits/.env.development` PRIVATE_KEY was
- *                         that wallet on 2026-09-09.
- *   PROVER_PRIVATE_KEY   the wallet that submits. Funded from the
- *                         buyer by step 1 when it is empty.
+ *   PROVER_PRIVATE_KEY   the wallet that submits. Needs the chain's gas
+ *                         token on a chain this service settles itself.
  *   PAYMENT_PAY_TO       the prover wallet address for direct settlement.
  *
  * ## Usage
  *
  *   PAYMENT_BUYER_KEY=0x... PROVER_PRIVATE_KEY=0x... PAYMENT_PAY_TO=0x... \
- *     npx tsx scripts/verify-payment.ts arc-testnet [price]
+ *     npx tsx scripts/verify-payment.ts ethereum-sepolia [price]
  */
 
-import { createWalletClient, createPublicClient, http, publicActions, parseUnits, formatUnits } from 'viem';
+import { createPublicClient, http, parseUnits, formatUnits } from 'viem';
 import { privateKeyToAccount, generatePrivateKey } from 'viem/accounts';
 import * as viemChains from 'viem/chains';
 import { getPaymentNetwork, allPaymentNetworkIds, buildPaymentRequirements } from '../src/payment/networks.js';
@@ -121,8 +116,9 @@ async function main() {
   const settler = needsSettler
     ? getSettlementAccount(need('PROVER_PRIVATE_KEY'), process.env.PAYMENT_PAY_TO || '')
     : null;
-  // Direct settlement must target the submitting prover wallet (Arc enforces
-  // this). Facilitator settlement can still measure a fresh recipient.
+  // Direct settlement must target the submitting prover wallet
+  // (getSettlementAccount enforces this). Facilitator settlement can still
+  // measure a fresh recipient.
   const recipient = settler ? settler.address : privateKeyToAccount(generatePrivateKey()).address;
   if (buyer.address.toLowerCase() === recipient.toLowerCase()) {
     throw new Error("PAYMENT_BUYER_KEY must differ from the prover recipient for the balance measurement.");
@@ -181,24 +177,11 @@ async function main() {
       ...(blockNumber === undefined ? {} : { blockNumber }),
     }) as Promise<bigint>;
 
-  // Step 1: the settler needs gas. On Arc that means USDC.
-  let settlerNative = settler ? await pub.getBalance({ address: settler.address }) : 0n;
-  if (settler && settlerNative === 0n) {
-    if (!net.nativeUsdc) {
-      throw new Error(
-        `settler ${settler.address} has no native balance on ${net.id} and USDC is not the gas asset there, ` +
-        `so it cannot be funded from USDC. Fund it with the chain's gas token.`,
-      );
-    }
-    console.log(`\n  settler has no gas; sending 1 USDC (which IS gas here)`);
-    const buyerWallet = createWalletClient({ account: buyer, chain, transport: http(rpc) });
-    const fundHash = await buyerWallet.sendTransaction({
-      to: settler.address,
-      value: parseUnits('1', net.nativeDecimals ?? 18),
-    });
-    await pub.waitForTransactionReceipt({ hash: fundHash });
-    settlerNative = await pub.getBalance({ address: settler.address });
-    console.log(`    funded: ${fundHash}`);
+  // Step 1: the settler needs gas in the chain's own gas token.
+  if (settler && (await pub.getBalance({ address: settler.address })) === 0n) {
+    throw new Error(
+      `settler ${settler.address} has no native balance on ${net.id}. Fund it with the chain's gas token.`,
+    );
   }
 
   // Pinned, so "before" and "after" are the same two blocks for every node.
@@ -265,25 +248,19 @@ async function main() {
   };
   const recipientGain = after.recipientUsdc - before.recipientUsdc;
   const buyerSpent = before.buyerUsdc - after.buyerUsdc;
-  const gasCost = receipt.gasUsed * receipt.effectiveGasPrice;
-  // Arc pays gas and receives payment in the same asset. The native balance
-  // delta is therefore gas minus payment, not gas alone.
-  const nativePayment = settler && net.nativeUsdc ? parseUnits(price, net.nativeDecimals ?? 18) : 0n;
-  const settlerSpent = before.settlerNative + nativePayment - after.settlerNative;
+  const settlerSpent = before.settlerNative - after.settlerNative;
 
   console.log(`\n  after (block ${settledAt}, before was ${blockBefore})`);
   console.log(`    recipient received  ${fmt(recipientGain)}`);
   console.log(`    buyer spent         ${fmt(buyerSpent)}`);
   console.log(
     settler
-      ? `    settler spent       ${formatUnits(settlerSpent, net.nativeDecimals ?? 18)} (gas)`
+      ? `    settler spent       ${formatUnits(settlerSpent, chain.nativeCurrency.decimals)} (gas)`
       : `    gas                 paid by ${net.facilitatorUrl}, not by us`,
   );
 
   const problems: string[] = [];
-  if (settler && net.nativeUsdc) {
-    if (settlerSpent !== gasCost) problems.push(`recipient native balance does not equal prior balance plus payment minus receipt gas`);
-  } else if (recipientGain !== amount) {
+  if (recipientGain !== amount) {
     problems.push(`recipient received ${fmt(recipientGain)}, expected ${fmt(amount)}`);
   }
   if (buyerSpent !== amount) {

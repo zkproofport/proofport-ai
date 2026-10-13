@@ -3,9 +3,8 @@
 #
 #   docker compose -f docker-compose.yml -f docker-compose.e2e-payment.yml up -d ai
 #
-# Offers all three staging chains, so one run covers a facilitator-settled
-# chain (Base Sepolia) and two this service settles itself (Arc, Ethereum
-# Sepolia). $0.01 rather than $0.10 -- cheap enough to run repeatedly, which is
+# Offers both staging chains, so one run covers a facilitator-settled chain
+# (Base Sepolia) and one this service settles itself (Ethereum Sepolia). $0.01 rather than $0.10 -- cheap enough to run repeatedly, which is
 # the only way the paid path actually gets exercised.
 #
 # PROVER_PRIVATE_KEY must come from the environment: the service
@@ -15,10 +14,9 @@ services:
   ai:
     environment:
       PAYMENT_MODE: testnet
-      PAYMENT_NETWORKS: "base-sepolia,arc-testnet,ethereum-sepolia"
+      PAYMENT_NETWORKS: "base-sepolia,ethereum-sepolia"
       PAYMENT_PAY_TO: "${PAYMENT_PAY_TO:?set PAYMENT_PAY_TO to the PROVER_PRIVATE_KEY wallet address}"
-      PROVER_PRIVATE_KEY: "${PROVER_PRIVATE_KEY:?set PROVER_PRIVATE_KEY to a wallet with USDC on Arc}"
+      PROVER_PRIVATE_KEY: "${PROVER_PRIVATE_KEY:?set PROVER_PRIVATE_KEY to the payee wallet, funded with Sepolia ETH for settlement gas}"
       X402_FACILITATOR_URL: "https://x402.dexter.cash"
       PAYMENT_PROOF_PRICE: "$$0.01"
-      ARC_RPC_URL: "https://rpc.testnet.arc.io"
       ETHEREUM_RPC_URL: "https://ethereum-sepolia-rpc.publicnode.com"

@@ -54,14 +54,14 @@ function canonical(value: unknown): string {
 }
 
 export interface ApprovalRequest {
-  circuit: 'giwa_attestation' | 'arc_eligibility'; scope: string; action: TypedAction; expectedSigner?: string;
+  circuit: 'giwa_attestation'; scope: string; action: TypedAction; expectedSigner?: string;
   requestHash: string; domainSeparator: string; actionHash: string; digest: string;
 }
 export function validateApprovalRequest(value: unknown, creating = true): ApprovalRequest {
   boundedJson(value);
   const body = object(value, 'Approval request');
   exactKeys(body, creating ? ['circuit', 'scope', 'action', 'expectedSigner'] : ['circuit', 'scope', 'action']);
-  if (body.circuit !== 'giwa_attestation' && body.circuit !== 'arc_eligibility') invalid('Human action approval supports only giwa_attestation and arc_eligibility.');
+  if (body.circuit !== 'giwa_attestation') invalid('Human action approval supports only giwa_attestation.');
   if (typeof body.scope !== 'string' || !body.scope.trim() || Buffer.byteLength(body.scope) > 1024) invalid('Scope must contain between 1 and 1024 UTF-8 bytes.');
   const sharedError = validateTypedAction(body.action);
   if (sharedError) invalid(sharedError);

@@ -202,15 +202,14 @@ ensure_published_packages() {
   if [ ! -f "$dir/node_modules/@zkproofport-ai/mcp/dist/index.js" ]; then
     log "Installing @zkproofport-ai/mcp@$ver and sdk@$ver from the registry into $dir"
     mkdir -p "$dir"
-    # The optional wallet peers come too. The SDK leaves CDP and Circle support
-    # to the consumer so nobody pulls Coinbase's or Circle's SDK to pay with a
-    # private key -- and a fixture without them fails as "Could not load the CDP
-    # wallet support", which reads like a broken published package.
+    # The optional wallet peers come too. The SDK leaves CDP support to the
+    # consumer so nobody pulls Coinbase's SDK to pay with a private key -- and
+    # a fixture without them fails as "Could not load the CDP wallet support",
+    # which reads like a broken published package.
     if ! (cd "$dir" && npm init -y >/dev/null 2>&1 && npm install --silent \
       "@zkproofport-ai/mcp@$ver" "@zkproofport-ai/sdk@$ver" \
       "@coinbase/cdp-sdk@>=1.55.0" "@x402/extensions@>=2.25.0" \
-      "@x402/core@>=2.25.0" "@x402/evm@>=2.25.0" "@x402/svm@>=2.25.0" \
-      "@circle-fin/developer-controlled-wallets@>=10.0.0" >/dev/null 2>&1); then
+      "@x402/core@>=2.25.0" "@x402/evm@>=2.25.0" "@x402/svm@>=2.25.0" >/dev/null 2>&1); then
       warn "Could not install version $ver from the registry — is it published yet?"
       warn "The published MCP step-flow suite will refuse to run, which is the honest outcome."
       return 0

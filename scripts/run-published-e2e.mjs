@@ -4,21 +4,17 @@
  * No credentials are copied into the temporary installation.
  * Usage: E2E_BASE_URL=https://stg-ai.zkproofport.app node scripts/run-published-e2e.mjs
  * Override release versions with --sdk-version / --mcp-version. Remaining
- * arguments go to Vitest, e.g. -t 'should list all 5 circuits' for a free check.
+ * arguments go to Vitest, e.g. -t 'should list all 4 circuits' for a free check.
  */
 import { mkdtemp, writeFile, readFile, rm, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawn, execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { spawn } from 'node:child_process';
 import { installPublishedPackages } from './install-published-packages.mjs';
 import { publishedWalletDependencies, walletImportPreflight } from './published-wallet-dependencies.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
-// Circle rejects older CLI wallet operations. Pin the supported version here
-// so an operator's global installation cannot silently break Arc E2E.
-const circleCliVersion = '1.1.4';
 const sdkManifest = JSON.parse(await readFile(join(root, 'packages/sdk/package.json'), 'utf8'));
 const rootLock = JSON.parse(await readFile(join(root, 'package-lock.json'), 'utf8'));
 const walletDependencies = publishedWalletDependencies(rootLock, sdkManifest);
@@ -47,7 +43,7 @@ const install = await mkdtemp(join(tmpdir(), 'proofport-ai-published-e2e-'));
 try {
   await writeFile(join(install, 'package.json'), JSON.stringify({
     private: true, type: 'module',
-    dependencies: { '@zkproofport-ai/sdk': sdkVersion, '@zkproofport-ai/mcp': mcpVersion, '@circle-fin/cli': circleCliVersion, ...walletDependencies },
+    dependencies: { '@zkproofport-ai/sdk': sdkVersion, '@zkproofport-ai/mcp': mcpVersion, ...walletDependencies },
     overrides: { '@zkproofport-ai/sdk': sdkVersion },
   }, null, 2));
   console.log(`[published E2E] Installing SDK ${sdkVersion} and MCP ${mcpVersion} from npm`);
@@ -71,18 +67,8 @@ try {
     await readFile(entries[name]); // Missing published dist must fail before tests.
     console.log(`[published E2E] ${manifest.name}@${version}: ${entries[name]}`);
   }
-  const circleRoot = await realpath(join(install, 'node_modules', '@circle-fin', 'cli'));
-  if (!circleRoot.startsWith(await realpath(install) + '/')) throw new Error('Circle CLI resolves outside isolated installation');
-  const circleManifest = JSON.parse(await readFile(join(circleRoot, 'package.json'), 'utf8'));
-  if (circleManifest.version !== circleCliVersion) throw new Error('Circle CLI version does not match the supported pin');
-  const circleBin = typeof circleManifest.bin === 'string' ? circleManifest.bin : circleManifest.bin?.circle;
-  if (!circleBin) throw new Error('Published Circle CLI has no circle executable');
-  const circleEntry = await realpath(join(circleRoot, circleBin));
   const childEnv = { ...process.env, PATH: join(install, 'node_modules', '.bin') + delimiter + (process.env.PATH || ''),
     E2E_PUBLISHED_SDK_ENTRY: entries.sdk, E2E_MCP_ENTRY: entries.mcp };
-  const { stdout: cliVersion } = await promisify(execFile)(process.execPath, [circleEntry, '--version'], { cwd: install, env: childEnv });
-  if (!cliVersion.trim().split(/\s+/).includes(circleCliVersion)) throw new Error('Circle CLI executable reported an unexpected version');
-  console.log(`[published E2E] @circle-fin/cli@${circleCliVersion} (isolated executable verified)`);
   console.log(`[published E2E] target: ${target.href}`);
   process.exitCode = await run(process.execPath, [
     'node_modules/vitest/vitest.mjs', 'run', '--config', 'vitest.published.config.ts', '--project', 'e2e',

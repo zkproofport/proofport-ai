@@ -5,7 +5,7 @@
  * passed an action, carrying the circuit id along beside it. That reads as two
  * paths and is really four, and two of them are silently wrong:
  *
- *   - `arc_eligibility` with no action signed `signal_hash` through
+ *   - an action-capable circuit with no action signed `signal_hash` through
  *     personal_sign, so the domain separator and action hash — both public
  *     inputs of that circuit — were absent from what the prover received.
  *   - a Coinbase circuit with an action signed typed data, which that circuit
@@ -43,7 +43,7 @@ const ACTION = {
   domain: {
     name: 'MyVault',
     version: '1',
-    chainId: 5042002,
+    chainId: 91342,
     verifyingContract: '0x0000000000000000000000000000000000000000',
   },
   types: { Deposit: [{ name: 'amount', type: 'uint256' }] },
@@ -53,7 +53,7 @@ const ACTION = {
 
 /**
  * The entry point takes the client-facing NAME (`coinbase_kyc`,
- * `arc_eligibility`), which it maps to the canonical id. The refusals below
+ * `giwa_attestation`), which it maps to the canonical id. The refusals below
  * happen before any network call, so nothing here needs a running service.
  */
 async function runFlow(params: Record<string, unknown>, signer: ReturnType<typeof watchfulSigner>) {
@@ -85,7 +85,7 @@ async function runApprovedFlow(params: Record<string, unknown>, signer: ReturnTy
 }
 
 describe('the circuit decides the signature', () => {
-  it('signs the signal hash for arc_eligibility when no action is given', async () => {
+  it('signs the signal hash for giwa_attestation when no action is given', async () => {
     /*
      * This asserted a refusal until 2026-09-22, when the circuit gained the
      * branch it had never had: with no action it personal_signs the signal
@@ -93,14 +93,14 @@ describe('the circuit decides the signature', () => {
      * what decides here, which is the point of the file's name.
      */
     const signer = watchfulSigner();
-    await runFlow({ circuit: 'arc_eligibility', scope: 'test' }, signer);
+    await runFlow({ circuit: 'giwa_attestation', scope: 'test' }, signer);
     expect(signer.signMessage).toHaveBeenCalled();
     expect(signer.signTypedData).not.toHaveBeenCalled();
   });
 
-  it('uses human-approved typed data for arc_eligibility when an action is given', async () => {
+  it('uses human-approved typed data for giwa_attestation when an action is given', async () => {
     const signer = watchfulSigner();
-    await runApprovedFlow({ circuit: 'arc_eligibility', scope: 'test', action: ACTION }, signer);
+    await runApprovedFlow({ circuit: 'giwa_attestation', scope: 'test', action: ACTION }, signer);
     expect(signer.getAddress).not.toHaveBeenCalled();
     expect(signer.signTypedData).not.toHaveBeenCalled();
     expect(signer.signMessage).not.toHaveBeenCalled();
@@ -110,7 +110,7 @@ describe('the circuit decides the signature', () => {
     const signer = watchfulSigner();
     await expect(
       runFlow({ circuit: 'coinbase_kyc', scope: 'test', action: ACTION }, signer),
-    ).rejects.toThrow(/only arc_eligibility carries one|An action was given but/);
+    ).rejects.toThrow(/An action was given but/);
     expect(signer.signTypedData).not.toHaveBeenCalled();
   });
 
@@ -120,8 +120,17 @@ describe('the circuit decides the signature', () => {
       { circuit: 'coinbase_kyc', scope: 'test', action: ACTION },
       signer,
     ).catch((e: Error) => e.message);
-    expect(extra).toContain(CIRCUIT_IDS.ARC_ELIGIBILITY);
     expect(extra).toContain(CIRCUIT_IDS.GIWA_ATTESTATION);
+    expect(extra).not.toContain('arc_eligibility');
+  });
+
+  it('refuses the removed arc_eligibility circuit before any signature', async () => {
+    const signer = watchfulSigner();
+    await expect(runFlow({ circuit: 'arc_eligibility', scope: 'test', action: ACTION }, signer))
+      .rejects.toThrow("Unknown circuit 'arc_eligibility'.");
+    expect(signer.getAddress).not.toHaveBeenCalled();
+    expect(signer.signMessage).not.toHaveBeenCalled();
+    expect(signer.signTypedData).not.toHaveBeenCalled();
   });
 });
 
@@ -177,7 +186,7 @@ const invalidActions = [
 describe('action validation before local signing', () => {
   it.each(invalidActions)('rejects %s before either signature', async (_name, action, error) => {
     const signer = watchfulSigner();
-    await expect(runFlow({ circuit: 'arc_eligibility', action }, signer)).rejects.toThrow(error);
+    await expect(runFlow({ circuit: 'giwa_attestation', action }, signer)).rejects.toThrow(error);
     expect(signer.getAddress).not.toHaveBeenCalled();
     expect(signer.signMessage).not.toHaveBeenCalled();
     expect(signer.signTypedData).not.toHaveBeenCalled();
@@ -186,7 +195,7 @@ describe('action validation before local signing', () => {
   it('rejects an action on OIDC before JWT processing or signing', async () => {
     const signer = watchfulSigner();
     await expect(runFlow({ circuit: 'oidc_domain', action: ACTION }, signer))
-      .rejects.toThrow(/only arc_eligibility carries one|An action was given but/);
+      .rejects.toThrow(/An action was given but/);
     expect(signer.getAddress).not.toHaveBeenCalled();
     expect(signer.signMessage).not.toHaveBeenCalled();
     expect(signer.signTypedData).not.toHaveBeenCalled();
@@ -194,7 +203,7 @@ describe('action validation before local signing', () => {
 
   it('uses approved caller-owned nested types and passes both hashes into recovery and proof submission', async () => {
     const signer = watchfulSigner();
-    await runApprovedFlow({ circuit: 'arc_eligibility', action: NESTED_ACTION }, signer);
+    await runApprovedFlow({ circuit: 'giwa_attestation', action: NESTED_ACTION }, signer);
     expect(signer.signTypedData).not.toHaveBeenCalled();
     expect(signer.signMessage).not.toHaveBeenCalled();
     const domainSeparator = ethers.TypedDataEncoder.hashDomain(NESTED_ACTION.domain);
@@ -228,7 +237,7 @@ describe('action ownership across asynchronous signing', () => {
     ] }, message: { amount: '10000000', nonce: '1' } };
     const approved = structuredClone(action);
     const signer = watchfulSigner();
-    await runApprovedFlow({ circuit: 'arc_eligibility', action }, signer, () => { action.message.nonce = '2'; });
+    await runApprovedFlow({ circuit: 'giwa_attestation', action }, signer, () => { action.message.nonce = '2'; });
     const { prepareInputs } = await import('../packages/sdk/src/inputs.js');
     const input = vi.mocked(prepareInputs).mock.calls.at(-1)![1];
     expect(action.message.nonce).toBe('2');
@@ -242,7 +251,7 @@ describe('action ownership across asynchronous signing', () => {
 
 it('recovers approved actual booleans in arbitrary nested structs and arrays', async () => {
   const signer = watchfulSigner();
-  await runApprovedFlow({ circuit: 'arc_eligibility', action: BOOLEAN_ACTION }, signer);
+  await runApprovedFlow({ circuit: 'giwa_attestation', action: BOOLEAN_ACTION }, signer);
   expect(signer.signTypedData).not.toHaveBeenCalled();
   const { prepareInputs } = await import('../packages/sdk/src/inputs.js');
   const input = vi.mocked(prepareInputs).mock.calls.at(-1)![1];
@@ -256,12 +265,10 @@ it('recovers approved actual booleans in arbitrary nested structs and arrays', a
  *
  * The flow above decides what the WALLET signs. This decides what the PROVER
  * receives, and the two were out of step: the formatter added the action pair
- * only when the circuit id was `arc_eligibility`, and required one there.
+ * only for one hardcoded circuit id, and required one there.
  * `giwa_attestation` takes the same two parameters, so every GIWA request died
  * inside noir_js with "Expected argument `action_hash`, but none was found" —
- * a message that names a circuit input and not the missing branch. Arc, for
- * its part, could no longer be proved WITHOUT an action, months after the
- * circuit made it optional.
+ * a message that names a circuit input and not the missing branch.
  */
 describe('what the prover hands to noir_js', () => {
   const ZERO_32 = Array(32).fill('0x00');
@@ -298,7 +305,7 @@ describe('what the prover hands to noir_js', () => {
     actionHash: '0x' + 'bb'.repeat(32),
   };
 
-  for (const circuitId of [CIRCUIT_IDS.ARC_ELIGIBILITY, CIRCUIT_IDS.GIWA_ATTESTATION]) {
+  for (const circuitId of [CIRCUIT_IDS.GIWA_ATTESTATION]) {
     it(`sends ${circuitId} an empty action pair when no action was bound`, async () => {
       const inputs = await format(circuitId);
       expect(inputs.domain_separator).toEqual(ZERO_32);

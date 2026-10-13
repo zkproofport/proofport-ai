@@ -26,11 +26,6 @@ export const CIRCUITS: Record<CircuitId, {
     displayName: 'OIDC Domain',
     inputType: 'oidc',
   },
-  [CIRCUIT_IDS.ARC_ELIGIBILITY]: {
-    displayName: 'Arc Eligibility',
-    easSchemaId: '0xf8b05c79f090979bf4a80270aba232dff11a10d9ca55c4f88de95317970f0de9',
-    functionSelector: '0x56feed5e',
-  },
   [CIRCUIT_IDS.GIWA_ATTESTATION]: {
     displayName: 'GIWA Attestation',
     // No EAS schema: GIWA's attestation is not indexed by EAS on Base. It is
@@ -90,11 +85,6 @@ export const ATTESTATION_SOURCES: Record<CircuitId, AttestationSource | null> = 
     signers: AUTHORIZED_SIGNERS,
   },
   [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: {
-    kind: 'eas-base',
-    contract: COINBASE_ATTESTER_CONTRACT,
-    signers: AUTHORIZED_SIGNERS,
-  },
-  [CIRCUIT_IDS.ARC_ELIGIBILITY]: {
     kind: 'eas-base',
     contract: COINBASE_ATTESTER_CONTRACT,
     signers: AUTHORIZED_SIGNERS,

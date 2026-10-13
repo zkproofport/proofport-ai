@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { CIRCUITS } from '../src/config/circuits.js';
 
 describe('circuit discovery input requirements', () => {
-  it.each(['arc_eligibility', 'giwa_attestation'] as const)('%s does not require optional action inputs', circuit => {
+  it('does not list the removed arc_eligibility circuit', () => {
+    expect(Object.keys(CIRCUITS)).not.toContain('arc_eligibility');
+  });
+  it.each(['giwa_attestation'] as const)('%s does not require optional action inputs', circuit => {
     expect(CIRCUITS[circuit].requiredInputs).not.toContain('domain_separator');
     expect(CIRCUITS[circuit].requiredInputs).not.toContain('action_hash');
     expect(CIRCUITS[circuit].description).toMatch(/optional/i);

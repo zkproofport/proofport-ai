@@ -8,8 +8,6 @@ export type CircuitName =
   | 'coinbase_kyc'
   | 'coinbase_country'
   | 'oidc_domain'
-  /** Coinbase KYC, optionally binding the signature to one EIP-712 action. */
-  | 'arc_eligibility'
   /** GIWA account attestation, optionally binding one EIP-712 action. */
   | 'giwa_attestation';
 
@@ -29,7 +27,6 @@ export const CIRCUIT_NAME_MAP: Record<CircuitName, CircuitId> = {
   coinbase_kyc: CIRCUIT_IDS.COINBASE_ATTESTATION,
   coinbase_country: CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION,
   oidc_domain: CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION,
-  arc_eligibility: CIRCUIT_IDS.ARC_ELIGIBILITY,
   giwa_attestation: CIRCUIT_IDS.GIWA_ATTESTATION,
 };
 
@@ -38,7 +35,6 @@ export const CIRCUIT_ID_MAP: Record<CircuitId, CircuitName> = {
   [CIRCUIT_IDS.COINBASE_ATTESTATION]: 'coinbase_kyc',
   [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: 'coinbase_country',
   [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: 'oidc_domain',
-  [CIRCUIT_IDS.ARC_ELIGIBILITY]: 'arc_eligibility',
   [CIRCUIT_IDS.GIWA_ATTESTATION]: 'giwa_attestation',
 };
 
@@ -207,7 +203,7 @@ export interface TypedAction {
 /** Terms explicitly accepted by a user; nonce is intentionally not pinned. */
 export interface ApprovedPayment {
   network:string;scheme:string;amount:string;asset:string;payTo:string;
-  /** Exact EIP-3009: verifyingContract = asset. Gateway: use offer.extra.verifyingContract. */
+  /** Exact EIP-3009: verifyingContract = asset. */
   extra:{name:string;version:string;verifyingContract:string};
 }
 
@@ -215,7 +211,7 @@ export interface ProofParams {
   circuit: CircuitName;
   /**
    * Which chain to pay on, when the service charges. Either the CAIP-2 id
-   * (`eip155:5042002`) or the plain name (`arc-testnet`).
+   * (`eip155:84532`) or the plain name (`base-sepolia`).
    *
    * Omitting it takes the first chain the service offers. Naming a chain it
    * does not offer is an error listing what it does -- never a quiet fall
@@ -237,7 +233,7 @@ export interface ProofParams {
   provider?: 'google' | 'microsoft';
 
   /**
-   * Optional for arc_eligibility and giwa_attestation; rejected for every
+   * Optional for giwa_attestation; rejected for every
    * other circuit, including OIDC.
    * A human wallet must approve these exact EIP-712 fields. generateProof throws
    * ActionApprovalRequiredError with a resumable handle until approval is ready.
@@ -283,8 +279,6 @@ export interface StepResult<T = unknown> {
 export interface PaymentWallet {
   /** On-chain USDC owner (an EOA or an ERC-1271 smart wallet). */
   address: `0x${string}`;
-  /** Separate Circle Gateway depositor, when it differs from the on-chain owner. */
-  gatewayAddress?: `0x${string}`;
   signTypedData(message: {
     domain: Record<string, unknown>;
     types: Record<string, unknown>;
@@ -297,9 +291,9 @@ export interface PaymentWallet {
 
 /** One chain a service will take payment on, from its 402 answer. */
 export interface PaymentOffer {
-  /** CAIP-2, e.g. `eip155:5042002`. */
+  /** CAIP-2, e.g. `eip155:84532`. */
   network: string;
-  /** The plain name, e.g. `arc-testnet`. */
+  /** The plain name, e.g. `base-sepolia`. */
   networkName: string;
   /** Price in that chain's USDC, in the token's own units. */
   amount: string;

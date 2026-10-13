@@ -21,7 +21,7 @@
  *
  * x402 sends payment options as a LIST, and Circle's Discovery API reads that
  * list to say which networks a service accepts. A service pinned to one chain
- * per deployment cannot answer "I take Base or Arc, your choice" — which is
+ * per deployment cannot answer "I take Base or Ethereum, your choice" — which is
  * the whole point of the standard. `PAYMENT_NETWORKS` is therefore a
  * comma-separated set, and the 402 offers all of them.
  */
@@ -47,17 +47,15 @@ const PAYAI = process.env.X402_FALLBACK_FACILITATOR_URL ?? 'https://facilitator.
  * Every chain-and-settlement pair this service takes payment on.
  *
  * One name, read by everything that needs it. It was typed out in two files
- * until 2026-09-13, and adding Arc's batched option to one of them made the
- * other a compile error — which is the good outcome, but only because the two
+ * until 2026-09-13, and adding an option to one of them made the other a
+ * compile error — which is the good outcome, but only because the two
  * happened to be checked together.
  */
 export type PaymentNetworkId =
   | 'base-sepolia'
   | 'base'
   | 'ethereum'
-  | 'ethereum-sepolia'
-  | 'arc-testnet'
-  | 'arc-testnet-nano';
+  | 'ethereum-sepolia';
 
 export interface PaymentNetwork {
   /** The x402 network name, as it appears in a payment requirement. */
@@ -75,29 +73,8 @@ export interface PaymentNetwork {
   chainId: number;
   /** The USDC contract a Transfer event must come from. */
   usdc: string;
-  /**
-   * Decimals of a QUOTED amount and of an EIP-3009 authorization.
-   *
-   * Six on every chain here, Arc included. Arc was written down as 18 in the
-   * first version of this table on the reasoning that USDC is its native gas
-   * asset, so a native send carries 18-decimal value. That is true of a native
-   * send and false of everything this service actually quotes: asked directly,
-   * `decimals()` on Arc's USDC answers 6, and its `DOMAIN_SEPARATOR()` is
-   * reproducible from {name:"USDC", version:"2", chainId:5042002} -- checked
-   * byte for byte on 2026-09-09, not assumed. So the ERC-20 view is an ordinary
-   * 6-decimal USDC and a signed authorization is an ordinary one.
-   *
-   * `nativeDecimals` below is where the 18 belongs.
-   */
+  /** Decimals of a quoted amount and of an EIP-3009 authorization. */
   decimals: number;
-  /**
-   * Decimals of `tx.value` when USDC is the chain's native asset.
-   *
-   * Only read when a payment arrives as a plain native send rather than an
-   * authorization -- nobody is asked to pay that way, but it is a real thing a
-   * wallet can do, and 0.01 USDC then appears as 1e16 rather than 1e4.
-   */
-  nativeDecimals?: number;
   /**
    * Who submits the transaction, and therefore who pays gas.
    *
@@ -108,65 +85,20 @@ export interface PaymentNetwork {
    *
    * `payee` -- no public facilitator settles this chain, so this service
    * submits the buyer's authorization itself. The buyer still needs no gas;
-   * the payee pays it, out of the payment it is about to receive. This is the
-   * only route that works on Arc today: `x402.dexter.cash` covers Base, Polygon,
-   * Arbitrum, Optimism, Avalanche, BSC, World Chain, Monad, SKALE and Solana,
-   * and `x402.org/facilitator` covers Base Sepolia and a few non-EVM chains --
-   * neither lists Arc, and neither lists Ethereum mainnet either.
-   */
-  /**
-   * Who puts the buyer's authorization on chain.
+   * the payee pays it, out of the payment it is about to receive. Asked on
+   * 2026-09-09: `x402.dexter.cash` covers Base, Polygon, Arbitrum, Optimism,
+   * Avalanche, BSC, World Chain, Monad, SKALE and Solana, and
+   * `x402.org/facilitator` covers Base Sepolia and a few non-EVM chains --
+   * neither lists Ethereum mainnet or Ethereum Sepolia.
    *
-   * `facilitator` — a public x402 facilitator does it.
-   * `payee` — this service does, from the wallet `PAYMENT_PAY_TO` names.
-   * `gateway` — nobody does, one payment at a time: the authorization goes to
-   *   Circle Gateway's off-chain ledger and is settled later in a batch with
-   *   thousands of others, so the gas per payment approaches zero. This is
-   *   what Circle calls nanopayments.
+   * In the `payee` case the submitting wallet is the one `PAYMENT_PAY_TO` names.
    */
-  settlement: 'facilitator' | 'payee' | 'gateway';
-  /**
-   * Present only on a `gateway` chain: what the buyer signs against.
-   *
-   * A batched authorization is signed for Gateway's wallet contract rather
-   * than for USDC itself, and `@circle-fin/x402-batching` recognises the offer
-   * by exactly these two values. They are not ours to choose.
-   */
-  batching?: {
-    name: 'GatewayWalletBatched';
-    version: '1';
-    gatewayWallet: string;
-    domain: number;
-    /**
-     * How long the authorization must stay valid, in seconds.
-     *
-     * Circle's own starter kit sends 345600 (four days) for Arc Testnet,
-     * and Gateway advertises a 604800 minimum in `getSupported()`. The kit's
-     * number is the one known to work, so it is the one used.
-     */
-    minValiditySeconds: number;
-    /**
-     * Which Circle Gateway settles this chain.
-     *
-     * Testnet and mainnet are different services at different hostnames, and
-     * the package's default is the mainnet one. Asking the mainnet Gateway
-     * about a testnet chain answers `unsupported_network` — which reads as
-     * "Circle does not support Arc" and is really "you asked the wrong
-     * server". Measured 2026-09-13: the testnet Gateway lists Arc Testnet
-     * among its twelve chains, the mainnet one lists eleven mainnets.
-     */
-    gatewayUrl: string;
-  };
+  settlement: 'facilitator' | 'payee';
   /**
    * The EIP-712 domain of this chain's USDC, which is what an EIP-3009
    * authorization is signed against. `name` is also what a wallet displays.
    */
   eip3009: { name: string; version: string };
-  /**
-   * True when USDC is the chain's native gas asset, so a payment can arrive
-   * as `tx.value` with no Transfer event at all.
-   */
-  nativeUsdc: boolean;
   /** The facilitator that settles this chain, when `settlement` is 'facilitator'. */
   facilitatorUrl?: string;
   /** Backup for the same chain and EIP-3009 authorization; never a different payment route. */
@@ -190,7 +122,6 @@ const NETWORKS: Record<string, PaymentNetwork> = {
     settlement: 'facilitator',
     facilitatorUrl: DEXTER,
     fallbackFacilitatorUrl: PAYAI || undefined,
-    nativeUsdc: false,
     rpcEnv: 'CHAIN_RPC_URL',
     defaultRpc: 'https://sepolia.base.org',
   },
@@ -207,7 +138,6 @@ const NETWORKS: Record<string, PaymentNetwork> = {
     settlement: 'facilitator',
     facilitatorUrl: DEXTER,
     fallbackFacilitatorUrl: PAYAI || undefined,
-    nativeUsdc: false,
     rpcEnv: 'CHAIN_RPC_URL',
     defaultRpc: 'https://mainnet.base.org',
   },
@@ -227,7 +157,6 @@ const NETWORKS: Record<string, PaymentNetwork> = {
     decimals: 6,
     eip3009: { name: 'USD Coin', version: '2' },
     settlement: 'payee',
-    nativeUsdc: false,
     rpcEnv: 'ETHEREUM_RPC_URL',
     defaultRpc: 'https://ethereum-rpc.publicnode.com',
   },
@@ -239,70 +168,8 @@ const NETWORKS: Record<string, PaymentNetwork> = {
     decimals: 6,
     eip3009: { name: 'USDC', version: '2' },
     settlement: 'payee',
-    nativeUsdc: false,
     rpcEnv: 'ETHEREUM_RPC_URL',
     defaultRpc: 'https://ethereum-sepolia-rpc.publicnode.com',
-  },
-  'arc-testnet': {
-    id: 'arc-testnet',
-    caip2: 'eip155:5042002',
-    chainId: 5042002,
-    // The ERC-20 interface over Arc's native USDC balance. One balance, two
-    // views: docs.arc.io/arc/references/evm-differences.
-    usdc: '0x3600000000000000000000000000000000000000',
-    decimals: 6,
-    nativeDecimals: 18,
-    // Asked the contract on 2026-09-09 rather than assuming a native-asset
-    // shim would be a partial ERC-20: it answers name()="USDC", version()="2",
-    // decimals()=6, and DOMAIN_SEPARATOR() equal to the hash a client computes
-    // from these three values plus chainId 5042002 -- byte for byte. So Arc
-    // takes an ordinary signed USDC authorization and nobody needs to hold a
-    // separate gas asset to pay here.
-    eip3009: { name: 'USDC', version: '2' },
-    // No public facilitator lists Arc. Asked both on 2026-09-09:
-    // x402.dexter.cash serves Base, Polygon, Arbitrum, Optimism, Avalanche,
-    // BSC, World Chain, Monad, SKALE, Solana; x402.org/facilitator serves Base
-    // Sepolia plus some non-EVM chains. Neither has Arc, which is why this
-    // route exists rather than Arc being declared unsupported.
-    settlement: 'payee',
-    nativeUsdc: true,
-    rpcEnv: 'ARC_RPC_URL',
-    defaultRpc: 'https://rpc.testnet.arc.io',
-  },
-  /**
-   * The same chain, paid for the other way: Circle Gateway's batched
-   * settlement, which is what Arc calls nanopayments.
-   *
-   * A separate entry rather than a flag on the one above, because the two are
-   * different offers a buyer chooses between -- one settles immediately and
-   * costs gas, the other settles in a batch and costs almost none. Offering
-   * both is what `@circle-fin/x402-batching` expects: its `supportsBatching()`
-   * picks this one out of the list by its `extra`, and anything it does not
-   * recognise stays on the existing on-chain path.
-   *
-   * Addresses read from `@circle-fin/x402-batching@3.4.0` and checked on chain
-   * 2026-09-13: both contracts are deployed on Arc Testnet.
-   */
-  'arc-testnet-nano': {
-    id: 'arc-testnet-nano',
-    caip2: 'eip155:5042002',
-    chainId: 5042002,
-    usdc: '0x3600000000000000000000000000000000000000',
-    decimals: 6,
-    nativeDecimals: 18,
-    eip3009: { name: 'USDC', version: '2' },
-    settlement: 'gateway',
-    batching: {
-      name: 'GatewayWalletBatched',
-      version: '1',
-      gatewayWallet: '0x0077777d7EBA4688BDeF3E311b846F25870A19B9',
-      domain: 26,
-      minValiditySeconds: 345600,
-      gatewayUrl: 'https://gateway-api-testnet.circle.com',
-    },
-    nativeUsdc: true,
-    rpcEnv: 'ARC_RPC_URL',
-    defaultRpc: 'https://rpc.testnet.arc.io',
   },
 };
 
@@ -368,7 +235,7 @@ export const PAYMENT_WINDOW_SECONDS = 300;
  */
 export interface PaymentRequirement {
   scheme: 'exact';
-  /** CAIP-2. The v2 form, and the only one that can name Arc. */
+  /** CAIP-2, the v2 form. */
   network: string;
   /** Price in the asset's own units. `amount` is the v2 name. */
   amount: string;
@@ -413,31 +280,13 @@ export function buildPaymentRequirements(params: {
     amount: disabled ? '0' : parseUnits(price, net.decimals).toString(),
     asset: net.usdc,
     payTo: disabled ? '' : payTo,
-    maxTimeoutSeconds: net.batching?.minValiditySeconds ?? PAYMENT_WINDOW_SECONDS,
-    // A batched offer is recognised by its `extra`: `@circle-fin/x402-batching`
-    // reads exactly `name`/`version` to tell a Gateway offer from an ordinary
-    // one, and the buyer signs against Gateway's wallet contract rather than
-    // against USDC. Everything else about the offer is the same, which is why
-    // this is one line and not a second builder.
-    extra: net.batching
-      ? {
-          // Three fields, exactly as Circle's own starter kit sends them
-          // (`lib/x402.ts` in circlefin/arc-nanopayments). Gateway signs over
-          // what it is given, so a field we add that the kit does not send
-          // makes a different message than the one Gateway verifies — and the
-          // refusal reads `unauthorized`, which says nothing about a field.
-          name: net.batching.name,
-          version: net.batching.version,
-          verifyingContract: net.batching.gatewayWallet,
-        }
-      : { name: net.eip3009.name, version: net.eip3009.version, nonce, caip2: net.caip2 },
+    maxTimeoutSeconds: PAYMENT_WINDOW_SECONDS,
+    extra: { name: net.eip3009.name, version: net.eip3009.version, nonce, caip2: net.caip2 },
     networkName: net.id,
     resource,
     description: disabled
       ? 'Payment disabled — free proof generation'
-      : net.batching
-        ? `ZK proof generation fee (${price} USDC on Arc, settled in a batch — no gas)`
-        : `ZK proof generation fee (${price} USDC on ${net.id})`,
+      : `ZK proof generation fee (${price} USDC on ${net.id})`,
     mimeType: 'application/json',
   }));
 }

@@ -40,7 +40,15 @@ afterEach(async () => {
   await rm(directory, { recursive: true, force: true });
 });
 describe('MCP step-by-step optional actions', () => {
-  for (const circuit of ['arc_eligibility', 'giwa_attestation']) {
+  it('refuses the removed arc_eligibility circuit before signing', async () => {
+    const result = await prepare({ circuit: 'arc_eligibility', scope: 'test', action });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Unknown circuit 'arc_eligibility'. Known: coinbase_kyc, coinbase_country, oidc_domain, giwa_attestation.");
+    expect(signer.signMessage).not.toHaveBeenCalled();
+    expect(signer.signTypedData).not.toHaveBeenCalled();
+    expect(prepareInputs).not.toHaveBeenCalled();
+  });
+  for (const circuit of ['giwa_attestation']) {
     it(`${circuit}: no action signs the signal without hashing undefined`, async () => {
       const result = await prepare({ circuit, scope: 'test' });
       expect(result.isError, JSON.stringify(result)).not.toBe(true);
@@ -83,7 +91,7 @@ describe('MCP step-by-step optional actions', () => {
   it.each(['coinbase_kyc', 'coinbase_country', 'oidc_domain'])('%s rejects an action before signing', async (circuit) => {
     const result = await prepare({ circuit, action });
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('only arc_eligibility and giwa_attestation');
+    expect(result.content[0].text).toContain('only giwa_attestation carries one');
     expect(signer.signTypedData).not.toHaveBeenCalled();
     expect(prepareInputs).not.toHaveBeenCalled();
   });

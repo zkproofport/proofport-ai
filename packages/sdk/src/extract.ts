@@ -78,13 +78,11 @@ const LAYOUTS: Record<CircuitId, PublicInputLayout> = {
   // Read off the compiled ABI, not counted by hand:
   //   signal_hash 0-31, domain_separator 32-63, action_hash 64-95,
   //   signer_list_merkle_root 96-127, scope 128-159, nullifier 160-191.
-  // The two extra 32-byte fields before the Merkle root are what pushes scope
-  // and nullifier 64 fields past where they sit in coinbase_attestation.
-  [CIRCUIT_IDS.ARC_ELIGIBILITY]: { scope: [128, 159], nullifier: [160, 191] },
-  // The same six fields in the same order: giwa_attestation gained the EIP-712
-  // pair on 2026-09-22 and shares Arc's layout exactly. Reading it at
-  // Coinbase's old offsets returns the Merkle root where the nullifier is --
-  // one value for every user of the circuit.
+  // giwa_attestation gained the EIP-712 pair on 2026-09-22; the two extra
+  // 32-byte fields before the Merkle root push scope and nullifier 64 fields
+  // past where they sit in coinbase_attestation. Reading it at Coinbase's
+  // offsets returns the Merkle root where the nullifier is -- one value for
+  // every user of the circuit.
   [CIRCUIT_IDS.GIWA_ATTESTATION]: { scope: [128, 159], nullifier: [160, 191] },
 };
 

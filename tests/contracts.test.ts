@@ -56,7 +56,8 @@ describe('Contract Addresses', () => {
 
     it('records a circuit with no deployment as null, not as an empty string', () => {
       // Guards the distinction above. Written after an empty string was used
-      // for arc_eligibility and passed tsc while failing the address check.
+      // for a circuit with no deployment and passed tsc while failing the
+      // address check.
       const values = Object.values(FALLBACK_VERIFIERS).flatMap(Object.values);
       expect(values.filter(v => v === '')).toEqual([]);
     });

@@ -1,8 +1,7 @@
 /**
  * The mirrored action check answers exactly what the customer SDK's does.
  *
- * `@zkproofport-app/sdk` owns the rule for what a usable `arc_eligibility`
- * action is. This package keeps a copy, for the same reason it copies the
+ * `@zkproofport-app/sdk` owns the rule for what a usable EIP-712 action is. This package keeps a copy, for the same reason it copies the
  * circuit ids: it is published and runs on every `npx zkproofport-mcp`, and
  * depending on the customer SDK drags qrcode and socket.io-client along.
  *
@@ -22,7 +21,7 @@ const GOOD = {
   domain: {
     name: 'MyVault',
     version: '1',
-    chainId: 5042002,
+    chainId: 91342,
     verifyingContract: '0x0000000000000000000000000000000000000000',
   },
   types: { Deposit: [{ name: 'amount', type: 'uint256' }, { name: 'nonce', type: 'uint256' }] },
@@ -51,7 +50,7 @@ const CASES: Array<[string, unknown]> = [
   ['no domain.version', drop('domain.version')],
   ['no domain.verifyingContract', drop('domain.verifyingContract')],
   ['no domain.chainId', drop('domain.chainId')],
-  ['a chainId that is a string', { ...GOOD, domain: { ...GOOD.domain, chainId: '5042002' } }],
+  ['a chainId that is a string', { ...GOOD, domain: { ...GOOD.domain, chainId: '91342' } }],
   ['a verifyingContract that is not an address', { ...GOOD, domain: { ...GOOD.domain, verifyingContract: 'MyVault' } }],
   ['no types', drop('types')],
   ['no primaryType', drop('primaryType')],

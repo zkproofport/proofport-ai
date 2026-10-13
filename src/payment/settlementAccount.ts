@@ -19,7 +19,7 @@ export function getSettlementAccount(proverPrivateKey: string, payTo: string) {
     throw new Error('PAYMENT_PAY_TO must be a valid EVM address for direct payment settlement.');
   }
   if (account.address.toLowerCase() !== payTo.toLowerCase()) {
-    throw new Error('PROVER_PRIVATE_KEY wallet must match PAYMENT_PAY_TO for direct payment settlement; Arc permits only the payee to submit.');
+    throw new Error('PROVER_PRIVATE_KEY wallet must match PAYMENT_PAY_TO for direct payment settlement; the settling wallet must be the payee.');
   }
   return account;
 }

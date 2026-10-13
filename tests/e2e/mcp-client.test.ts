@@ -64,7 +64,7 @@ describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
   });
 
   describe('get_supported_circuits', () => {
-    it('should list all 5 circuits', async () => {
+    it('should list all 4 circuits', async () => {
       const result = await client.callTool({
         name: 'get_supported_circuits',
         arguments: {},
@@ -76,7 +76,7 @@ describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
       expect(Object.keys(data.circuits)).toContain('coinbase_attestation');
       expect(Object.keys(data.circuits)).toContain('coinbase_country_attestation');
       expect(Object.keys(data.circuits)).toContain('oidc_domain_attestation');
-      expect(Object.keys(data.circuits)).toContain('arc_eligibility');
+      expect(Object.keys(data.circuits)).not.toContain('arc_eligibility');
       expect(Object.keys(data.circuits)).toContain('giwa_attestation');
     });
   });
@@ -95,9 +95,8 @@ describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
       const text = (result.content as any[])[0]?.text;
       const data = JSON.parse(text);
 
-      // Say WHAT the tool answered. `expected true to be falsy` hid
-      // "Circle Gateway failed to settle arc-testnet-nano:
-      // insufficient_balance" behind a boolean for a whole staging run.
+      // Say WHAT the tool answered. `expected true to be falsy` hid the
+      // payer's settlement failure behind a boolean for a whole staging run.
       expect(result.isError, `generate_proof failed: ${text}`).toBeFalsy();
       expect(data.proof).toBeTruthy();
       const verified = await verifyProof(data);
@@ -123,9 +122,8 @@ describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
       const text = (result.content as any[])[0]?.text;
       const data = JSON.parse(text);
 
-      // Say WHAT the tool answered. `expected true to be falsy` hid
-      // "Circle Gateway failed to settle arc-testnet-nano:
-      // insufficient_balance" behind a boolean for a whole staging run.
+      // Say WHAT the tool answered. `expected true to be falsy` hid the
+      // payer's settlement failure behind a boolean for a whole staging run.
       expect(result.isError, `generate_proof failed: ${text}`).toBeFalsy();
       expect(data.proof).toBeTruthy();
       const verified = await verifyProof(data);
@@ -146,9 +144,8 @@ describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
       const text = (result.content as any[])[0]?.text;
       const data = JSON.parse(text);
 
-      // Say WHAT the tool answered. `expected true to be falsy` hid
-      // "Circle Gateway failed to settle arc-testnet-nano:
-      // insufficient_balance" behind a boolean for a whole staging run.
+      // Say WHAT the tool answered. `expected true to be falsy` hid the
+      // payer's settlement failure behind a boolean for a whole staging run.
       expect(result.isError, `generate_proof failed: ${text}`).toBeFalsy();
       expect(data.proof).toBeTruthy();
       const verified = await verifyProof(data);

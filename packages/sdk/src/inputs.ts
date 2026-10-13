@@ -129,7 +129,6 @@ export function computeWalletNullifier(
 const NULLIFIER_RULE: Record<CircuitId, 'wallet-and-circuit-tag' | 'wallet-and-signal-hash' | 'built-from-the-token'> = {
   [CIRCUIT_IDS.COINBASE_ATTESTATION]: 'wallet-and-signal-hash',
   [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: 'wallet-and-signal-hash',
-  [CIRCUIT_IDS.ARC_ELIGIBILITY]: 'wallet-and-circuit-tag',
   [CIRCUIT_IDS.GIWA_ATTESTATION]: 'wallet-and-circuit-tag',
   // OIDC's nullifier is derived inside the OIDC payload builder, from the
   // identity token; this function is never asked for it.
@@ -253,10 +252,11 @@ export async function prepareInputs(config: ClientConfig, params: {
   countryList?: string[];
   isIncluded?: boolean;
   /**
-   * The EIP-712 hashes the wallet signed over, for `arc_eligibility`.
+   * The EIP-712 hashes the wallet signed over, for `giwa_attestation` with an
+   * action.
    *
-   * Required there, because that circuit's wallet signs a typed action rather
-   * than `signal_hash` — recovering against `signal_hash` yields a public key
+   * Required then, because the wallet signs a typed action rather than
+   * `signal_hash` — recovering against `signal_hash` yields a public key
    * that is not the user's, and the circuit then fails on "User pubkey does not
    * match address", which points at the address rather than at the message.
    * Added after exactly that failure on 2026-09-12: the caller was attaching
@@ -287,19 +287,16 @@ export async function prepareInputs(config: ClientConfig, params: {
 
   // Step 2: Recover the user's public key from the digest they actually signed.
   /*
-   * The circuits that can carry an action, and both treat it as optional
-   * since their circuits gained the branch on 2026-09-22. Naming one here is
-   * what made a GIWA request with an action impossible to express.
+   * The one circuit that can carry an action, optionally, since its circuit
+   * gained the branch on 2026-09-22.
    */
-  const canBindAction =
-    circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY ||
-    circuitId === CIRCUIT_IDS.GIWA_ATTESTATION;
+  const canBindAction = circuitId === CIRCUIT_IDS.GIWA_ATTESTATION;
   const isAction = Boolean(params.domainSeparator) && Boolean(params.actionHash);
 
   if (!canBindAction && (params.domainSeparator || params.actionHash)) {
     throw new Error(
       `An EIP-712 action was given but '${circuitId}' has no inputs for one. ` +
-      `Only ${CIRCUIT_IDS.ARC_ELIGIBILITY} and ${CIRCUIT_IDS.GIWA_ATTESTATION} carry one.`,
+      `Only ${CIRCUIT_IDS.GIWA_ATTESTATION} carries one.`,
     );
   }
   if (Boolean(params.domainSeparator) !== Boolean(params.actionHash)) {

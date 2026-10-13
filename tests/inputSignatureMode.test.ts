@@ -17,18 +17,18 @@ describe('server witness signature recovery follows action presence', () => {
     const signature = await wallet.signMessage(digest);
     expect(recoverUserPubkeyFromDigest(digest, signature, false)).toBe(wallet.signingKey.publicKey);
   });
-  it('recovers typed action signatures for both Arc and GIWA without adding personal-sign prefix', () => {
+  it('recovers typed action signatures for GIWA without adding personal-sign prefix', () => {
     const signature = wallet.signingKey.sign(digest).serialized;
     expect(recoverUserPubkeyFromDigest(digest, signature, true)).toBe(wallet.signingKey.publicKey);
   });
-  it('describes missing EIP-712 hashes without claiming Arc always requires actions', () => {
+  it('describes missing EIP-712 hashes without claiming actions are always required', () => {
     expect(() => eip712Digest()).toThrow(/both domainSeparator and actionHash/);
   });
 });
 
 
 describe('full server input preparation preserves each action mode', () => {
-  for (const circuitId of ['arc_eligibility', 'giwa_attestation'] as const) {
+  for (const circuitId of ['giwa_attestation'] as const) {
     it.each([false, true])(`${circuitId} recovers the actual wallet with action=%s`, async hasAction => {
       fixture.attesterAddress = ATTESTATION_SOURCES[circuitId]!.signers[0];
       fixture.attesterPublicKey = wallet.signingKey.publicKey;
@@ -47,4 +47,12 @@ describe('full server input preparation preserves each action mode', () => {
       expect(`0x04${result.userPubkeyX.replace(/^0x/, '')}${result.userPubkeyY.replace(/^0x/, '')}`).toBe(wallet.signingKey.publicKey);
     });
   }
+});
+
+describe('the removed arc_eligibility circuit', () => {
+  it('is refused before any witness is prepared, naming the known circuits', async () => {
+    await expect(computeCircuitParams({ address: wallet.address, scope: 's', circuitId: 'arc_eligibility' as never, signature: '0x' + '00'.repeat(65) },
+      'https://eas.example.com', ['https://base.example.com']))
+      .rejects.toThrow('Unknown circuit: arc_eligibility. Known: coinbase_attestation, coinbase_country_attestation, oidc_domain_attestation, giwa_attestation.');
+  });
 });

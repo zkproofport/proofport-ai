@@ -76,7 +76,7 @@ let frozenIdentity = '', polling = false, broken = false;
 let mobileAttempted = false;
 const wallets: WalletChoice[] = [];
 const statuses = { pending: 'Awaiting approval', approved: 'Approved', rejected: 'Rejected', consumed: 'Used by requester', expired: 'Expired' };
-const circuitNames: Record<string, string> = { giwa_attestation: 'GIWA KYC', arc_eligibility: 'Coinbase KYC (Arc)' };
+const circuitNames: Record<string, string> = { giwa_attestation: 'GIWA KYC' };
 function pending(): boolean { return !broken && session?.status === 'pending' && expirationTime(session.expiresAt) > Date.now(); }
 function report(cause: unknown): void { error = cause instanceof ApiError ? cause.message : walletError(cause); render(); }
 async function connect(choice: WalletChoice): Promise<void> {

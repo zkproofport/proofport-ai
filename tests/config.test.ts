@@ -112,9 +112,38 @@ describe('Config', () => {
       setAllRequired();
       process.env.PAYMENT_MODE = 'testnet';
       process.env.PAYMENT_PAY_TO = '0x5A3E649208Ae15ec52496c1Ae23b2Ff89Ac02f0c';
-      process.env.PAYMENT_NETWORKS = 'arc-testnet,base-sepolia';
+      process.env.PAYMENT_NETWORKS = 'ethereum-sepolia,base-sepolia';
 
-      expect(loadConfig().paymentNetworks).toBe('arc-testnet,base-sepolia');
+      expect(loadConfig().paymentNetworks).toBe('ethereum-sepolia,base-sepolia');
+    });
+
+    it.each(['arc-testnet', 'arc-testnet-nano', 'base-sepolia,arc-testnet-nano'])(
+      'refuses the removed Arc payment network in PAYMENT_NETWORKS=%s before serving offers', async (networks) => {
+        setAllRequired();
+        process.env.PAYMENT_MODE = 'testnet';
+        process.env.PAYMENT_PAY_TO = '0x5A3E649208Ae15ec52496c1Ae23b2Ff89Ac02f0c';
+        process.env.PAYMENT_NETWORKS = networks;
+        const { validateSettlementConfig } = await import('../src/payment/settlementAccount.js');
+        const { resolvePaymentNetworks } = await import('../src/payment/networks.js');
+        const config = loadConfig();
+        expect(() => resolvePaymentNetworks(config.paymentNetworks))
+          .toThrow(/^Unknown payment network\(s\): arc-testnet(-nano)?\. Available: base-sepolia, base, ethereum, ethereum-sepolia$/);
+        expect(() => validateSettlementConfig(config)).toThrow(/Unknown payment network\(s\): arc-testnet/);
+      },
+    );
+
+    it('ignores leftover ARC_* settings: the config carries no Arc field', () => {
+      setAllRequired();
+      process.env.ARC_RPC_URL = 'https://rpc.testnet.arc.io';
+      process.env.ARC_CHAIN_ID = '5042002';
+      process.env.ARC_VERIFICATION_RPC_URL = 'https://rpc.testnet.arc.io';
+      process.env.ARC_VERIFICATION_CHAIN_ID = '5042002';
+      try {
+        expect(Object.keys(loadConfig()).filter(key => /^arc/i.test(key))).toEqual([]);
+      } finally {
+        delete process.env.ARC_RPC_URL; delete process.env.ARC_CHAIN_ID;
+        delete process.env.ARC_VERIFICATION_RPC_URL; delete process.env.ARC_VERIFICATION_CHAIN_ID;
+      }
     });
 
     it('should throw if TEE_MODE is invalid', () => {

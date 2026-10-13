@@ -38,10 +38,10 @@ for arg in "$@"; do
     -h|--help)
       echo "Usage: $(basename "$0") [--payment]"
       echo ""
-      echo "  --payment   Start with x402 payment ON (\$0.01), offering Base Sepolia,"
-      echo "              Arc testnet and Ethereum Sepolia. Requires"
+      echo "  --payment   Start with x402 payment ON (\$0.01), offering Base Sepolia"
+      echo "              and Ethereum Sepolia. Requires"
       echo "              PROVER_PRIVATE_KEY: no public facilitator settles"
-      echo "              Arc or Ethereum, so this service submits the buyer's signed"
+      echo "              Ethereum, so this service submits the buyer's signed"
       echo "              authorization itself. PAYMENT_PAY_TO must be this wallet."
       exit 0 ;;
   esac
@@ -53,11 +53,8 @@ if [ "$WITH_PAYMENT" = "1" ]; then
     echo "[ERROR] --payment needs PROVER_PRIVATE_KEY."
     echo ""
     echo "  It is the wallet that submits a buyer's signed authorization on the"
-    echo "  chains no public x402 facilitator settles (Arc, Ethereum). The buyer"
-    echo "  signs and pays no gas; this wallet pays it."
-    echo ""
-    echo "  It needs USDC on Arc testnet, which is also Arc's gas asset:"
-    echo "  faucet.circle.com gives 20 USDC every 2 hours, no account needed."
+    echo "  chains no public x402 facilitator settles (Ethereum). The buyer"
+    echo "  signs and pays no gas; this wallet pays it, so it needs Sepolia ETH."
     exit 1
   fi
   if [ -z "${PAYMENT_PAY_TO:-}" ]; then
@@ -65,7 +62,7 @@ if [ "$WITH_PAYMENT" = "1" ]; then
     exit 1
   fi
   COMPOSE_FILES+=(-f docker-compose.e2e-payment.yml)
-  echo "[*] Payment ON — \$0.01, chains: base-sepolia, arc-testnet, ethereum-sepolia"
+  echo "[*] Payment ON — \$0.01, chains: base-sepolia, ethereum-sepolia"
 fi
 
 echo "=========================================="
@@ -113,7 +110,7 @@ echo "[OK] NEXT_PUBLIC_API_BASE_URL=http://${HOST_IP}:4002"
 #
 # The circuit list comes from src/config/circuitIds.ts, not from a list written
 # here. It WAS written here -- three directory names, hardcoded -- and on
-# 2026-09-09 that made the container crash-loop: arc_eligibility had been added
+# 2026-09-09 that made the container crash-loop: a fourth circuit had been added
 # to the server's own map and not to this script, so three circuits were copied,
 # four were needed, and the server tried to download the fourth from a branch it
 # had not been pushed to. A hardcoded list of circuits fails every time a

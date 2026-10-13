@@ -24,19 +24,19 @@ async function submit(circuit: string, extra: Record<string, unknown> = {}) {
 }
 beforeEach(() => prove.mockClear());
 describe('HTTP proof route preserves optional action policy', () => {
-  it.each(['arc_eligibility', 'giwa_attestation'])('%s accepts an identity-only witness without action', async circuit => {
+  it.each(['giwa_attestation'])('%s accepts an identity-only witness without action', async circuit => {
     const response = await submit(circuit);
     expect(response.status).toBe(200);
     expect(response.body.proofType).toBe(circuit);
     expect(prove).toHaveBeenCalledOnce();
     expect(prove.mock.calls[0][1]).not.toHaveProperty('actionHash');
   });
-  it.each(['arc_eligibility', 'giwa_attestation'])('%s forwards the complete action pair unchanged', async circuit => {
+  it.each(['giwa_attestation'])('%s forwards the complete action pair unchanged', async circuit => {
     const response = await submit(circuit, pair);
     expect(response.status).toBe(200);
     expect(prove.mock.calls[0][1]).toMatchObject({ domainSeparator: pair.domain_separator, actionHash: pair.action_hash });
   });
-  for (const circuit of ['arc_eligibility', 'giwa_attestation']) {
+  for (const circuit of ['giwa_attestation']) {
     it.each([{ domain_separator: pair.domain_separator }, { action_hash: pair.action_hash }])(`${circuit} refuses half an action instead of dropping it`, async extra => {
       const response = await submit(circuit, extra);
       expect(response.status).toBe(400);
@@ -52,8 +52,25 @@ describe('HTTP proof route preserves optional action policy', () => {
   });
 });
 
+describe('the removed arc_eligibility circuit', () => {
+  it('is refused by the proof route as an unknown circuit, naming the valid ones', async () => {
+    const response = await submit('arc_eligibility');
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('INVALID_CIRCUIT');
+    expect(response.body.message).toBe('Unknown circuit: arc_eligibility. Valid: coinbase_kyc, coinbase_country, oidc_domain, coinbase_attestation, coinbase_country_attestation, oidc_domain_attestation, giwa_attestation');
+    expect(prove).not.toHaveBeenCalled();
+  });
+  it('has no guide route', async () => {
+    const app = express();
+    app.use('/api/v1', createProofRoutes({ config, redis: {} as never }));
+    const response = await request(app).get('/api/v1/guide/arc_eligibility');
+    expect(response.status).toBe(404);
+    expect(response.body.error).toBe('UNKNOWN_CIRCUIT');
+  });
+});
+
 describe('encrypted proof response metadata', () => {
-  it.each(['arc_eligibility', 'giwa_attestation'])('%s does not claim to be a Google login', async circuit => {
+  it.each(['giwa_attestation'])('%s does not claim to be a Google login', async circuit => {
     const app = express();
     app.use(express.json());
     app.use('/api/v1', createProofRoutes({ config: { ...config, teeMode: 'nitro' }, redis: { getdel: async () => circuit } as never,

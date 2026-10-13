@@ -1,6 +1,6 @@
 /**
  * Auto-registration on ERC-8004 Identity contract at server startup.
- * Verifies every configured Base, Ethereum and Arc identity.
+ * Verifies every configured Base and Ethereum identity.
  */
 
 import { withRegistrationLock } from './registrationLock.js';
@@ -71,7 +71,7 @@ function buildAgentMetadata(
     ],
     protocols: ['mcp', 'a2a', 'x402'],
     circuits: [...PROVABLE_CIRCUIT_IDS],
-    tags: ['ZK', 'Privacy', 'Proof', 'Coinbase', 'KYC', 'Attestation', 'x402', 'Identity', 'Country', 'Verification', 'Base', 'USDC', 'Arc', ...(config.teeMode === 'nitro' ? ['TEE'] : []), 'Noir', 'EAS', 'Zero-Knowledge'],
+    tags: ['ZK', 'Privacy', 'Proof', 'Coinbase', 'KYC', 'Attestation', 'x402', 'Identity', 'Country', 'Verification', 'Base', 'USDC', ...(config.teeMode === 'nitro' ? ['TEE'] : []), 'Noir', 'EAS', 'Zero-Knowledge'],
     ...(config.teeMode === 'nitro' && { tee: 'nitro' }),
     x402Support: true,
     type: 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1',
@@ -176,7 +176,7 @@ async function registerOnChain(config: Config, chain: ChainIdentity): Promise<bi
 export function isIdentityRegistrationEnabled(config: Config): boolean {
   const serviceUrl = new URL(config.a2aBaseUrl);
   if (serviceUrl.protocol !== 'https:' || ['localhost', '127.0.0.1', '[::1]'].includes(serviceUrl.hostname) || serviceUrl.hostname.endsWith('.localhost')) return false;
-  return Boolean(config.erc8004IdentityAddress || config.arcRpcUrl);
+  return Boolean(config.erc8004IdentityAddress);
 }
 
 /**

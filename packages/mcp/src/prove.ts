@@ -263,11 +263,8 @@ function printUsage() {
   writeError('  ATTESTATION_KEY    Credential key for proofs WITHOUT --action (not needed for OIDC or human action approval)');
   writeError('');
   writeError('Paying (only when the service charges — the wallet and the chain are separate choices):');
-  writeError('  --pay-with arc      an Arc agent wallet, signed by Circle CLI (no key here)');
-  writeError('                      optional: ARC_AGENT_WALLET picks one when several exist');
   writeError('  --pay-with key      PAYMENT_PRIVATE_KEY');
   writeError('  --pay-with cdp      CDP_API_KEY_ID, CDP_API_KEY_SECRET, CDP_WALLET_SECRET');
-  writeError('  --pay-with circle   CIRCLE_API_KEY, CIRCLE_ENTITY_SECRET, CIRCLE_WALLET_ID');
   writeError('');
   writeError('  The payer signs a USDC authorization and the service submits it, so no gas');
   writeError('  and no native balance are needed on the paying chain — only USDC.');
@@ -280,16 +277,15 @@ function printUsage() {
   writeError('  --login-google             Login with Google account (device flow)');
   writeError('  --login-google-workspace   Login with Google Workspace (device flow)');
   writeError('  --login-microsoft-365      Login with Microsoft 365 (device flow)');
-  writeError('  --action <file.json>        EIP-712 action; opens a human wallet approval link (Arc/GIWA)');
-  writeError('  --pay-with <key|cdp|circle|arc> Which wallet pays, when the service charges');
-  writeError('  --pay-on <chain>            Which chain to pay on (e.g. arc-testnet, base-sepolia)');
+  writeError('  --action <file.json>        EIP-712 action; opens a human wallet approval link (GIWA)');
+  writeError('  --pay-with <key|cdp>        Which wallet pays, when the service charges');
+  writeError('  --pay-on <chain>            Which chain to pay on (e.g. base-sepolia, ethereum-sepolia)');
   writeError('  --max-payment <USDC>        Maximum proof fee, up to six decimal places');
   writeError('');
   writeError('Circuits:');
   writeError('  coinbase_kyc       Prove Coinbase KYC verification (requires ATTESTATION_KEY)');
   writeError('  coinbase_country   Prove KYC country attestation (requires ATTESTATION_KEY)');
   writeError('  oidc_domain        Prove email domain via OIDC JWT (--jwt required)');
-  writeError('  arc_eligibility    Coinbase KYC, optionally binding one EIP-712 action (--action)');
   writeError('  giwa_attestation   GIWA account attestation, optionally binding one action');
   writeError('');
   writeError('ATTESTATION_KEY must be the wallet attested for the circuit you ask for:');
@@ -297,8 +293,8 @@ function printUsage() {
   writeError('  wallet is rarely attested by both.');
   writeError('');
   writeError('Examples:');
-  writeError('  # pay on Arc from a Circle wallet');
-  writeError('  zkproofport-prove coinbase_kyc --pay-with circle --pay-on arc-testnet');
+  writeError('  # pay on Ethereum Sepolia from a raw private key');
+  writeError('  PAYMENT_PRIVATE_KEY=0x... zkproofport-prove coinbase_kyc --pay-with key --pay-on ethereum-sepolia');
   writeError('  # pay on Base Sepolia from a CDP wallet');
   writeError('  zkproofport-prove coinbase_kyc --pay-with cdp --pay-on base-sepolia');
   writeError('  ATTESTATION_KEY=0x... zkproofport-prove coinbase_kyc --scope my-app');
@@ -349,7 +345,7 @@ const hasLoginFlag = loginGoogle || loginGoogleWorkspace || loginMicrosoft365;
 
 // Coinbase circuits require ATTESTATION_KEY (EAS-attested wallet)
 // OIDC/login flows do not require any key — ephemeral key is generated internally
-const awaitsHumanAction = !!actionFile && (circuit === 'arc_eligibility' || circuit === 'giwa_attestation');
+const awaitsHumanAction = !!actionFile && circuit === 'giwa_attestation';
 if (!isOidc && !hasLoginFlag && !awaitsHumanAction) {
   if (!attestationKey) {
     if (silent) {
@@ -452,25 +448,24 @@ if (loginGoogle || loginGoogleWorkspace || loginMicrosoft365) {
   }
 }
 
-// ─── The action-bound circuit needs the typed action ──────────────────
+// ─── The action-bound circuit reads the typed action ──────────────────
 //
 // Read from a file rather than a flag: an EIP-712 structure is nested JSON,
 // and a shell-quoted one loses its quoting in ways that surface as a wrong
 // hash rather than a parse error.
 let action: unknown;
-const canBindAction = circuit === 'arc_eligibility' || circuit === 'giwa_attestation';
+const canBindAction = circuit === 'giwa_attestation';
 if (actionFile && !canBindAction) {
   const msg =
     `--action was given but '${circuit}' has no inputs for one. Only ` +
-    'arc_eligibility and giwa_attestation carry an action.';
+    'giwa_attestation carries an action.';
   if (silent) writeError(JSON.stringify({ error: msg }));
   else writeError(`Error: ${msg}`);
   process.exit(1);
 }
 if (canBindAction && actionFile) {
-  // Optional since 2026-09-22: both circuits sign the request's signal hash
-  // when no action is given. It used to be required for arc_eligibility
-  // because that circuit had no second path.
+  // Optional since 2026-09-22: the circuit signs the request's signal hash
+  // when no action is given.
   const { readFileSync } = await import('node:fs');
   try {
     action = JSON.parse(readFileSync(actionFile, 'utf8'));

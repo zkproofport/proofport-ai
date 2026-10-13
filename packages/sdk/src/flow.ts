@@ -62,6 +62,9 @@ export async function generateProof(
   // Keep the requested circuit and approved values stable across asynchronous operations.
   const circuit = params.circuit;
   const action = params.action ? structuredClone(params.action) : params.action;
+  if (!Object.hasOwn(CIRCUIT_NAME_MAP, circuit)) {
+    throw new Error(`Unknown circuit '${String(circuit)}'. Known: ${Object.keys(CIRCUIT_NAME_MAP).join(', ')}.`);
+  }
   const circuitId: CircuitId = CIRCUIT_NAME_MAP[circuit];
   const scope = params.scope || 'proofport';
   const isOidc = CIRCUITS[circuitId]?.inputType === 'oidc';
@@ -84,24 +87,21 @@ export async function generateProof(
   let actionHash: string | undefined;
 
   /*
-   * Which circuits carry an action, and what happens when one is given.
+   * Which circuit carries an action, and what happens when one is given.
    *
-   * Both of these branch in-circuit: with an action the wallet signs the typed
-   * data, without one it signs the request's signal hash. Arc used to require
-   * one -- its circuit had no second path -- and that requirement lived here as
-   * a circuit name typed twice. Now the only refusal is an action sent where
-   * nothing can prove it, which must be an error rather than a silent drop: a
-   * dropped action leaves the caller believing the proof authorized something.
+   * giwa_attestation branches in-circuit: with an action the wallet signs the
+   * typed data, without one it signs the request's signal hash. The only
+   * refusal is an action sent where nothing can prove it, which must be an
+   * error rather than a silent drop: a dropped action leaves the caller
+   * believing the proof authorized something.
    */
-  const canBindAction =
-    circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY ||
-    circuitId === CIRCUIT_IDS.GIWA_ATTESTATION;
+  const canBindAction = circuitId === CIRCUIT_IDS.GIWA_ATTESTATION;
 
   if (action && !canBindAction) {
     throw new Error(
       `An action was given but '${circuitId}' was requested, and it has no inputs for one. ` +
         `Signing typed data for '${circuitId}' yields a signature that circuit cannot verify. ` +
-        `Ask for ${CIRCUIT_IDS.ARC_ELIGIBILITY} or ${CIRCUIT_IDS.GIWA_ATTESTATION}, or drop the action.`,
+        `Ask for ${CIRCUIT_IDS.GIWA_ATTESTATION}, or drop the action.`,
     );
   }
 
@@ -190,9 +190,7 @@ export async function generateProof(
   // Step 3b: Pay, if the service charges.
   //
   // The buyer signs an EIP-3009 authorization and the service settles it, so
-  // no gas and no native balance are needed on the paying chain -- which is
-  // what makes paying on Arc possible at all, since no public facilitator
-  // settles Arc and the buyer cannot rely on one.
+  // no gas and no native balance are needed on the paying chain.
   let paymentHeaders: Record<string, string> | undefined;
   if (challenge.requiresPayment) {
     if (!signers.payment) {
@@ -202,7 +200,7 @@ export async function generateProof(
         .join(', ');
       throw new Error(
         `${config.baseUrl} charges for proofs and no payment wallet was given. ` +
-        `Pass signers.payment (see walletFromPrivateKey / walletFromCdp / walletFromCircle). ` +
+        `Pass signers.payment (see walletFromPrivateKey / walletFromCdp). ` +
         `Chains offered: ${offered || 'none named'}`,
       );
     }

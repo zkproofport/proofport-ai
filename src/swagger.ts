@@ -594,7 +594,7 @@ export function buildSwaggerSpec(baseUrl: string, agentName = 'ZKProofport prove
                 properties: {
                   circuit: {
                     type: 'string',
-                    enum: ['coinbase_kyc', 'coinbase_country', 'oidc_domain', 'arc_eligibility', 'giwa_attestation'],
+                    enum: ['coinbase_kyc', 'coinbase_country', 'oidc_domain', 'giwa_attestation'],
                     description: 'Which circuit to use',
                   },
                   inputs: {
@@ -699,7 +699,7 @@ export function buildSwaggerSpec(baseUrl: string, agentName = 'ZKProofport prove
           name: 'circuit',
           in: 'path',
           required: true,
-          schema: { type: 'string', enum: ['coinbase_kyc', 'coinbase_country', 'oidc_domain', 'arc_eligibility', 'giwa_attestation'] },
+          schema: { type: 'string', enum: ['coinbase_kyc', 'coinbase_country', 'oidc_domain', 'giwa_attestation'] },
           description: 'Circuit alias name',
         }],
         responses: {

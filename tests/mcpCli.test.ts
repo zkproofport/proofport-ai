@@ -32,9 +32,9 @@ afterEach(async()=>{await rm(directory,{recursive:true,force:true});process.argv
 async function run(args:string[]){process.argv=['node','zkproofport-prove',...args];return import('../packages/mcp/src/prove.ts');}
 
 describe('published proof CLI payment controls and privacy',()=>{
- it('forwards the decimal cap and explicit Arc payer with a four-minute proof timeout',async()=>{
-  await run(['coinbase_kyc','--pay-with','arc','--pay-on','arc-testnet-nano','--max-payment','0.001']);
-  expect(client.callTool).toHaveBeenCalledExactlyOnceWith({name:'generate_proof',arguments:{circuit:'coinbase_kyc',scope:'proofport',pay_with:'arc',pay_on:'arc-testnet-nano',max_payment:'0.001'}},undefined,expect.objectContaining({timeout:240000}));
+ it('forwards the decimal cap and explicit payer with a four-minute proof timeout',async()=>{
+  await run(['coinbase_kyc','--pay-with','key','--pay-on','ethereum-sepolia','--max-payment','0.001']);
+  expect(client.callTool).toHaveBeenCalledExactlyOnceWith({name:'generate_proof',arguments:{circuit:'coinbase_kyc',scope:'proofport',pay_with:'key',pay_on:'ethereum-sepolia',max_payment:'0.001'}},undefined,expect.objectContaining({timeout:240000}));
   expect(client.close).toHaveBeenCalledOnce();expect(stdout).toHaveBeenCalledWith('{"proof":"0x1234"}');
  });
  it.each([[],['-1'],['NaN'],['1e3'],['0.0000001'],['--silent']].map(value=>({value})))('rejects an invalid or missing maximum $value before starting MCP',async({value})=>{

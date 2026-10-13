@@ -14,7 +14,7 @@ import { circuitActionBinding } from '@zkproofport-app/sdk/circuits';
  * prove except OIDC, which starts from a JWT and has its own formatter.
  *
  * Written as an exclusion rather than a list of three, because it WAS a list
- * of three -- coinbase, country, arc -- and giwa_attestation was added to the
+ * of three circuits -- and giwa_attestation was added to the
  * server without being added here. The circuit takes `action_hash`, the list
  * did not know giwa existed, and every GIWA request died inside noir_js with
  * "Expected argument `action_hash`, but none was found".
@@ -138,8 +138,8 @@ export function formatAttestationInputs(
    * on a circuit id here: it already says, per circuit, whether an action is
    * impossible ('none') or allowed ('optional'), and every layer reads that
    * same table. A test here would be a second copy, and the copy is what was
-   * wrong -- it named arc_eligibility and required an action there, months
-   * after arc made it optional and while giwa_attestation had the same two
+   * wrong -- it named a single circuit and required an action there, months
+   * after the action became optional, while giwa_attestation had the same two
    * parameters and no way to fill them.
    */
   const binding = circuitActionBinding(circuitId);

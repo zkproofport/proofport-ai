@@ -192,8 +192,8 @@ describe('AgentRegistration', () => {
       expect(result.tokenId).toBe(42n);
     });
 
-    it('uses RPC gas estimation for Arc metadata storage instead of a guessed limit', async () => {
-      mockProvider.getNetwork.mockResolvedValue({ chainId: 5042002n });
+    it('uses RPC gas estimation for Base metadata storage instead of a guessed limit', async () => {
+      mockProvider.getNetwork.mockResolvedValue({ chainId: 84532n });
       mockContract.register.mockResolvedValue({ wait: vi.fn().mockResolvedValue({
         status: 1, blockNumber: 10, logs: [{ address: validConfig.identityContractAddress, topics: ['0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef', '0x' + '0'.repeat(64), '0x' + '0'.repeat(24) + '1234567890123456789012345678901234567890', '0x2a'] }], hash: '0xtx',
       }) });

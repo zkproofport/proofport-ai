@@ -11,7 +11,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const rows = [
-  { circuit: 'arc_eligibility', key: process.env.ATTESTATION_KEY, keyName: 'ATTESTATION_KEY', chainId: 5042002 },
   { circuit: 'giwa_attestation', key: process.env.GIWA_ATTESTATION_KEY, keyName: 'GIWA_ATTESTATION_KEY', chainId: 91342 },
 ];
 for (const row of rows) if (!row.key) console.warn(`SKIP MCP preparation ${row.circuit}: ${row.keyName} missing`);

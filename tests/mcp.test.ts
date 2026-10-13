@@ -106,10 +106,11 @@ describe('handleGetSupportedCircuits', () => {
     const result = handleGetSupportedCircuits({});
 
     expect(result.circuits).toHaveLength(Object.keys(CIRCUITS).length);
-    // Five since giwa_attestation became provable on 2026-09-22. The literal
-    // is kept alongside the derived count on purpose: without it, deleting a
+    // Four since arc_eligibility was removed on 2026-10-13. The literal is
+    // kept alongside the derived count on purpose: without it, deleting a
     // circuit from CIRCUITS would still pass.
-    expect(result.circuits.length).toBe(5);
+    expect(result.circuits.length).toBe(4);
+    expect(result.circuits.map(c => c.id)).not.toContain('arc_eligibility');
   });
 
   it('should include coinbase_attestation with correct metadata', () => {

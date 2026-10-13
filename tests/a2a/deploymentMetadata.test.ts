@@ -5,12 +5,11 @@ import type { Config } from '../../src/config/index.js';
 import { buildAgentCard, buildMcpDiscovery, buildOasfAgent, buildSkillMd, getAgentRegistrationHandler, getOasfAgentHandler } from '../../src/a2a/agentCard.js';
 
 const config = {
-  teeMode: 'local', teeAttestationEnabled: true, paymentNetworks: 'base-sepolia,arc-testnet-nano',
+  teeMode: 'local', teeAttestationEnabled: true, paymentNetworks: 'base-sepolia,ethereum-sepolia',
   paymentMode: 'testnet', paymentProofPrice: '$0.07', a2aBaseUrl: 'https://proof.example.com',
   websiteUrl: 'https://example.com', chainRpcUrl: 'https://sepolia.base.org',
   erc8004IdentityAddress: '0x0000000000000000000000000000000000000011',
-  ethereumRpcUrl: 'https://eth.example.com', arcRpcUrl: 'https://arc.example.com', arcChainId: 5042002,
-  arcIdentityAddress: '0x0000000000000000000000000000000000000022',
+  ethereumRpcUrl: 'https://eth.example.com',
   proverPrivateKey: '0x' + '11'.repeat(32), agentVersion: '1.0.0',
 } as Config;
 
@@ -24,8 +23,9 @@ describe('deployment discovery metadata', () => {
     for (const text of [JSON.stringify(card), JSON.stringify(mcp), JSON.stringify(oasf), skill]) {
       expect(text).not.toContain('AWS Nitro');
       expect(text).toContain('ZKProofport prover');
-      expect(text).toContain('arc_eligibility');
-      expect(text).toContain('arc-testnet-nano');
+      expect(text).toContain('giwa_attestation');
+      expect(text).toContain('ethereum-sepolia');
+      expect(text).not.toMatch(/arc_eligibility|arc-testnet|deposit_to_gateway|gateway_balance|GatewayWalletBatched|nanopayment|Circle Agent Wallet|5042002/i);
     }
     expect(card.tee).toBeUndefined();
     expect(mcp['x-tee']).toBeUndefined();
@@ -46,8 +46,8 @@ describe('deployment discovery metadata', () => {
     expect(() => buildSkillMd({ ...config, paymentNetworks: '' })).toThrow();
   });
 
-  it('publishes separate Base and Arc registry addresses in both discovery documents', async () => {
-    const tokens = { chains: new Map([[84532, 2n], [5042002, 0n]]) };
+  it('publishes the Base Sepolia and Ethereum Sepolia registrations in both discovery documents', async () => {
+    const tokens = { chains: new Map([[84532, 2n], [11155111, 0n]]) };
     const app = express();
     app.get('/registration', getAgentRegistrationHandler(config, tokens));
     app.get('/oasf', getOasfAgentHandler(config, tokens));
@@ -56,7 +56,7 @@ describe('deployment discovery metadata', () => {
       expect(response.status).toBe(200);
       expect(response.body.registrations).toEqual([
         { agentId: 2, agentRegistry: `eip155:84532:${config.erc8004IdentityAddress}` },
-        { agentId: 0, agentRegistry: `eip155:5042002:${config.arcIdentityAddress}` },
+        { agentId: 0, agentRegistry: `eip155:11155111:${config.erc8004IdentityAddress}` },
       ]);
     }
   });
@@ -70,7 +70,7 @@ describe('deployment discovery metadata', () => {
     expect(response.body.registrations[0].agentId).toBeNull();
   });
 
-  it.each([{ chainId: 999, tokenId: 1n }, { chainId: 5042002, tokenId: -1n }, { chainId: 5042002, tokenId: 9007199254740992n }])(
+  it.each([{ chainId: 999, tokenId: 1n }, { chainId: 5042002, tokenId: 1n }, { chainId: 84532, tokenId: -1n }, { chainId: 84532, tokenId: 9007199254740992n }])(
     'rejects unknown chain or unsafe token ID #%#', ({ chainId, tokenId }) => {
       const handler = getAgentRegistrationHandler(config, { chains: new Map([[chainId, tokenId]]) });
       expect(() => handler({} as never, {} as never)).toThrow();
@@ -79,7 +79,13 @@ describe('deployment discovery metadata', () => {
 });
 
 describe('complete circuit discovery and deployment isolation', () => {
-  const circuits = ['coinbase_attestation', 'coinbase_country_attestation', 'oidc_domain_attestation', 'arc_eligibility', 'giwa_attestation'];
+  const circuits = ['coinbase_attestation', 'coinbase_country_attestation', 'oidc_domain_attestation', 'giwa_attestation'];
+
+  it('links no guide for the removed arc_eligibility circuit', () => {
+    for (const guides of [buildAgentCard(config).guides, buildMcpDiscovery(config)['x-guides'], buildOasfAgent(config).guides]) {
+      expect(guides).not.toHaveProperty('arc_eligibility');
+    }
+  });
 
   it('links every canonical guide on A2A, MCP, OASF and SKILL discovery', () => {
     const guides = [buildAgentCard(config).guides, buildMcpDiscovery(config)['x-guides'], buildOasfAgent(config).guides];
@@ -90,21 +96,21 @@ describe('complete circuit discovery and deployment isolation', () => {
     }
   });
 
-  it('describes optional action binding for both Arc and GIWA without forcing Coinbase witnesses on OIDC', () => {
+  it('describes optional action binding for GIWA without forcing Coinbase witnesses on OIDC', () => {
     const card = buildAgentCard(config);
     const mcp = buildMcpDiscovery(config);
     for (const text of [card.skills[0].description, mcp.tools[0].description, buildSkillMd(config)]) {
       expect(text).toContain('giwa_attestation');
       expect(text).toMatch(/optional/i);
       expect(text).not.toContain('action (required)');
-      expect(text).not.toContain('arc_eligibility additionally requires');
+      expect(text).not.toContain('arc_eligibility');
     }
     expect(mcp.tools[0].inputSchema.properties.inputs).not.toHaveProperty('required');
   });
 
   it.each([
-    ['staging', config, [11155111, 84532, 5042002], 'proveragent.sepolia', 3288n],
-    ['production', { ...config, chainRpcUrl: 'https://mainnet.base.org', ethereumRpcUrl: 'https://ethereum.example.com', arcRpcUrl: '', a2aBaseUrl: 'https://ai.zkproofport.app', paymentNetworks: 'base', erc8004IdentityAddress: '0x0000000000000000000000000000000000000033' }, [1, 8453], 'proveragent.eth', 99n],
+    ['staging', config, [11155111, 84532], 'proveragent.sepolia', 3288n],
+    ['production', { ...config, chainRpcUrl: 'https://mainnet.base.org', ethereumRpcUrl: 'https://ethereum.example.com', a2aBaseUrl: 'https://ai.zkproofport.app', paymentNetworks: 'base', erc8004IdentityAddress: '0x0000000000000000000000000000000000000033' }, [1, 8453], 'proveragent.eth', 99n],
   ] as const)('%s publishes only its configured names, registries and tokens', async (_name, current, chainIds, agentName, tokenId) => {
     const { getChainIdentities } = await import('../../src/config/index.js');
     expect(getChainIdentities(current).map(chain => chain.chainId)).toEqual(chainIds);
@@ -129,7 +135,7 @@ describe('complete circuit discovery and deployment isolation', () => {
   });
 
   it('refuses to publish a staging token map under production configuration', () => {
-    const production = { ...config, chainRpcUrl: 'https://mainnet.base.org', arcRpcUrl: '' };
+    const production = { ...config, chainRpcUrl: 'https://mainnet.base.org' };
     const handler = getAgentRegistrationHandler(production, { chains: new Map([[84532, 592n]]) });
     expect(() => handler({} as never, {} as never)).toThrow('Unknown registered chain 84532');
   });

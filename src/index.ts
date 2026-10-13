@@ -128,8 +128,8 @@ function createApp(config: Config) {
       paymentRequired: paymentModeConfig.requiresPayment,
       // Which chains this instance will actually take payment on. Reported
       // because it is the setting most likely to be wrong and least likely to
-      // be noticed: a service configured for Arc whose PAYMENT_NETWORKS never
-      // reached it refuses Arc payments while looking healthy. An operator can
+      // be noticed: a service configured for Ethereum whose PAYMENT_NETWORKS
+      // never reached it refuses Ethereum payments while looking healthy. An operator can
       // now read the answer here instead of inferring it from a 402.
       paymentNetworks: config.paymentNetworks,
       tee: {

@@ -63,12 +63,12 @@ export function loadConfig() {
      *
      * A LIST because x402 sends payment options as a list and Circle's
      * Discovery API reads it to say which networks a service accepts -- one
-     * chain per deployment cannot express "Base or Arc, your choice".
+     * chain per deployment cannot express "Base or Ethereum, your choice".
      *
      * Required, with no default. It briefly had `|| 'base-sepolia'` on the
      * reasoning that an existing deployment should behave identically until
      * the variable is set -- which is precisely the shape this project
-     * forbids: a deployment meant to take payment on Arc, whose variable was
+     * forbids: a deployment meant to take payment on Ethereum, whose variable was
      * misspelled or never plumbed through, would quote prices in Base Sepolia
      * USDC and publish a Base asset address, and every one of those steps
      * would succeed while describing a chain nobody chose. Both deploy
@@ -109,29 +109,12 @@ export function loadConfig() {
     ethereumRpcUrl: process.env.ETHEREUM_RPC_URL || '',
     agentTokenIdEthereum: process.env.AGENT_TOKEN_ID_ETHEREUM || '',
 
-    // Arc — Circle's L1, where USDC is the gas token. Entirely opt-in: with no
-    // ARC_RPC_URL nothing below runs and the service behaves exactly as before.
-    // The chain id is NOT defaulted. Arc's docs publish only the testnet
-    // (5042002) today; public mainnet is 2026-09-16 and third-party chain
-    // lists already carry a number for it that Circle has not published. A
-    // guessed chain id would sign for the wrong network, so it is required
-    // input when Arc is switched on.
-    // GIWA Sepolia, where giwa_attestation's attester and verifier live. Opt-in
-    // like Arc: with neither set, every other circuit behaves as before and a
+    // GIWA Sepolia, where giwa_attestation's attester and verifier live.
+    // Opt-in: with neither set, every other circuit behaves as before and a
     // GIWA request is refused with a message naming these two rather than
     // reaching Coinbase's EAS and reporting the wallet as unattested.
     giwaRpcUrl: process.env.GIWA_RPC_URL || '',
     giwaExplorerUrl: process.env.GIWA_EXPLORER_URL || '',
-
-    // Proof verification does not opt this service into Arc identity publication.
-    // Preserve undefined: a partially configured explicit pair must not fall back.
-    arcVerificationRpcUrl: process.env.ARC_VERIFICATION_RPC_URL,
-    arcVerificationChainId: process.env.ARC_VERIFICATION_CHAIN_ID === undefined
-      ? undefined : Number(process.env.ARC_VERIFICATION_CHAIN_ID),
-    arcRpcUrl: process.env.ARC_RPC_URL || '',
-    arcChainId: process.env.ARC_CHAIN_ID ? Number(process.env.ARC_CHAIN_ID) : 0,
-    arcIdentityAddress: process.env.ARC_IDENTITY_ADDRESS || '',
-    arcAgentTokenId: process.env.ARC_AGENT_TOKEN_ID || '',
 
     // Chat / LLM (optional)
     openaiApiKey: process.env.OPENAI_API_KEY || '',
@@ -146,38 +129,10 @@ export function loadConfig() {
     virtualsEntityId: process.env.VIRTUALS_ENTITY_ID ? parseInt(process.env.VIRTUALS_ENTITY_ID, 10) : 0,
     virtualsAgentWallet: process.env.VIRTUALS_AGENT_WALLET || '',
   };
-  if (config.arcVerificationRpcUrl !== undefined || config.arcVerificationChainId !== undefined) {
-    getArcVerificationConfig(config);
-  }
   return config;
 }
 
 export type Config = ReturnType<typeof loadConfig>;
-
-/** Resolve Arc proof verification without changing ERC-8004 identity selection. */
-export function getArcVerificationConfig(config: {
-  arcVerificationRpcUrl?: string; arcVerificationChainId?: number;
-  arcRpcUrl?: string; arcChainId?: number;
-}): { rpcUrl: string; chainId: number } {
-  const explicit = config.arcVerificationRpcUrl !== undefined || config.arcVerificationChainId !== undefined;
-  const rpcUrl = explicit ? config.arcVerificationRpcUrl : config.arcRpcUrl;
-  const chainId = explicit ? config.arcVerificationChainId : config.arcChainId;
-  if (!explicit && !rpcUrl && !chainId) return { rpcUrl: '', chainId: 0 };
-  if (!Number.isSafeInteger(chainId) || (chainId ?? 0) <= 0) {
-    throw new Error(explicit
-      ? 'ARC_VERIFICATION_RPC_URL and ARC_VERIFICATION_CHAIN_ID require a complete valid pair'
-      : 'Invalid verification chain for arc_eligibility');
-  }
-  try {
-    const url = new URL(rpcUrl ?? '');
-    if (!['https:', 'http:'].includes(url.protocol) || !url.hostname) throw new Error('Invalid RPC');
-  } catch {
-    throw new Error(explicit
-      ? 'ARC_VERIFICATION_RPC_URL must be a valid HTTP(S) URL paired with ARC_VERIFICATION_CHAIN_ID'
-      : 'ARC_RPC_URL must be a valid HTTP(S) URL paired with ARC_CHAIN_ID');
-  }
-  return { rpcUrl: rpcUrl!, chainId: chainId! };
-}
 
 /** Chain registration config for ERC-8004 dual identity */
 export interface ChainIdentity {
@@ -219,40 +174,9 @@ export function isProductionChain(config: Config): boolean {
  * Production: Ethereum mainnet (primary) + Base mainnet (both always registered).
  * Testnet: Base Sepolia only.
  */
-/**
- * The Arc entry, or null when Arc is not configured.
- *
- * Arc's IdentityRegistry is deployed at the SAME address as the one this
- * service already uses on Base Sepolia — `0x8004A818BFB912233c491871b3d84c89A494BD9e`,
- * per docs.arc.io — because ERC-8004 is deployed deterministically. So Arc
- * needs no new registration code: the existing path is already driven by
- * `chain.rpcUrl` / `chain.chainId` / `chain.identityAddress`. ARC_IDENTITY_ADDRESS
- * is still read separately rather than reusing erc8004IdentityAddress, because
- * production points that at the mainnet registry and Arc must not silently
- * inherit it.
- */
-function arcIdentity(config: Config): ChainIdentity | null {
-  if (!config.arcRpcUrl) return null;
-  if (!Number.isSafeInteger(config.arcChainId) || config.arcChainId <= 0) {
-    throw new Error('ARC_RPC_URL is set but ARC_CHAIN_ID is not — refusing to guess the chain');
-  }
-  if (!config.arcIdentityAddress) {
-    throw new Error('ARC_RPC_URL is set but ARC_IDENTITY_ADDRESS is not');
-  }
-  return {
-    chainId: config.arcChainId,
-    chainName: `Arc (${config.arcChainId})`,
-    agentName: 'proveragent.arc',
-    rpcUrl: config.arcRpcUrl,
-    identityAddress: config.arcIdentityAddress,
-    cachedTokenId: config.arcAgentTokenId,
-  };
-}
-
 export function getChainIdentities(config: Config): ChainIdentity[] {
   const identityAddress = config.erc8004IdentityAddress;
-  const arc = arcIdentity(config);
-  if (!identityAddress) return arc ? [arc] : [];
+  if (!identityAddress) return [];
 
   if (isTestnet(config)) {
     return [
@@ -272,7 +196,6 @@ export function getChainIdentities(config: Config): ChainIdentity[] {
         identityAddress,
         cachedTokenId: config.agentTokenId,
       },
-      ...(arc ? [arc] : []),
     ];
   }
 
@@ -294,6 +217,5 @@ export function getChainIdentities(config: Config): ChainIdentity[] {
       identityAddress,
       cachedTokenId: config.agentTokenId,
     },
-    ...(arc ? [arc] : []),
   ];
 }

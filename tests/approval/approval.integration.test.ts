@@ -103,7 +103,7 @@ describe.skipIf(!enabled)('action approval real Redis + HTTP integration (APPROV
     const bad = await alice.signTypedData(action.domain, action.types, { ...action.message, amount: '1' });
     expect((await h.api.post(`/api/v1/action-approvals/${c.approvalId}/approve`).set('Authorization', auth(browserToken(c))).send({ address: alice.address, signature: bad })).status).toBe(400);
     await approve(h, c);
-    for (const changed of [{ ...body, scope: 'other' }, { ...body, circuit: 'arc_eligibility' }, { ...body, action: { ...action, message: { ...action.message, amount: '1' } } }]) {
+    for (const changed of [{ ...body, scope: 'other' }, { ...body, action: { ...action, message: { ...action.message, amount: '1' } } }]) {
       expect((await h.api.post(`/api/v1/action-approvals/${c.approvalId}/consume`).set('Authorization', auth(c.requesterToken)).send(changed)).status).toBe(409);
     }
     expect((await h.api.post(`/api/v1/action-approvals/${c.approvalId}/consume`).set('Authorization', auth(c.requesterToken)).send(body)).status).toBe(200);

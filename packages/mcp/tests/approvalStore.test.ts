@@ -48,7 +48,7 @@ describe('private approval continuation storage', () => {
     const store = new ApprovalStore(directory);
     const handle = await store.saveInputs(config, 'giwa_attestation', { user_signature: 'private-signature', value: [1, 2] });
     expect(handle).not.toContain('private-signature');
-    await expect(store.consumeInputs(config, handle, 'arc_eligibility')).rejects.toThrow(/circuit/i);
+    await expect(store.consumeInputs(config, handle, 'coinbase_kyc')).rejects.toThrow(/circuit/i);
     const results = await Promise.allSettled([
       store.consumeInputs(config, handle, 'giwa_attestation'),
       store.consumeInputs(config, handle, 'giwa_attestation'),

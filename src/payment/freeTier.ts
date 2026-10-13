@@ -4,9 +4,7 @@
  * It deliberately does NOT name a chain. Which chains payment is taken on is
  * `PAYMENT_NETWORKS`, resolved through the table in `networks.ts`, and a
  * service can offer several at once -- so a mode that also named a chain would
- * be a second, quieter answer to the same question. An `arc-testnet` mode was
- * added here on 2026-09-09 and removed the same day for exactly that reason:
- * nothing ever read it, because the chain was already coming from the table.
+ * be a second, quieter answer to the same question.
  */
 export type PaymentMode = 'disabled' | 'testnet' | 'mainnet';
 
@@ -52,7 +50,7 @@ export function validatePaymentConfig(config: {
   paymentMode: string;
   paymentPayTo: string;
 }): void {
-  const validModes = ['disabled', 'testnet', 'mainnet', 'arc-testnet'];
+  const validModes = ['disabled', 'testnet', 'mainnet'];
   if (!validModes.includes(config.paymentMode)) {
     throw new Error(`paymentMode must be one of: ${validModes.join(', ')}`);
   }
@@ -81,8 +79,8 @@ export function validatePaymentConfig(config: {
  *
  * while the real answer comes from `proofRoutes.ts` and carries `accepts` --
  * one requirement per chain in `PAYMENT_NETWORKS`, each with that chain's
- * price, asset and CAIP-2 id. A mode cannot express "Base or Arc, your
- * choice", so this shape could never have been right once payment was offered
+ * price, asset and CAIP-2 id. A mode cannot express "Base or Ethereum,
+ * your choice", so this shape could never have been right once payment was offered
  * on more than one chain.
  *
  * A comment added to it earlier the same day claimed Circle's Agent

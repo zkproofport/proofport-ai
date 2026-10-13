@@ -69,8 +69,6 @@ export const CIRCUIT_IDS = Object.freeze({
   COINBASE_COUNTRY_ATTESTATION: 'coinbase_country_attestation',
   /** OIDC email-domain attestation. Officially supported. */
   OIDC_DOMAIN_ATTESTATION: 'oidc_domain_attestation',
-  /** Arc eligibility: one EIP-712 action, authorized. Officially supported. */
-  ARC_ELIGIBILITY: 'arc_eligibility',
   /** GIWA attestation. Planned — not officially supported yet. */
   GIWA_ATTESTATION: 'giwa_attestation',
   /** Korea Mobile ID ownership. Planned — not officially supported yet. */
@@ -102,7 +100,6 @@ export const CIRCUIT_SUPPORT_STATUS: Readonly<Record<CanonicalCircuitId, Circuit
     coinbase_attestation: 'supported',
     coinbase_country_attestation: 'supported',
     oidc_domain_attestation: 'supported',
-    arc_eligibility: 'experimental',
     // Experimental since 2026-09-22: built, deployed on GIWA Sepolia and
     // provable here. Testnet-only, which is what keeps it out of 'supported'.
     giwa_attestation: 'experimental',
@@ -160,7 +157,6 @@ export const PROVABLE_CIRCUIT_IDS = [
   CIRCUIT_IDS.COINBASE_ATTESTATION,
   CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION,
   CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION,
-  CIRCUIT_IDS.ARC_ELIGIBILITY,
   // Added 2026-09-22 with the server's own list, which a test holds byte
   // identical to this one: the two trees ship separately and cannot import
   // each other, so nothing else stops one moving without the other.

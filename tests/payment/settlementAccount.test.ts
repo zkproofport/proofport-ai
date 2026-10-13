@@ -16,7 +16,7 @@ vi.mock('@x402/core/facilitator', () => ({
 const key = `0x${'01'.padStart(64, '0')}` as const;
 const payTo = privateKeyToAccount(key).address;
 const config = {
-  paymentMode: 'testnet', paymentNetworks: 'base-sepolia,arc-testnet,ethereum-sepolia',
+  paymentMode: 'testnet', paymentNetworks: 'base-sepolia,ethereum-sepolia',
   proverPrivateKey: key, paymentPayTo: payTo,
 };
 afterEach(() => vi.unstubAllEnvs());
@@ -49,7 +49,7 @@ describe('one prover wallet also settles direct payments', () => {
     expect(() => getSettlementAccount(key, value)).toThrow(/PAYMENT_PAY_TO/);
   });
 
-  it.each(['base-sepolia', 'arc-testnet-nano', 'base-sepolia,arc-testnet-nano'])(
+  it.each(['base-sepolia', 'base', 'base-sepolia,base'])(
     'does not require a settlement wallet for %s', (paymentNetworks) => {
       expect(() => validateSettlementConfig({ ...config, paymentNetworks, proverPrivateKey: '', paymentPayTo: '' }))
         .not.toThrow();
@@ -65,8 +65,15 @@ describe('one prover wallet also settles direct payments', () => {
     expect(() => validateSettlementConfig({ ...config, paymentNetworks: 'typo-network' })).toThrow(/typo-network/);
   });
 
+  it.each(['arc-testnet', 'arc-testnet-nano', 'base-sepolia,arc-testnet-nano'])(
+    'refuses the removed Arc payment network in %s', (paymentNetworks) => {
+      expect(() => validateSettlementConfig({ ...config, paymentNetworks, proverPrivateKey: '', paymentPayTo: '' }))
+        .toThrow(/Unknown payment network\(s\): arc-testnet/);
+    },
+  );
 
-  it.each(['arc-testnet', 'ethereum-sepolia', 'ethereum'])(
+
+  it.each(['ethereum-sepolia', 'ethereum'])(
     'settles %s using only the prover key', async (id) => {
       vi.stubEnv('PROVER_PRIVATE_KEY', key);
       vi.stubEnv('PAYMENT_SETTLER_PRIVATE_KEY', 'invalid-legacy-key-is-ignored');
@@ -80,7 +87,7 @@ describe('one prover wallet also settles direct payments', () => {
   it('also rejects a payee mismatch at the transaction boundary', async () => {
     vi.stubEnv('PROVER_PRIVATE_KEY', key);
     vi.stubEnv('PAYMENT_PAY_TO', `0x${'22'.repeat(20)}`);
-    const network = getPaymentNetwork('arc-testnet');
+    const network = getPaymentNetwork('ethereum-sepolia');
     await expect(settlePayment({ payload: {}, requirements: {}, network, networks: [network] }))
       .rejects.toThrow(/PROVER_PRIVATE_KEY.*PAYMENT_PAY_TO/);
   });

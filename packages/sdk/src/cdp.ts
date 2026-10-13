@@ -12,11 +12,11 @@
  * The same night produced `isTestnet = ... || chainRpcUrl.includes('sepolia')`,
  * for the same reason -- with payment disabled the chain was no longer known,
  * so it was guessed. That guess resolved every unrecognised configuration to
- * Base mainnet and is why there was no place to put Arc.
+ * Base mainnet.
  *
  * Restored as it was. The interface is deliberately structural rather than a
- * CDP dependency: anything with these methods works, which is how an Arc agent
- * wallet or a viem account plugs in without this SDK importing either.
+ * CDP dependency: anything with these methods works, which is how a viem
+ * account plugs in without this SDK importing it.
  */
 import type { ProofportSigner } from './signer.js';
 

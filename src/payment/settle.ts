@@ -6,7 +6,7 @@
  *
  * The buyer signs an EIP-3009 `TransferWithAuthorization` and sends it. It
  * never submits a transaction and never needs a gas balance -- not on Base,
- * not on Ethereum, not on Arc. That is the whole point of the x402 `exact`
+ * not on Ethereum. That is the whole point of the x402 `exact`
  * scheme, and it is what the first version of this service's payment support
  * did before it was deleted (see `packages/sdk/src/cdp.ts` for that history).
  *
@@ -15,10 +15,10 @@
  * A public facilitator submits the authorization and eats the gas. Asked on
  * 2026-09-09, `x402.dexter.cash` does that for Base, Polygon, Arbitrum,
  * Optimism, Avalanche, BSC, World Chain, Monad, SKALE and Solana, and
- * `x402.org/facilitator` for Base Sepolia. Neither serves Arc. Neither serves
- * Ethereum mainnet either.
+ * `x402.org/facilitator` for Base Sepolia. Neither serves Ethereum mainnet or
+ * Ethereum Sepolia.
  *
- * So for those chains this service settles the payment itself, using the
+ * So for the Ethereum chains this service settles the payment itself, using the
  * facilitator implementation that ships in `@x402/evm/exact/facilitator` --
  * the same code a public facilitator runs. It is the payee: paying a few cents
  * of gas out of the payment it is collecting is in its own interest, and it
@@ -42,8 +42,6 @@ import { toFacilitatorEvmSigner } from '@x402/evm';
 import { ExactEvmScheme } from '@x402/evm/exact/facilitator';
 import { x402Facilitator } from '@x402/core/facilitator';
 import type { PaymentNetwork } from './networks.js';
-import { isBatchPayment } from '@circle-fin/x402-batching';
-import { BatchFacilitatorClient } from '@circle-fin/x402-batching/server';
 import { settleWithFacilitator } from './facilitator.js';
 
 /** The viem chain for one of our networks. Absence is an error, never a guess. */
@@ -103,7 +101,7 @@ function facilitatorFor(net: PaymentNetwork) {
 export interface SettleOutcome {
   txHash: string;
   /** Which route actually moved the money, for the log and the report. */
-  via: 'facilitator' | 'payee' | 'gateway';
+  via: 'facilitator' | 'payee';
   facilitatorUrl?: string;
 }
 
@@ -122,63 +120,6 @@ export async function settlePayment(params: {
   networks: PaymentNetwork[];
 }): Promise<SettleOutcome> {
   const { payload, requirements, network } = params;
-
-  // Circle Gateway's batched settlement -- what Arc calls nanopayments. The
-  // authorization is handed to Gateway's off-chain ledger, which verifies it
-  // in under a second and settles it later alongside thousands of others, so
-  // the gas per payment approaches zero. Nothing goes on chain here, and there
-  // is no transaction hash to return for this one payment; the batch has one.
-  //
-  // Routed by `isBatchPayment`, Circle's own check, rather than by our network
-  // id: the offer carries what it is, and a buyer that picked a different
-  // offer must not land here.
-  if (network.settlement === 'gateway' || isBatchPayment(requirements as { extra?: Record<string, unknown> })) {
-    if (network.settlement !== 'gateway') {
-      throw new Error(
-        `A batched authorization arrived for '${network.id}', which does not offer batched settlement. ` +
-        `Gateway settles only the chains marked settlement:'gateway' in networks.ts.`,
-      );
-    }
-    // Named, not defaulted. The package's default is the mainnet Gateway,
-    // which answers `unsupported_network` for a testnet chain — measured both
-    // ways on 2026-09-13. Circle's starter kit gets away with the default
-    // because it reads a GATEWAY_API_URL from its own environment.
-    const gateway = new BatchFacilitatorClient({ url: network.batching!.gatewayUrl });
-
-    // Gateway wants the resource inside the payload, and x402's own encoder
-    // does not put it there — it lives on the requirement, which is where the
-    // buyer read it from. Copied across rather than invented: the two must
-    // name the same resource or Gateway verifies an authorization for
-    // something other than what was offered.
-    const req = (requirements ?? {}) as { resource?: unknown; description?: unknown; mimeType?: unknown };
-    const withResource =
-      payload && typeof payload === 'object' && !(payload as { resource?: unknown }).resource && typeof req.resource === 'string'
-        ? {
-            ...(payload as Record<string, unknown>),
-            // Gateway wants the resource as an object; x402's requirement
-            // carries the same three values flat. Same strings, regrouped.
-            resource: {
-              url: req.resource,
-              description: String(req.description ?? ''),
-              mimeType: String(req.mimeType ?? 'application/json'),
-            },
-          }
-        : payload;
-
-    const verified = await gateway.verify(withResource as never, requirements as never);
-    if (!verified.isValid) {
-      throw new Error(
-        `Circle Gateway refused the authorization for ${network.id}: ${verified.invalidReason ?? 'no reason given'}`,
-      );
-    }
-    const settled = await gateway.settle(withResource as never, requirements as never);
-    if (!settled.success) {
-      throw new Error(
-        `Circle Gateway failed to settle ${network.id}: ${settled.errorReason ?? 'no reason given'}`,
-      );
-    }
-    return { via: 'gateway', txHash: settled.transaction ?? null };
-  }
 
   if (network.settlement === 'facilitator') {
     return settleWithFacilitator(payload, requirements, network);

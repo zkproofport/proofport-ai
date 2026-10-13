@@ -1,7 +1,7 @@
 {
   "name": "@zkproofport-ai/sdk",
   "version": "0.3.0",
-  "description": "TypeScript SDK for ZKProofport Coinbase KYC, country, OIDC, Arc eligibility and GIWA attestation proofs. Optional EIP-712 action binding for Arc/GIWA; x402 USDC and Circle Gateway payments.",
+  "description": "TypeScript SDK for ZKProofport Coinbase KYC, country, OIDC and GIWA attestation proofs. Optional EIP-712 action binding for GIWA; x402 USDC payments.",
   "keywords": [
     "sdk",
     "typescript",
@@ -18,11 +18,6 @@
     "noir-lang",
     "base-chain",
     "ethers",
-    "arc-testnet",
-    "experimental-arc",
-    "circle-agent-wallet",
-    "circle-gateway",
-    "gateway-nanopayments",
     "action-authorization",
     "eip-712"
   ],
@@ -40,7 +35,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@circle-fin/x402-batching": "^3.4.0",
     "@x402/core": "^2.25.0",
     "@x402/evm": "^2.25.0",
     "ethers": "^6.13.0",
@@ -60,15 +54,11 @@
     "directory": "packages/sdk"
   },
   "peerDependencies": {
-    "@circle-fin/developer-controlled-wallets": ">=10.0.0",
     "@coinbase/cdp-sdk": ">=1.55.0",
     "@x402/extensions": ">=2.25.0"
   },
   "peerDependenciesMeta": {
     "@coinbase/cdp-sdk": {
-      "optional": true
-    },
-    "@circle-fin/developer-controlled-wallets": {
       "optional": true
     },
     "@x402/extensions": {

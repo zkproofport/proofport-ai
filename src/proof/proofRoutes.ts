@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import { circuitActionBinding } from '@zkproofport-app/sdk/circuits';
 import type { RedisClient } from '../redis/client.js';
-import { type Config, getArcVerificationConfig } from '../config/index.js';
+import type { Config } from '../config/index.js';
 import type { TeeProvider } from '../tee/types.js';
 import { PROVABLE_CIRCUIT_IDS, CIRCUIT_IDS } from '../config/circuitIds.js';
 import type { CircuitId } from '../config/circuitIds.js';
@@ -20,7 +20,6 @@ import { GIWA_CHAIN_ID } from '../config/contracts.js';
 import { ethers } from 'ethers';
 import { createLogger } from '../logger.js';
 import { parseAttestationDocument, verifyAttestationDocument } from '../tee/attestation.js';
-import { isBatchPayment } from '@circle-fin/x402-batching';
 import type {
   ProveRequest,
   ProveResponse,
@@ -95,7 +94,6 @@ export function chooseVerificationTarget(
   testnet: boolean,
 ): ProveResponse['verification'] {
   const dedicated: Partial<Record<CircuitId, { chainId: number; rpcUrl: string }>> = {
-    [CIRCUIT_IDS.ARC_ELIGIBILITY]: circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY ? getArcVerificationConfig(config) : undefined,
     [CIRCUIT_IDS.GIWA_ATTESTATION]: { chainId: GIWA_CHAIN_ID, rpcUrl: config.giwaRpcUrl },
   };
   const target = dedicated[circuitId];
@@ -125,7 +123,6 @@ function proofTypeForCircuit(circuitId: CircuitId, provider?: string): string {
   const types: Record<CircuitId, string> = {
     [CIRCUIT_IDS.COINBASE_ATTESTATION]: 'kyc',
     [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: 'country',
-    [CIRCUIT_IDS.ARC_ELIGIBILITY]: 'arc_eligibility',
     [CIRCUIT_IDS.GIWA_ATTESTATION]: 'giwa_attestation',
     [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: 'google_login',
   };
@@ -339,7 +336,7 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
   // Which chain the PROOF is verified on, which is a different question from
   // which chain the payment arrives on. Kept on the deployment's own chain
   // setting rather than derived from the payment networks: a service that
-  // takes Arc USDC still verifies its proofs wherever its verifier contracts
+  // takes Ethereum USDC still verifies its proofs wherever its verifier contracts
   // are deployed.
   const isTestnet = isTestnetConfig(config);
   const priceStr = (config.paymentProofPrice || '$0.10').replace('$', '');
@@ -388,7 +385,7 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
       // a payment whether or not it is accompanied by one.
       // A signed EIP-3009 authorization. The buyer signs and this service
       // submits, so the buyer needs no gas on the chain it pays on -- which is
-      // the only way to be paid on Arc or Ethereum, where no public
+      // the only way to be paid on Ethereum, where no public
       // facilitator will submit on a buyer's behalf.
       //
       // `PAYMENT-SIGNATURE` is x402 v2's header name, and it pairs with the
@@ -483,7 +480,7 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
           accepts,
           // Which chain settles how, rather than one global facilitator URL.
           // The single field said "use this facilitator" -- true for Base,
-          // false for Arc and both Ethereum chains, where no public
+          // false for both Ethereum chains, where no public
           // facilitator serves and this service settles. An agent following
           // it would POST to a facilitator that refuses the chain.
           settlement: isDisabled
@@ -514,8 +511,8 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
       // would buy proofs forever.
       //
       // Optional when the buyer signed an authorization instead, because the
-      // authorization itself carries a nonce that Gateway and the USDC
-      // contract each refuse to spend twice. Requiring ours as well shut out
+      // authorization itself carries a nonce that the USDC contract refuses
+      // to spend twice. Requiring ours as well shut out
       // every standard x402 client — Circle's own CLI signs correctly, gets a
       // second 402, and its money has already moved.
       if (paymentTxHeader && !paymentNonceHeader) {
@@ -585,7 +582,7 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
         //
         //   { x402Version: 2,
         //     payload:  { authorization: {...}, signature: "0x..." },
-        //     accepted: { scheme, network: "eip155:5042002", amount, asset, ... } }
+        //     accepted: { scheme, network: "eip155:84532", amount, asset, ... } }
         //
         // The echo is NOT trusted for anything but choosing which chain to look
         // at: the requirement used for settling is rebuilt below from this
@@ -602,25 +599,10 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
             )
           : '';
 
-        // Which offer was paid, not merely which chain.
-        //
-        // Arc appears twice — once settled on chain per payment, once batched
-        // through Circle Gateway — and both carry the same CAIP-2 id, because
-        // they ARE the same chain. Matching on the id alone picks whichever
-        // was listed first, so a buyer who chose nanopayments had the payment
-        // settled the expensive way and the failure named the wrong chain.
-        //
-        // The payload says which it is: a batched authorization is signed
-        // against Gateway's wallet contract, and Circle's own `isBatchPayment`
-        // reads that out of it.
-        const paidBatched = isBatchPayment(
-          ((decoded?.accepted ?? decoded?.paymentRequirements ?? {}) as { extra?: Record<string, unknown> }),
-        );
         const matchesChain = (n: (typeof paymentNetworks)[number]) =>
           n.caip2 === signedFor || n.id === signedFor;
         const payNet = signedFor
-          ? paymentNetworks.find((n) => matchesChain(n) && (n.settlement === 'gateway') === paidBatched)
-            ?? paymentNetworks.find(matchesChain)
+          ? paymentNetworks.find(matchesChain)
           : paymentNetworks.find((n) => n.id === String(req.headers['x-payment-network'] ?? ''));
 
         if (!payNet) {
@@ -684,22 +666,6 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
           return;
         }
 
-        // A batched payment has nothing on chain to look up yet.
-        //
-        // Circle Gateway verifies the authorization off chain, in under a
-        // second, and settles it later alongside thousands of others. What it
-        // hands back is a batch id, not a transaction hash — and asking an RPC
-        // about it produces "Invalid params", which reads as a broken payment
-        // rather than as the wrong question. Gateway's own verification is the
-        // check here, and it already passed to get this far.
-        if (payNet.settlement === 'gateway') {
-          log.info(
-            { action: 'prove.x402.gateway_batched', batch: paymentTxToVerify, network: payNet.id },
-            'Payment accepted by Circle Gateway; it settles in a batch',
-          );
-          paymentVerifyMs = Date.now() - paymentStart;
-        } else {
-
         const payRpc = process.env[payNet.rpcEnv] || payNet.defaultRpc;
         const paymentResult = await verifyPaymentOnChain({
           txHash: paymentTxToVerify,
@@ -724,7 +690,6 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
         }
 
         log.info({ action: 'prove.x402.payment_verified', txHash: paymentTxToVerify, paymentVerifyMs }, 'x402 payment verified');
-        }
       } else {
         log.info({ action: 'prove.payment_skipped', circuit: circuitId }, 'Payment disabled, skipping on-chain verification');
       }

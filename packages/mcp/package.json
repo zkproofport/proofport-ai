@@ -1,7 +1,7 @@
 {
   "name": "@zkproofport-ai/mcp",
   "version": "0.3.0",
-  "description": "Local MCP server and CLI for ZKProofport Coinbase KYC, country, OIDC, Arc eligibility and GIWA attestation proofs. Optional EIP-712 action binding for Arc/GIWA; x402 USDC and Circle Gateway payments.",
+  "description": "Local MCP server and CLI for ZKProofport Coinbase KYC, country, OIDC and GIWA attestation proofs. Optional EIP-712 action binding for GIWA; x402 USDC payments.",
   "keywords": [
     "mcp",
     "model-context-protocol",
@@ -19,11 +19,6 @@
     "base-chain",
     "tee",
     "nitro-enclaves",
-    "arc-testnet",
-    "experimental-arc",
-    "circle-agent-wallet",
-    "circle-gateway",
-    "gateway-nanopayments",
     "action-authorization",
     "eip-712"
   ],
@@ -42,7 +37,6 @@
     "test:e2e": "vitest run --project e2e"
   },
   "dependencies": {
-    "@circle-fin/x402-batching": "^3.4.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@zkproofport-ai/sdk": "^0.3.0",
     "zod": "^3.23.0"

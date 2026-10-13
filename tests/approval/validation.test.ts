@@ -15,12 +15,12 @@ const body = { circuit: 'giwa_attestation', scope: 'Gotgan', action };
 const clone = () => structuredClone(body);
 
 describe('approval validation unit boundaries', () => {
-  it.each(['giwa_attestation', 'arc_eligibility'])('accepts %s with exact inert UTF-8 action values and zero', circuit => {
+  it.each(['giwa_attestation'])('accepts %s with exact inert UTF-8 action values and zero', circuit => {
     const result = validateApprovalRequest({ ...body, circuit });
     expect(result.action).toEqual(action);
     expect(result.digest).toBe(TypedDataEncoder.hash(action.domain, action.types, action.message));
   });
-  it.each(['coinbase_kyc', 'coinbase_attestation', 'oidc_domain', 'unknown', '', null, undefined])('refuses unsupported circuit %j', circuit => {
+  it.each(['arc_eligibility', 'coinbase_kyc', 'coinbase_attestation', 'oidc_domain', 'unknown', '', null, undefined])('refuses unsupported circuit %j', circuit => {
     expect(() => validateApprovalRequest({ ...body, circuit })).toThrow(/only/);
   });
   it.each([undefined, null, '', ' ', [], {}])('refuses absent or malformed action %j', value => {
@@ -65,7 +65,7 @@ describe('approval validation unit boundaries', () => {
   it('binds circuit, exact scope, field order and domain while accepting object-key reordering', () => {
     const original = validateApprovalRequest(body);
     expect(validateApprovalRequest({ action, scope: 'Gotgan', circuit: 'giwa_attestation' }).requestHash).toBe(original.requestHash);
-    for (const input of [{ ...body, circuit: 'arc_eligibility' }, { ...body, scope: 'Gotgan ' }, { ...body, action: { ...action, domain: { ...action.domain, chainId: 1 } } }]) expect(validateApprovalRequest(input).requestHash).not.toBe(original.requestHash);
+    for (const input of [{ ...body, scope: 'Gotgan ' }, { ...body, action: { ...action, domain: { ...action.domain, chainId: 1 } } }]) expect(validateApprovalRequest(input).requestHash).not.toBe(original.requestHash);
   });
   it('enforces exact depth, node-count and object-member boundaries', () => {
     let depth: unknown = 0; for (let i = 0; i < 12; i++) depth = [depth];

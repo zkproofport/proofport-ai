@@ -85,7 +85,6 @@ export const PROVABLE_CIRCUIT_IDS = [
   CIRCUIT_IDS.COINBASE_ATTESTATION,
   CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION,
   CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION,
-  CIRCUIT_IDS.ARC_ELIGIBILITY,
   // Added 2026-09-22, when its circuit gained the optional EIP-712 action and
   // its verifier was deployed on GIWA Sepolia. Its attestation comes from our
   // own attester on that chain, not from Coinbase's EAS -- see
@@ -111,7 +110,7 @@ export function isProvableCircuitId(value: unknown): value is CircuitId {
  * and `dir` in `src/prover/bbProver.ts`, the same three values under two field
  * names -- and `scripts/ai-dev.sh` held a third copy as a hardcoded list of
  * three circuit directories. That third copy is how the local container broke
- * on 2026-09-09: `arc_eligibility` was added to the other two and not to the
+ * on 2026-09-09: a fourth circuit was added to the other two and not to the
  * script, so the script copied artifacts for three circuits, the server needed
  * four, and it crash-looped trying to download the fourth from a branch it had
  * not been pushed to yet.
@@ -132,10 +131,6 @@ export const CIRCUIT_DIRS: Record<CircuitId, { dir: string; packageName: Circuit
   [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: {
     dir: 'oidc-domain-attestation',
     packageName: CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION,
-  },
-  [CIRCUIT_IDS.ARC_ELIGIBILITY]: {
-    dir: 'arc-eligibility',
-    packageName: CIRCUIT_IDS.ARC_ELIGIBILITY,
   },
   [CIRCUIT_IDS.GIWA_ATTESTATION]: {
     dir: 'giwa-attestation',

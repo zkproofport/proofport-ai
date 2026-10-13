@@ -22,7 +22,7 @@ export function verificationChains(environment: string): Record<string, number> 
   const coreChains: Record<string, number> = { staging: 84532, production: 8453 };
   const core = coreChains[environment];
   if (!core) throw new Error(`Unknown deployment environment: ${environment}`);
-  return { coinbase_attestation: core, coinbase_country_attestation: core, oidc_domain_attestation: core, arc_eligibility: 5042002, giwa_attestation: 91342 };
+  return { coinbase_attestation: core, coinbase_country_attestation: core, oidc_domain_attestation: core, giwa_attestation: 91342 };
 }
 
 export function validateDeploymentSnapshot(expected: DeploymentExpectation, value: DeploymentSnapshot): void {
@@ -38,8 +38,8 @@ export function validateDeploymentSnapshot(expected: DeploymentExpectation, valu
   assert.equal(value.card.url, `${expected.baseUrl}/a2a`, 'Agent URL belongs to a different environment');
   const proofSkill = value.card.skills?.find((s: Json) => s.id === 'prove');
   const offers = buildPaymentRequirements({ networks: resolvePaymentNetworks(expected.paymentNetworks), price: expected.price.replace(/^\$/, ''), payTo: expected.payTo, resource: `${expected.baseUrl}/api/v1/prove`, nonce: '0x' + '00'.repeat(32), parseUnits });
-  // Arc exact and Arc Gateway share a chain ID. Compare their signing domains
-  // too, otherwise replacing one with a duplicate of the other passes.
+  // Compare signing domains too, not only the chain: a wrong domain is a valid
+  // signature over the wrong message.
   const paymentShape = (r: Json) => [r.scheme, r.network, r.asset.toLowerCase(), r.payTo.toLowerCase(), r.amount, r.extra?.name, r.extra?.version, r.extra?.verifyingContract?.toLowerCase() ?? null];
   const chains = verificationChains(expected.environment);
   for (const circuit of PROVABLE_CIRCUIT_IDS) {

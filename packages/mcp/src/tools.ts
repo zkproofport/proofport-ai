@@ -15,8 +15,6 @@ import {
   CIRCUITS,
   AUTHORIZED_SIGNERS,
   CIRCUIT_NAME_MAP,
-  ensureGatewayBalance,
-  gatewayBalance,
   ActionApprovalRequiredError,
   getActionApprovalStatus,
   resolveActionApproval,
@@ -30,9 +28,10 @@ import { ApprovalStore } from './approvalStore.js';
  * The circuit names every tool accepts, read from the map the SDK owns.
  *
  * Typed out four times until 2026-09-12, and two of the four had fallen behind:
- * `generate_proof`, `request_challenge` and `submit_proof` did not list
- * `arc_eligibility`, so the circuit could be prepared and then not proved. A
- * new circuit now reaches every tool by being added to `CIRCUIT_NAME_MAP`.
+ * `generate_proof`, `request_challenge` and `submit_proof` did not list a
+ * circuit `prepare_inputs` accepted, so it could be prepared and then not
+ * proved. A new circuit now reaches every tool by being added to
+ * `CIRCUIT_NAME_MAP`.
  */
 const CIRCUIT_NAMES = Object.keys(CIRCUIT_NAME_MAP) as [CircuitName, ...CircuitName[]];
 const circuitParam = () => z.enum(CIRCUIT_NAMES).describe('Which circuit to use');
@@ -120,7 +119,7 @@ export function registerTools(
  * machine with no credentials would fail before reaching the service.
  */
 function hasAnyPaymentWalletConfigured(): boolean {
-  return !!(process.env.PAYMENT_PRIVATE_KEY || process.env.CDP_API_KEY_ID || process.env.CIRCLE_API_KEY);
+  return !!(process.env.PAYMENT_PRIVATE_KEY || process.env.CDP_API_KEY_ID);
 }
 
   // ─── generate_proof ─────────────────────────────────────────────────
@@ -132,8 +131,7 @@ CIRCUITS:
   - "coinbase_kyc": Proves the user passed Coinbase KYC verification.
   - "coinbase_country": Proves the user's country of residence is (or is not) in a given list. Requires country_list and is_included.
   - "oidc_domain": Proves the user authenticated via OIDC and their email belongs to a specific domain. Requires jwt and scope.
-  - "arc_eligibility": Coinbase KYC, optionally binding the wallet's signature to ONE EIP-712 action. Without action it signs the request signal hash. The proof carries that action's hash, so a contract can check WHICH instruction was authorised -- not merely that somebody eligible signed something. Verified on Arc Testnet (chain 5042002).
-  - "giwa_attestation": GIWA attestation, optionally binding one EIP-712 action. Uses a GIWA-attested wallet; verified on GIWA Sepolia (chain 91342).
+  - "giwa_attestation": GIWA attestation, optionally binding the wallet's signature to ONE EIP-712 action. Without action it signs the request signal hash. With one, the proof carries that action's hash, so a contract can check WHICH instruction was authorised -- not merely that somebody eligible signed something. Uses a GIWA-attested wallet; verified on GIWA Sepolia (chain 91342).
 
 WITH ACTION: Returns awaiting_approval with an approval URL for the HUMAN to review and sign in their wallet. Keep the request parameters unchanged, query get_action_approval, then repeat with approval_id when approved. ATTESTATION_KEY cannot authorize an action on the human's behalf. Ordinary proofs without action retain automatic signing.
 
@@ -159,7 +157,7 @@ RETURNS: awaiting_approval or the full ProofResult with proof bytes, public inpu
         })
         .optional()
         .describe(
-          'The EIP-712 action to authorise. Optional for arc_eligibility and giwa_attestation; rejected for other circuits. ' +
+          'The EIP-712 action to authorise. Optional for giwa_attestation; rejected for other circuits. ' +
           'Any structure is provable: the circuit hashes it without reading it, so a deposit, a grant of authority ' +
           'or an agreement in prose all work. The wallet signs exactly these fields, and the proof carries their hash.',
         ),
@@ -180,16 +178,13 @@ RETURNS: awaiting_approval or the full ProofResult with proof bytes, public inpu
         .optional()
         .describe('OIDC provider. "google" (default) for Google Workspace, "microsoft" for Microsoft 365.'),
       pay_with: z
-        .enum(['key', 'cdp', 'circle', 'arc'])
+        .enum(['key', 'cdp'])
         .optional()
         .describe(
-          'Which wallet pays, when the service charges. "arc" is an Arc agent wallet — Circle holds it, ' +
-          'it carries spending policies the agent cannot ignore, and Circle CLI signs with it ' +
-          '(install: npm i -g @circle-fin/cli, then circle wallet login <email> --testnet). ' +
+          'Which wallet pays, when the service charges. ' +
           '"key" signs with PAYMENT_PRIVATE_KEY. ' +
           '"cdp" uses a Coinbase CDP server wallet (CDP_API_KEY_ID, CDP_API_KEY_SECRET, CDP_WALLET_SECRET). ' +
-          '"circle" uses a Circle developer-controlled wallet (CIRCLE_API_KEY, CIRCLE_ENTITY_SECRET, CIRCLE_WALLET_ID) ' +
-          'when that wallet supports the selected offer. Omit it and the single configured wallet is used; ' +
+          'Omit it and the single configured wallet is used; ' +
           'omit it with none configured against a paying service and the error names what to set. ' +
           'Wallet and chain are separate choices; both must support the actual offered signing domain.',
         ),
@@ -197,19 +192,14 @@ RETURNS: awaiting_approval or the full ProofResult with proof bytes, public inpu
         .string()
         .optional()
         .describe(
-          'Which chain to pay on: a CAIP-2 id ("eip155:5042002") or a plain name ' +
-          '("arc-testnet", "arc-testnet-nano", "base-sepolia"). ' +
+          'Which chain to pay on: a CAIP-2 id ("eip155:84532") or a plain name ' +
+          '("base-sepolia", "ethereum-sepolia"). ' +
           'Call request_challenge to see what a service offers. Omitted takes the first chain offered. ' +
           'The payer signs an authorization and the service settles it, so no gas or native balance is needed ' +
-          'on the paying chain -- only USDC. ' +
-          '"arc-testnet-nano" is Arc nanopayments: the authorization goes to Circle Gateway, which verifies it ' +
-          'off chain in under a second and settles it later in a batch with thousands of others, so the gas per ' +
-          'payment approaches zero. It requires a Gateway balance -- deposit first with the deposit_to_gateway ' +
-          'tool -- and is the right choice for an agent buying many proofs. "arc-testnet" settles each payment ' +
-          'on chain immediately and costs gas every time.',
+          'on the paying chain -- only USDC.',
         ),
       max_payment:z.string().regex(/^\d+(\.\d{1,6})?$/).optional().describe('Maximum USDC proof fee allowed by the user.'),
-      approved_payment:z.object({network:z.string(),scheme:z.string(),amount:z.string().regex(/^\d+$/),asset:z.string(),payTo:z.string(),extra:z.object({name:z.string(),version:z.string(),verifyingContract:z.string()})}).optional().describe('Exact user-approved terms. For direct EIP-3009 set extra.verifyingContract to the offer asset; for Gateway copy its required extra.verifyingContract. Changed fee, recipient, token, chain or signing domain is rejected before signing.'),
+      approved_payment:z.object({network:z.string(),scheme:z.string(),amount:z.string().regex(/^\d+$/),asset:z.string(),payTo:z.string(),extra:z.object({name:z.string(),version:z.string(),verifyingContract:z.string()})}).optional().describe('Exact user-approved terms. Set extra.verifyingContract to the offer asset (EIP-3009). Changed fee, recipient, token, chain or signing domain is rejected before signing.'),
     },
     async (params) => {
       params = structuredClone(params);
@@ -253,111 +243,6 @@ RETURNS: awaiting_approval or the full ProofResult with proof bytes, public inpu
       } catch (error) {
         try { return await operationError(error, 'generate_proof', request); }
         catch (storageError) { return errorResult(storageError instanceof Error ? storageError.message : String(storageError)); }
-      }
-    },
-  );
-
-  // ─── Arc nanopayments: deposit and balance ──────────────────────────
-  //
-  // Nanopayments are not "small payments". The authorization goes to Circle
-  // Gateway's off-chain ledger and is settled later in a batch with thousands
-  // of others, so the gas per payment approaches zero -- which is what makes
-  // a sub-cent price sensible at all. The money moves once, by depositing;
-  // after that each payment is a signature.
-  server.tool(
-    'deposit_to_gateway',
-    `Deposit USDC into Circle Gateway on Arc, so later proofs can be paid for with nanopayments (pay_on: "arc-testnet-nano").
-
-Do this ONCE, not per proof. The deposit is the only on-chain step and it costs gas; every payment drawn against the balance costs almost none. Paying with "arc-testnet-nano" against an empty Gateway balance is refused.
-
-Requires PAYMENT_PRIVATE_KEY -- the buyer signs authorizations with it and never sends a transaction per payment.
-
-RETURNS: whether a deposit was made, its transaction hash, and the Gateway balance afterwards (in USDC's smallest units, so 1000000 is one USDC).`,
-    {
-      amount: z
-        .string()
-        .describe('How much USDC to deposit, in whole USDC as a decimal string, e.g. "5" or "0.5".'),
-      at_least: z
-        .string()
-        .optional()
-        .describe(
-          'Skip the deposit if the Gateway balance already covers this, in USDC\'s smallest units ' +
-          '(1000000 = 1 USDC). Omitted deposits unconditionally.',
-        ),
-      rpc_url: z
-        .string()
-        .optional()
-        .describe('Arc RPC. Defaults to https://rpc.testnet.arc.io.'),
-    },
-    async (params) => {
-      try {
-        const key = process.env.PAYMENT_PRIVATE_KEY;
-        if (!key) {
-          return errorResult(
-            'PAYMENT_PRIVATE_KEY is required to deposit: Gateway holds the balance for the wallet that deposits, ' +
-            'and that wallet is the one signing the payments.',
-          );
-        }
-        const wallet = {
-          privateKey: (key.startsWith('0x') ? key : `0x${key}`) as `0x${string}`,
-          rpcUrl: params.rpc_url ?? 'https://rpc.testnet.arc.io',
-        };
-        const result = await ensureGatewayBalance(
-          wallet,
-          params.at_least !== undefined ? BigInt(params.at_least) : undefined,
-          params.amount,
-        );
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify(
-                {
-                  deposited: result.deposited,
-                  depositTxHash: result.depositTxHash ?? null,
-                  available: result.balance.available.toString(),
-                  withdrawing: result.balance.withdrawing.toString(),
-                },
-                null,
-                2,
-              ),
-            },
-          ],
-        };
-      } catch (error) {
-        return errorResult(error instanceof Error ? error.message : String(error));
-      }
-    },
-  );
-
-  server.tool(
-    'gateway_balance',
-    `What the buyer currently holds inside Circle Gateway on Arc — the balance nanopayments are drawn against. Amounts are in USDC's smallest units (1000000 = 1 USDC). Requires PAYMENT_PRIVATE_KEY.`,
-    {
-      rpc_url: z.string().optional().describe('Arc RPC. Defaults to https://rpc.testnet.arc.io.'),
-    },
-    async (params) => {
-      try {
-        const key = process.env.PAYMENT_PRIVATE_KEY;
-        if (!key) return errorResult('PAYMENT_PRIVATE_KEY is required to read a Gateway balance.');
-        const balance = await gatewayBalance({
-          privateKey: (key.startsWith('0x') ? key : `0x${key}`) as `0x${string}`,
-          rpcUrl: params.rpc_url ?? 'https://rpc.testnet.arc.io',
-        });
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify(
-                { available: balance.available.toString(), withdrawing: balance.withdrawing.toString() },
-                null,
-                2,
-              ),
-            },
-          ],
-        };
-      } catch (error) {
-        return errorResult(error instanceof Error ? error.message : String(error));
       }
     },
   );
@@ -428,7 +313,7 @@ RETURNS: whether a deposit was made, its transaction hash, and the Gateway balan
         })
         .optional()
         .describe(
-          'The EIP-712 action to authorise. Optional for arc_eligibility and giwa_attestation; rejected for other circuits. ' +
+          'The EIP-712 action to authorise. Optional for giwa_attestation; rejected for other circuits. ' +
           'Any structure is provable: the circuit hashes it without reading it, so a deposit, a grant of authority ' +
           'or an agreement in prose all work. The wallet signs exactly these fields, and the proof carries their hash.',
         ),
@@ -454,13 +339,16 @@ RETURNS: whether a deposit was made, its transaction hash, and the Gateway balan
       const request = originalRequest(params);
       try {
         const action = params.action ? structuredClone(params.action) : params.action;
+        if (!Object.hasOwn(CIRCUIT_NAME_MAP, params.circuit)) {
+          return errorResult(`Unknown circuit '${String(params.circuit)}'. Known: ${CIRCUIT_NAMES.join(', ')}.`);
+        }
         const circuitId = CIRCUIT_NAME_MAP[params.circuit];
         const scope = params.scope || 'proofport';
         const isOidc = params.circuit === 'oidc_domain';
 
-        const supportsAction = circuitId === CIRCUIT_IDS.ARC_ELIGIBILITY || circuitId === CIRCUIT_IDS.GIWA_ATTESTATION;
+        const supportsAction = circuitId === CIRCUIT_IDS.GIWA_ATTESTATION;
         if (action && !supportsAction) {
-          return errorResult(`An action was given but '${circuitId}' was requested; only arc_eligibility and giwa_attestation carry one.`);
+          return errorResult(`An action was given but '${circuitId}' was requested; only giwa_attestation carries one.`);
         }
         let actionHashes;
         try { actionHashes = action ? hashTypedAction(action) : undefined; }
