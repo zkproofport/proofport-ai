@@ -66,21 +66,27 @@ async function readJson(url: string): Promise<Json> {
   return response.json();
 }
 
-export async function verifyDeployment(expected: DeploymentExpectation): Promise<void> {
+/**
+ * `fetchUrl` is where the requests go; `expected.baseUrl` is the public URL the
+ * documents must name. They differ before traffic moves: deploy-ai.yml checks
+ * the new revision on its own tagged URL while the custom domain still serves
+ * the old one, and the new revision must already advertise the custom domain.
+ */
+export async function verifyDeployment(expected: DeploymentExpectation, fetchUrl: string): Promise<void> {
   const [health, identity, registration, card] = await Promise.all([
     '/health', '/identity/status', '/.well-known/agent-registration.json', '/.well-known/agent-card.json',
-  ].map(path => readJson(expected.baseUrl + path)));
+  ].map(path => readJson(fetchUrl + path)));
   const guides: DeploymentSnapshot['guides'] = {};
   const challenges: DeploymentSnapshot['challenges'] = {};
   for (const circuit of PROVABLE_CIRCUIT_IDS) {
-    guides[circuit] = await readJson(expected.baseUrl + '/api/v1/guide/' + circuit);
-    const response = await fetch(expected.baseUrl + '/api/v1/prove', {
+    guides[circuit] = await readJson(fetchUrl + '/api/v1/guide/' + circuit);
+    const response = await fetch(fetchUrl + '/api/v1/prove', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ circuit, inputs: {} }), signal: AbortSignal.timeout(30000),
     });
     challenges[circuit] = { status: response.status, body: await response.json() };
   }
   validateDeploymentSnapshot(expected, { health, identity, registration, card, challenges, guides });
-  console.log(JSON.stringify({ verified: true, url: expected.baseUrl, circuits: PROVABLE_CIRCUIT_IDS, paymentNetworks: expected.paymentNetworks, identities: expected.identities.map(({ chainId, agentId }) => ({ chainId, agentId })) }));
+  console.log(JSON.stringify({ verified: true, url: expected.baseUrl, fetchedFrom: fetchUrl, circuits: PROVABLE_CIRCUIT_IDS, paymentNetworks: expected.paymentNetworks, identities: expected.identities.map(({ chainId, agentId }) => ({ chainId, agentId })) }));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -96,5 +102,5 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     paymentNetworks: required('VERIFY_PAYMENT_NETWORKS'), payTo: required('VERIFY_PAYMENT_PAY_TO'),
     price: required('VERIFY_PAYMENT_PRICE'), identities: JSON.parse(required('VERIFY_IDENTITIES')),
   };
-  await verifyDeployment(expected);
+  await verifyDeployment(expected, required('VERIFY_FETCH_URL').replace(/\/$/, ''));
 }
