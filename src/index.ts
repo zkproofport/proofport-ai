@@ -271,7 +271,7 @@ async function startServer() {
 
     // Sync verifier addresses from GitHub broadcast JSON
     try {
-      const deploymentsUpdated = await syncDeployments(config.paymentMode, config.chainRpcUrl);
+      const deploymentsUpdated = await syncDeployments(config.paymentMode, config.chainRpcUrl, config.circuitsRepoUrl);
       log.info({ action: 'server.deployments.synced', updated: deploymentsUpdated }, 'Deployment addresses synced');
     } catch (err) {
       log.warn({ action: 'server.deployments.failed', err }, 'Deployment sync failed, using fallback addresses');

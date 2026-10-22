@@ -362,7 +362,7 @@ async function generateProof(
       '-w', witnessPath,
       '-o', proofDir,
       '-k', paths.vk,
-      '--oracle_hash', 'keccak',
+      '-t', 'evm', // bb 4.x: the EVM target replaces the old keccak oracle flag
     ];
     logInfo('bb prove started', { action: 'enclave.bb.started', requestId, cmd: `bb ${bbCmd.join(' ')}` });
 

@@ -1,17 +1,19 @@
-# Stage 1: bb binary source — pulled from the official Aztec image on Docker Hub.
-# The GitHub release for v1.0.0-nightly.20250723 was deleted, but the matching
-# aztecprotocol/aztec image is still available and bundles the same bb binary.
-# We extract bb + its x86_64 runtime deps into /opt/{bb,x86-libs} so Stage 3
-# can copy them verbatim. No private registry dependency.
-FROM --platform=linux/amd64 aztecprotocol/aztec:1.0.0-nightly.20250723-amd64 AS bb-extractor
+# Stage 1: bb, the official Barretenberg release asset for linux/amd64.
+# BB_VERSION must equal BB_VERSION in circuits/toolchain.env: the proof format
+# belongs to the bb that wrote the circuit artifacts. (The 2025 nightly came
+# from the aztecprotocol/aztec image because its GitHub release was deleted;
+# 4.2.0-aztecnr-rc.2 is a published release asset.) bb + its x86_64 runtime
+# deps go to /opt/{bb,x86-libs} so Stage 3 can copy them verbatim.
+FROM --platform=linux/amd64 ubuntu:24.04 AS bb-extractor
+ARG BB_VERSION=4.2.0-aztecnr-rc.2
 
 RUN set -e; \
-    BB_PATH=$(find / -name bb -type f -executable 2>/dev/null | grep -v '^/proc/' | head -1); \
-    [ -n "$BB_PATH" ] || { echo "bb binary not found in aztec image" >&2; exit 1; }; \
-    echo "Found bb at: $BB_PATH"; \
+    apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*; \
     mkdir -p /opt/bb /opt/x86-libs; \
-    cp "$BB_PATH" /opt/bb/bb; \
+    curl -fsSL "https://github.com/AztecProtocol/aztec-packages/releases/download/v${BB_VERSION}/barretenberg-amd64-linux.tar.gz" | tar -xz -C /opt/bb; \
     chmod +x /opt/bb/bb; \
+    got="$(/opt/bb/bb --version)"; \
+    [ "$got" = "$BB_VERSION" ] || { echo "bb reports '$got', expected $BB_VERSION" >&2; exit 1; }; \
     ldd /opt/bb/bb | awk '/=>/{print $3}' | grep -v '^$' | xargs -I{} cp -L {} /opt/x86-libs/; \
     cp /lib64/ld-linux-x86-64.so.2 /opt/x86-libs/
 

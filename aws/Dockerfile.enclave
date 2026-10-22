@@ -3,7 +3,7 @@
 #
 # LOCKED VERSIONS (do NOT change):
 #   bb:       v1.0.0-nightly.20250723
-#   noir_js:  1.0.0-beta.8
+#   noir_js:  1.0.0-beta.19
 #
 # Build:   docker build -f Dockerfile.enclave -t proofport-ai-enclave .
 # Convert: nitro-cli build-enclave --docker-uri proofport-ai-enclave:latest --output-file enclave.eif
@@ -83,7 +83,7 @@ COPY circuits/ /app/circuits/
 
 # Install noir_js packages (WASM-based, can't be esbuild-bundled).
 # Installed here rather than in deploy workflow because EC2 host has no npm.
-RUN npm install --no-save @noir-lang/noir_js@1.0.0-beta.8 @noir-lang/acvm_js@1.0.0-beta.8
+RUN npm install --no-save @noir-lang/noir_js@1.0.0-beta.19 @noir-lang/acvm_js@1.0.0-beta.19
 ENV NODE_PATH=/app/node_modules
 
 # Copy pre-bundled enclave server

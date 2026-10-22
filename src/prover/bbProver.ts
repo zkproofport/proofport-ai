@@ -111,8 +111,10 @@ export class BbProver {
             vkPath,
             '-o',
             proofDir,
-            '--oracle_hash',
-            'keccak',
+            // EVM target: keccak transcript with ZK, what the Solidity
+            // verifiers check. bb 4.x replaced the old oracle-hash flag with -t evm.
+            '-t',
+            'evm',
           ],
           {
             timeout: 120000,
@@ -161,7 +163,7 @@ export class BbProver {
     try {
       await execFileAsync(
         this.config.bbPath,
-        ['verify', '-p', proofPath, '-i', publicInputsPath, '-k', vkPath, '--oracle_hash', 'keccak'],
+        ['verify', '-p', proofPath, '-i', publicInputsPath, '-k', vkPath, '-t', 'evm'],
         {
           timeout: 30000,
         }

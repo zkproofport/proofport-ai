@@ -165,7 +165,7 @@ describe('BbProver', () => {
       );
     });
 
-    it('calls bb prove with correct args including --oracle_hash keccak and -k vk', async () => {
+    it('calls bb prove with the EVM target (-t evm) and -k vk', async () => {
       await prover.prove('coinbase_attestation', mockCircuitParams);
 
       const bbCalls = vi.mocked(childProcess.execFile).mock.calls.filter(
@@ -180,8 +180,8 @@ describe('BbProver', () => {
       expect(args).toContain('-w');
       expect(args).toContain('-k');
       expect(args).toContain('-o');
-      expect(args).toContain('--oracle_hash');
-      expect(args).toContain('keccak');
+      expect(args[args.indexOf('-t') + 1]).toBe('evm');
+      expect(args).not.toContain('--oracle_hash');
 
       // -b points to circuit JSON
       const bIdx = args.indexOf('-b');
@@ -208,7 +208,7 @@ describe('BbProver', () => {
       expect((bbCalls[1][1] as string[])[0]).toBe('verify');
     });
 
-    it('calls bb verify with --oracle_hash keccak', async () => {
+    it('calls bb verify with the EVM target (-t evm)', async () => {
       await prover.prove('coinbase_attestation', mockCircuitParams);
 
       const verifyCall = vi.mocked(childProcess.execFile).mock.calls.find(
@@ -217,8 +217,8 @@ describe('BbProver', () => {
 
       expect(verifyCall).toBeDefined();
       const args = verifyCall![1] as string[];
-      expect(args).toContain('--oracle_hash');
-      expect(args).toContain('keccak');
+      expect(args[args.indexOf('-t') + 1]).toBe('evm');
+      expect(args).not.toContain('--oracle_hash');
     });
 
     it('reads proof output and returns hex-encoded result', async () => {
@@ -379,7 +379,7 @@ describe('BbProver', () => {
       expect(result).toBe(true);
       expect(childProcess.execFile).toHaveBeenCalledWith(
         mockConfig.bbPath,
-        ['verify', '-p', '/path/to/proof', '-i', '/path/to/public_inputs', '-k', '/path/to/vk', '--oracle_hash', 'keccak'],
+        ['verify', '-p', '/path/to/proof', '-i', '/path/to/public_inputs', '-k', '/path/to/vk', '-t', 'evm'],
         { timeout: 30000 },
         expect.any(Function)
       );

@@ -6,7 +6,10 @@
  * with fallback to hardcoded addresses.
  *
  * Resolution strategy:
- *   - testnet (staging): fetch from main branch (latest deployments)
+ *   - testnet (staging): fetch from the same circuits ref the artifacts come
+ *     from (CIRCUITS_REPO_URL). It was hardcoded to main, so a server proving
+ *     with artifacts from another branch verified against main's verifiers --
+ *     on 2026-10-22 every beta.19 proof reverted with ProofLengthWrong().
  *   - mainnet (production): fetch from latest GitHub Release tag (verified only)
  */
 
@@ -122,13 +125,13 @@ async function resolveBroadcastUrl(
   circuitId: CircuitId,
   chainId: number,
   isProduction: boolean,
+  testnetRepoUrl: string,
 ): Promise<string | null> {
   const pathFn = BROADCAST_PATHS[circuitId];
   if (!pathFn) return null;
 
   if (!isProduction) {
-    // Staging/testnet: fetch from main branch
-    return `${GITHUB_RAW('main')}/${pathFn(chainId)}`;
+    return `${testnetRepoUrl}/${pathFn(chainId)}`;
   }
 
   // Production: resolve latest release tag first
@@ -168,13 +171,13 @@ async function fetchVerifierFromBroadcast(
 /**
  * Sync verifier addresses for a single chain from GitHub broadcast JSON.
  */
-async function syncChain(chainId: number, isProduction: boolean): Promise<boolean> {
+async function syncChain(chainId: number, isProduction: boolean, testnetRepoUrl: string): Promise<boolean> {
   const chainIdStr = String(chainId);
   let updated = false;
 
   await Promise.all(
     PROVABLE_CIRCUIT_IDS.map(async (circuitId) => {
-      const url = await resolveBroadcastUrl(circuitId, chainId, isProduction);
+      const url = await resolveBroadcastUrl(circuitId, chainId, isProduction, testnetRepoUrl);
       if (!url) return;
 
       const address = await fetchVerifierFromBroadcast(url);
@@ -210,25 +213,35 @@ async function syncChain(chainId: number, isProduction: boolean): Promise<boolea
  * Syncs: Ethereum mainnet (1), Base mainnet (8453), and Base Sepolia (84532) for testnet.
  *
  * @param paymentMode - 'testnet' | 'mainnet' | 'disabled'
+ * @param testnetRepoUrl - raw base URL of the circuits ref the artifacts come
+ *   from (config.circuitsRepoUrl); testnet broadcasts are read from the same ref
  * @returns true if any address was updated
  */
-export async function syncDeployments(paymentMode: string, chainRpcUrl?: string): Promise<boolean> {
+export async function syncDeployments(
+  paymentMode: string,
+  chainRpcUrl: string | undefined,
+  testnetRepoUrl: string,
+): Promise<boolean> {
+  if (!testnetRepoUrl) throw new Error('syncDeployments needs the circuits repo URL the artifacts come from');
   const isTestnetRpc = chainRpcUrl?.includes('sepolia') ?? false;
   const isProduction = paymentMode === 'mainnet' || (paymentMode === 'disabled' && !isTestnetRpc);
 
   if (isProduction) {
     // Sync both Ethereum mainnet and Base mainnet
     const [ethUpdated, baseUpdated] = await Promise.all([
-      syncChain(1, true),
-      syncChain(8453, true),
+      syncChain(1, true, testnetRepoUrl),
+      syncChain(8453, true, testnetRepoUrl),
     ]);
     return ethUpdated || baseUpdated;
   } else {
-    // Testnet: sync both Ethereum Sepolia and Base Sepolia
-    const [ethUpdated, baseUpdated] = await Promise.all([
-      syncChain(11155111, false),
-      syncChain(84532, false),
+    // Testnet: Ethereum Sepolia, Base Sepolia, and GIWA Sepolia -- the only
+    // chain giwa_attestation is deployed on, which was never synced and so
+    // stayed on its fallback address after every redeploy.
+    const results = await Promise.all([
+      syncChain(11155111, false, testnetRepoUrl),
+      syncChain(84532, false, testnetRepoUrl),
+      syncChain(91342, false, testnetRepoUrl),
     ]);
-    return ethUpdated || baseUpdated;
+    return results.some(Boolean);
   }
 }
