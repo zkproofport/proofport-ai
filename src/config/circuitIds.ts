@@ -1,29 +1,19 @@
 /**
  * Canonical ZKProofport circuit identifiers, for the proofport-ai server.
  *
- * ## The customer SDK owns this list, and this file now imports it
+ * `@zkproofport-app/core/circuits` is the single source of truth for circuit
+ * identifiers across every layer: the mobile app, the relay, the demo, this
+ * server and its published client SDK. This file re-exports it and adds the one
+ * thing core has no opinion on -- which of those circuits THIS server can
+ * actually prove, and where each one's artifacts live.
  *
- * `@zkproofport-app/sdk/circuits` is the single source of truth for circuit
- * identifiers across every layer: the mobile app, the relay, the demo, and this
- * server. This file re-exports it and adds the one thing the SDK has no opinion
- * on — which of those circuits THIS server can actually prove.
+ * Core and not `@zkproofport-app/sdk`: the customer SDK re-exports the same
+ * module but installs `@aztec/bb.js` (about 153 MB unpacked) for an off-chain
+ * verifier this server never uses. `./circuits` is the dependency-free subpath.
  *
- * ## It used to be a copy
- *
- * Until 2026-09-11 the ids below were typed out again here, with a note calling
- * the file "a mirror, not a second source of truth" and two reasons the import
- * could not resolve: that the published SDK did not ship the module, and that a
- * sibling `file:` link could not reach across repositories.
- *
- * The first reason had expired. `@zkproofport-app/sdk@0.2.16` exports
- * `./circuits` — checked by reading its `exports` map and loading it — so the
- * dependency resolves from the registry like any other and the Docker build and
- * the npm tarballs are unaffected. A copy that has to be kept in step by hand
- * is a second source of truth however the comment describes it, so it is gone.
- *
- * Adding a circuit now means adding it to the SDK and publishing; this server
- * picks it up on the next install. An id this server cannot prove yet stays out
- * of PROVABLE_CIRCUIT_IDS below, which is a separate, deliberate list.
+ * Adding a circuit means adding it to core and publishing; this server picks
+ * it up on the next install. An id this server cannot prove yet stays out of
+ * PROVABLE_CIRCUIT_IDS below, which is a separate, deliberate list.
  */
 export {
   ALL_CIRCUIT_IDS,
@@ -33,40 +23,40 @@ export {
   PLANNED_CIRCUIT_IDS,
   SUPPORTED_CIRCUIT_IDS,
   getCircuitSupportStatus,
-} from '@zkproofport-app/sdk/circuits';
+} from '@zkproofport-app/core/circuits';
 
 import {
   ALL_CIRCUIT_IDS,
   CIRCUIT_IDS,
   isCircuitId,
-  type CircuitId as SdkCircuitId,
-  type CircuitSupportStatus as SdkCircuitSupportStatus,
-} from '@zkproofport-app/sdk/circuits';
+  type CircuitId as CoreCircuitId,
+  type CircuitSupportStatus as CoreCircuitSupportStatus,
+} from '@zkproofport-app/core/circuits';
 
 /**
  * Union of every canonical circuit identifier.
  *
- * The SDK calls this `CircuitId`. It is `CanonicalCircuitId` here because
+ * Core calls this `CircuitId`. It is `CanonicalCircuitId` here because
  * {@link CircuitId} in this repo has always meant the narrower set proofport-ai
  * can prove, and silently widening it would let `circuit: 'mdl_kr_age'`
  * typecheck against an endpoint that cannot serve it.
  */
-export type CanonicalCircuitId = SdkCircuitId;
+export type CanonicalCircuitId = CoreCircuitId;
 
-export type CircuitSupportStatus = SdkCircuitSupportStatus;
+export type CircuitSupportStatus = CoreCircuitSupportStatus;
 
 /**
  * Narrows an unknown value to a canonical circuit identifier. Returns `false`
  * for hyphenated route names such as `'coinbase-kyc'`.
  *
- * The SDK's own narrowing function, re-exported under this repo's long-standing
+ * Core's own narrowing function, re-exported under this repo's long-standing
  * name.
  */
 export const isCanonicalCircuitId: (value: unknown) => value is CanonicalCircuitId = isCircuitId;
 
 // ── proofport-ai's own subset ───────────────────────────────────────────────
-// Everything above mirrors the customer SDK. Everything below is this repo's,
-// and the SDK has no opinion on it.
+// Everything above comes from core. Everything below is this repo's, and core
+// has no opinion on it.
 
 /**
  * The circuits this server can actually prove: the ones it has compiled
@@ -79,7 +69,7 @@ export const isCanonicalCircuitId: (value: unknown) => value is CanonicalCircuit
  * Being provable is a stronger claim than being `supported`: a newly supported
  * circuit is not provable here until its artifacts, input builder and verifier
  * address land. `tests/circuitIds.test.ts` enforces the other direction — this
- * server never sells proofs for a circuit the SDK still marks `planned`.
+ * server never sells proofs for a circuit core still marks `planned`.
  */
 export const PROVABLE_CIRCUIT_IDS = [
   CIRCUIT_IDS.COINBASE_ATTESTATION,

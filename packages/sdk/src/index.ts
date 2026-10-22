@@ -19,8 +19,8 @@ export type {
 
 export { CIRCUIT_NAME_MAP, CIRCUIT_ID_MAP } from './types.js';
 
-// Canonical circuit identifiers.
-// Mirrors @zkproofport-app/sdk/circuits — see ./circuits.ts for why a mirror.
+// Canonical circuit identifiers, from @zkproofport-app/core, plus the subset
+// the proofport-ai server can prove. See ./circuits.ts.
 export {
   CIRCUIT_IDS,
   CIRCUIT_SUPPORT_STATUS,
@@ -106,10 +106,9 @@ export {
   getSignerAddress,
 } from './attestation.js';
 
-// Checking the EIP-712 action a giwa_attestation proof can bind to. Mirrored
-// from the customer SDK; see the note in typedAction.ts for why, and
-// tests/typedAction.test.ts for the guard that keeps them equal.
-export { validateTypedAction } from './typedAction.js';
+// Checking the EIP-712 action a giwa_attestation proof can bind to. The one
+// implementation lives in @zkproofport-app/core.
+export { validateTypedAction } from '@zkproofport-app/core/typedAction';
 
 // Validate and hash caller-owned actions before local signing.
 export { hashTypedAction } from './action.js';

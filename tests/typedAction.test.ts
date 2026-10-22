@@ -1,21 +1,17 @@
 /**
- * The mirrored action check answers exactly what the customer SDK's does.
+ * The EIP-712 action check the published client SDK exposes is core's.
  *
- * `@zkproofport-app/sdk` owns the rule for what a usable EIP-712 action is. This package keeps a copy, for the same reason it copies the
- * circuit ids: it is published and runs on every `npx zkproofport-mcp`, and
- * depending on the customer SDK drags qrcode and socket.io-client along.
- *
- * A copy is only acceptable while something proves it has not drifted. Two
- * validators disagreeing about what a dapp may send is worse than either rule
- * alone: the SDK accepts an action, the CLI refuses it, and nobody can say
- * which is right.
+ * `@zkproofport-app/core/typedAction` owns the rule for what a usable EIP-712
+ * action is. `@zkproofport-ai/sdk` used to keep a mirrored copy, held equal by
+ * comparing it with the customer SDK's build; it now re-exports core's function
+ * and `hashTypedAction` calls it, so there is one validator and nothing to
+ * compare. What is checked here is that the wiring stays that way and that the
+ * function still refuses every broken shape below.
  */
 import { describe, it, expect } from 'vitest';
-import * as path from 'node:path';
-import { pathToFileURL } from 'node:url';
-import { existsSync } from 'node:fs';
 
-import { validateTypedAction as mirrored } from '../packages/sdk/src/typedAction.js';
+import { validateTypedAction as fromCore } from '@zkproofport-app/core/typedAction';
+import { validateTypedAction as fromClientSdk, hashTypedAction } from '../packages/sdk/src/index.js';
 
 const GOOD = {
   domain: {
@@ -38,7 +34,7 @@ const drop = (path_: string) => {
   return copy;
 };
 
-/** Everything both validators must agree about. */
+/** A good action, then every way of breaking one. */
 const CASES: Array<[string, unknown]> = [
   ['a complete action', GOOD],
   ['no action at all', undefined],
@@ -60,41 +56,19 @@ const CASES: Array<[string, unknown]> = [
   ['a message missing a declared field', { ...GOOD, message: { amount: '1000000' } }],
 ];
 
-/**
- * The customer SDK's own validator, from the sibling checkout's build.
- *
- * Loaded from `dist` because that is what a consumer installs. When it is not
- * built the comparison cannot run, and the test says so rather than passing.
- */
-async function customerValidator(): Promise<(v: unknown) => string | null> {
-  const dir = path.resolve(__dirname, '../../proofport-app-sdk');
-  for (const candidate of ['dist/typedAction.mjs', 'dist/typedAction.esm.js', 'dist/typedAction.js']) {
-    const file = path.join(dir, candidate);
-    if (existsSync(file)) {
-      const mod = await import(pathToFileURL(file).href);
-      return mod.validateTypedAction;
-    }
-  }
-  throw new Error(
-    `The customer SDK is not built at ${dir}/dist — run \`npm run build\` there. ` +
-      'Without it this guard cannot compare the two validators, and the mirror is unchecked.',
-  );
-}
-
-describe('the mirrored action check matches the customer SDK', () => {
-  it.each(CASES)('agrees about %s', async (_name, value) => {
-    const theirs = await customerValidator();
-    const ours = mirrored(value);
-    const expected = theirs(value);
-    // Compared as exact strings: the message is what a dapp developer reads,
-    // and "both rejected it" is not the same as "both said why the same way".
-    expect(ours).toBe(expected);
+describe('the client SDK uses core\'s action check', () => {
+  it('re-exports core\'s function rather than a copy', () => {
+    expect(fromClientSdk).toBe(fromCore);
   });
 
   it('accepts the good action and rejects every broken one', () => {
-    expect(mirrored(GOOD)).toBeNull();
+    expect(fromClientSdk(GOOD)).toBeNull();
     for (const [name, value] of CASES.slice(1)) {
-      expect(mirrored(value), `${name} should have been refused`).toBeTruthy();
+      expect(fromClientSdk(value), `${name} should have been refused`).toBeTruthy();
     }
+  });
+
+  it.each(CASES.slice(1))('hashTypedAction refuses %s with core\'s reason', (_name, value) => {
+    expect(() => hashTypedAction(value as never)).toThrow(fromCore(value) as string);
   });
 });

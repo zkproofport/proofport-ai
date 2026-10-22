@@ -21,8 +21,8 @@
     "typecheck": "tsc --noEmit",
     "test:all": "vitest run",
     "typecheck:all": "tsc --noEmit -p tsconfig.scripts.json",
-    "sdk:local": "npm install --no-save ../proofport-app-sdk && node -e \"console.log('Using LOCAL customer SDK (node_modules only; package.json untouched)')\"",
-    "sdk:npm": "npm ci && node -e \"console.log('Restored the npm-published customer SDK from the lockfile')\"",
+    "sdk:local": "npm install --no-save ../proofport-app-sdk/packages/core && node -e \"console.log('Using LOCAL @zkproofport-app/core (node_modules only; package.json untouched)')\"",
+    "sdk:npm": "npm ci && node -e \"console.log('Restored the npm-published @zkproofport-app/core from the lockfile')\"",
     "test:e2e:published": "node scripts/run-published-e2e.mjs"
   },
   "dependencies": {
@@ -45,7 +45,7 @@
     "@x402/core": "^2.25.0",
     "@x402/evm": "^2.25.0",
     "@x402/extensions": "^2.25.0",
-    "@zkproofport-app/sdk": "0.4.0",
+    "@zkproofport-app/core": "0.1.1",
     "cbor-x": "^1.6.0",
     "ethers": "^6.13.0",
     "express": "^4.21.0",

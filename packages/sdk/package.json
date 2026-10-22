@@ -37,6 +37,7 @@
   "dependencies": {
     "@x402/core": "^2.25.0",
     "@x402/evm": "^2.25.0",
+    "@zkproofport-app/core": "0.1.1",
     "ethers": "^6.13.0",
     "viem": "^2.45.2"
   },

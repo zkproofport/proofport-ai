@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 import type { TypedAction } from './types.js';
-import { validateTypedAction } from './typedAction.js';
+import { validateTypedAction } from '@zkproofport-app/core/typedAction';
 
 /**
  * Validate and hash a caller-owned EIP-712 action before asking a wallet to sign.

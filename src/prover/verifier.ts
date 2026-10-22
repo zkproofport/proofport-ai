@@ -1,9 +1,7 @@
 import { ethers } from 'ethers';
+import { VERIFIER_ABI, verifyProofOnChain } from '@zkproofport-app/core';
 import { getVerifierAddress } from '../config/deployments.js';
-
-const VERIFIER_ABI = [
-  'function verify(bytes calldata _proof, bytes32[] calldata _publicInputs) external view returns (bool)',
-];
+import { isCanonicalCircuitId } from '../config/circuitIds.js';
 
 export interface VerifyOnChainParams {
   proof: string;
@@ -22,7 +20,9 @@ export interface VerifyOnChainResult {
  * Verify a ZK proof on-chain by calling the deployed verifier contract.
  *
  * Looks up the verifier address via getVerifierAddress(circuitId, chainId),
- * then calls verify(proof, publicInputs) on the contract.
+ * then calls verify(proof, publicInputs) on it through core's
+ * `verifyProofOnChain`. The proof and public inputs are passed through
+ * unchanged; core's `parseProofForOnChain` is not applied.
  *
  * @throws If no verifier is found for the given chainId/circuitId combination.
  * @throws If the on-chain contract call reverts or fails.
@@ -30,23 +30,26 @@ export interface VerifyOnChainResult {
 export async function verifyOnChain(params: VerifyOnChainParams): Promise<VerifyOnChainResult> {
   const { proof, publicInputs, circuitId, chainId, rpcUrl } = params;
 
-  // Look up verifier address
   const verifierAddress = getVerifierAddress(circuitId, chainId);
-  if (!verifierAddress) {
+  if (!verifierAddress || !isCanonicalCircuitId(circuitId)) {
     throw new Error(
       `No verifier found for circuit "${circuitId}" on chain "${chainId}"`
     );
   }
 
-  // Create provider and contract instance (ethers v6)
   const provider = new ethers.JsonRpcProvider(rpcUrl);
-  const verifier = new ethers.Contract(verifierAddress, VERIFIER_ABI, provider);
+  const result = await verifyProofOnChain(
+    circuitId,
+    { proofHex: proof, publicInputsHex: publicInputs, numPublicInputs: publicInputs.length },
+    provider,
+    { address: verifierAddress, chainId: Number(chainId), abi: VERIFIER_ABI },
+  );
 
-  try {
-    const isValid: boolean = await verifier.verify(proof, publicInputs);
-    return { isValid, verifierAddress };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`On-chain verification failed: ${message}`);
+  // Core reports a failed call as `{ valid: false, error }`. This server has
+  // always thrown for that case, so a revert is not mistaken for a proof that
+  // verified as false.
+  if (result.error !== undefined) {
+    throw new Error(`On-chain verification failed: ${result.error}`);
   }
+  return { isValid: result.valid, verifierAddress };
 }

@@ -18,9 +18,12 @@
  *
  * ## Public-input layouts are this repo's knowledge
  *
- * The index ranges below are per-circuit facts that proofport-ai owns; the
- * customer SDK has no layout data. Only the *identifiers* come from
- * `./circuits.js` (mirroring `@zkproofport-app/sdk/circuits`).
+ * The index ranges below repeat what `@zkproofport-app/core` holds for the
+ * same circuits. Core's extractors are not used because they differ in
+ * contract: they take an array of fields and throw on an unknown circuit,
+ * while these take the server's one concatenated hex string and answer `null`
+ * for anything this server cannot prove. Only the *identifiers* come from
+ * `./circuits.js` (re-exporting `@zkproofport-app/core/circuits`).
  *
  * coinbase_attestation (128 fields):
  *   Index 0-31:   signal_hash (32 bytes)

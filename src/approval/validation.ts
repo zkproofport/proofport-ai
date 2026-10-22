@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { getAddress, TypedDataEncoder } from 'ethers';
-import { validateTypedAction, type TypedAction } from '@zkproofport-app/sdk';
+import { validateTypedAction, type TypedAction } from '@zkproofport-app/core/typedAction';
 
 export const APPROVAL_BODY_LIMIT = 32 * 1024;
 export class ApprovalError extends Error {

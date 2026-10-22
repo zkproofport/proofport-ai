@@ -2,6 +2,7 @@
 
 import { CIRCUIT_IDS, PROVABLE_CIRCUIT_IDS } from './circuits.js';
 import type { ActionApproval } from './actionApproval.js';
+import type { TypedAction as CoreTypedAction } from '@zkproofport-app/core/typedAction';
 
 /** Client-friendly circuit aliases. */
 export type CircuitName =
@@ -15,10 +16,8 @@ export type CircuitName =
  * Canonical circuit IDs this server can prove.
  *
  * Derived from `PROVABLE_CIRCUIT_IDS` in `./circuits.js`, which is itself built
- * from the canonical identifiers owned by `@zkproofport-app/sdk/circuits`. The
- * union is unchanged — the three names are no longer typed out here, so a
- * rename in the customer SDK becomes a compile error instead of a silent
- * divergence.
+ * from the canonical identifiers owned by `@zkproofport-app/core/circuits`, so
+ * a rename there becomes a compile error instead of a silent divergence.
  */
 export type CircuitId = (typeof PROVABLE_CIRCUIT_IDS)[number];
 
@@ -187,18 +186,7 @@ export interface AttestationData {
  * A contract cannot enforce prose, though -- to check an amount on-chain the
  * amount has to be its own field.
  */
-export interface TypedAction {
-  domain: {
-    name: string;
-    version: string;
-    chainId: number;
-    /** The contract that will verify this signature. Binds it to one address. */
-    verifyingContract: string;
-  };
-  types: Record<string, Array<{ name: string; type: string }>>;
-  primaryType: string;
-  message: Record<string, unknown>;
-}
+export type TypedAction = CoreTypedAction;
 
 /** Terms explicitly accepted by a user; nonce is intentionally not pinned. */
 export interface ApprovedPayment {

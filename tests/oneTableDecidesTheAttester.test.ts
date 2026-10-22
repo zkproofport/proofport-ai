@@ -11,7 +11,7 @@
  * Coinbase's four signers, and the proof came back wrong somewhere else.
  */
 import { describe, it, expect } from 'vitest';
-import { CIRCUIT_IDS } from '@zkproofport-app/sdk/circuits';
+import { CIRCUIT_IDS } from '@zkproofport-app/core/circuits';
 import { PROVABLE_CIRCUIT_IDS } from '../src/config/circuitIds.js';
 import { ATTESTATION_SOURCES as SERVER_SOURCES } from '../src/config/contracts.js';
 import {

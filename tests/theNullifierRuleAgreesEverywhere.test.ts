@@ -17,7 +17,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { ethers } from 'ethers';
-import { CIRCUIT_IDS, circuitActionBinding } from '@zkproofport-app/sdk/circuits';
+import { CIRCUIT_IDS, circuitActionBinding } from '@zkproofport-app/core/circuits';
 import { PROVABLE_CIRCUIT_IDS } from '../src/config/circuitIds.js';
 import { nullifierForCircuit as serverNullifier } from '../src/input/inputBuilder.js';
 import { nullifierForCircuit as sdkNullifier } from '../packages/sdk/src/inputs.js';

@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from 'express';
-import { circuitActionBinding } from '@zkproofport-app/sdk/circuits';
+import { circuitActionBinding } from '@zkproofport-app/core/circuits';
 import type { RedisClient } from '../redis/client.js';
 import type { Config } from '../config/index.js';
 import type { TeeProvider } from '../tee/types.js';

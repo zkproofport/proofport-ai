@@ -28,36 +28,19 @@ jobs:
       run:
         working-directory: proofport-ai
     steps:
-      # This repo is checked out into a SUBDIRECTORY so proofport-app-sdk can sit
-      # beside it. tests/circuitIds.test.ts resolves the canonical circuit
-      # identifiers from `../proofport-app-sdk/dist/circuits.mjs` and is written
-      # to FAIL — deliberately, not skip — when it cannot find them, because a
-      # green run with nothing to compare against would mean nothing.
-      # `@zkproofport-app/sdk` is not an npm dependency here (the published
-      # package does not export ./circuits yet — see src/config/circuitIds.ts),
-      # so the sibling checkout is the only source.
+      # Checked out into a SUBDIRECTORY, so every step below runs from
+      # proofport-ai/. The canonical circuit ids and the EIP-712 action check
+      # come from the npm package @zkproofport-app/core; no sibling checkout of
+      # proofport-app-sdk is needed.
       - name: Checkout proofport-ai
         uses: actions/checkout@v4
         with:
           path: proofport-ai
 
-      - name: Checkout proofport-app-sdk (canonical circuit identifiers)
-        uses: actions/checkout@v4
-        with:
-          repository: zkproofport/proofport-app-sdk
-          path: proofport-app-sdk
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-
-      # Produces dist/circuits.mjs, which is what circuitIds.test.ts imports.
-      - name: Build proofport-app-sdk
-        working-directory: proofport-app-sdk
-        run: |
-          npm ci
-          npm run build
 
       # Resolve the same pinned dependencies used by the publication workflow.
       - name: Install dependencies

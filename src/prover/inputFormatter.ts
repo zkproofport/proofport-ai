@@ -7,7 +7,7 @@
 
 import type { CircuitParams } from '../input/inputBuilder.js';
 import { CIRCUIT_IDS, type CircuitId } from '../config/circuitIds.js';
-import { circuitActionBinding } from '@zkproofport-app/sdk/circuits';
+import { circuitActionBinding } from '@zkproofport-app/core/circuits';
 
 /**
  * The circuits built from an on-chain attestation: everything this server can

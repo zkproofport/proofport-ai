@@ -1,41 +1,35 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Mock ethers before importing the module under test
+// The provider is built here from the caller's rpcUrl; the contract call is
+// @zkproofport-app/core's verifyProofOnChain. Both are mocked so the test
+// asserts what this module hands to core and how it reports core's answer.
 vi.mock('ethers', () => {
-  const mockVerify = vi.fn();
-  const mockContract = vi.fn().mockImplementation(() => ({
-    verify: mockVerify,
-  }));
-  const mockJsonRpcProvider = vi.fn().mockImplementation(() => ({}));
-
+  const mockJsonRpcProvider = vi.fn().mockImplementation(() => ({ kind: 'provider' }));
   return {
-    ethers: {
-      JsonRpcProvider: mockJsonRpcProvider,
-      Contract: mockContract,
-    },
-    // Re-export for named imports
+    ethers: { JsonRpcProvider: mockJsonRpcProvider },
     JsonRpcProvider: mockJsonRpcProvider,
-    Contract: mockContract,
   };
 });
 
+vi.mock('@zkproofport-app/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@zkproofport-app/core')>();
+  return { ...actual, verifyProofOnChain: vi.fn() };
+});
+
 import { ethers } from 'ethers';
+import { VERIFIER_ABI, verifyProofOnChain } from '@zkproofport-app/core';
 import { verifyOnChain } from '../src/prover/verifier.js';
 import { FALLBACK_VERIFIERS } from '../src/config/contracts.js';
 
-describe('verifyOnChain', () => {
-  const mockVerifyFn = vi.fn();
+const coreVerify = verifyProofOnChain as unknown as ReturnType<typeof vi.fn>;
 
+describe('verifyOnChain', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Reset the mock Contract to return our mockVerifyFn
-    (ethers.Contract as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
-      verify: mockVerifyFn,
-    }));
   });
 
   it('should return isValid: true when on-chain verification succeeds', async () => {
-    mockVerifyFn.mockResolvedValue(true);
+    coreVerify.mockResolvedValue({ valid: true });
 
     const result = await verifyOnChain({
       proof: '0xaabbccdd',
@@ -53,19 +47,23 @@ describe('verifyOnChain', () => {
     // Verify JsonRpcProvider was called with the rpcUrl
     expect(ethers.JsonRpcProvider).toHaveBeenCalledWith('https://sepolia.base.org');
 
-    // Verify Contract was instantiated with the correct verifier address
-    expect(ethers.Contract).toHaveBeenCalledWith(
-      FALLBACK_VERIFIERS['84532']['coinbase_attestation'],
-      expect.any(Array),
-      expect.any(Object),
+    // Core is called with the proof and public inputs unchanged (no padding),
+    // the provider built from rpcUrl, and the looked-up verifier on that chain.
+    expect(coreVerify).toHaveBeenCalledTimes(1);
+    expect(coreVerify).toHaveBeenCalledWith(
+      'coinbase_attestation',
+      { proofHex: '0xaabbccdd', publicInputsHex: ['0x1111', '0x2222'], numPublicInputs: 2 },
+      { kind: 'provider' },
+      {
+        address: FALLBACK_VERIFIERS['84532']['coinbase_attestation'],
+        chainId: 84532,
+        abi: VERIFIER_ABI,
+      },
     );
-
-    // Verify the verify function was called with proof and publicInputs
-    expect(mockVerifyFn).toHaveBeenCalledWith('0xaabbccdd', ['0x1111', '0x2222']);
   });
 
   it('should return isValid: false when on-chain verification fails', async () => {
-    mockVerifyFn.mockResolvedValue(false);
+    coreVerify.mockResolvedValue({ valid: false });
 
     const result = await verifyOnChain({
       proof: '0xbadproof',
@@ -82,7 +80,7 @@ describe('verifyOnChain', () => {
   });
 
   it('should work with coinbase_country_attestation circuit', async () => {
-    mockVerifyFn.mockResolvedValue(true);
+    coreVerify.mockResolvedValue({ valid: true });
 
     const result = await verifyOnChain({
       proof: '0xdeadbeef',
@@ -108,6 +106,7 @@ describe('verifyOnChain', () => {
         rpcUrl: 'https://sepolia.base.org',
       })
     ).rejects.toThrow('No verifier found for circuit "unknown_circuit" on chain "84532"');
+    expect(coreVerify).not.toHaveBeenCalled();
   });
 
   it('should throw for unknown chainId', async () => {
@@ -120,10 +119,11 @@ describe('verifyOnChain', () => {
         rpcUrl: 'https://sepolia.base.org',
       })
     ).rejects.toThrow('No verifier found for circuit "coinbase_attestation" on chain "99999"');
+    expect(coreVerify).not.toHaveBeenCalled();
   });
 
   it('should throw when contract call reverts', async () => {
-    mockVerifyFn.mockRejectedValue(new Error('execution reverted'));
+    coreVerify.mockResolvedValue({ valid: false, error: 'execution reverted' });
 
     await expect(
       verifyOnChain({
@@ -137,7 +137,7 @@ describe('verifyOnChain', () => {
   });
 
   it('should throw when RPC connection fails', async () => {
-    mockVerifyFn.mockRejectedValue(new Error('could not detect network'));
+    coreVerify.mockResolvedValue({ valid: false, error: 'could not detect network' });
 
     await expect(
       verifyOnChain({
