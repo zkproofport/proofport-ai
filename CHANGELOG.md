@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/zkproofport/proofport-ai/compare/server-v0.5.0...server-v0.5.1) (2026-10-23)
+
+
+### Bug Fixes
+
+* **payment:** retry RPC errors while verifying a settled payment ([070be65](https://github.com/zkproofport/proofport-ai/commit/070be65d317fc04550b66839b079015b01b01c57))
+
 ## [0.5.0](https://github.com/zkproofport/proofport-ai/compare/server-v0.4.0...server-v0.5.0) (2026-10-23)
 
 
