@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.4.0...sdk-v0.4.1) (2026-10-23)
+
+
+### Refactoring
+
+* take circuit ids and verify from @zkproofport-app/core ([fde3f0f](https://github.com/zkproofport/proofport-ai/commit/fde3f0facec6cc0a60e0dc956edb3a38eb34dc65))
+
 ## [0.4.0](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.3.0...sdk-v0.4.0) (2026-10-13)
 
 
