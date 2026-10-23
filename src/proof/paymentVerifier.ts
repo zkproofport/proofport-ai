@@ -57,17 +57,38 @@ export async function verifyPaymentOnChain(params: {
     // Get transaction and receipt
     let tx = null;
     let receipt = null;
-    // Retry loop: facilitator tx may not be visible on public RPC immediately
+    // Retry loop: facilitator tx may not be visible on public RPC immediately.
+    //
+    // A lookup that THROWS is retried too. It used to escape the loop on the
+    // first error, so one 503 from the RPC refused a payment this service had
+    // just settled: the buyer's USDC moved and no proof came back
+    // (sepolia.base.org answered every receipt lookup with 503, 2026-10-23).
+    let lastLookupError: unknown = null;
     for (let attempt = 0; attempt < 5; attempt++) {
-      [tx, receipt] = await Promise.all([
-        provider.getTransaction(txHash),
-        provider.getTransactionReceipt(txHash),
-      ]);
+      try {
+        [tx, receipt] = await Promise.all([
+          provider.getTransaction(txHash),
+          provider.getTransactionReceipt(txHash),
+        ]);
+        lastLookupError = null;
+      } catch (lookupError: unknown) {
+        lastLookupError = lookupError;
+        log.warn({ action: 'payment.verify.lookup_error', attempt: attempt + 1, txHash, network, err: lookupError }, 'RPC lookup failed');
+      }
       if (tx) break;
       if (attempt < 4) {
         log.info({ action: 'payment.verify.retry', attempt: attempt + 1, txHash }, 'Transaction not found yet, retrying...');
         await new Promise(r => setTimeout(r, 2000));
       }
+    }
+
+    if (!tx && lastLookupError) {
+      const detail = lastLookupError instanceof Error ? lastLookupError.message : String(lastLookupError);
+      return {
+        valid: false,
+        error: `The ${network} RPC could not be read for ${txHash} after retries: ${detail}`,
+        reason: 'rpc_unavailable',
+      };
     }
 
     if (!tx) {

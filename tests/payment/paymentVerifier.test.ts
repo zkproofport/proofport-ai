@@ -133,6 +133,76 @@ describe('transactions that did not happen or did not work', () => {
   });
 });
 
+describe('an RPC that errors instead of answering', () => {
+  // On 2026-10-23 sepolia.base.org answered every receipt lookup with 503.
+  // The first thrown error left the retry loop, and a payment this service had
+  // just settled was refused -- USDC moved, no proof came back.
+  const rpc503 = () => new Error('could not coalesce error (error={ "code": -32004, "message": "failed to serve request" })');
+  const settledTx = { data: '0xe3ee160e', to: USDC_BASE_SEPOLIA, value: 0n };
+
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  async function settle<T>(promise: Promise<T>): Promise<T> {
+    await vi.runAllTimersAsync();
+    return promise;
+  }
+
+  it('retries through transient errors and accepts the payment once the RPC answers', async () => {
+    const getTx = vi.spyOn(ethers.JsonRpcProvider.prototype, 'getTransaction')
+      .mockRejectedValueOnce(rpc503())
+      .mockRejectedValueOnce(rpc503())
+      .mockResolvedValue(settledTx as never);
+    vi.spyOn(ethers.JsonRpcProvider.prototype, 'getTransactionReceipt')
+      .mockResolvedValue(receiptPaying(PAY_TO, 10_000n) as never);
+
+    const r = await settle(verifyPaymentOnChain({ ...base, settledByUs: true }));
+    expect(r).toEqual({ valid: true });
+    expect(getTx).toHaveBeenCalledTimes(3);
+  });
+
+  it('says the RPC could not be read -- not that the transaction is missing -- when every attempt errors', async () => {
+    const getTx = vi.spyOn(ethers.JsonRpcProvider.prototype, 'getTransaction').mockRejectedValue(rpc503());
+    vi.spyOn(ethers.JsonRpcProvider.prototype, 'getTransactionReceipt').mockRejectedValue(rpc503());
+
+    const r = await settle(verifyPaymentOnChain({ ...base, settledByUs: true }));
+    expect(r.valid).toBe(false);
+    expect(r.reason).toBe('rpc_unavailable');
+    expect(r.error).toContain('failed to serve request');
+    expect(r.error).toContain(base.txHash);
+    expect(getTx).toHaveBeenCalledTimes(5);
+  });
+
+  it('still reports tx_not_found when the RPC answers but has no such transaction', async () => {
+    vi.spyOn(ethers.JsonRpcProvider.prototype, 'getTransaction').mockResolvedValue(null as never);
+    vi.spyOn(ethers.JsonRpcProvider.prototype, 'getTransactionReceipt').mockResolvedValue(null as never);
+
+    const r = await settle(verifyPaymentOnChain({ ...base, settledByUs: true }));
+    expect(r.reason).toBe('tx_not_found');
+  });
+
+  it('reports tx_not_found when an early error is followed by answers with no transaction', async () => {
+    vi.spyOn(ethers.JsonRpcProvider.prototype, 'getTransaction')
+      .mockRejectedValueOnce(rpc503())
+      .mockResolvedValue(null as never);
+    vi.spyOn(ethers.JsonRpcProvider.prototype, 'getTransactionReceipt').mockResolvedValue(null as never);
+
+    const r = await settle(verifyPaymentOnChain({ ...base, settledByUs: true }));
+    expect(r.reason).toBe('tx_not_found');
+  });
+
+  it('keeps every other check after a recovered lookup: a wrong recipient is still refused', async () => {
+    vi.spyOn(ethers.JsonRpcProvider.prototype, 'getTransaction')
+      .mockRejectedValueOnce(rpc503())
+      .mockResolvedValue(settledTx as never);
+    vi.spyOn(ethers.JsonRpcProvider.prototype, 'getTransactionReceipt')
+      .mockResolvedValue(receiptPaying('0x000000000000000000000000000000000000dEaD', 10_000n) as never);
+
+    const r = await settle(verifyPaymentOnChain({ ...base, settledByUs: true }));
+    expect(r.reason).toBe('wrong_recipient');
+  });
+});
+
 describe('a removed Arc payment network', () => {
   it.each(['arc-testnet', 'arc-testnet-nano'])('is refused by name, not checked against another chain: %s', async (network) => {
     await expect(verifyPaymentOnChain({ ...base, network: network as never, settledByUs: true }))

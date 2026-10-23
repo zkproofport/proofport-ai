@@ -117,6 +117,7 @@ export interface PaymentVerificationResult {
    * did nothing lands here, which is why it is worth telling apart.
    */
   reason?:
+    | 'rpc_unavailable'
     | 'tx_not_found'
     | 'tx_pending'
     | 'tx_reverted'
