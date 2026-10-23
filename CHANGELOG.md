@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.5.0](https://github.com/zkproofport/proofport-ai/compare/server-v0.4.0...server-v0.5.0) (2026-10-23)
+
+
+### ⚠ BREAKING CHANGES
+
+* prove with bb 4.2.0-aztecnr-rc.2 and noir_js 1.0.0-beta.19
+
+### build
+
+* prove with bb 4.2.0-aztecnr-rc.2 and noir_js 1.0.0-beta.19 ([85011a9](https://github.com/zkproofport/proofport-ai/commit/85011a91a88529fa779ee2f82ce81ff7d512fdbc))
+
+
+### Features
+
+* **deploy:** verify a revision on its own URL before it serves ([9f70af7](https://github.com/zkproofport/proofport-ai/commit/9f70af7e6232ea7919643defb36942738967496a))
+
+
+### Bug Fixes
+
+* **identity:** send transactions one request at a time ([e5094dc](https://github.com/zkproofport/proofport-ai/commit/e5094dc452d8ca93df49df37d8faad0afb99fee5)), closes [#30](https://github.com/zkproofport/proofport-ai/issues/30)
+
+
+### Refactoring
+
+* take circuit ids and verify from @zkproofport-app/core ([fde3f0f](https://github.com/zkproofport/proofport-ai/commit/fde3f0facec6cc0a60e0dc956edb3a38eb34dc65))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @zkproofport-ai/mcp bumped from ^0.4.0 to ^0.4.1
+    * @zkproofport-ai/sdk bumped from ^0.4.0 to ^0.4.1
+
 ## [0.4.0](https://github.com/zkproofport/proofport-ai/compare/server-v0.3.0...server-v0.4.0) (2026-10-13)
 
 
