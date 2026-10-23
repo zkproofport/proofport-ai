@@ -54,10 +54,6 @@ This service interacts with the following third-party services:
 | Coinbase EAS | Attestation data queries (read-only) | [coinbase.com/legal/privacy](https://www.coinbase.com/legal/privacy) |
 | x402 Protocol | Micropayment processing | [x402.org](https://x402.org) |
 
-## Testnet Notice
-
-> ⚠️ This service currently operates on **Base Sepolia testnet**. No real assets or mainnet funds are involved. Testnet tokens have no monetary value.
-
 ## Open Source
 
 The source code for this bot and the entire Prover Agent infrastructure is open source and auditable:

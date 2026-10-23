@@ -121,11 +121,9 @@ console.log('Valid:', verification.valid);
 ```
 
 
-## Binding a proof to one action (experimental, testnet only)
+## Binding a proof to one action
 
-> **Experimental. Testnet only.**
->
-> One circuit can bind an action, on a testnet and not generally available:
+> One circuit can bind an action, on GIWA Sepolia:
 >
 > | Circuit | Chain | Verifier |
 > |---|---|---|

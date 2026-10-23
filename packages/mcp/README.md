@@ -42,7 +42,7 @@ Proof generation is paid when the endpoint's live x402 challenge requires paymen
 - OIDC proofs require an `id_token`; the CLI offers `--login-google`, `--login-google-workspace`, and `--login-microsoft-365` device login. Complete login locally.
 - A paid endpoint requires an explicitly selected compatible payment wallet and the user's approval of the payment terms.
 
-## Action-bound circuit — EXPERIMENTAL, testnet only
+## Action-bound circuit (GIWA Sepolia)
 
 `giwa_attestation` proves an attestation **and, when you supply one,
 exact-action authorization** in the same proof: the credential
@@ -215,7 +215,7 @@ Use `--silent` for raw result JSON. Paid endpoints still require a compatible ap
 ## Related
 
 - [SDK README](../sdk/README.md) — programmatic payment, action and verification APIs
-- [Project README](../../README.md) — service architecture and experimental Arc contracts
+- [Project README](../../README.md) — service architecture
 - [ZKProofport](https://zkproofport.app)
 
 ## License
