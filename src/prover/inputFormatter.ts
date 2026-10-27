@@ -30,6 +30,10 @@ export interface OidcCircuitInputs {
   scope: number[];                  // 32 bytes
   nullifier: number[];              // 32 bytes
   provider: number;              // 0=Google, 1=Microsoft
+  aud_hash: number[];               // 32 bytes, keccak256(aud)
+  nonce_mode: number;               // 1 = request-bound nonce, 0 = none (device flow)
+  nonce_binding: number[];          // 32 bytes, all zero in mode 0
+  now: string;                      // u64 unix seconds, decimal; iat <= now < exp
 
   // Private inputs
   partial_data: { storage: number[]; len: number };
@@ -222,6 +226,10 @@ export function formatOidcInputs(inputs: OidcCircuitInputs): Record<string, unkn
   result.scope = toHexArray(inputs.scope);
   result.nullifier = toHexArray(inputs.nullifier);
   result.provider = inputs.provider.toString();
+  result.aud_hash = toHexArray(inputs.aud_hash);
+  result.nonce_mode = inputs.nonce_mode.toString();
+  result.nonce_binding = toHexArray(inputs.nonce_binding);
+  result.now = inputs.now;
 
   // Private inputs
   result.partial_data = {

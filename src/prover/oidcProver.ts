@@ -7,8 +7,15 @@
  * Responsibilities:
  * 1. Parse and validate JWT (RS256, claims)
  * 2. Provider-specific validation (Google: email_verified + hd, Microsoft: xms_edov + tid)
- * 3. Compute RSA limbs, partial SHA-256, domain, scope, nullifier
- * 4. Return OidcCircuitInputs ready for formatOidcInputs → noir_js
+ * 3. Refuse a token this server cannot prove: v2 of the circuit binds `aud`,
+ *    `iss` and `iat <= now < exp`, and verifiers accept only our own clients.
+ *    This server proves for the CLI/AI device flow, which cannot carry a nonce,
+ *    so it proves in nonce_mode 0 and accepts only the device-flow client ids.
+ * 4. Compute RSA limbs, partial SHA-256, domain, scope, nullifier, aud_hash, now
+ * 5. Return OidcCircuitInputs ready for formatOidcInputs → noir_js
+ *
+ * Layout and builder contract: circuits oidc-domain-attestation/src/main.nr and
+ * its reference builder scripts/oidc-inputs.ts (v2, 214 public inputs).
  */
 
 import { ethers } from 'ethers';
@@ -16,8 +23,50 @@ import type { OidcCircuitInputs } from './inputFormatter.js';
 
 // ─── Circuit constants (must match main.nr) ─────────────────────────────
 
-export const OIDC_MAX_PARTIAL_DATA_LENGTH = 768;
+export const OIDC_MAX_PARTIAL_DATA_LENGTH = 2048;
 export const OIDC_MAX_DOMAIN_LENGTH = 64;
+/** Public inputs of the v2 circuit. */
+export const OIDC_PUBLIC_INPUT_COUNT = 214;
+
+/** nonce_mode this server proves in: the device flow carries no nonce. */
+export const OIDC_DEVICE_NONCE_MODE = 0;
+
+export type OidcProviderName = 'google' | 'microsoft';
+
+/**
+ * Per provider: the circuit's `provider` value, the issuers the circuit
+ * accepts, and the one OAuth client whose tokens this server proves -- the
+ * device-flow client of packages/mcp/src/prove.ts. Verifiers (core's
+ * checkOidcPolicy) accept the Google device client only in nonce_mode 0, and
+ * the Google web client only in nonce_mode 1, which this server never uses.
+ */
+export const OIDC_PROVIDERS: Readonly<Record<OidcProviderName, {
+  circuitValue: number;
+  isIssuer: (iss: string) => boolean;
+  deviceClientId: string;
+}>> = Object.freeze({
+  google: {
+    circuitValue: 0,
+    // Both spellings are documented and both are accepted in-circuit.
+    isIssuer: (iss: string) => iss === 'https://accounts.google.com' || iss === 'accounts.google.com',
+    deviceClientId: '491923400813-pr17m6kpin2rsbbes18jpb60j1s3qmv4.apps.googleusercontent.com',
+  },
+  microsoft: {
+    circuitValue: 1,
+    // v2.0 tenant issuer, tenant GUID lowercase; v1.0 sts.windows.net is refused in-circuit.
+    isIssuer: (iss: string) =>
+      /^https:\/\/login\.microsoftonline\.com\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/v2\.0$/.test(iss),
+    deviceClientId: '8b09c842-d7a8-4d9c-a6ea-46c797412bac',
+  },
+});
+
+/**
+ * How far this server's clock may lag a token's `iat` before `now` is moved up
+ * to `iat`. The circuit requires iat <= now; a token minted by the provider a
+ * second "ahead" of this server would otherwise be unprovable. Verifiers
+ * accept `now` up to five minutes ahead of their own clock.
+ */
+export const OIDC_IAT_CLOCK_SKEW_SECONDS = 60;
 
 // ─── Types ──────────────────────────────────────────────────────────────
 
@@ -25,8 +74,63 @@ export interface OidcProvePayload {
   jwt: string;
   jwks: { keys: JWK[] };
   scope: string;
-  provider?: 'google' | 'microsoft';
+  /** Optional; when given it must agree with the token's `iss`. */
+  provider?: OidcProviderName;
   domain?: string;
+}
+
+/**
+ * The provider a token is from, read off its `iss`. A `provider` the caller
+ * names must agree; an issuer no provider claims is an error.
+ */
+export function resolveOidcProvider(iss: unknown, named: unknown): OidcProviderName {
+  if (named !== undefined && !Object.prototype.hasOwnProperty.call(OIDC_PROVIDERS, named as string)) {
+    throw new Error(`Unknown OIDC provider '${String(named)}'. Known: ${Object.keys(OIDC_PROVIDERS).join(', ')}.`);
+  }
+  if (typeof iss !== 'string') {
+    throw new Error(`JWT iss claim must be a string, got ${iss === null ? 'null' : typeof iss}.`);
+  }
+  const matches = (Object.keys(OIDC_PROVIDERS) as OidcProviderName[]).filter(p => OIDC_PROVIDERS[p].isIssuer(iss));
+  if (matches.length !== 1) {
+    throw new Error(
+      `JWT iss '${iss}' is not a Google issuer (https://accounts.google.com) or a Microsoft v2.0 tenant issuer ` +
+      '(https://login.microsoftonline.com/<tenant-guid>/v2.0).',
+    );
+  }
+  const fromIss = matches[0];
+  if (named !== undefined && named !== fromIss) {
+    throw new Error(`provider '${String(named)}' was given, but the JWT was issued by ${fromIss} (iss '${iss}').`);
+  }
+  return fromIss;
+}
+
+/**
+ * The `now` public input: this server's clock, checked against the token's
+ * iat/exp so a token the circuit would refuse is refused here with its reason.
+ */
+export function oidcNowFor(iat: unknown, exp: unknown, clockSeconds: number): bigint {
+  if (!Number.isSafeInteger(iat) || (iat as number) < 0) {
+    throw new Error(`JWT iat must be a non-negative integer, got ${JSON.stringify(iat)}.`);
+  }
+  if (!Number.isSafeInteger(exp) || (exp as number) < 0) {
+    throw new Error(`JWT exp must be a non-negative integer, got ${JSON.stringify(exp)}.`);
+  }
+  const issuedAt = iat as number;
+  const expiresAt = exp as number;
+  let now = clockSeconds;
+  if (now < issuedAt) {
+    if (issuedAt - now > OIDC_IAT_CLOCK_SKEW_SECONDS) {
+      throw new Error(
+        `JWT iat ${issuedAt} is ${issuedAt - now}s ahead of this server's clock ${now}; ` +
+        `at most ${OIDC_IAT_CLOCK_SKEW_SECONDS}s is tolerated.`,
+      );
+    }
+    now = issuedAt;
+  }
+  if (now >= expiresAt) {
+    throw new Error(`JWT expired at ${expiresAt} (now ${now}). Sign in again for a fresh id_token.`);
+  }
+  return BigInt(now);
 }
 
 interface JWK {
@@ -150,7 +254,12 @@ function keccak256Bytes(data: Uint8Array): Uint8Array {
  */
 export function prepareOidcCircuitInputs(payload: OidcProvePayload): OidcCircuitInputs {
   const { jwt, jwks, scope } = payload;
-  const providerValue = payload.provider === 'microsoft' ? 1 : 0;
+  if (typeof jwt !== 'string') {
+    throw new Error('Invalid JWT format: expected a string');
+  }
+  if (typeof scope !== 'string' || scope.trim() === '') {
+    throw new Error('OIDC scope must be a non-empty string');
+  }
 
   // 1. Decode JWT
   const [headerB64, payloadB64, signatureB64url] = jwt.split('.');
@@ -171,24 +280,37 @@ export function prepareOidcCircuitInputs(payload: OidcProvePayload): OidcCircuit
     throw new Error('JWT payload missing email claim');
   }
 
+  const provider = resolveOidcProvider(jwtPayload.iss, payload.provider);
+  const providerValue = OIDC_PROVIDERS[provider].circuitValue;
+
+  // The audience: only the device-flow client this server proves for. A token
+  // issued to any other client (another website, our app's web client) would
+  // make a proof every ZKProofport verifier refuses -- or, for the app's web
+  // client, one that must carry a request nonce this path cannot supply.
+  const deviceClientId = OIDC_PROVIDERS[provider].deviceClientId;
+  if (jwtPayload.aud !== deviceClientId) {
+    throw new Error(
+      `JWT aud ${JSON.stringify(jwtPayload.aud)} is not the ZKProofport ${provider} device-flow client ` +
+      `(${deviceClientId}). This prover accepts only id_tokens from the device sign-in of @zkproofport-ai/mcp.`,
+    );
+  }
+
+  const now = oidcNowFor(jwtPayload.iat, jwtPayload.exp, Math.floor(Date.now() / 1000));
+
   // 2. Provider-specific claim validation
-  if (payload.provider === 'microsoft') {
+  if (provider === 'microsoft') {
     if (!jwtPayload.xms_edov) {
       throw new Error('Microsoft JWT xms_edov is not true (email domain ownership not verified)');
     }
     if (!jwtPayload.tid) {
       throw new Error('Microsoft JWT missing tid claim (not an organizational account)');
     }
-  } else if (payload.provider === 'google') {
-    if (!jwtPayload.email_verified) {
+  } else {
+    if (jwtPayload.email_verified !== true) {
       throw new Error('JWT email_verified is not true');
     }
     if (!jwtPayload.hd) {
       throw new Error('Google JWT missing hd claim (not a Google Workspace account)');
-    }
-  } else {
-    if (!jwtPayload.email_verified) {
-      throw new Error('JWT email_verified is not true');
     }
   }
 
@@ -220,17 +342,13 @@ export function prepareOidcCircuitInputs(payload: OidcProvePayload): OidcCircuit
   const redcLimbs = splitBigIntToChunks(redcParam, 120, 18).map(v => v.toString());
   const sigLimbs = splitBigIntToChunks(signatureBigInt, 120, 18).map(v => v.toString());
 
-  // 5. Partial SHA-256
-  const payloadJson = new TextDecoder().decode(base64urlToBytes(payloadB64));
-  const emailKeyIndex = payloadJson.indexOf('"email"');
-  if (emailKeyIndex === -1) {
-    throw new Error('Could not find "email" key in JWT payload');
-  }
-
-  const emailKeyIndexB64 = Math.floor(emailKeyIndex / 3) * 4;
-  const sliceStart = headerB64.length + 1 + emailKeyIndexB64;
-
-  const { partialHash, remainingData } = generatePartialSHA256(signedData, sliceStart);
+  // 5. Partial SHA-256. v2 cuts at the 64-byte block holding the `.` between
+  // header and payload, so partial_data carries the whole payload (the circuit
+  // reads iss, aud, iat and exp, which precede email), and the payload starts
+  // 1..64 bytes into partial_data -- the offset the circuit asserts.
+  const dot = headerB64.length;
+  const cut = Math.floor(dot / 64) * 64;
+  const { partialHash, remainingData } = generatePartialSHA256(signedData, cut);
 
   if (remainingData.length > OIDC_MAX_PARTIAL_DATA_LENGTH) {
     throw new Error(
@@ -242,9 +360,7 @@ export function prepareOidcCircuitInputs(payload: OidcProvePayload): OidcCircuit
   const partialDataPadded = new Uint8Array(OIDC_MAX_PARTIAL_DATA_LENGTH);
   partialDataPadded.set(remainingData);
 
-  const shaCutoffIndex = signedData.length - remainingData.length;
-  const payloadBytesInShaPrecompute = shaCutoffIndex - (headerB64.length + 1);
-  const base64DecodeOffset = (4 - (payloadBytesInShaPrecompute % 4)) % 4;
+  const base64DecodeOffset = dot + 1 - cut;
 
   // 6. Domain BoundedVec
   const domainBytes = new TextEncoder().encode(domain);
@@ -265,12 +381,19 @@ export function prepareOidcCircuitInputs(payload: OidcProvePayload): OidcCircuit
   preimage.set(scopeBytes, 32);
   const nullifierBytes = keccak256Bytes(preimage);
 
+  // 9. aud_hash = keccak256(aud); device flow: nonce_mode 0, zero binding.
+  const audHash = keccak256Bytes(new TextEncoder().encode(jwtPayload.aud as string));
+
   return {
     pubkey_modulus_limbs: pubkeyLimbs,
     domain: { storage: Array.from(domainStorage), len: domainBytes.length },
     scope: Array.from(scopeBytes),
     nullifier: Array.from(nullifierBytes),
     provider: providerValue,
+    aud_hash: Array.from(audHash),
+    nonce_mode: OIDC_DEVICE_NONCE_MODE,
+    nonce_binding: new Array(32).fill(0),
+    now: now.toString(),
     partial_data: { storage: Array.from(partialDataPadded), len: remainingData.length },
     partial_hash: Array.from(partialHash),
     full_data_length: signedData.length,

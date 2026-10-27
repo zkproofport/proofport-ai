@@ -515,7 +515,7 @@ const result = await generateProof(
   {},
   {
     circuit: 'oidc_domain',
-    jwt: googleIdToken, // JWT id_token from Google OAuth
+    jwt: googleIdToken, // id_token from the ZKProofport device sign-in (Google Workspace)
     scope: 'myapp:verify-domain',
   },
 );
@@ -533,7 +533,7 @@ const result = await generateProof(
   {},
   {
     circuit: 'oidc_domain',
-    jwt: microsoftIdToken, // JWT id_token from Microsoft OAuth
+    jwt: microsoftIdToken, // id_token from the ZKProofport device sign-in (Microsoft 365)
     provider: 'microsoft',
     scope: 'myapp:verify-domain',
   },
@@ -562,8 +562,8 @@ const result = await generateProof(
 );
 
 // Extract domain and nullifier from proof
-const domain = extractDomainFromPublicInputs(result.publicInputs);
-const nullifier = extractNullifierFromPublicInputs(result.publicInputs);
+const domain = extractDomainFromPublicInputs(result.publicInputs, 'oidc_domain_attestation');
+const nullifier = extractNullifierFromPublicInputs(result.publicInputs, 'oidc_domain_attestation');
 
 console.log('Verified domain:', domain);
 console.log('Nullifier:', nullifier);
@@ -571,7 +571,7 @@ console.log('Nullifier:', nullifier);
 
 **Public Input Layout (oidc_domain_attestation):**
 
-The proof contains 148 public input fields (32 bytes each):
+The proof contains 214 public input fields (32 bytes each):
 
 | Fields | Description |
 |--------|-------------|
@@ -580,12 +580,18 @@ The proof contains 148 public input fields (32 bytes each):
 | 82 | Domain length |
 | 83-114 | Scope (32 bytes) |
 | 115-146 | Nullifier (32 bytes) |
-| 147 | Provider identifier (u8) |
+| 147 | Provider identifier (u8): 0 Google, 1 Microsoft |
+| 148-179 | keccak256 of the id_token's `aud` (32 bytes) |
+| 180 | Nonce mode (u8): always 0 here — device sign-in carries no nonce |
+| 181-212 | Nonce binding (32 bytes): all zero in nonce mode 0 |
+| 213 | `now`: unix seconds the proof was made at; the circuit proves the token was valid then |
+
+Only id_tokens from the ZKProofport device sign-in (`zkproofport-prove --login-google-workspace` or `--login-microsoft-365`) are accepted: a token issued to any other client, or an expired one, is refused before anything is paid. Verify a proof soon after it is made — verifiers accept `now` up to 15 minutes old.
 
 **Functions:**
 
-- `extractDomainFromPublicInputs(publicInputs: string): string | null` — Extracts the email domain (e.g., "google.com") from public inputs. Returns null if extraction fails.
-- `extractNullifierFromPublicInputs(publicInputs: string): string | null` — Extracts the 32-byte nullifier as a 0x-prefixed hex string. Returns null if extraction fails.
+- `extractDomainFromPublicInputs(publicInputs: string, circuit: CircuitId): string | null` — Extracts the email domain (e.g., "google.com") from public inputs. Returns null if extraction fails.
+- `extractNullifierFromPublicInputs(publicInputs: string, circuit: CircuitId): string | null` — Extracts the 32-byte nullifier as a 0x-prefixed hex string. Returns null if extraction fails.
 
 ## Types Reference
 

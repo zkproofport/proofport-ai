@@ -5,7 +5,7 @@
  *
  * Every function here takes the circuit id explicitly. There used to be a
  * `detectCircuit(fieldCount)` that inferred the circuit from the *number* of
- * public inputs (128 → coinbase, 150 → country, 148 → oidc, anything else →
+ * public inputs (128 → coinbase, 150 → country, 148 → oidc v1, anything else →
  * coinbase). It is gone. Field count is a size, not an identity: nothing
  * guarantees two circuits have different counts, and when they collide the
  * inference returns whichever branch is written first, silently, with no error.
@@ -39,13 +39,17 @@
  *   Index 86-117: scope (32 bytes)
  *   Index 118-149: nullifier (32 bytes)
  *
- * oidc_domain_attestation (148 fields):
+ * oidc_domain_attestation (214 fields, circuit v2; 0-147 are v1's, unchanged):
  *   Index 0-17:    pubkey_modulus_limbs (18 x u128)
  *   Index 18-81:   domain storage (BoundedVec<u8, 64>)
  *   Index 82:      domain len
  *   Index 83-114:  scope (32 bytes)
  *   Index 115-146: nullifier (32 bytes)
  *   Index 147:     provider (u8)
+ *   Index 148-179: aud_hash (32 bytes, keccak256 of the token's aud)
+ *   Index 180:     nonce_mode (u8; 0 for proofs from this server's device flow)
+ *   Index 181-212: nonce_binding (32 bytes; all zero in nonce_mode 0)
+ *   Index 213:     now (u64 unix seconds; iat <= now < exp)
  */
 
 import { CIRCUIT_IDS } from './circuits.js';
