@@ -13,6 +13,7 @@
  *   - mainnet (production): fetch from latest GitHub Release tag (verified only)
  */
 
+import { PINNED_VERIFIERS, sameAddress } from '@zkproofport-app/core';
 import { createLogger } from '../logger.js';
 import { FALLBACK_VERIFIERS } from './contracts.js';
 import { CIRCUIT_IDS, PROVABLE_CIRCUIT_IDS } from './circuitIds.js';
@@ -67,6 +68,27 @@ export function getChainVerifiers(
   chainId: string,
 ): Record<string, string> {
   return verifierAddresses[chainId] || {};
+}
+
+/**
+ * Why published clients will refuse proofs that name `address`, or `null`
+ * when they will accept it.
+ *
+ * The AI SDK, the MCP and every other @zkproofport-app/core consumer verify
+ * against core's pinned table and refuse a response naming a different
+ * verifier. A deployment synced here that is newer than the installed core
+ * (a redeploy on the circuits branch staging proves from) produces responses
+ * those clients refuse until core is released with it.
+ */
+export function unpinnedVerifierReason(circuitId: CircuitId, chainId: number, address: string): string | null {
+  const pinned = PINNED_VERIFIERS[circuitId]?.[chainId];
+  if (!pinned) {
+    return `@zkproofport-app/core pins no ${circuitId} verifier on chain ${chainId}`;
+  }
+  if (!sameAddress(pinned.address, address)) {
+    return `@zkproofport-app/core pins ${circuitId} on chain ${chainId} to ${pinned.address}, not ${address}`;
+  }
+  return null;
 }
 
 // ── Async fetch logic ───────────────────────────────────────────────────
@@ -182,6 +204,14 @@ async function syncChain(chainId: number, isProduction: boolean, testnetRepoUrl:
 
       const address = await fetchVerifierFromBroadcast(url);
       if (!address) return;
+
+      const unpinned = unpinnedVerifierReason(circuitId, chainId, address);
+      if (unpinned) {
+        log.error(
+          { action: 'deployment.unpinned', circuitId, chainId, address },
+          `${unpinned}; clients verifying with the published SDK/MCP will refuse these proofs`,
+        );
+      }
 
       const current = verifierAddresses[chainIdStr]?.[circuitId];
       if (address !== current) {

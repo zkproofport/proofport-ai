@@ -134,10 +134,15 @@ export interface ProveResponse {
     inputBuildMs?: number;
     proveMs?: number;
   };
+  /**
+   * What the server says about the verifier. `verifyProof` treats it as a
+   * claim: the chain selects ZKProofport's pinned verifier, the address must
+   * equal it, and `rpcUrl` is never used to verify.
+   */
   verification: {
     chainId: number;
     verifierAddress: string;
-    rpcUrl: string;
+    rpcUrl?: string;
   } | null;
 }
 

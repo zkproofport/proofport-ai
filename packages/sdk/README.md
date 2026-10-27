@@ -384,7 +384,7 @@ if (result.attestation) {
 | `proofWithInputs` | string | Combined proof + public inputs |
 | `attestation` | object | TEE attestation (document, proof_hash, verification) or null |
 | `timing` | object | Execution times per step |
-| `verification` | object | On-chain verifier info (chainId, address, rpcUrl) |
+| `verification` | object | The on-chain verifier the server used; `verifyProof` checks it against the pinned one |
 
 ## On-Chain Verification
 
@@ -401,6 +401,15 @@ if (verification.valid) {
   console.log('Proof verification failed:', verification.error);
 }
 ```
+
+`verifyProof` does not take the server's word for where to verify. It calls
+ZKProofport's own pinned verifier contract for the proof's circuit and chain,
+refuses a result that names a different contract, and reads the chain through
+its own public RPC rather than one the result names. Before the contract call
+it also checks the proof's issuer: for Google/Microsoft proofs, that the signing
+key is one the provider currently publishes; for Coinbase and GIWA proofs, that
+the signer list is the official one. Any failed check returns
+`{ valid: false, error }`.
 
 ## Step-by-Step API
 

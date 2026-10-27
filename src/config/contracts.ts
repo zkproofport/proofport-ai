@@ -71,6 +71,12 @@ export const ATTESTATION_SOURCES: Record<
  * lookup that returns `undefined` at request time.
  */
 /**
+ * Must equal `PINNED_VERIFIERS` in @zkproofport-app/core, the table the AI SDK,
+ * the MCP and every other published client verify against: a response naming
+ * any other address is refused by them. tests/fallbackVerifiersMatchCore.test.ts
+ * holds the two together. (Ethereum Sepolia was still on the pre-2026-10-22
+ * deployments here until 2026-10-27; the live staging server had synced past it.)
+ *
  * `null` means NOT DEPLOYED on that chain, and is different from a missing
  * key, which would be a circuit somebody forgot. An empty string was used here
  * briefly and is worse than either: it looks like an address that failed to
@@ -92,9 +98,9 @@ export const FALLBACK_VERIFIERS: Record<string, Record<CircuitId, string | null>
     [CIRCUIT_IDS.GIWA_ATTESTATION]: null,
   },
   '11155111': {
-    [CIRCUIT_IDS.COINBASE_ATTESTATION]: '0xCbC8E63fF92659E8B44cFF117D33005Bb669a018',
-    [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: '0x6646d970499BBeD728636823A5A7e551E811b414',
-    [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: '0x07121eb50b2Ebe1675E7Cb96c84B580A3fF6589e',
+    [CIRCUIT_IDS.COINBASE_ATTESTATION]: '0x7fc2059a73cEF2b572C8deEe911c72963dCB4A8a',
+    [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: '0x0b3Af3DFc67dC65E0145c37ee00230139d579F64',
+    [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: '0x41d707cD61847bB6939F3F1182eC96EFE6AaA983',
     // Deployed on GIWA Sepolia (91342) and nowhere else.
     [CIRCUIT_IDS.GIWA_ATTESTATION]: null,
   },

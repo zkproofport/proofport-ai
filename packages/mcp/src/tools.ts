@@ -455,7 +455,7 @@ You MUST pass the nonce returned by request_challenge. POST /api/v1/prove answer
   // ─── verify_proof ──────────────────────────────────────────────────────
   server.tool(
     'verify_proof',
-    `Step 4 (optional): Verify a ZK proof on-chain against the deployed verifier contract. Pass the full generate_proof result object directly — verification info (verifierAddress, chainId, rpcUrl) is extracted automatically. Returns { valid: true } if the proof is valid.`,
+    `Step 4 (optional): Verify a ZK proof on-chain against ZKProofport's own pinned verifier contract for the circuit and chain. Pass the full generate_proof result object directly. The result's verifierAddress is only compared with the pinned one: a different address is refused, never called. Issuer anchors are checked too (OIDC provider key against Google/Microsoft's published keys; Coinbase/GIWA signer-list root). Returns { valid: true } if the proof is valid, otherwise { valid: false, error }.`,
     {
       result: z
         .object({
@@ -464,9 +464,9 @@ You MUST pass the nonce returned by request_challenge. POST /api/v1/prove answer
           proof: z.string().describe('0x-prefixed proof hex bytes'),
           publicInputs: z.string().describe('0x-prefixed concatenated public inputs hex'),
           verification: z.object({
-            verifierAddress: z.string().describe('Verifier contract address'),
-            chainId: z.number().describe('Chain ID (e.g. 8453 for Base, 84532 for Base Sepolia)'),
-            rpcUrl: z.string().describe('RPC URL for the chain'),
+            verifierAddress: z.string().describe('Verifier address the result names; compared with the pinned verifier, refused if different'),
+            chainId: z.number().describe('Chain the result names; selects the pinned verifier for the circuit on that chain'),
+            rpcUrl: z.string().optional().describe('Ignored: verification uses its own public RPC for the chain, never one a result names'),
           }),
         })
         .passthrough()
