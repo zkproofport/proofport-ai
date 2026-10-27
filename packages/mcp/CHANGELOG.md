@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.2](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.4.1...mcp-v0.4.2) (2026-10-27)
+
+
+### Bug Fixes
+
+* **sdk:** verify against core's pinned verifier, not the response's ([fb61861](https://github.com/zkproofport/proofport-ai/commit/fb61861051b63131b6bdf8fd8a9ef97ad5d1beb7))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @zkproofport-ai/sdk bumped from ^0.4.1 to ^0.5.0
+
 ## [0.4.1](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.4.0...mcp-v0.4.1) (2026-10-23)
 
 
