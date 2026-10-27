@@ -106,10 +106,22 @@ jobs:
       - name: Publish to npm (OIDC trusted publisher)
         if: steps.pkg.outputs.skip != 'true'
         working-directory: ${{ steps.pkg.outputs.package }}
+        env:
+          # Which npm dist-tag a release goes to is a decision, set per release in
+          # the repository variable NPM_DIST_TAG (latest | beta). There is no
+          # default: an unset or unknown value stops the publish. Added
+          # 2026-10-28 so SDK 0.5.0 / MCP 0.4.2 (OIDC v2 inputs) could ship as
+          # beta while the production AI server still runs OIDC v1.
+          NPM_DIST_TAG: ${{ vars.NPM_DIST_TAG }}
         run: |
           TAG="$RELEASE_TAG"
           if [[ "$TAG" == *"beta"* ]]; then
-            npm publish --access public --tag beta
+            DIST_TAG=beta
           else
-            npm publish --access public
+            case "$NPM_DIST_TAG" in
+              latest|beta) DIST_TAG="$NPM_DIST_TAG" ;;
+              *) echo "Repository variable NPM_DIST_TAG is '$NPM_DIST_TAG'; set it to latest or beta"; exit 1 ;;
+            esac
           fi
+          echo "Publishing $RELEASE_TAG with dist-tag $DIST_TAG"
+          npm publish --access public --tag "$DIST_TAG"
