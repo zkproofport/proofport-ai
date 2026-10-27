@@ -64,10 +64,10 @@ describe('artifactManager', () => {
       expect(mockFetch).toHaveBeenCalledTimes(PROVABLE_CIRCUIT_IDS.length * 2);
 
       const calls = mockFetch.mock.calls.map(call => call[0]);
-      expect(calls).toContain(`${repoBaseUrl}/coinbase-attestation/target/coinbase_attestation.json`);
+      expect(calls).toContain(`${repoBaseUrl}/coinbase-attestation-v2/target/coinbase_attestation_v2.json`);
       expect(calls).toContain(`${repoBaseUrl}/giwa-attestation/target/giwa_attestation.json`);
       expect(calls.some(url => String(url).includes('arc-eligibility'))).toBe(false);
-      expect(calls).toContain(`${repoBaseUrl}/coinbase-attestation/target/vk/vk`);
+      expect(calls).toContain(`${repoBaseUrl}/coinbase-attestation-v2/target/vk/vk`);
       expect(calls).toContain(`${repoBaseUrl}/coinbase-country-attestation/target/coinbase_country_attestation.json`);
       expect(calls).toContain(`${repoBaseUrl}/coinbase-country-attestation/target/vk/vk`);
       expect(calls).toContain(`${repoBaseUrl}/oidc-domain-attestation/target/oidc_domain_attestation.json`);
@@ -85,7 +85,7 @@ describe('artifactManager', () => {
       await downloadArtifacts(circuitsDir, repoBaseUrl);
 
       // Check directory structure for every provable circuit
-      const circuit1Dir = path.join(circuitsDir, 'coinbase-attestation', 'target');
+      const circuit1Dir = path.join(circuitsDir, 'coinbase-attestation-v2', 'target');
       const circuit1VkDir = path.join(circuit1Dir, 'vk');
       const circuit2Dir = path.join(circuitsDir, 'coinbase-country-attestation', 'target');
       const circuit2VkDir = path.join(circuit2Dir, 'vk');
@@ -208,8 +208,11 @@ describe('artifactManager', () => {
     }
 
     it('adopts a local circuit that has no recorded hash, and starts', async () => {
-      for (const id of PROVABLE_CIRCUIT_IDS) {
-        await placeCircuit(id.replace(/_/g, '-'), id);
+      // From CIRCUIT_DIRS: the directory and artifact name are not always the
+      // id with dashes (coinbase_attestation is served from
+      // coinbase-attestation-v2/coinbase_attestation_v2.json).
+      for (const { dir, packageName } of Object.values(CIRCUIT_DIRS)) {
+        await placeCircuit(dir, packageName);
       }
 
       // A base URL that 404s on everything, standing in for a circuit that
@@ -230,15 +233,18 @@ describe('artifactManager', () => {
       // is why the hashes are recorded at all, and the remote is authoritative
       // once a circuit IS pushed. What must not happen is a failed or absent
       // remote deleting what is on disk.
-      for (const id of PROVABLE_CIRCUIT_IDS) {
-        const local = path.join(circuitsDir, id.replace(/_/g, '-'), 'target', `${id}.json`);
+      for (const { dir, packageName } of Object.values(CIRCUIT_DIRS)) {
+        const local = path.join(circuitsDir, dir, 'target', `${packageName}.json`);
         await expect(fs.readFile(local, 'utf-8')).resolves.toContain('local');
       }
     });
 
     it('keeps a local circuit when the remote cannot be reached', async () => {
-      for (const id of PROVABLE_CIRCUIT_IDS) {
-        await placeCircuit(id.replace(/_/g, '-'), id);
+      // From CIRCUIT_DIRS: the directory and artifact name are not always the
+      // id with dashes (coinbase_attestation is served from
+      // coinbase-attestation-v2/coinbase_attestation_v2.json).
+      for (const { dir, packageName } of Object.values(CIRCUIT_DIRS)) {
+        await placeCircuit(dir, packageName);
       }
       // Record hashes first, so the second pass reaches the remote comparison.
       await ensureArtifacts(circuitsDir, 'https://example.invalid/nothing-here');
@@ -247,8 +253,8 @@ describe('artifactManager', () => {
       await expect(ensureArtifacts(circuitsDir, 'https://example.invalid/nothing-here')).resolves.toBeUndefined();
 
       // Still there. A failed remote check must not delete working artifacts.
-      const first = PROVABLE_CIRCUIT_IDS[0];
-      const stillThere = path.join(circuitsDir, first.replace(/_/g, '-'), 'target', `${first}.json`);
+      const first = CIRCUIT_DIRS[PROVABLE_CIRCUIT_IDS[0]];
+      const stillThere = path.join(circuitsDir, first.dir, 'target', `${first.packageName}.json`);
       await expect(fs.readFile(stillThere, 'utf-8')).resolves.toContain('local');
       fetchSpy.mockRestore();
     });

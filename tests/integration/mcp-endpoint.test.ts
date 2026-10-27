@@ -445,9 +445,11 @@ describe('MCP Endpoint E2E', () => {
       expect(payload.chainId).not.toBe('11155111');
 
       // ...and the addresses must be that chain's, not another's.
-      const kyc = payload.circuits.find((c: any) => c.id === 'coinbase_attestation');
-      expect(kyc.verifierAddress).toBe(FALLBACK_VERIFIERS['1']['coinbase_attestation']);
-      expect(kyc.verifierAddress).not.toBe(FALLBACK_VERIFIERS['11155111']['coinbase_attestation']);
+      // coinbase_country_attestation: deployed on both chains, so the two
+      // addresses differ (coinbase_attestation v2 has neither yet).
+      const country = payload.circuits.find((c: any) => c.id === 'coinbase_country_attestation');
+      expect(country.verifierAddress).toBe(FALLBACK_VERIFIERS['1']['coinbase_country_attestation']);
+      expect(country.verifierAddress).not.toBe(FALLBACK_VERIFIERS['11155111']['coinbase_country_attestation']);
     });
 
     it('should handle tools/call for unknown tool (verify_proof does not exist in remote MCP)', async () => {

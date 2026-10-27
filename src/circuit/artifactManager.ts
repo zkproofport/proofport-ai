@@ -7,9 +7,9 @@ import type { CircuitId } from '../config/circuitIds.js';
 /**
  * Where each circuit's artifacts live in the `zkproofport/circuits` repo.
  *
- * `repoDir` is a directory name and uses hyphens; `packageName` is the circuit's
- * canonical id and uses underscores. They are different strings on purpose —
- * only `packageName` is an identifier, and it comes from `CIRCUIT_IDS`.
+ * `dir` is a directory name and uses hyphens; `packageName` is the compiled
+ * artifact's name (see CIRCUIT_DIRS for the one circuit where it is not the
+ * canonical id).
  */
 
 

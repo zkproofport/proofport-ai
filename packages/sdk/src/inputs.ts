@@ -127,7 +127,9 @@ export function computeWalletNullifier(
  * the last branch held.
  */
 const NULLIFIER_RULE: Record<CircuitId, 'wallet-and-circuit-tag' | 'wallet-and-signal-hash' | 'built-from-the-token'> = {
-  [CIRCUIT_IDS.COINBASE_ATTESTATION]: 'wallet-and-signal-hash',
+  // coinbase_attestation v2 (circuits coinbase-attestation-v2): the wallet +
+  // circuit-tag rule, decided 2026-10-23; v1 nullifiers do not carry over.
+  [CIRCUIT_IDS.COINBASE_ATTESTATION]: 'wallet-and-circuit-tag',
   [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: 'wallet-and-signal-hash',
   [CIRCUIT_IDS.GIWA_ATTESTATION]: 'wallet-and-circuit-tag',
   // OIDC's nullifier is derived inside the OIDC payload builder, from the

@@ -17,8 +17,9 @@
  */
 import { describe, it, expect } from 'vitest';
 import { ethers } from 'ethers';
-import { CIRCUIT_IDS, circuitActionBinding } from '@zkproofport-app/core/circuits';
+import { CIRCUIT_IDS } from '@zkproofport-app/core/circuits';
 import { PROVABLE_CIRCUIT_IDS } from '../src/config/circuitIds.js';
+import { CIRCUIT_INPUT_FACTS } from '../src/prover/inputFormatter.js';
 import { nullifierForCircuit as serverNullifier } from '../src/input/inputBuilder.js';
 import { nullifierForCircuit as sdkNullifier } from '../packages/sdk/src/inputs.js';
 
@@ -43,11 +44,14 @@ describe('the nullifier rule agrees everywhere', () => {
   });
 
   it.each(WITH_ATTESTATION)(
-    '%s: an action-carrying circuit ignores signal_hash, one that cannot carry an action does not',
+    '%s: a circuit with action inputs ignores signal_hash, one without them does not',
     (id) => {
+      // The compiled circuit's inputs decide it, not whether core lets an
+      // action be bound yet: coinbase_attestation v2 has the inputs (and the
+      // wallet + tag nullifier) while core 0.3.0 still says 'none'.
       const a = ethers.hexlify(sdkNullifier(id, WALLET, SIGNAL, SCOPE));
       const b = ethers.hexlify(sdkNullifier(id, WALLET, OTHER_SIGNAL, SCOPE));
-      if (circuitActionBinding(id) === 'none') {
+      if (!CIRCUIT_INPUT_FACTS[id as keyof typeof CIRCUIT_INPUT_FACTS].actionInputs) {
         expect(a).not.toBe(b);
       } else {
         expect(a).toBe(b);

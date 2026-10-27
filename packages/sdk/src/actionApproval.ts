@@ -1,6 +1,7 @@
 import { getAddress, verifyTypedData } from 'ethers';
 import { hashTypedAction } from './action.js';
-import type { CircuitName, ClientConfig, TypedAction } from './types.js';
+import { CIRCUIT_NAME_MAP, type CircuitName, type ClientConfig, type TypedAction } from './types.js';
+import { circuitBindsAction } from './circuits.js';
 
 /** Requester capability. Keep this handle private; show only approvalUrl to the person. */
 export interface ActionApproval {
@@ -82,7 +83,7 @@ function address(value: unknown): string {
 function snapshotRequest(request: ActionApprovalRequest): ActionApprovalRequest {
   try {
     const copy = structuredClone(request);
-    if (copy.circuit !== 'giwa_attestation') throw invalid();
+    if (!Object.hasOwn(CIRCUIT_NAME_MAP, copy.circuit) || !circuitBindsAction(CIRCUIT_NAME_MAP[copy.circuit])) throw invalid();
     if (typeof copy.scope !== 'string' || !copy.scope.trim()) throw invalid();
     canonical(copy.action);
     hashTypedAction(copy.action);

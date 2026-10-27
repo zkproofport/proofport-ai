@@ -109,10 +109,17 @@ export function isProvableCircuitId(value: unknown): value is CircuitId {
  * instead -- from TypeScript by importing it, and from a shell script by
  * asking node for it (see `circuitDirsJson`).
  */
-export const CIRCUIT_DIRS: Record<CircuitId, { dir: string; packageName: CircuitId }> = {
+/*
+ * `packageName` is the compiled artifact's file name (Nargo.toml `name`). It
+ * equals the canonical id for every circuit except coinbase_attestation, whose
+ * v2 is built from circuits `coinbase-attestation-v2` as package
+ * `coinbase_attestation_v2` while v1 still lives beside it; the circuit id it
+ * proves is still `coinbase_attestation` (nullifier tag, statement kind).
+ */
+export const CIRCUIT_DIRS: Record<CircuitId, { dir: string; packageName: string }> = {
   [CIRCUIT_IDS.COINBASE_ATTESTATION]: {
-    dir: 'coinbase-attestation',
-    packageName: CIRCUIT_IDS.COINBASE_ATTESTATION,
+    dir: 'coinbase-attestation-v2',
+    packageName: 'coinbase_attestation_v2',
   },
   [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: {
     dir: 'coinbase-country-attestation',
@@ -138,4 +145,22 @@ export function circuitDirsLines(): string {
   return Object.values(CIRCUIT_DIRS)
     .map((c) => `${c.dir} ${c.packageName}`)
     .join('\n');
+}
+
+/**
+ * Friendly names a caller may send instead of a canonical id (the AI SDK's
+ * `CircuitName`). Only the aliases live here; every provable canonical id is
+ * accepted as itself by {@link resolveCircuitName}.
+ */
+export const CIRCUIT_ALIASES: Readonly<Record<string, CircuitId>> = Object.freeze({
+  coinbase_kyc: CIRCUIT_IDS.COINBASE_ATTESTATION,
+  coinbase_country: CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION,
+  oidc_domain: CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION,
+});
+
+/** The provable circuit a caller-supplied name means, or `undefined` for an unknown name. */
+export function resolveCircuitName(name: unknown): CircuitId | undefined {
+  if (typeof name !== 'string') return undefined;
+  if (Object.hasOwn(CIRCUIT_ALIASES, name)) return CIRCUIT_ALIASES[name];
+  return isProvableCircuitId(name) ? name : undefined;
 }

@@ -97,6 +97,38 @@ function buildConstants(config: Config, circuitId: CircuitId) {
   };
 }
 
+/**
+ * Each wallet circuit's nullifier rule, as a table: coinbase_attestation v2
+ * moved to the wallet + circuit-tag rule (v1 nullifiers do not carry over),
+ * the country circuit still derives it from signal_hash. Must agree with
+ * nullifierForCircuit in src/input/inputBuilder.ts.
+ */
+const NULLIFIER_GUIDES: Partial<Record<CircuitId, { description: string; formula: string; ethers_v6_code: string }>> = {
+  [CIRCUIT_IDS.COINBASE_ATTESTATION]: {
+    description: 'Deterministic from the wallet, the circuit id and scope_bytes; signal_hash does not enter it, so it is the same with or without an action.',
+    formula: 'nullifier = keccak256(keccak256(address_bytes || keccak256(UTF8("coinbase_attestation"))) || scope_bytes)',
+    ethers_v6_code: [
+      `const tag = ethers.keccak256(ethers.toUtf8Bytes('coinbase_attestation'));`,
+      `const userSecret = ethers.keccak256(ethers.concat([ethers.getBytes(userAddress), ethers.getBytes(tag)]));`,
+      `const nullifier = ethers.keccak256(ethers.concat([ethers.getBytes(userSecret), ethers.getBytes(scope_bytes)]));`,
+    ].join('\n'),
+  },
+  [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: {
+    description: 'Prevents double-proving for the same user + scope. Deterministic from address, signal_hash, and scope_bytes.',
+    formula: 'nullifier = keccak256(keccak256(address_bytes || signal_hash_bytes) || scope_bytes_bytes)',
+    ethers_v6_code: [
+      `const userSecret = ethers.keccak256(ethers.concat([ethers.getBytes(userAddress), ethers.getBytes(signal_hash)]));`,
+      `const nullifier = ethers.keccak256(ethers.concat([ethers.getBytes(userSecret), ethers.getBytes(scope_bytes)]));`,
+    ].join('\n'),
+  },
+};
+
+function nullifierGuide(circuitId: CircuitId) {
+  const row = NULLIFIER_GUIDES[circuitId];
+  if (!row) throw new Error(`No nullifier guide for '${circuitId}'. Known: ${Object.keys(NULLIFIER_GUIDES).join(', ')}.`);
+  return row;
+}
+
 function buildFormulas(circuitId: CircuitId) {
   if (circuitId === CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION) {
     return {
@@ -147,15 +179,18 @@ function buildFormulas(circuitId: CircuitId) {
       formula: 'scope_bytes = keccak256(toUtf8Bytes(scope))',
       ethers_v6_code: `ethers.keccak256(ethers.toUtf8Bytes(scope))`,
     },
-    nullifier: {
-      description:
-        'Prevents double-proving for the same user + scope. Deterministic from address, signal_hash, and scope_bytes.',
-      formula: 'nullifier = keccak256(keccak256(address_bytes || signal_hash_bytes) || scope_bytes_bytes)',
-      ethers_v6_code: [
-        `const userSecret = ethers.keccak256(ethers.concat([ethers.getBytes(userAddress), ethers.getBytes(signal_hash)]));`,
-        `const nullifier = ethers.keccak256(ethers.concat([ethers.getBytes(userSecret), ethers.getBytes(scope_bytes)]));`,
-      ].join('\n'),
-    },
+    nullifier: nullifierGuide(circuitId),
+    ...(circuitId === CIRCUIT_IDS.COINBASE_ATTESTATION && {
+      revocation_statement: {
+        description:
+          'coinbase_attestation v2: before any payment is taken the server reads the wallet\'s Coinbase KYC attestation ' +
+          'on EAS (Base) and refuses unless it is Coinbase\'s, for this wallet, unrevoked and unexpired; it then signs a ' +
+          '225-byte statement (wallet, time, attestation uid, this request\'s signed digest, scope) with its Cloud KMS key, ' +
+          'which the circuit pins. Clients send nothing extra. The proof carries the statement time as public input ' +
+          '`attested_at` (the last of 193 public inputs); verifiers should require it to be recent (e.g. 10 minutes).',
+        refusals: 'NO_COINBASE_ATTESTATION / COINBASE_ATTESTATION_REVOKED / COINBASE_ATTESTATION_EXPIRED (403), NULLIFIER_RULE (400) -- all before payment.',
+      },
+    }),
     merkle_leaf: {
       description:
         'Each leaf in the authorized-signers Merkle tree is the keccak256 hash of the checksum-encoded address bytes.',
@@ -218,8 +253,8 @@ function buildInputSchema(circuitId: CircuitId) {
       name: 'nullifier',
       type: 'hex string',
       bytes: 32,
-      description: 'Double-proof prevention hash derived from user address, signal_hash, and scope_bytes',
-      how_to_obtain: 'Computed from user address, signal_hash, and scope',
+      description: `Double-proof prevention hash: ${nullifierGuide(circuitId).formula}`,
+      how_to_obtain: nullifierGuide(circuitId).description,
     },
     {
       name: 'scope_bytes',

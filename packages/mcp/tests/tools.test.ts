@@ -33,6 +33,9 @@ vi.mock('@zkproofport-ai/sdk', async () => ({
   getActionApprovalStatus: mockApprovalStatus,
   hashTypedAction: (await import('../../sdk/src/index.js')).hashTypedAction,
   CIRCUIT_IDS: (await import('../../sdk/src/circuits.js')).CIRCUIT_IDS,
+  // The real table lookup (core's circuitActionBinding), not a stub: which
+  // circuits bind an action is exactly what these tests check.
+  circuitBindsAction: (await import('../../sdk/src/circuits.js')).circuitBindsAction,
   generateProof: mockGenerateProof,
   requestChallenge: mockRequestChallenge,
   prepareInputs: mockPrepareInputs,
@@ -708,8 +711,8 @@ describe('prepare_inputs action authorization', () => {
     ['missing field', 'giwa_attestation', { ...CUSTOM_ACTION, message: {} }, /missing/],
     ['malformed value', 'giwa_attestation', { ...CUSTOM_ACTION, message: { ...CUSTOM_ACTION.message, terms: { quantity: 'bad', description: 'bad' } } }, /./],
     ['wrong root', 'giwa_attestation', { ...CUSTOM_ACTION, primaryType: 'Terms', message: { quantity: '1', description: 'bad' } }, /primaryType.*root|root.*primaryType/],
-    ['Coinbase action', 'coinbase_kyc', CUSTOM_ACTION, /only giwa_attestation|rejected/],
-    ['OIDC action', 'oidc_domain', CUSTOM_ACTION, /only giwa_attestation|rejected/],
+    ['Coinbase action', 'coinbase_kyc', CUSTOM_ACTION, /does not bind one. Circuits that do: giwa_attestation./],
+    ['OIDC action', 'oidc_domain', CUSTOM_ACTION, /does not bind one. Circuits that do: giwa_attestation./],
   ])('rejects %s before any signing or input preparation', async (_name, circuit, action, error) => {
     const result = await callTool('prepare_inputs', { circuit, action });
     expect(result.isError).toBe(true);

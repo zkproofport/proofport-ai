@@ -79,7 +79,7 @@ describe('BbProver', () => {
       if (p.endsWith('/proof')) return Buffer.from([0xaa, 0xbb, 0xcc, 0xdd]);
       if (p.endsWith('/public_inputs')) return Buffer.from([0x11, 0x22, 0x33, 0x44]);
       // circuit JSON
-      return JSON.stringify({ bytecode: 'mock' });
+      return JSON.stringify({ bytecode: 'mock', abi: { parameters: [{ name: 'mock' }] } });
     });
   }
 
@@ -113,14 +113,30 @@ describe('BbProver', () => {
       await expect(prover.prove('unknown_circuit', {})).rejects.toThrow('Unknown circuit ID: unknown_circuit');
     });
 
+    it('refuses inputs missing a parameter of the compiled ABI, before noir_js', async () => {
+      vi.mocked(inputFormatter.formatAttestationInputs).mockReturnValue({} as any);
+      await expect(prover.prove('coinbase_attestation', mockCircuitParams)).rejects.toThrow(/missing \[mock\], unexpected \[\]/);
+      expect(Noir).not.toHaveBeenCalled();
+    });
+
+    it('refuses inputs the compiled ABI does not take (e.g. a statement for a circuit without one)', async () => {
+      vi.mocked(inputFormatter.formatAttestationInputs).mockReturnValue({ mock: 'inputs', client_data: [] } as any);
+      await expect(prover.prove('coinbase_attestation', mockCircuitParams)).rejects.toThrow(/unexpected \[client_data\]/);
+    });
+
+    it('refuses a compiled circuit without an ABI', async () => {
+      vi.mocked(fs.readFile).mockImplementation(async () => JSON.stringify({ bytecode: 'mock' }) as any);
+      await expect(prover.prove('coinbase_attestation', mockCircuitParams)).rejects.toThrow(/no ABI parameter list/);
+    });
+
     it('loads circuit JSON from correct path for coinbase_attestation', async () => {
       await prover.prove('coinbase_attestation', mockCircuitParams);
 
       const expectedPath = path.join(
         mockConfig.circuitsDir,
-        'coinbase-attestation',
+        'coinbase-attestation-v2',
         'target',
-        'coinbase_attestation.json'
+        'coinbase_attestation_v2.json'
       );
       expect(fs.readFile).toHaveBeenCalledWith(expectedPath, 'utf-8');
     });
@@ -185,11 +201,11 @@ describe('BbProver', () => {
 
       // -b points to circuit JSON
       const bIdx = args.indexOf('-b');
-      expect(args[bIdx + 1]).toMatch(/coinbase-attestation\/target\/coinbase_attestation\.json$/);
+      expect(args[bIdx + 1]).toMatch(/coinbase-attestation-v2\/target\/coinbase_attestation_v2\.json$/);
 
       // -k points to vk
       const kIdx = args.indexOf('-k');
-      expect(args[kIdx + 1]).toMatch(/coinbase-attestation\/target\/vk\/vk$/);
+      expect(args[kIdx + 1]).toMatch(/coinbase-attestation-v2\/target\/vk\/vk$/);
 
       // bb prove uses timeout of 120000
       const opts = bbCalls[0][2] as any;
@@ -226,7 +242,7 @@ describe('BbProver', () => {
         const p = filePath.toString();
         if (p.endsWith('/proof')) return Buffer.from([0xaa, 0xbb, 0xcc, 0xdd]);
         if (p.endsWith('/public_inputs')) return Buffer.from([0x11, 0x22, 0x33, 0x44]);
-        return JSON.stringify({ bytecode: 'mock' });
+        return JSON.stringify({ bytecode: 'mock', abi: { parameters: [{ name: 'mock' }] } });
       });
 
       const result = await prover.prove('coinbase_attestation', mockCircuitParams);

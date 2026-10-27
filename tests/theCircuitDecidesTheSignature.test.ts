@@ -327,12 +327,9 @@ describe('what the prover hands to noir_js', () => {
     });
   }
 
-  for (const circuitId of [CIRCUIT_IDS.COINBASE_ATTESTATION, CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]) {
+  for (const circuitId of [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]) {
     it(`gives ${circuitId} no action parameters at all`, async () => {
-      const extra = circuitId === CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION
-        ? { countryList: ['US'], countryListLength: 1, isIncluded: true }
-        : {};
-      const inputs = await format(circuitId, extra);
+      const inputs = await format(circuitId, { countryList: ['US'], countryListLength: 1, isIncluded: true });
       expect('domain_separator' in inputs).toBe(false);
       expect('action_hash' in inputs).toBe(false);
       expect(inputs.signal_hash).not.toEqual(ZERO_32);
@@ -342,4 +339,59 @@ describe('what the prover hands to noir_js', () => {
       await expect(format(circuitId, ACTION_PAIR)).rejects.toThrow(/has no inputs for one/);
     });
   }
+
+  /*
+   * coinbase_attestation v2 CARRIES the action parameters (GIWA's six public
+   * inputs) while core 0.3.0 still says no action may be bound to it. So the
+   * pair goes in as zeros and an action is refused -- not dropped -- until
+   * core's v2 release marks it 'optional'. It also needs the server-signed
+   * revocation statement, with the App Attest inputs all zero.
+   */
+  describe('coinbase_attestation v2', () => {
+    const STATEMENT = {
+      statement: { clientData: new Uint8Array(225).fill(9), signature: new Uint8Array(64).fill(8), attestedAt: 1_800_000_000 },
+    };
+
+    it('sends an empty action pair and the signed signal hash', async () => {
+      const inputs = await format(CIRCUIT_IDS.COINBASE_ATTESTATION, STATEMENT);
+      expect(inputs.domain_separator).toEqual(ZERO_32);
+      expect(inputs.action_hash).toEqual(ZERO_32);
+      expect(inputs.signal_hash).not.toEqual(ZERO_32);
+    });
+
+    it('sends the statement as the server kind with every App Attest input zero', async () => {
+      const inputs = await format(CIRCUIT_IDS.COINBASE_ATTESTATION, STATEMENT) as Record<string, unknown>;
+      expect(inputs.signer_kind).toBe('2');
+      expect(inputs.attested_at).toBe('1800000000');
+      expect(inputs.client_data).toEqual(Array(225).fill('0x09'));
+      expect(inputs.statement_sig).toEqual(Array(64).fill('0x08'));
+      expect(inputs.credential_tbs).toEqual(Array(1000).fill('0x00'));
+      expect(inputs.credential_sig).toEqual(Array(96).fill('0x00'));
+      expect(inputs.att_auth_data).toEqual(Array(256).fill('0x00'));
+      expect(inputs.att_client_data_hash).toEqual(ZERO_32);
+      expect(inputs.assertion_auth_data).toEqual(Array(128).fill('0x00'));
+      expect([inputs.credential_tbs_len, inputs.att_auth_data_len, inputs.assertion_auth_data_len]).toEqual(['0', '0', '0']);
+    });
+
+    it('refuses to format without the statement', async () => {
+      await expect(format(CIRCUIT_IDS.COINBASE_ATTESTATION)).rejects.toThrow(/server-signed revocation statement/);
+    });
+
+    it('refuses a statement on a circuit that takes none', async () => {
+      await expect(format(CIRCUIT_IDS.GIWA_ATTESTATION, STATEMENT)).rejects.toThrow(/takes no revocation statement/);
+    });
+
+    it('refuses a malformed statement', async () => {
+      await expect(format(CIRCUIT_IDS.COINBASE_ATTESTATION, { statement: { ...STATEMENT.statement, clientData: new Uint8Array(224) } }))
+        .rejects.toThrow(/client_data is 224 bytes/);
+      await expect(format(CIRCUIT_IDS.COINBASE_ATTESTATION, { statement: { ...STATEMENT.statement, signature: new Uint8Array(65) } }))
+        .rejects.toThrow(/statement_sig is 65 bytes/);
+      await expect(format(CIRCUIT_IDS.COINBASE_ATTESTATION, { statement: { ...STATEMENT.statement, attestedAt: 0 } }))
+        .rejects.toThrow(/Invalid attested_at/);
+    });
+
+    it('refuses an action while core does not let one be bound', async () => {
+      await expect(format(CIRCUIT_IDS.COINBASE_ATTESTATION, { ...STATEMENT, ...ACTION_PAIR })).rejects.toThrow(/has no inputs for one/);
+    });
+  });
 });

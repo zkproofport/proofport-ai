@@ -56,9 +56,13 @@ const CIRCUIT_BASE_DIR = '/app/circuits';
  * rather than an "Unknown circuit" at prove time inside the enclave.
  */
 const CIRCUITS: Record<CircuitId, { dir: string; bytecode: string; vk: string }> = {
+  // v2 (package coinbase_attestation_v2). Its witness needs the statement the
+  // AI server signs with Cloud KMS, which the server can only build from
+  // plaintext inputs -- so an E2E-encrypted Coinbase request cannot be served
+  // (proofRoutes refuses it).
   [CIRCUIT_IDS.COINBASE_ATTESTATION]: {
-    dir: 'coinbase-attestation',
-    bytecode: `${CIRCUIT_IDS.COINBASE_ATTESTATION}.json`,
+    dir: 'coinbase-attestation-v2',
+    bytecode: 'coinbase_attestation_v2.json',
     vk: 'vk/vk',
   },
   [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: {

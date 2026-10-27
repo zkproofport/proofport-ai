@@ -14,7 +14,7 @@
  * What stays is this package's own subset -- the circuits the proofport-ai
  * server can prove -- which core has no opinion on.
  */
-import { CIRCUIT_IDS, type CircuitId as CoreCircuitId } from '@zkproofport-app/core/circuits';
+import { CIRCUIT_IDS, circuitActionBinding, type CircuitId as CoreCircuitId } from '@zkproofport-app/core/circuits';
 
 export {
   CIRCUIT_IDS,
@@ -60,4 +60,18 @@ export const PROVABLE_CIRCUIT_IDS = [
 /** Narrows an unknown value to a circuit the proofport-ai server can prove. */
 export function isProvableCircuitId(value: unknown): value is CanonicalCircuitId {
   return typeof value === 'string' && (PROVABLE_CIRCUIT_IDS as readonly string[]).includes(value);
+}
+
+/**
+ * Whether a caller may bind an EIP-712 action to this circuit's proof.
+ *
+ * Read from core's `circuitActionBinding`, the one table every layer uses
+ * (server, approval page, SDK, MCP). It used to be `circuit ===
+ * 'giwa_attestation'` in four places, so a second action-capable circuit
+ * (coinbase_attestation v2) would have needed four edits and got some of
+ * them. core marks coinbase_attestation 'optional' from its v2 release; until
+ * then this answers false for it and the circuit's action inputs are zeros.
+ */
+export function circuitBindsAction(circuitId: CoreCircuitId): boolean {
+  return circuitActionBinding(circuitId) !== 'none';
 }

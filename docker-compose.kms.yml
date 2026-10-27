@@ -1,0 +1,19 @@
+# coinbase_attestation v2: the server signs each Coinbase request's revocation
+# statement with a Cloud KMS key the circuit pins, and refuses to start without
+# a usable one. On Cloud Run the service account supplies the credentials; a
+# local container needs a gcloud credentials file allowed to sign with the key
+# (roles/cloudkms.signerVerifier, or project owner).
+#
+#   export COINBASE_STATEMENT_KMS_KEY=projects/masselabs-zkproofport/locations/us-central1/keyRings/proofport-ai/cryptoKeys/coinbase-kyc-v2-statement/cryptoKeyVersions/1
+#   export PROOFPORT_AI_GCP_ADC="$HOME/.config/gcloud/legacy_credentials/<your account>/adc.json"
+#
+# scripts/ai-dev.sh and scripts/run-e2e.sh --container layer this file on top
+# of docker-compose.yml. Both values are required: a container started without
+# them would refuse every Coinbase proof, so compose stops here instead.
+services:
+  ai:
+    environment:
+      COINBASE_STATEMENT_KMS_KEY: ${COINBASE_STATEMENT_KMS_KEY:?COINBASE_STATEMENT_KMS_KEY must name the Cloud KMS key version the circuit pins (see docker-compose.kms.yml)}
+      GOOGLE_APPLICATION_CREDENTIALS: /run/gcp/adc.json
+    volumes:
+      - ${PROOFPORT_AI_GCP_ADC:?PROOFPORT_AI_GCP_ADC must point at a gcloud credentials file allowed to sign with the key (see docker-compose.kms.yml)}:/run/gcp/adc.json:ro

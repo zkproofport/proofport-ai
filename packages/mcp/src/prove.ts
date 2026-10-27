@@ -4,7 +4,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { fromPrivateKey, CIRCUIT_NAME_MAP } from '@zkproofport-ai/sdk';
+import { fromPrivateKey, CIRCUIT_NAME_MAP, circuitBindsAction } from '@zkproofport-ai/sdk';
 import { toolData, waitForActionApproval, type PendingActionApproval } from './approvalCli.js';
 
 const privateValues = [process.env.ATTESTATION_KEY, process.env.E2E_ATTESTATION_WALLET_ADDRESS]
@@ -338,6 +338,17 @@ if (!circuit && !wantsDeviceFlow) {
 // ─── Determine if this is an OIDC circuit ─────────────────────────────
 const isOidc = circuit === 'oidc_domain';
 
+/**
+ * Whether this CLI name binds an action, from core's table via the SDK.
+ * A missing or unknown name binds nothing: with --action that ends in the
+ * refusal below, which lists the circuits that do; without it the unknown
+ * name is refused where the proof is requested.
+ */
+function bindsAction(name: string | undefined): boolean {
+  if (name === undefined || !Object.hasOwn(CIRCUIT_NAME_MAP, name)) return false;
+  return circuitBindsAction(CIRCUIT_NAME_MAP[name as keyof typeof CIRCUIT_NAME_MAP]);
+}
+
 // ─── Validate keys based on circuit type ──────────────────────────────
 const attestationKey = process.env.ATTESTATION_KEY;
 
@@ -345,7 +356,7 @@ const hasLoginFlag = loginGoogle || loginGoogleWorkspace || loginMicrosoft365;
 
 // Coinbase circuits require ATTESTATION_KEY (EAS-attested wallet)
 // OIDC/login flows do not require any key — ephemeral key is generated internally
-const awaitsHumanAction = !!actionFile && circuit === 'giwa_attestation';
+const awaitsHumanAction = !!actionFile && bindsAction(circuit);
 if (!isOidc && !hasLoginFlag && !awaitsHumanAction) {
   if (!attestationKey) {
     if (silent) {
@@ -454,11 +465,11 @@ if (loginGoogle || loginGoogleWorkspace || loginMicrosoft365) {
 // and a shell-quoted one loses its quoting in ways that surface as a wrong
 // hash rather than a parse error.
 let action: unknown;
-const canBindAction = circuit === 'giwa_attestation';
+const canBindAction = bindsAction(circuit);
 if (actionFile && !canBindAction) {
   const msg =
-    `--action was given but '${circuit}' has no inputs for one. Only ` +
-    'giwa_attestation carries an action.';
+    `--action was given but '${circuit}' does not bind an action. Circuits that do: ` +
+    `${Object.keys(CIRCUIT_NAME_MAP).filter(bindsAction).join(', ')}.`;
   if (silent) writeError(JSON.stringify({ error: msg }));
   else writeError(`Error: ${msg}`);
   process.exit(1);

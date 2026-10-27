@@ -31,6 +31,7 @@ export {
   isCanonicalCircuitId,
   isProvableCircuitId,
   getCircuitSupportStatus,
+  circuitBindsAction,
 } from './circuits.js';
 export type { CanonicalCircuitId, CircuitSupportStatus } from './circuits.js';
 

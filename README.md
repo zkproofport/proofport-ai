@@ -355,6 +355,7 @@ The agent auto-registers on-chain at startup via the ERC-8004 Identity contract.
 | `PROVER_PRIVATE_KEY` | Agent wallet private key (64 hex chars, optional 0x); also submits direct payment settlements |
 | `PAYMENT_MODE` | `disabled` / `testnet` / `mainnet` |
 | `A2A_BASE_URL` | Public-facing service URL (for Agent Card) |
+| `COINBASE_STATEMENT_KMS_KEY` | Cloud KMS key version (`projects/…/cryptoKeyVersions/N`, `EC_SIGN_P256_SHA256`) that signs coinbase_attestation v2's revocation statement; the circuit pins its public key. The server refuses to start unless it can read the key. Credentials come from the runtime service account (Cloud Run) or `GOOGLE_APPLICATION_CREDENTIALS` (local; see `docker-compose.kms.yml`) |
 
 ### Optional
 

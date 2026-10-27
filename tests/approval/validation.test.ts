@@ -23,6 +23,12 @@ describe('approval validation unit boundaries', () => {
   it.each(['arc_eligibility', 'coinbase_kyc', 'coinbase_attestation', 'oidc_domain', 'unknown', '', null, undefined])('refuses unsupported circuit %j', circuit => {
     expect(() => validateApprovalRequest({ ...body, circuit })).toThrow(/only/);
   });
+  it('names the circuits core lets bind an action, read from core rather than a hardcoded id', () => {
+    // coinbase_attestation v2 carries the action inputs but core 0.3.0 still
+    // says 'none' for it; the day core says 'optional' this list grows.
+    expect(() => validateApprovalRequest({ ...body, circuit: 'coinbase_kyc' }))
+      .toThrow('Human action approval supports only circuits that bind an action: giwa_attestation.');
+  });
   it.each([undefined, null, '', ' ', [], {}])('refuses absent or malformed action %j', value => {
     expect(() => validateApprovalRequest({ ...body, action: value })).toThrow();
   });

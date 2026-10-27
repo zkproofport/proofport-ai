@@ -47,7 +47,7 @@ for arg in "$@"; do
   esac
 done
 
-COMPOSE_FILES=(-f docker-compose.yml)
+COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.kms.yml)
 if [ "$WITH_PAYMENT" = "1" ]; then
   if [ -z "${PROVER_PRIVATE_KEY:-}" ]; then
     echo "[ERROR] --payment needs PROVER_PRIVATE_KEY."

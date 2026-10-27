@@ -63,6 +63,12 @@ describe('the verification block never mixes one chain with another chain rpc', 
     for (const circuit of CIRCUITS) {
       it(`${env.name} — ${circuit}: the rpc serves the chain that is named`, () => {
         const target = chooseVerificationTarget(configWith(env.chain, env.eth), circuit, env.testnet);
+        // coinbase_attestation v2 has no mainnet verifier yet (Base Sepolia
+        // only, 2026-10-28): no target is the honest answer there.
+        if (circuit === CIRCUIT_IDS.COINBASE_ATTESTATION && !env.testnet) {
+          expect(target).toBeNull();
+          return;
+        }
         expect(target).not.toBeNull();
         expect(CHAIN_OF_RPC[target!.rpcUrl]).toBe(target!.chainId);
       });
@@ -74,7 +80,7 @@ describe('which chain gets chosen', () => {
   it('prefers Ethereum when an Ethereum rpc is configured', () => {
     const target = chooseVerificationTarget(
       configWith(BASE_SEPOLIA, ETHEREUM_SEPOLIA),
-      CIRCUIT_IDS.COINBASE_ATTESTATION,
+      CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION,
       true,
     );
     expect(target!.chainId).toBe(11155111);
@@ -95,12 +101,19 @@ describe('which chain gets chosen', () => {
 
   it('uses mainnet chain ids when not on testnet', () => {
     expect(
-      chooseVerificationTarget(configWith(BASE_MAINNET, ETHEREUM_MAINNET), CIRCUIT_IDS.COINBASE_ATTESTATION, false)!
+      chooseVerificationTarget(configWith(BASE_MAINNET, ETHEREUM_MAINNET), CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION, false)!
         .chainId,
     ).toBe(1);
     expect(
-      chooseVerificationTarget(configWith(BASE_MAINNET, ''), CIRCUIT_IDS.COINBASE_ATTESTATION, false)!.chainId,
+      chooseVerificationTarget(configWith(BASE_MAINNET, ''), CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION, false)!.chainId,
     ).toBe(8453);
+  });
+
+  it('sends coinbase_attestation v2 to its Base Sepolia verifier even when an Ethereum rpc is configured', () => {
+    // Ethereum Sepolia has no v2 verifier; naming v1's there would make every
+    // v2 proof revert on its length.
+    const target = chooseVerificationTarget(configWith(BASE_SEPOLIA, ETHEREUM_SEPOLIA), CIRCUIT_IDS.COINBASE_ATTESTATION, true);
+    expect(target).toEqual({ chainId: 84532, rpcUrl: BASE_SEPOLIA, verifierAddress: '0x1885aA2283DB21ad0fc63A2Df98efe92F31908E6' });
   });
 
   it('returns a verifier address that is a real address, not an empty string', () => {

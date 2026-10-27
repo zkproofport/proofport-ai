@@ -34,6 +34,7 @@ import { getTeeConfig, createTeeProvider, resolveTeeMode } from './tee/index.js'
 import { ensureAgentRegistered, isIdentityRegistrationEnabled } from './identity/autoRegister.js';
 import { createAgentAuthMiddleware } from './identity/agentAuth.js';
 import { createProofRoutes } from './proof/proofRoutes.js';
+import { easAttestationReader, statementSignerFromEnv } from './input/coinbaseStatement.js';
 import { createActionApprovalRouter, approvalSecurityHeaders } from './approval/routes.js';
 import type { LLMProvider } from './chat/llmProvider.js';
 import { OpenAIProvider } from './chat/openaiClient.js';
@@ -214,7 +215,17 @@ function createApp(config: Config) {
   app.use('/a2a', jsonRpcHandler({ requestHandler, userBuilder: UserBuilder.noAuthentication }));
 
   // REST API routes — payment is handled inside skillHandler via request_payment flow
-  app.use('/api/v1', createProofRoutes({ redis, config, teeProvider }));
+  // coinbase_attestation v2's statement signer. startServer refuses to start
+  // without a usable COINBASE_STATEMENT_KMS_KEY; an app built without one (a
+  // unit test of some other route) answers every Coinbase proof request with
+  // an error rather than proving without a statement.
+  const statement = process.env.COINBASE_STATEMENT_KMS_KEY
+    ? {
+        reader: easAttestationReader(config.easGraphqlEndpoint, config.baseRpcUrl),
+        signer: statementSignerFromEnv(),
+      }
+    : undefined;
+  app.use('/api/v1', createProofRoutes({ redis, config, teeProvider, statement }));
 
   // MCP StreamableHTTP endpoint (stateless mode)
   // Payment is handled inside skillHandler via request_payment flow (no HTTP-level x402 gate)
@@ -268,6 +279,20 @@ async function startServer() {
     // Download circuit artifacts if not present
     await ensureArtifacts(config.circuitsDir, config.circuitsRepoUrl);
     log.info({ action: 'server.artifacts.ready' }, 'Circuit artifacts ready');
+
+    // The coinbase_attestation v2 statement key must be reachable and be
+    // EC_SIGN_P256_SHA256 before this serves anything: otherwise every
+    // Coinbase request would be refused only after the caller tried to pay.
+    {
+      const { createPublicKey, createHash } = await import('node:crypto');
+      const pem = await statementSignerFromEnv().publicKeyPem();
+      const jwk = createPublicKey(pem).export({ format: 'jwk' }) as { x: string; y: string };
+      const xy = Buffer.concat([Buffer.from(jwk.x, 'base64url'), Buffer.from(jwk.y, 'base64url')]);
+      log.info(
+        { action: 'server.coinbase_statement.ready', keyVersion: process.env.COINBASE_STATEMENT_KMS_KEY, keyXYSha256: createHash('sha256').update(xy).digest('hex') },
+        'Coinbase KYC v2 statement key ready',
+      );
+    }
 
     // Sync verifier addresses from GitHub broadcast JSON
     try {

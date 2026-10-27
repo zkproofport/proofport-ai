@@ -1,6 +1,11 @@
 import { createHash } from 'node:crypto';
 import { getAddress, TypedDataEncoder } from 'ethers';
 import { validateTypedAction, type TypedAction } from '@zkproofport-app/core/typedAction';
+import { circuitActionBinding } from '@zkproofport-app/core/circuits';
+import { PROVABLE_CIRCUIT_IDS, resolveCircuitName, type CircuitId } from '../config/circuitIds.js';
+
+/** Provable circuits core lets bind an action; the approval page serves only these. */
+const ACTION_CIRCUITS = (): CircuitId[] => PROVABLE_CIRCUIT_IDS.filter(id => circuitActionBinding(id) !== 'none');
 
 export const APPROVAL_BODY_LIMIT = 32 * 1024;
 export class ApprovalError extends Error {
@@ -54,14 +59,18 @@ function canonical(value: unknown): string {
 }
 
 export interface ApprovalRequest {
-  circuit: 'giwa_attestation'; scope: string; action: TypedAction; expectedSigner?: string;
+  /** As the caller sent it (canonical id or the SDK's alias); stored and echoed unchanged. */
+  circuit: string; scope: string; action: TypedAction; expectedSigner?: string;
   requestHash: string; domainSeparator: string; actionHash: string; digest: string;
 }
 export function validateApprovalRequest(value: unknown, creating = true): ApprovalRequest {
   boundedJson(value);
   const body = object(value, 'Approval request');
   exactKeys(body, creating ? ['circuit', 'scope', 'action', 'expectedSigner'] : ['circuit', 'scope', 'action']);
-  if (body.circuit !== 'giwa_attestation') invalid('Human action approval supports only giwa_attestation.');
+  const circuitId = resolveCircuitName(body.circuit);
+  if (!circuitId || circuitActionBinding(circuitId) === 'none') {
+    invalid(`Human action approval supports only circuits that bind an action: ${ACTION_CIRCUITS().join(', ')}.`);
+  }
   if (typeof body.scope !== 'string' || !body.scope.trim() || Buffer.byteLength(body.scope) > 1024) invalid('Scope must contain between 1 and 1024 UTF-8 bytes.');
   const sharedError = validateTypedAction(body.action);
   if (sharedError) invalid(sharedError);

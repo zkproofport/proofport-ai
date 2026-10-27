@@ -15,6 +15,7 @@ import {
   CIRCUITS,
   AUTHORIZED_SIGNERS,
   CIRCUIT_NAME_MAP,
+  circuitBindsAction,
   ActionApprovalRequiredError,
   getActionApprovalStatus,
   resolveActionApproval,
@@ -346,9 +347,9 @@ RETURNS: awaiting_approval or the full ProofResult with proof bytes, public inpu
         const scope = params.scope || 'proofport';
         const isOidc = params.circuit === 'oidc_domain';
 
-        const supportsAction = circuitId === CIRCUIT_IDS.GIWA_ATTESTATION;
+        const supportsAction = circuitBindsAction(circuitId);
         if (action && !supportsAction) {
-          return errorResult(`An action was given but '${circuitId}' was requested; only giwa_attestation carries one.`);
+          return errorResult(`An action was given but '${circuitId}' does not bind one. Circuits that do: ${Object.values(CIRCUIT_NAME_MAP).filter(circuitBindsAction).join(', ')}.`);
         }
         let actionHashes;
         try { actionHashes = action ? hashTypedAction(action) : undefined; }

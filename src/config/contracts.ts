@@ -77,6 +77,13 @@ export const ATTESTATION_SOURCES: Record<
  * holds the two together. (Ethereum Sepolia was still on the pre-2026-10-22
  * deployments here until 2026-10-27; the live staging server had synced past it.)
  *
+ * ONE DELIBERATE EXCEPTION, coinbase_attestation: this server proves v2
+ * (circuits coinbase-attestation-v2), whose only verifier so far is Base
+ * Sepolia 0x1885aA22...08E6 (2026-10-28), while core 0.3.0 still pins v1's.
+ * Until core's v2 release (circuits-dev.md fix list item 9) the published
+ * SDK/MCP refuse these responses; the test names the exception and fails
+ * once core pins v2, so it cannot outlive its reason.
+ *
  * `null` means NOT DEPLOYED on that chain, and is different from a missing
  * key, which would be a circuit somebody forgot. An empty string was used here
  * briefly and is worse than either: it looks like an address that failed to
@@ -84,21 +91,24 @@ export const ATTESTATION_SOURCES: Record<
  */
 export const FALLBACK_VERIFIERS: Record<string, Record<CircuitId, string | null>> = {
   '1': {
-    [CIRCUIT_IDS.COINBASE_ATTESTATION]: '0xF3D5A09d2C85B28C52EF2905c1BE3a852b609D0C',
+    // coinbase_attestation v2: not deployed on Ethereum mainnet yet.
+    [CIRCUIT_IDS.COINBASE_ATTESTATION]: null,
     [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: '0x78792554E1582cB49D858eACb5C3607B42d28224',
     [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: '0x440EaA25603eD5480caD0ee51d9808a1993eF267',
     // Deployed on GIWA Sepolia (91342) and nowhere else.
     [CIRCUIT_IDS.GIWA_ATTESTATION]: null,
   },
   '8453': {
-    [CIRCUIT_IDS.COINBASE_ATTESTATION]: '0xF7dED73E7a7fc8fb030c35c5A88D40ABe6865382',
+    // coinbase_attestation v2: not deployed on Base mainnet yet.
+    [CIRCUIT_IDS.COINBASE_ATTESTATION]: null,
     [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: '0xF3D5A09d2C85B28C52EF2905c1BE3a852b609D0C',
     [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: '0x9677ba46ad226ce8b3c4517d9c0143e4d458beae',
     // Deployed on GIWA Sepolia (91342) and nowhere else.
     [CIRCUIT_IDS.GIWA_ATTESTATION]: null,
   },
   '11155111': {
-    [CIRCUIT_IDS.COINBASE_ATTESTATION]: '0x7fc2059a73cEF2b572C8deEe911c72963dCB4A8a',
+    // coinbase_attestation v2: deployed on Base Sepolia only (2026-10-28).
+    [CIRCUIT_IDS.COINBASE_ATTESTATION]: null,
     [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: '0x0b3Af3DFc67dC65E0145c37ee00230139d579F64',
     [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: '0x728EED982A3Aeb0274fef972EBbA9b774A2f9bE4',
     // Deployed on GIWA Sepolia (91342) and nowhere else.
@@ -112,7 +122,8 @@ export const FALLBACK_VERIFIERS: Record<string, Record<CircuitId, string | null>
     [CIRCUIT_IDS.GIWA_ATTESTATION]: '0xF6Edb9d6114B2546B6E559997fdDE08CAeEA83b3',
   },
   '84532': {
-    [CIRCUIT_IDS.COINBASE_ATTESTATION]: '0x42d165a48256Ae184e1dE4e7E6372E870E2bC883',
+    // coinbase_attestation v2 (circuits e498841).
+    [CIRCUIT_IDS.COINBASE_ATTESTATION]: '0x1885aA2283DB21ad0fc63A2Df98efe92F31908E6',
     [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: '0x9DEea2189aE694D7a36f65Fb7d7Dbe9f75abDDcE',
     [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: '0x003334A7C2ff15ee9ee845Ab88e152A2A3694167',
     // Deployed on GIWA Sepolia (91342) and nowhere else.

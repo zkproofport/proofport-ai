@@ -26,8 +26,10 @@ const GITHUB_RAW = (ref: string) =>
   `https://raw.githubusercontent.com/${GITHUB_REPO}/${ref}`;
 
 const BROADCAST_PATHS: Record<CircuitId, (chainId: number) => string> = {
+  // v2 (circuits coinbase-attestation-v2). v1's DeployCoinbaseAttestation
+  // records name verifiers that refuse every v2 proof on proof length.
   [CIRCUIT_IDS.COINBASE_ATTESTATION]: (chainId) =>
-    `broadcast/DeployCoinbaseAttestation.s.sol/${chainId}/run-latest.json`,
+    `broadcast/DeployCoinbaseAttestationV2.s.sol/${chainId}/run-latest.json`,
   [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: (chainId) =>
     `broadcast/DeployCoinbaseCountryAttestation.s.sol/${chainId}/run-latest.json`,
   [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: (chainId) =>

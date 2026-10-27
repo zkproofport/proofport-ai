@@ -3,7 +3,7 @@ import { circuitActionBinding } from '@zkproofport-app/core/circuits';
 import type { RedisClient } from '../redis/client.js';
 import type { Config } from '../config/index.js';
 import type { TeeProvider } from '../tee/types.js';
-import { PROVABLE_CIRCUIT_IDS, CIRCUIT_IDS } from '../config/circuitIds.js';
+import { PROVABLE_CIRCUIT_IDS, CIRCUIT_IDS, CIRCUIT_ALIASES } from '../config/circuitIds.js';
 import type { CircuitId } from '../config/circuitIds.js';
 import { verifyPaymentOnChain } from './paymentVerifier.js';
 import { settlePayment } from '../payment/settle.js';
@@ -20,6 +20,13 @@ import { GIWA_CHAIN_ID } from '../config/contracts.js';
 import { ethers } from 'ethers';
 import { createLogger } from '../logger.js';
 import { parseAttestationDocument, verifyAttestationDocument } from '../tee/attestation.js';
+import {
+  prepareServerStatement,
+  StatementRefusal,
+  type AttestationReader,
+  type ServerStatement,
+  type StatementSigner,
+} from '../input/coinbaseStatement.js';
 import type {
   ProveRequest,
   ProveResponse,
@@ -40,12 +47,6 @@ const log = createLogger('ProofRoutes');
  * answered "Unknown circuit". Measured 2026-09-22, against a server that had
  * the circuit, its artifacts and its verifier.
  */
-const CIRCUIT_ALIASES: Record<string, CircuitId> = {
-  coinbase_kyc: CIRCUIT_IDS.COINBASE_ATTESTATION,
-  coinbase_country: CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION,
-  oidc_domain: CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION,
-};
-
 const CIRCUIT_MAP: Record<string, CircuitId> = {
   ...CIRCUIT_ALIASES,
   ...Object.fromEntries(PROVABLE_CIRCUIT_IDS.map((id) => [id, id])),
@@ -55,7 +56,40 @@ export interface ProofRoutesDeps {
   redis: RedisClient;
   config: Config;
   teeProvider?: TeeProvider;
+  /**
+   * coinbase_attestation v2's server statement: the on-chain revocation read
+   * and the Cloud KMS signer. index.ts always supplies it (startup fails
+   * without COINBASE_STATEMENT_KMS_KEY); a Coinbase request reaching routes
+   * built without it is an error, never a proof without a statement.
+   */
+  statement?: { reader: AttestationReader; signer: StatementSigner };
 }
+
+/**
+ * The action fields' shape and whether this circuit may bind one -- checked
+ * before payment as well as before proving, so a request the prover would
+ * refuse is refused before anything is charged.
+ */
+function actionFieldsError(circuitId: CircuitId, inputs: unknown): string | null {
+  const actionInputs = (inputs ?? {}) as { domain_separator?: unknown; action_hash?: unknown };
+  const hasDomain = actionInputs.domain_separator !== undefined;
+  const hasAction = actionInputs.action_hash !== undefined;
+  if (hasDomain !== hasAction) return 'Send both domain_separator and action_hash, or neither for an identity-only proof.';
+  if (!hasDomain) return null;
+  if (circuitActionBinding(circuitId) === 'none') return `${circuitId} does not support action binding.`;
+  if (![actionInputs.domain_separator, actionInputs.action_hash].every(value => typeof value === 'string' && /^0x[0-9a-fA-F]{64}$/.test(value))) {
+    return 'domain_separator and action_hash must each be a 0x-prefixed 32-byte hash.';
+  }
+  return null;
+}
+
+const STATEMENT_REFUSAL_STATUS: Record<string, number> = {
+  INVALID_REQUEST: 400,
+  NULLIFIER_RULE: 400,
+  NO_COINBASE_ATTESTATION: 403,
+  COINBASE_ATTESTATION_REVOKED: 403,
+  COINBASE_ATTESTATION_EXPIRED: 403,
+};
 
 /** Shared context for proof generation */
 interface ProveContext {
@@ -66,6 +100,8 @@ interface ProveContext {
   startTime: number;
   requestId: string;
   verification: ProveResponse['verification'];
+  /** coinbase_attestation v2: the statement signed before payment was taken. */
+  statement?: ServerStatement;
 }
 
 /**
@@ -156,22 +192,13 @@ async function generateProofFromInputs(
   let proverInputs: Record<string, any>;
   const inputBuildStart = Date.now();
 
-  const actionInputs = inputs as { domain_separator?: unknown; action_hash?: unknown };
-  const hasDomain = actionInputs.domain_separator !== undefined;
-  const hasAction = actionInputs.action_hash !== undefined;
-  if (hasDomain !== hasAction) {
-    res.status(400).json({ error: 'INVALID_REQUEST', message: 'Send both domain_separator and action_hash, or neither for an identity-only proof.' });
+  const actionError = actionFieldsError(circuitId, inputs);
+  if (actionError) {
+    res.status(400).json({ error: 'INVALID_REQUEST', message: actionError });
     return;
   }
-  if (hasDomain && hasAction) {
-    if (circuitActionBinding(circuitId) === 'none') {
-      res.status(400).json({ error: 'INVALID_REQUEST', message: `${circuitId} does not support action binding.` });
-      return;
-    }
-    if (![actionInputs.domain_separator, actionInputs.action_hash].every(value => typeof value === 'string' && /^0x[0-9a-fA-F]{64}$/.test(value))) {
-      res.status(400).json({ error: 'INVALID_REQUEST', message: 'domain_separator and action_hash must each be a 0x-prefixed 32-byte hash.' });
-      return;
-    }
+  if ((circuitId === CIRCUIT_IDS.COINBASE_ATTESTATION) !== Boolean(ctx.statement)) {
+    throw new Error(`${circuitId}: the server statement is ${ctx.statement ? 'present for a circuit that takes none' : 'missing'}`);
   }
   if (isOidc) {
     // OIDC: pass OidcProvePayload { jwt, jwks, scope, provider } — TEE/bbProver validates JWT + builds circuit inputs
@@ -228,6 +255,9 @@ async function generateProofFromInputs(
       // here is how the next one gets forgotten.
       ...(cb.domain_separator && cb.action_hash
         ? { domainSeparator: cb.domain_separator, actionHash: cb.action_hash }
+        : {}),
+      ...(ctx.statement
+        ? { statement: { clientData: ctx.statement.clientData, signature: ctx.statement.signature, attestedAt: ctx.statement.attestedAt } }
         : {}),
     } satisfies CircuitParams;
   }
@@ -547,6 +577,65 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
         return;
       }
 
+      // coinbase_attestation v2: read the attestation on chain and sign the
+      // revocation statement BEFORE any payment is taken, so a revoked or
+      // unattested wallet, or an SDK still deriving v1's nullifier, is refused
+      // for free. The statement is bound to this request's digest and scope.
+      let statement: ServerStatement | undefined;
+      if (circuitId === CIRCUIT_IDS.COINBASE_ATTESTATION) {
+        if (body.encrypted_payload) {
+          res.status(400).json({
+            error: 'E2E_UNSUPPORTED',
+            message: 'coinbase_attestation needs the server to sign a revocation statement over the request, which it cannot read inside an encrypted payload. Send plaintext inputs.',
+          });
+          return;
+        }
+        const actionError = actionFieldsError(circuitId, body.inputs);
+        if (actionError) {
+          res.status(400).json({ error: 'INVALID_REQUEST', message: actionError });
+          return;
+        }
+        const cb = body.inputs as import('./types.js').CoinbaseProveInputs;
+        if (!cb.signal_hash || !cb.nullifier || !cb.scope_bytes || !cb.user_address) {
+          res.status(400).json({ error: 'INVALID_REQUEST', message: 'Missing required derived fields: signal_hash, nullifier, scope_bytes, user_address' });
+          return;
+        }
+        const HASH32 = /^0x[0-9a-fA-F]{64}$/;
+        const badField = (['signal_hash', 'nullifier', 'scope_bytes'] as const).find(k => typeof cb[k] !== 'string' || !HASH32.test(cb[k]));
+        if (badField || typeof cb.user_address !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(cb.user_address)) {
+          res.status(400).json({
+            error: 'INVALID_REQUEST',
+            message: badField
+              ? `${badField} must be a 0x-prefixed 32-byte hex string.`
+              : 'user_address must be a 0x-prefixed 20-byte hex address.',
+          });
+          return;
+        }
+        if (!deps.statement) throw new Error('coinbase_attestation statement signer is not configured on this server');
+        try {
+          statement = await prepareServerStatement(
+            {
+              userAddress: cb.user_address,
+              signalHash: ethers.getBytes(cb.signal_hash),
+              scopeBytes: ethers.getBytes(cb.scope_bytes),
+              nullifierBytes: ethers.getBytes(cb.nullifier),
+              domainSeparator: cb.domain_separator,
+              actionHash: cb.action_hash,
+            },
+            deps.statement,
+          );
+        } catch (e) {
+          if (e instanceof StatementRefusal) {
+            const status = STATEMENT_REFUSAL_STATUS[e.code];
+            if (!status) throw new Error(`Unmapped statement refusal ${e.code}: ${e.message}`);
+            log.warn({ action: 'prove.coinbase.statement_refused', code: e.code }, 'Coinbase statement refused');
+            res.status(status).json({ error: e.code, message: e.message });
+            return;
+          }
+          throw e;
+        }
+      }
+
       // On-chain payment verification (skip when payment disabled)
       if (config.paymentMode !== 'disabled') {
         const paymentStart = Date.now();
@@ -779,6 +868,7 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
           startTime,
           requestId,
           verification: chooseVerificationTarget(config, circuitId, isTestnet),
+          statement,
         },
         deps,
         config,

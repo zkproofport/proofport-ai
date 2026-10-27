@@ -21,6 +21,38 @@ import { circuitActionBinding } from '@zkproofport-app/core/circuits';
  */
 export type AttestationCircuitId = Exclude<CircuitId, typeof CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION>;
 
+/**
+ * Facts about the COMPILED circuit each id is served from (CIRCUIT_DIRS),
+ * which are not the same question as "may a caller bind an action":
+ *
+ *   actionInputs  main() takes domain_separator / action_hash. core's
+ *                 circuitActionBinding answers whether an action may be BOUND;
+ *                 a circuit can carry the inputs while core still says 'none'
+ *                 (coinbase_attestation v2 until core's v2 release), and then
+ *                 the inputs are zeros.
+ *   statement     main() takes the revocation statement (client_data,
+ *                 signer_kind, statement_sig, attested_at and the App Attest
+ *                 chain) -- coinbase_attestation v2.
+ *
+ * BbProver compares the formatted inputs with the compiled circuit's ABI
+ * before every proof, which holds this table to the artifact actually served.
+ */
+export const CIRCUIT_INPUT_FACTS: Record<AttestationCircuitId, { actionInputs: boolean; statement: boolean }> = {
+  [CIRCUIT_IDS.COINBASE_ATTESTATION]: { actionInputs: true, statement: true },
+  [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: { actionInputs: false, statement: false },
+  [CIRCUIT_IDS.GIWA_ATTESTATION]: { actionInputs: true, statement: false },
+};
+
+/** The App Attest inputs, all zero for the server kind (circuit README step 6). */
+const APP_ATTEST_ZERO_INPUTS = {
+  credential_tbs: 1000,
+  credential_sig: 96,
+  att_auth_data: 256,
+  att_client_data_hash: 32,
+  assertion_auth_data: 128,
+} as const;
+const SIGNER_KIND_SERVER = 2;
+
 // ─── OIDC Circuit Inputs ────────────────────────────────────────────────
 
 export interface OidcCircuitInputs {
@@ -147,6 +179,10 @@ export function formatAttestationInputs(
    * parameters and no way to fill them.
    */
   const binding = circuitActionBinding(circuitId);
+  const facts = CIRCUIT_INPUT_FACTS[circuitId];
+  if (!facts) {
+    throw new Error(`No input facts for circuit '${circuitId}'. Known: ${Object.keys(CIRCUIT_INPUT_FACTS).join(', ')}.`);
+  }
   const bound = Boolean(params.domainSeparator) && Boolean(params.actionHash);
 
   if (Boolean(params.domainSeparator) !== Boolean(params.actionHash)) {
@@ -168,7 +204,7 @@ export function formatAttestationInputs(
    * refuses. Out of action mode the pair is empty instead.
    */
   inputs.signal_hash = bound ? toHexArray(new Uint8Array(32)) : toHexArray(params.signalHash);
-  if (binding !== 'none') {
+  if (facts.actionInputs) {
     // Parameter order in the circuit is signal_hash, domain_separator,
     // action_hash, signer_list_merkle_root, scope, nullifier. noir_js takes a
     // named object so the key order here does not matter, but the public
@@ -205,6 +241,28 @@ export function formatAttestationInputs(
   inputs.coinbase_signer_merkle_proof = formatMerkleProofArray(params.merkleProof, 8);
   inputs.coinbase_signer_leaf_index = params.merkleLeafIndex.toString();
   inputs.merkle_proof_depth = params.merkleDepth.toString();
+
+  if (facts.statement) {
+    const st = params.statement;
+    if (!st) {
+      throw new Error(`${circuitId} needs the server-signed revocation statement (client_data, statement_sig, attested_at).`);
+    }
+    if (st.clientData.length !== 225) throw new Error(`client_data is ${st.clientData.length} bytes, expected 225`);
+    if (st.signature.length !== 64) throw new Error(`statement_sig is ${st.signature.length} bytes, expected 64`);
+    if (!Number.isSafeInteger(st.attestedAt) || st.attestedAt <= 0) throw new Error(`Invalid attested_at ${st.attestedAt}`);
+    inputs.attested_at = st.attestedAt.toString();
+    inputs.client_data = toHexArray(st.clientData);
+    inputs.signer_kind = SIGNER_KIND_SERVER.toString();
+    inputs.statement_sig = toHexArray(st.signature);
+    for (const [name, len] of Object.entries(APP_ATTEST_ZERO_INPUTS)) {
+      inputs[name] = toHexArray(new Uint8Array(len));
+    }
+    inputs.credential_tbs_len = '0';
+    inputs.att_auth_data_len = '0';
+    inputs.assertion_auth_data_len = '0';
+  } else if (params.statement) {
+    throw new Error(`${circuitId} takes no revocation statement; one was given.`);
+  }
 
   return inputs;
 }

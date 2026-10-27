@@ -107,8 +107,13 @@ if [ "$REMOTE" = false ] && [ -f "$REPO_ROOT/scripts/lib/dev-docker.sh" ]; then
   docker() { command docker "${DEV_DOCKER_ARGS[@]}" "$@"; }
 fi
 
-COMPOSE_FREE="docker compose -f docker-compose.yml -f docker-compose.e2e-free.yml"
-COMPOSE_PAYMENT="docker compose -f docker-compose.yml -f docker-compose.e2e-payment.yml"
+# docker-compose.kms.yml: the container needs the Cloud KMS statement key and
+# credentials for it (coinbase_attestation v2); it refuses to start without them.
+# Redis-only use (the Mac-native path) does not need them, so it stays off there.
+KMS_COMPOSE=""
+[ "$CONTAINER" = true ] && KMS_COMPOSE="-f docker-compose.kms.yml"
+COMPOSE_FREE="docker compose -f docker-compose.yml -f docker-compose.e2e-free.yml $KMS_COMPOSE"
+COMPOSE_PAYMENT="docker compose -f docker-compose.yml -f docker-compose.e2e-payment.yml $KMS_COMPOSE"
 
 # ─── Which suites run in which phase ─────────────────────────────────────
 # Derived from the directory, never a hand-kept list: this script spent months

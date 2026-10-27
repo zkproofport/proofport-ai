@@ -74,7 +74,11 @@ interface PublicInputLayout {
  * compile error here rather than a lookup that quietly misses.
  */
 const LAYOUTS: Record<CircuitId, PublicInputLayout> = {
-  [CIRCUIT_IDS.COINBASE_ATTESTATION]: { scope: [64, 95], nullifier: [96, 127] },
+  // v2 (circuits coinbase-attestation-v2): giwa_attestation's six inputs in
+  // its order, then attested_at -- 193 fields. Scope and nullifier sit where
+  // GIWA's do; v1's [64, 95] / [96, 127] would read the action hash and the
+  // signer root.
+  [CIRCUIT_IDS.COINBASE_ATTESTATION]: { scope: [128, 159], nullifier: [160, 191] },
   [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: { scope: [86, 117], nullifier: [118, 149] },
   [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: {
     scope: [83, 114],

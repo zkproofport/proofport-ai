@@ -36,7 +36,7 @@ describe('Contract Addresses', () => {
   describe('FALLBACK_VERIFIERS', () => {
     it('should contain Base Sepolia (84532) verifiers', () => {
       expect(FALLBACK_VERIFIERS['84532']).toBeDefined();
-      expect(FALLBACK_VERIFIERS['84532'].coinbase_attestation).toBe('0x42d165a48256Ae184e1dE4e7E6372E870E2bC883');
+      expect(FALLBACK_VERIFIERS['84532'].coinbase_attestation).toBe('0x1885aA2283DB21ad0fc63A2Df98efe92F31908E6'); // v2
       expect(FALLBACK_VERIFIERS['84532'].coinbase_country_attestation).toBe('0x9DEea2189aE694D7a36f65Fb7d7Dbe9f75abDDcE');
     });
 

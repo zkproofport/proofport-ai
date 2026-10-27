@@ -245,7 +245,9 @@ export function computeWalletNullifier(
  * per circuit and the wrong one produces a proof that simply fails.
  */
 const NULLIFIER_FROM_WALLET_AND_TAG: Readonly<Record<string, boolean>> = Object.freeze({
-  coinbase_attestation: false,
+  // v2 (circuits coinbase-attestation-v2) moved to the wallet + tag rule, as
+  // decided 2026-10-23: v1 nullifiers do not carry over.
+  coinbase_attestation: true,
   coinbase_country_attestation: false,
   giwa_attestation: true,
 });
@@ -569,6 +571,16 @@ export interface CircuitParams {
   isIncluded?: boolean;
   domainSeparator?: string;
   actionHash?: string;
+  /**
+   * coinbase_attestation v2 only: the revocation statement this server signed
+   * with its Cloud KMS key (src/input/coinbaseStatement.ts). Required there,
+   * refused everywhere else.
+   */
+  statement?: {
+    clientData: Uint8Array;
+    signature: Uint8Array;
+    attestedAt: number;
+  };
 }
 
 /**

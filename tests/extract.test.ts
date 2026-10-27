@@ -52,8 +52,9 @@ function buildPublicInputsHex(opts: {
 }
 
 /**
- * Build a 128-field coinbase_attestation publicInputs hex string.
- * scope 64..95, nullifier 96..127.
+ * Build a coinbase_attestation v2 publicInputs hex string: 193 fields,
+ * GIWA's six inputs then attested_at -- scope 128..159, nullifier 160..191.
+ * `fieldCount` shortens it (v1 proofs had 128 fields).
  */
 function buildCoinbasePublicInputsHex(opts: {
   scopeBytes?: number[];
@@ -62,14 +63,15 @@ function buildCoinbasePublicInputsHex(opts: {
   bytesAtOidcDomainSlot?: string;
   /** Value to place at index 82 — where OIDC keeps its domain length. */
   oidcDomainLenSlot?: number;
+  fieldCount?: number;
 }): string {
-  const fields: string[] = new Array(128).fill('00'.repeat(32));
+  const fields: string[] = new Array(opts.fieldCount ?? 193).fill('00'.repeat(32));
 
   for (let i = 0; i < (opts.scopeBytes?.length ?? 0); i++) {
-    fields[64 + i] = field(opts.scopeBytes![i]);
+    fields[128 + i] = field(opts.scopeBytes![i]);
   }
   for (let i = 0; i < (opts.nullifierBytes?.length ?? 0); i++) {
-    fields[96 + i] = field(opts.nullifierBytes![i]);
+    fields[160 + i] = field(opts.nullifierBytes![i]);
   }
   if (opts.bytesAtOidcDomainSlot) {
     for (let i = 0; i < opts.bytesAtOidcDomainSlot.length; i++) {
@@ -217,11 +219,13 @@ describe('extractScopeFromPublicInputs', () => {
   });
 
   it('returns null when the vector is too short for the circuit layout', () => {
-    // 128 fields is a complete coinbase proof but stops well short of the
-    // country circuit's nullifier at 118..149.
-    const hex = buildCoinbasePublicInputsHex({});
-    expect(extractScopeFromPublicInputs(hex, KYC)).not.toBeNull();
-    expect(extractNullifierFromPublicInputs(hex, COUNTRY)).toBeNull();
+    // 128 fields was a complete coinbase_attestation v1 proof; v2's scope and
+    // nullifier sit at 128..191, so a v1-length vector must not be read as v2.
+    const v1Length = buildCoinbasePublicInputsHex({ fieldCount: 128 });
+    expect(extractScopeFromPublicInputs(v1Length, KYC)).toBeNull();
+    expect(extractNullifierFromPublicInputs(v1Length, KYC)).toBeNull();
+    // A full v2 vector reads.
+    expect(extractScopeFromPublicInputs(buildCoinbasePublicInputsHex({}), KYC)).not.toBeNull();
   });
 });
 

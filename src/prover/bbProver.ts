@@ -82,6 +82,26 @@ export class BbProver {
         );
       }
 
+      // 2b. The inputs must name exactly the compiled circuit's parameters.
+      // This is what holds the formatter's per-circuit tables
+      // (CIRCUIT_INPUT_FACTS) to the artifact actually served: a missing
+      // parameter would otherwise surface as noir_js's "Expected argument",
+      // and an extra one -- e.g. a statement sent to a circuit built without
+      // one -- would be ignored without a word.
+      const abiNames: unknown = circuitJson?.abi?.parameters?.map?.((p: { name?: unknown }) => p.name);
+      if (!Array.isArray(abiNames) || abiNames.some(n => typeof n !== 'string')) {
+        throw new Error(`Compiled ${meta.packageName}.json has no ABI parameter list`);
+      }
+      const given = Object.keys(noirInputs);
+      const missing = (abiNames as string[]).filter(n => !given.includes(n));
+      const unexpected = given.filter(n => !(abiNames as string[]).includes(n));
+      if (missing.length || unexpected.length) {
+        throw new Error(
+          `Inputs for ${circuitId} do not match ${meta.packageName}'s ABI: ` +
+          `missing [${missing.join(', ')}], unexpected [${unexpected.join(', ')}]`,
+        );
+      }
+
       // 3. Execute circuit via noir_js to generate witness
       const noir = new Noir(circuitJson);
       let witnessData: Uint8Array;
