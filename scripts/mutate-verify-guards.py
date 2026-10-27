@@ -70,6 +70,46 @@ MUTATIONS = [
         'tests': ['tests/fallbackVerifiersMatchCore.test.ts'],
         'expect': 'names both addresses',
     },
+    {
+        'name': 'server-oidc-fallback-stays-v1',
+        'file': 'src/config/contracts.ts',
+        'old': "'0x003334A7C2ff15ee9ee845Ab88e152A2A3694167'",
+        'new': "'0x5D9ECe4F0276D12693F79659760a68011EFeF485'",
+        'tests': ['tests/fallbackVerifiersMatchCore.test.ts', 'tests/oidcV2Verify.test.ts'],
+        'expect': 'oidc_domain_attestation on chain 84532',
+    },
+    {
+        'name': 'server-verifier-swallows-core-refusal',
+        'file': 'src/prover/verifier.ts',
+        'old': "  if (result.error !== undefined) {",
+        'new': "  if (false) {",
+        'tests': ['tests/oidcV2Verify.test.ts'],
+        'expect': 'before any key fetch',
+    },
+    {
+        'name': 'sdk-reports-core-refusal-without-reason',
+        'file': VERIFY,
+        'old': "    return { valid: false, error: `Verification failed: ${result.error}` };",
+        'new': "    return { valid: false };",
+        'tests': ['tests/oidcV2Verify.test.ts'],
+        'expect': 'refuses a v1 proof (148 inputs), by name',
+    },
+    {
+        'name': 'server-builder-count-drifts-from-core',
+        'file': 'src/prover/oidcProver.ts',
+        'old': "export const OIDC_PUBLIC_INPUT_COUNT = 214;",
+        'new': "export const OIDC_PUBLIC_INPUT_COUNT = 148;",
+        'tests': ['tests/oidcV2Verify.test.ts'],
+        'expect': 'both builders build as many public inputs as core verifies',
+    },
+    {
+        'name': 'sdk-builder-proves-for-a-client-core-refuses',
+        'file': 'packages/sdk/src/oidc-inputs.ts',
+        'old': "    deviceClientId: '491923400813-pr17m6kpin2rsbbes18jpb60j1s3qmv4.apps.googleusercontent.com',",
+        'new': "    deviceClientId: '32555940559.apps.googleusercontent.com',",
+        'tests': ['tests/oidcV2Verify.test.ts'],
+        'expect': "google device client is accepted by core",
+    },
 ]
 
 

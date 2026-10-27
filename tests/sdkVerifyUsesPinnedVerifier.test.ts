@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearOidcKeyCache, PINNED_VERIFIERS } from '@zkproofport-app/core';
 import { verifyProof, verifyRpcUrl, VERIFY_RPC_URLS } from '../packages/sdk/src/verify.js';
 import type { ProveResponse } from '../packages/sdk/src/types.js';
+import { oidcV2Inputs } from './helpers/oidcV2Inputs.js';
 
 /**
  * The AI SDK's verifyProof (and the MCP verify_proof tool built on it) used to
@@ -126,14 +127,15 @@ describe('AI SDK verifyProof refuses what the response says about its verifier',
 });
 
 describe('AI SDK verifyProof checks the OIDC provider key through core', () => {
-  // A well-formed 2048-bit modulus (18 limbs of 120 bits, top limb 0xff) that
-  // no provider publishes; provider public input (index 147) = 0 -> Google.
-  const field = (v: number) => v.toString(16).padStart(64, '0');
-  const forgedKeyInputs = '0x' + Array.from({ length: 148 }, (_, i) => field(i < 17 ? 1 : i === 17 ? 0xff : 0)).join('');
+  // v2 layout (214 inputs). A well-formed 2048-bit modulus (18 limbs of 120
+  // bits, top limb 0xff) that no provider publishes; provider 0 (Google); the
+  // Google device client's aud_hash, nonce_mode 0, zero binding, now = clock.
+  // Everything core's OIDC policy checks passes, so the refusal below can only
+  // come from the provider-key check.
   const oidc = (verifierAddress = pinned('oidc_domain_attestation', ETH_SEPOLIA)) => response({
     circuit: 'oidc_domain_attestation',
     proofType: 'google_workspace',
-    publicInputs: forgedKeyInputs,
+    publicInputs: oidcV2Inputs(),
     verification: { chainId: ETH_SEPOLIA, verifierAddress, rpcUrl: 'https://ethereum-sepolia-rpc.publicnode.com' },
   });
 
