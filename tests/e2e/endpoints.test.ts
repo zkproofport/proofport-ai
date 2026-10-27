@@ -18,7 +18,6 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { randomUUID } from 'crypto';
-import { execSync } from 'child_process';
 
 // SDK clients
 import { ClientFactory } from '@a2a-js/sdk/client';
@@ -1367,14 +1366,12 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
 
   // ─── OIDC Domain Proof Generation + Verification ───────────────────────────
 
-  // Auto-generate OIDC JWT via gcloud CLI if not provided
+  // OIDC v2 binds the token's aud: only a device sign-in id_token
+  // (zkproofport-prove --login-google-workspace / --login-microsoft-365) is
+  // proved. A gcloud identity token is issued to gcloud's own client and is
+  // refused, so it is no longer a source here.
   function getOidcJwt(): string | undefined {
-    if (process.env.E2E_OIDC_JWT) return process.env.E2E_OIDC_JWT;
-    try {
-      return execSync('gcloud auth print-identity-token', { encoding: 'utf-8' }).trim();
-    } catch {
-      return undefined;
-    }
+    return process.env.E2E_OIDC_JWT || undefined;
   }
   const OIDC_JWT = getOidcJwt();
 

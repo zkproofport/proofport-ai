@@ -4,11 +4,10 @@
  * E2E_BASE_URL=https://stg-ai.zkproofport.app npm run test:e2e:published
  * The isolated runner supplies published SDK/MCP entry paths and wallet peers.
  * Requires .env.test attestation/payer keys, GIWA_ATTESTATION_KEY for GIWA,
- * and E2E_OIDC_JWT or a valid gcloud identity token for OIDC.
+ * and E2E_OIDC_JWT (a device sign-in id_token) for OIDC.
  */
 
-import { execSync } from 'child_process';
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, vi } from 'vitest';
 import * as sdk from '@zkproofport-ai/sdk';
 import {
   createConfig,
@@ -43,16 +42,18 @@ const ATTESTATION_KEY = process.env.ATTESTATION_KEY;
 const GIWA_KEY = process.env.GIWA_ATTESTATION_KEY;
 const PAYER_KEY = process.env.E2E_PAYER_WALLET_KEY;
 
+/*
+ * OIDC v2 binds the token's aud: this server proves only id_tokens from the
+ * ZKProofport device sign-in (`zkproofport-prove --login-google-workspace` or
+ * `--login-microsoft-365`). A `gcloud auth print-identity-token` token is
+ * issued to gcloud's own OAuth client and is refused, so it is no longer a
+ * source here; a human device sign-in supplies E2E_OIDC_JWT.
+ */
 function getOidcJwt(): string | undefined {
-  if (process.env.E2E_OIDC_JWT) return process.env.E2E_OIDC_JWT;
-  try {
-    return execSync('gcloud auth print-identity-token', { encoding: 'utf-8' }).trim();
-  } catch {
-    return undefined;
-  }
+  return process.env.E2E_OIDC_JWT || undefined;
 }
 const OIDC_JWT = getOidcJwt();
-if (!OIDC_JWT) console.warn('SKIP OIDC proof: E2E_OIDC_JWT absent and gcloud identity token unavailable');
+if (!OIDC_JWT) console.warn('SKIP OIDC proof: E2E_OIDC_JWT absent (needs a human device sign-in; gcloud tokens are refused since OIDC v2)');
 if (!GIWA_KEY) console.warn('SKIP GIWA proofs: GIWA_ATTESTATION_KEY missing');
 
 describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
@@ -257,6 +258,24 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
       expect(result.publicInputs).toBeTruthy();
       if (result.paymentTxHash) expect(result.paymentTxHash).toMatch(/^0x/);
     }, 120_000);
+
+    it('oidc_domain: a token issued to another client is refused before any challenge or payment', async () => {
+      const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
+      const now = Math.floor(Date.now() / 1000);
+      const foreign = [
+        b64({ alg: 'RS256', kid: 'x', typ: 'JWT' }),
+        b64({ iss: 'https://accounts.google.com', aud: '32555940559.apps.googleusercontent.com', email: 'a@example.com', email_verified: true, hd: 'example.com', iat: now - 5, exp: now + 3000 }),
+        'c2ln',
+      ].join('.');
+      const fetchSpy = vi.spyOn(globalThis, 'fetch');
+      await expect(generateProof(
+        config,
+        { attestation: attestationSigner, payment: paymentWallet },
+        { circuit: 'oidc_domain', scope: 'e2e-test:npm-sdk-oidc-foreign-aud', payOn, jwt: foreign },
+      )).rejects.toThrow(/device-flow client/);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      fetchSpy.mockRestore();
+    });
 
     it.skipIf(!OIDC_JWT)('oidc_domain: full E2E proof generation', async () => {
       const result = await generateProof(
