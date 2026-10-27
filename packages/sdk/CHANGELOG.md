@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.5.0](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.4.1...sdk-v0.5.0) (2026-10-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* **oidc:** build OIDC v2 inputs for the device flow
+
+### Features
+
+* **oidc:** build OIDC v2 inputs for the device flow ([a862521](https://github.com/zkproofport/proofport-ai/commit/a8625217301425c2526b52fbc6c7a4337e29f352))
+* **verify:** verify OIDC v2 proofs through core 0.3.0 ([1a21bc1](https://github.com/zkproofport/proofport-ai/commit/1a21bc12fe0d43ae066848c6de0ebbf2452502e1))
+
+
+### Bug Fixes
+
+* **sdk:** verify against core's pinned verifier, not the response's ([fb61861](https://github.com/zkproofport/proofport-ai/commit/fb61861051b63131b6bdf8fd8a9ef97ad5d1beb7))
+
 ## [0.4.1](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.4.0...sdk-v0.4.1) (2026-10-23)
 
 
