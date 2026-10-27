@@ -127,7 +127,7 @@ if [ -d "$PARENT_CIRCUITS" ]; then
   fi
 
   MISSING=0
-  while read -r circuit package; do
+  while read -r circuit package _circuit_id; do
     [ -z "$circuit" ] && continue
     TARGET="$AI_DIR/circuits/${circuit}/target"
     VK_TARGET="$TARGET/vk"

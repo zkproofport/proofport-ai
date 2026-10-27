@@ -136,14 +136,21 @@ export const CIRCUIT_DIRS: Record<CircuitId, { dir: string; packageName: string 
 };
 
 /**
- * `<directory> <artifact-name>` per line, for a shell script to read.
+ * `<directory> <artifact-name> <circuit-id>` per line, for a shell script to read.
+ *
+ * The id is there because the artifact name is not always the id
+ * (coinbase_attestation is served from coinbase_attestation_v2.json), and the
+ * pinned-artifact manifest the deploy writes is keyed by circuit id: keyed by
+ * artifact name, the first v2 staging revision refused to start with
+ * "Pinned artifact hashes are missing or invalid for coinbase_attestation"
+ * (2026-10-28).
  *
  * Deliberately not JSON: a shell loop over two whitespace-separated fields
  * needs no jq, and jq is not installed everywhere this runs.
  */
 export function circuitDirsLines(): string {
-  return Object.values(CIRCUIT_DIRS)
-    .map((c) => `${c.dir} ${c.packageName}`)
+  return Object.entries(CIRCUIT_DIRS)
+    .map(([id, c]) => `${c.dir} ${c.packageName} ${id}`)
     .join('\n');
 }
 
