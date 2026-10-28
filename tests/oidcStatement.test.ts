@@ -325,7 +325,7 @@ describe('prepareOidcProviderKeyStatement with core\'s live key check', () => {
     expect(signer.signDigest).not.toHaveBeenCalled();
   });
 
-  it('a key dropped from a successful refetch is still accepted within core\'s 24 h retention (verifiers accept it too)', async () => {
+  it('a key dropped from a successful refetch is still accepted within core\'s retention window, RECENT_KEY_RETENTION_MS (verifiers accept it too)', async () => {
     let keys: unknown[] = [googleKey.jwk];
     serveKeyLists({ [GOOGLE_JWKS_URL]: () => jwksResponse(keys, 'max-age=60')() });
     await prepareOidcProviderKeyStatement(googlePayload(), { signer: kmsLike() });
