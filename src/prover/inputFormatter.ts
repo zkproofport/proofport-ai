@@ -43,15 +43,19 @@ export const CIRCUIT_INPUT_FACTS: Record<AttestationCircuitId, { actionInputs: b
   [CIRCUIT_IDS.GIWA_ATTESTATION]: { actionInputs: true, statement: false },
 };
 
-/** The App Attest inputs, all zero for the server kind (circuit README step 6). */
-const APP_ATTEST_ZERO_INPUTS = {
+/**
+ * The App Attest inputs, all zero for the server kind (circuit README step 6).
+ * The same names and sizes in every circuit built on circuits
+ * `statement-signer` (coinbase_attestation v2, oidc_domain_attestation).
+ */
+export const APP_ATTEST_ZERO_INPUTS = {
   credential_tbs: 1000,
   credential_sig: 96,
   att_auth_data: 256,
   att_client_data_hash: 32,
   assertion_auth_data: 128,
 } as const;
-const SIGNER_KIND_SERVER = 2;
+export const SIGNER_KIND_SERVER = 2;
 
 // ─── OIDC Circuit Inputs ────────────────────────────────────────────────
 
@@ -74,6 +78,21 @@ export interface OidcCircuitInputs {
   base64_decode_offset: number;
   redc_params_limbs: string[];      // 18 × u128 decimal strings
   signature_limbs: string[];        // 18 × u128 decimal strings
+
+  // Private: who vouched that the modulus is the provider's published key
+  // (circuits oidc-domain-attestation/src/provider_key.nr), in the circuit's
+  // ABI order after signature_limbs. This server is always signer kind 2
+  // (Cloud KMS); every App Attest input is zero.
+  signer_kind: number;
+  statement_sig: number[];          // 64 bytes, r || s, low s
+  credential_tbs: number[];         // 1000 bytes
+  credential_tbs_len: number;
+  credential_sig: number[];         // 96 bytes
+  att_auth_data: number[];          // 256 bytes
+  att_auth_data_len: number;
+  att_client_data_hash: number[];   // 32 bytes
+  assertion_auth_data: number[];    // 128 bytes
+  assertion_auth_data_len: number;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────
@@ -299,6 +318,37 @@ export function formatOidcInputs(inputs: OidcCircuitInputs): Record<string, unkn
   result.base64_decode_offset = inputs.base64_decode_offset.toString();
   result.redc_params_limbs = inputs.redc_params_limbs;
   result.signature_limbs = inputs.signature_limbs;
+
+  // Provider-key statement signer. Only the server kind is built here: this
+  // server holds no App Attest chain, and a kind it did not sign for would be
+  // a witness the circuit refuses after payment.
+  if (inputs.signer_kind !== SIGNER_KIND_SERVER) {
+    throw new Error(`OIDC signer_kind must be ${SIGNER_KIND_SERVER} (server) on this prover, got ${inputs.signer_kind}.`);
+  }
+  if (inputs.statement_sig.length !== 64) throw new Error(`statement_sig is ${inputs.statement_sig.length} bytes, expected 64`);
+  const zeroFields = [
+    ['credential_tbs', inputs.credential_tbs, inputs.credential_tbs_len],
+    ['credential_sig', inputs.credential_sig, 0],
+    ['att_auth_data', inputs.att_auth_data, inputs.att_auth_data_len],
+    ['att_client_data_hash', inputs.att_client_data_hash, 0],
+    ['assertion_auth_data', inputs.assertion_auth_data, inputs.assertion_auth_data_len],
+  ] as const;
+  for (const [name, bytes, len] of zeroFields) {
+    const size = APP_ATTEST_ZERO_INPUTS[name];
+    if (bytes.length !== size || len !== 0 || bytes.some(b => b !== 0)) {
+      throw new Error(`${name} must be ${size} zero bytes with length 0 for the server signer.`);
+    }
+  }
+  result.signer_kind = inputs.signer_kind.toString();
+  result.statement_sig = toHexArray(inputs.statement_sig);
+  result.credential_tbs = toHexArray(inputs.credential_tbs);
+  result.credential_tbs_len = inputs.credential_tbs_len.toString();
+  result.credential_sig = toHexArray(inputs.credential_sig);
+  result.att_auth_data = toHexArray(inputs.att_auth_data);
+  result.att_auth_data_len = inputs.att_auth_data_len.toString();
+  result.att_client_data_hash = toHexArray(inputs.att_client_data_hash);
+  result.assertion_auth_data = toHexArray(inputs.assertion_auth_data);
+  result.assertion_auth_data_len = inputs.assertion_auth_data_len.toString();
 
   return result;
 }

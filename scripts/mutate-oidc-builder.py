@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-"""Mutation check for the OIDC v2 input builders (server and client SDK).
+"""Mutation check for the OIDC v2 input builders (server and client SDK) and
+the server's provider-key statement (src/input/oidcStatement.ts, the shared
+signer src/input/statementSigner.ts, and the proof route that signs before
+payment).
 
-Reintroduces each defect a guard exists for, runs tests/oidcInputsV2.test.ts,
+Reintroduces each defect a guard exists for, runs the OIDC tests (TESTS),
 and restores the file byte-for-byte. A mutation whose text is not found
 exactly once is an error, not a pass; a mutation is "caught" only when the
 tests fail AND the output names the expected test.
@@ -19,7 +22,10 @@ REPO = subprocess.run(['git', 'rev-parse', '--show-toplevel'],
 SERVER = 'src/prover/oidcProver.ts'
 SDK = 'packages/sdk/src/oidc-inputs.ts'
 FORMAT = 'src/prover/inputFormatter.ts'
-TESTS = ['tests/oidcInputsV2.test.ts']
+STATEMENT = 'src/input/oidcStatement.ts'
+SIGNER = 'src/input/statementSigner.ts'
+ROUTE = 'src/proof/proofRoutes.ts'
+TESTS = ['tests/oidcInputsV2.test.ts', 'tests/oidcStatement.test.ts', 'tests/proofRouteOidcStatement.test.ts']
 
 MUTATIONS = [
     ('server-any-audience', SERVER,
@@ -49,7 +55,7 @@ MUTATIONS = [
      'builds a Google device-flow token'),
     ('server-proves-at-expiry', SERVER,
      "  if (now >= expiresAt) {", "  if (now > expiresAt) {",
-     'refuses exp equal to the clock'),
+     'oidcNowFor refuses a clock equal to exp'),
     ('server-iat-skew-unbounded', SERVER,
      "    if (issuedAt - now > OIDC_IAT_CLOCK_SKEW_SECONDS) {", "    if (false) {",
      'refuses iat 61s ahead of the clock'),
@@ -65,6 +71,39 @@ MUTATIONS = [
     ('sdk-sends-named-provider', SDK,
      "    provider: token.provider,\n  };", "    provider: params.provider as never,\n  };",
      'sends the provider the issuer names when none was given'),
+    # Provider-key statement (circuits fix list item 12).
+    ('statement-signs-unpublished-key', STATEMENT,
+     "  if (!check.ok) {", "  if (false && !check.ok) {",
+     "refuses a self-made key (not in Google's list) without signing"),
+    ('statement-field-order', STATEMENT,
+     "new Uint8Array([provider]), time, modulus", "new Uint8Array([provider]), modulus, time",
+     'matches the reference builder (Google, now 1800000000)'),
+    ('statement-keeps-leading-zero', STATEMENT,
+     "  while (n.length - start > MODULUS_LEN && n[start] === 0) start++;\n", "",
+     'drops any number of leading zero bytes'),
+    ('statement-top-bit-unchecked', STATEMENT,
+     "  if (n.length !== MODULUS_LEN || (n[0] & 0x80) === 0) {", "  if (n.length !== MODULUS_LEN) {",
+     'refuses 256 bytes with the top bit clear'),
+    ('signer-keeps-high-s', SIGNER,
+     "  if (s > P256_HALF_N) s = P256_N - s;\n", "",
+     'normalises a high-s KMS signature to low s'),
+    ('signer-skips-self-verify', SIGNER,
+     "  if (!(await verifyRawP256(await signer.publicKeyPem(), statement, signature))) {", "  if (false) {",
+     'refuses a signature made by another key'),
+    ('prover-ignores-signed-modulus', SERVER,
+     "  if (modulusHex !== statement.modulus.toLowerCase()) {", "  if (false) {",
+     'refuses a statement signed for another modulus'),
+    ('prover-uses-own-clock', SERVER,
+     "buildUnsignedOidcInputs(payload, (iat, exp) => oidcNowAt(iat, exp, signedNow));",
+     "buildUnsignedOidcInputs(payload, (iat, exp) => oidcNowFor(iat, exp, Math.floor(Date.now() / 1000)));",
+     'uses the signed now as the public now'),
+    ('formatter-any-signer-kind', FORMAT,
+     "  if (inputs.signer_kind !== SIGNER_KIND_SERVER) {", "  if (false) {",
+     "the formatter refuses any signer kind but the server's"),
+    ('route-caller-statement-wins', ROUTE,
+     "proverInputs = { ...inputs, providerKeyStatement: ctx.oidcStatement };",
+     "proverInputs = { providerKeyStatement: ctx.oidcStatement, ...inputs };",
+     'overwrites a caller-sent providerKeyStatement'),
 ]
 
 ENV = {k: v for k, v in os.environ.items() if k != 'NODE_OPTIONS'}

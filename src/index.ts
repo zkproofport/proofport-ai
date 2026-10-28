@@ -215,10 +215,12 @@ function createApp(config: Config) {
   app.use('/a2a', jsonRpcHandler({ requestHandler, userBuilder: UserBuilder.noAuthentication }));
 
   // REST API routes — payment is handled inside skillHandler via request_payment flow
-  // coinbase_attestation v2's statement signer. startServer refuses to start
-  // without a usable COINBASE_STATEMENT_KMS_KEY; an app built without one (a
-  // unit test of some other route) answers every Coinbase proof request with
-  // an error rather than proving without a statement.
+  // The statement signer for coinbase_attestation v2 (revocation statement)
+  // and oidc_domain_attestation (provider-key statement): one Cloud KMS key,
+  // pinned by both circuits. startServer refuses to start without a usable
+  // COINBASE_STATEMENT_KMS_KEY; an app built without one (a unit test of some
+  // other route) answers every Coinbase or OIDC proof request with an error
+  // rather than proving without a statement.
   const statement = process.env.COINBASE_STATEMENT_KMS_KEY
     ? {
         reader: easAttestationReader(config.easGraphqlEndpoint, config.baseRpcUrl),
@@ -280,9 +282,9 @@ async function startServer() {
     await ensureArtifacts(config.circuitsDir, config.circuitsRepoUrl);
     log.info({ action: 'server.artifacts.ready' }, 'Circuit artifacts ready');
 
-    // The coinbase_attestation v2 statement key must be reachable and be
-    // EC_SIGN_P256_SHA256 before this serves anything: otherwise every
-    // Coinbase request would be refused only after the caller tried to pay.
+    // The statement key (coinbase_attestation v2 and oidc_domain_attestation)
+    // must be reachable and be EC_SIGN_P256_SHA256 before this serves
+    // anything: otherwise every Coinbase and OIDC request would fail.
     {
       const { createPublicKey, createHash } = await import('node:crypto');
       const pem = await statementSignerFromEnv().publicKeyPem();
@@ -290,7 +292,7 @@ async function startServer() {
       const xy = Buffer.concat([Buffer.from(jwk.x, 'base64url'), Buffer.from(jwk.y, 'base64url')]);
       log.info(
         { action: 'server.coinbase_statement.ready', keyVersion: process.env.COINBASE_STATEMENT_KMS_KEY, keyXYSha256: createHash('sha256').update(xy).digest('hex') },
-        'Coinbase KYC v2 statement key ready',
+        'Statement key ready (coinbase_attestation v2, oidc_domain_attestation)',
       );
     }
 

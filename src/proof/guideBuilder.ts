@@ -221,6 +221,14 @@ function buildInputSchema(circuitId: CircuitId) {
       ],
       accepted_tokens: 'RS256 id_token from the ZKProofport device sign-in only: aud must be the Google device client or the Microsoft client of @zkproofport-ai/mcp, iss Google or a Microsoft v2.0 tenant, and the token unexpired.',
       public_input_count: 214,
+      provider_key_statement: {
+        description:
+          'Before any payment is taken the server validates the token, checks that the RSA key it was signed with is in ' +
+          'the provider\'s published key list (Google, or Microsoft\'s organizations list), and signs a 313-byte statement ' +
+          '(provider, now, modulus) with its own key, which the circuit pins. Clients send nothing extra; anything sent as ' +
+          'providerKeyStatement is replaced. The public inputs are unchanged.',
+        refusals: 'OIDC_TOKEN_REFUSED / OIDC_PROVIDER_KEY_INVALID (400), OIDC_PROVIDER_KEY_UNPUBLISHED (403, also when the key list cannot be fetched) -- all before payment. Encrypted payloads are refused (E2E_UNSUPPORTED).',
+      },
       server_computed_fields: [
         { name: 'pubkey_modulus_limbs', description: '18 x u128 RSA public key modulus limbs (from JWKS)' },
         { name: 'domain', description: 'BoundedVec<u8, 64> — email domain bytes' },

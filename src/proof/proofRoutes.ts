@@ -27,6 +27,11 @@ import {
   type ServerStatement,
   type StatementSigner,
 } from '../input/coinbaseStatement.js';
+import {
+  prepareOidcProviderKeyStatement,
+  type OidcProviderKeyStatement,
+  type ProviderKeyCheck,
+} from '../input/oidcStatement.js';
 import type {
   ProveRequest,
   ProveResponse,
@@ -57,12 +62,15 @@ export interface ProofRoutesDeps {
   config: Config;
   teeProvider?: TeeProvider;
   /**
-   * coinbase_attestation v2's server statement: the on-chain revocation read
-   * and the Cloud KMS signer. index.ts always supplies it (startup fails
-   * without COINBASE_STATEMENT_KMS_KEY); a Coinbase request reaching routes
+   * The server's signed statements: coinbase_attestation v2's revocation
+   * statement (the on-chain read `reader`) and oidc_domain_attestation's
+   * provider-key statement (the live key-list check `checkProviderKey`,
+   * core's by default), both signed by the one Cloud KMS `signer` the
+   * circuits pin. index.ts always supplies it (startup fails without
+   * COINBASE_STATEMENT_KMS_KEY); a Coinbase or OIDC request reaching routes
    * built without it is an error, never a proof without a statement.
    */
-  statement?: { reader: AttestationReader; signer: StatementSigner };
+  statement?: { reader: AttestationReader; signer: StatementSigner; checkProviderKey?: ProviderKeyCheck };
 }
 
 /**
@@ -89,6 +97,9 @@ const STATEMENT_REFUSAL_STATUS: Record<string, number> = {
   NO_COINBASE_ATTESTATION: 403,
   COINBASE_ATTESTATION_REVOKED: 403,
   COINBASE_ATTESTATION_EXPIRED: 403,
+  OIDC_TOKEN_REFUSED: 400,
+  OIDC_PROVIDER_KEY_INVALID: 400,
+  OIDC_PROVIDER_KEY_UNPUBLISHED: 403,
 };
 
 /** Shared context for proof generation */
@@ -102,6 +113,8 @@ interface ProveContext {
   verification: ProveResponse['verification'];
   /** coinbase_attestation v2: the statement signed before payment was taken. */
   statement?: ServerStatement;
+  /** oidc_domain_attestation: the provider-key statement signed before payment was taken. */
+  oidcStatement?: OidcProviderKeyStatement;
 }
 
 /**
@@ -200,14 +213,20 @@ async function generateProofFromInputs(
   if ((circuitId === CIRCUIT_IDS.COINBASE_ATTESTATION) !== Boolean(ctx.statement)) {
     throw new Error(`${circuitId}: the server statement is ${ctx.statement ? 'present for a circuit that takes none' : 'missing'}`);
   }
+  if (isOidc !== Boolean(ctx.oidcStatement)) {
+    throw new Error(`${circuitId}: the provider-key statement is ${ctx.oidcStatement ? 'present for a circuit that takes none' : 'missing'}`);
+  }
   if (isOidc) {
-    // OIDC: pass OidcProvePayload { jwt, jwks, scope, provider } — TEE/bbProver validates JWT + builds circuit inputs
+    // OIDC: pass OidcProvePayload { jwt, jwks, scope, provider } plus the
+    // provider-key statement signed before payment — TEE/bbProver validates
+    // the JWT again and builds circuit inputs. The statement is set last so a
+    // caller-sent providerKeyStatement never reaches the prover.
     const oidc = inputs as { jwt?: string; jwks?: unknown; scope?: string };
     if (!oidc.jwt || !oidc.jwks || !oidc.scope) {
       res.status(400).json({ error: 'INVALID_REQUEST', message: 'Missing required OIDC fields: jwt, jwks, scope' });
       return;
     }
-    proverInputs = inputs;
+    proverInputs = { ...inputs, providerKeyStatement: ctx.oidcStatement };
   } else {
     // Coinbase: validate and convert to CircuitParams — TEE/bbProver calls toProverToml()
     const cb = inputs as import('./types.js').CoinbaseProveInputs;
@@ -636,6 +655,49 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
         }
       }
 
+      // oidc_domain_attestation: the circuit verifies a signature over the
+      // token's RSA key (the provider-key statement). Validate the token as
+      // the prover will, confirm the key is in the provider's published list
+      // and sign -- all BEFORE payment, so a self-made key, a refused token or
+      // a key list that cannot be fetched costs the caller nothing.
+      let oidcStatement: OidcProviderKeyStatement | undefined;
+      if (circuitId === CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION) {
+        if (body.encrypted_payload) {
+          res.status(400).json({
+            error: 'E2E_UNSUPPORTED',
+            message: 'oidc_domain_attestation needs the server to check the token\'s signing key and sign a statement about it, which it cannot do inside an encrypted payload. Send plaintext inputs.',
+          });
+          return;
+        }
+        const actionError = actionFieldsError(circuitId, body.inputs);
+        if (actionError) {
+          res.status(400).json({ error: 'INVALID_REQUEST', message: actionError });
+          return;
+        }
+        const oidc = (body.inputs ?? {}) as { jwt?: unknown; jwks?: unknown; scope?: unknown };
+        if (typeof oidc.jwt !== 'string' || !oidc.jwt || !oidc.jwks || typeof oidc.jwks !== 'object' || typeof oidc.scope !== 'string' || !oidc.scope) {
+          res.status(400).json({ error: 'INVALID_REQUEST', message: 'Missing required OIDC fields: jwt, jwks, scope' });
+          return;
+        }
+        if (!deps.statement) throw new Error('oidc_domain_attestation statement signer is not configured on this server');
+        try {
+          oidcStatement = await prepareOidcProviderKeyStatement(
+            body.inputs as unknown as import('../prover/oidcProver.js').OidcProvePayload,
+            { signer: deps.statement.signer, checkProviderKey: deps.statement.checkProviderKey },
+          );
+        } catch (e) {
+          if (e instanceof StatementRefusal) {
+            const status = STATEMENT_REFUSAL_STATUS[e.code];
+            if (!status) throw new Error(`Unmapped statement refusal ${e.code}: ${e.message}`);
+            // The message can quote token claims (the email); the code is logged, the caller gets the message.
+            log.warn({ action: 'prove.oidc.statement_refused', code: e.code }, 'OIDC provider-key statement refused');
+            res.status(status).json({ error: e.code, message: e.message });
+            return;
+          }
+          throw e;
+        }
+      }
+
       // On-chain payment verification (skip when payment disabled)
       if (config.paymentMode !== 'disabled') {
         const paymentStart = Date.now();
@@ -869,6 +931,7 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
           requestId,
           verification: chooseVerificationTarget(config, circuitId, isTestnet),
           statement,
+          oidcStatement,
         },
         deps,
         config,

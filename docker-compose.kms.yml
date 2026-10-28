@@ -1,6 +1,6 @@
-# coinbase_attestation v2: the server signs each Coinbase request's revocation
-# statement with a Cloud KMS key the circuit pins, and refuses to start without
-# a usable one. On Cloud Run the service account supplies the credentials; a
+# The server signs each coinbase_attestation v2 request's revocation statement
+# and each oidc_domain_attestation request's provider-key statement with one
+# Cloud KMS key both circuits pin, and refuses to start without a usable one. On Cloud Run the service account supplies the credentials; a
 # local container needs a gcloud credentials file allowed to sign with the key
 # (roles/cloudkms.signerVerifier, or project owner).
 #
@@ -9,7 +9,7 @@
 #
 # scripts/ai-dev.sh and scripts/run-e2e.sh --container layer this file on top
 # of docker-compose.yml. Both values are required: a container started without
-# them would refuse every Coinbase proof, so compose stops here instead.
+# them would refuse every Coinbase and OIDC proof, so compose stops here instead.
 services:
   ai:
     environment:

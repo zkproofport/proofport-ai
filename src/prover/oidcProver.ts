@@ -12,14 +12,18 @@
  *    This server proves for the CLI/AI device flow, which cannot carry a nonce,
  *    so it proves in nonce_mode 0 and accepts only the device-flow client ids.
  * 4. Compute RSA limbs, partial SHA-256, domain, scope, nullifier, aud_hash, now
- * 5. Return OidcCircuitInputs ready for formatOidcInputs → noir_js
+ * 5. Add the server-signed provider-key statement (signer kind 2): the route
+ *    signs it BEFORE payment (src/input/oidcStatement.ts, using
+ *    oidcStatementSubject below, the same checks), and `now` here is the one
+ *    it was signed for, never this process's clock
+ * 6. Return OidcCircuitInputs ready for formatOidcInputs → noir_js
  *
  * Layout and builder contract: circuits oidc-domain-attestation/src/main.nr and
  * its reference builder scripts/oidc-inputs.ts (v2, 214 public inputs).
  */
 
 import { ethers } from 'ethers';
-import type { OidcCircuitInputs } from './inputFormatter.js';
+import { APP_ATTEST_ZERO_INPUTS, SIGNER_KIND_SERVER, type OidcCircuitInputs } from './inputFormatter.js';
 
 // ─── Circuit constants (must match main.nr) ─────────────────────────────
 
@@ -77,6 +81,27 @@ export interface OidcProvePayload {
   /** Optional; when given it must agree with the token's `iss`. */
   provider?: OidcProviderName;
   domain?: string;
+  /**
+   * Set by the proof route only, after it checked the key against the live
+   * key list and Cloud KMS signed the statement; anything a caller sends under
+   * this name is overwritten. Required by prepareOidcCircuitInputs.
+   */
+  providerKeyStatement?: OidcProviderKeyStatement;
+}
+
+/**
+ * The server-signed provider-key statement, as the route hands it to the
+ * prover: the `now` it was signed for (also the public input `now`), the
+ * modulus it vouches for and the signature (r || s, low s). Hex/decimal so it
+ * crosses JSON (and the enclave's vsock) unchanged.
+ */
+export interface OidcProviderKeyStatement {
+  /** Unix seconds, decimal. */
+  now: string;
+  /** The 256-byte RSA modulus, 0x-hex, big-endian. */
+  modulus: string;
+  /** P-256 r || s, s in low form, 0x-hex (64 bytes). */
+  signature: string;
 }
 
 /**
@@ -131,6 +156,23 @@ export function oidcNowFor(iat: unknown, exp: unknown, clockSeconds: number): bi
     throw new Error(`JWT expired at ${expiresAt} (now ${now}). Sign in again for a fresh id_token.`);
   }
   return BigInt(now);
+}
+
+/**
+ * The `now` a provider-key statement was signed for, checked against the
+ * token the way the circuit does: iat <= now < exp, no skew allowance (the
+ * skew was applied when `now` was chosen, by oidcNowFor).
+ */
+export function oidcNowAt(iat: unknown, exp: unknown, now: bigint): bigint {
+  if (!Number.isSafeInteger(iat) || (iat as number) < 0) {
+    throw new Error(`JWT iat must be a non-negative integer, got ${JSON.stringify(iat)}.`);
+  }
+  if (!Number.isSafeInteger(exp) || (exp as number) < 0) {
+    throw new Error(`JWT exp must be a non-negative integer, got ${JSON.stringify(exp)}.`);
+  }
+  if (now < BigInt(iat as number)) throw new Error(`Statement time ${now} is before the JWT iat ${iat as number}.`);
+  if (now >= BigInt(exp as number)) throw new Error(`JWT expired at ${exp as number} (statement time ${now}).`);
+  return now;
 }
 
 interface JWK {
@@ -246,13 +288,72 @@ function keccak256Bytes(data: Uint8Array): Uint8Array {
 
 // ─── Main: validate JWT + build circuit inputs ──────────────────────────
 
+type UnsignedOidcInputs = Omit<OidcCircuitInputs,
+  | 'signer_kind' | 'statement_sig' | 'credential_tbs' | 'credential_tbs_len' | 'credential_sig'
+  | 'att_auth_data' | 'att_auth_data_len' | 'att_client_data_hash' | 'assertion_auth_data' | 'assertion_auth_data_len'>;
+
+/**
+ * What the provider-key statement is about, after every check the prover
+ * makes: the circuit's provider value, the `now` the proof will carry (this
+ * server's clock, raised to iat within the skew), and the key the token was
+ * signed with. The route calls this BEFORE payment, so a token the prover
+ * would refuse is refused for free.
+ */
+export function oidcStatementSubject(
+  payload: OidcProvePayload,
+  clockSeconds: number,
+): { provider: number; now: bigint; modulusB64url: string; kid: string } {
+  const built = buildUnsignedOidcInputs(payload, (iat, exp) => oidcNowFor(iat, exp, clockSeconds));
+  return { provider: built.inputs.provider, now: built.now, modulusB64url: built.jwk.n, kid: built.jwk.kid };
+}
+
 /**
  * Validate JWT claims and prepare circuit inputs for oidc_domain_attestation.
  *
  * Called inside TEE (enclave) or bbProver (local).
  * JWKS is pre-fetched by SDK and passed in (TEE has no network access).
+ * `payload.providerKeyStatement` is required: the circuit verifies the
+ * server's signature over (provider, now, modulus), so `now` is the signed
+ * one and the modulus must be the one signed.
  */
 export function prepareOidcCircuitInputs(payload: OidcProvePayload): OidcCircuitInputs {
+  const statement = payload.providerKeyStatement;
+  if (!statement || typeof statement !== 'object') {
+    throw new Error('oidc_domain_attestation needs the server-signed provider-key statement (providerKeyStatement); none was given.');
+  }
+  if (typeof statement.now !== 'string' || !/^(0|[1-9][0-9]{0,19})$/.test(statement.now) || BigInt(statement.now) >= 1n << 64n) {
+    throw new Error(`providerKeyStatement.now must be a decimal u64, got ${JSON.stringify(statement.now)}.`);
+  }
+  if (typeof statement.modulus !== 'string' || !/^0x[0-9a-fA-F]{512}$/.test(statement.modulus)) {
+    throw new Error('providerKeyStatement.modulus must be 0x and 256 bytes of hex.');
+  }
+  if (typeof statement.signature !== 'string' || !/^0x[0-9a-fA-F]{128}$/.test(statement.signature)) {
+    throw new Error('providerKeyStatement.signature must be 0x and 64 bytes of hex (r || s).');
+  }
+  const signedNow = BigInt(statement.now);
+  const { inputs, modulusHex } = buildUnsignedOidcInputs(payload, (iat, exp) => oidcNowAt(iat, exp, signedNow));
+  if (modulusHex !== statement.modulus.toLowerCase()) {
+    throw new Error('The provider-key statement was signed for a different RSA key than the one this token uses.');
+  }
+  return {
+    ...inputs,
+    signer_kind: SIGNER_KIND_SERVER,
+    statement_sig: Array.from(ethers.getBytes(statement.signature)),
+    credential_tbs: new Array(APP_ATTEST_ZERO_INPUTS.credential_tbs).fill(0),
+    credential_tbs_len: 0,
+    credential_sig: new Array(APP_ATTEST_ZERO_INPUTS.credential_sig).fill(0),
+    att_auth_data: new Array(APP_ATTEST_ZERO_INPUTS.att_auth_data).fill(0),
+    att_auth_data_len: 0,
+    att_client_data_hash: new Array(APP_ATTEST_ZERO_INPUTS.att_client_data_hash).fill(0),
+    assertion_auth_data: new Array(APP_ATTEST_ZERO_INPUTS.assertion_auth_data).fill(0),
+    assertion_auth_data_len: 0,
+  };
+}
+
+function buildUnsignedOidcInputs(
+  payload: OidcProvePayload,
+  resolveNow: (iat: unknown, exp: unknown) => bigint,
+): { inputs: UnsignedOidcInputs; now: bigint; jwk: JWK; modulusHex: string } {
   const { jwt, jwks, scope } = payload;
   if (typeof jwt !== 'string') {
     throw new Error('Invalid JWT format: expected a string');
@@ -295,7 +396,7 @@ export function prepareOidcCircuitInputs(payload: OidcProvePayload): OidcCircuit
     );
   }
 
-  const now = oidcNowFor(jwtPayload.iat, jwtPayload.exp, Math.floor(Date.now() / 1000));
+  const now = resolveNow(jwtPayload.iat, jwtPayload.exp);
 
   // 2. Provider-specific claim validation
   if (provider === 'microsoft') {
@@ -322,12 +423,18 @@ export function prepareOidcCircuitInputs(payload: OidcProvePayload): OidcCircuit
   const domain = payload.domain || email.substring(atIndex + 1);
 
   // 3. Find matching JWKS key
-  const jwk = jwks.keys.find(k => k.kid === header.kid);
+  if (!jwks || typeof jwks !== 'object' || !Array.isArray(jwks.keys)) {
+    throw new Error('jwks must be an object with a "keys" array.');
+  }
+  const jwk = jwks.keys.find(k => k && k.kid === header.kid);
   if (!jwk) {
     throw new Error(`No JWKS key matching kid="${header.kid}". Available: ${jwks.keys.map(k => k.kid).join(', ')}`);
   }
   if (jwk.kty !== 'RSA') {
     throw new Error(`Expected RSA key, got ${jwk.kty}`);
+  }
+  if (typeof jwk.n !== 'string') {
+    throw new Error(`JWKS key "${header.kid}" has no modulus n.`);
   }
 
   // 4. Compute RSA limbs
@@ -384,7 +491,7 @@ export function prepareOidcCircuitInputs(payload: OidcProvePayload): OidcCircuit
   // 9. aud_hash = keccak256(aud); device flow: nonce_mode 0, zero binding.
   const audHash = keccak256Bytes(new TextEncoder().encode(jwtPayload.aud as string));
 
-  return {
+  const inputs: UnsignedOidcInputs = {
     pubkey_modulus_limbs: pubkeyLimbs,
     domain: { storage: Array.from(domainStorage), len: domainBytes.length },
     scope: Array.from(scopeBytes),
@@ -401,4 +508,5 @@ export function prepareOidcCircuitInputs(payload: OidcProvePayload): OidcCircuit
     redc_params_limbs: redcLimbs,
     signature_limbs: sigLimbs,
   };
+  return { inputs, now, jwk, modulusHex: '0x' + modulusBigInt.toString(16).padStart(512, '0') };
 }

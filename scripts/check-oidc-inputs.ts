@@ -15,13 +15,26 @@
  * which shows the circuit is actually checking the field (a check that
  * accepts everything would pass the first half alone).
  *
+ * Since the provider-key statement (circuits fix list item 12) the circuit
+ * also verifies the server's P-256 signature over (provider, now, modulus)
+ * against the key it PINS, so only the real Cloud KMS key can make a witness
+ * solve: set COINBASE_STATEMENT_KMS_KEY (the key version both circuits pin)
+ * and credentials allowed to sign with it (GOOGLE_APPLICATION_CREDENTIALS or
+ * gcloud application-default). There is no local-key mode, on purpose: a
+ * witness signed by any other key is refused by the circuit. The script signs
+ * the statement exactly as the route does, but for the throwaway RSA key the
+ * tokens here are signed with -- it skips only the live key-list check.
+ *
  * Exits non-zero on any unexpected result. Needs `env -u NODE_OPTIONS` on a
  * shell whose NODE_OPTIONS preloads a file that no longer exists.
  */
 import { readFileSync } from 'fs';
 import { generateKeyPairSync, sign } from 'crypto';
 import { Noir } from '@noir-lang/noir_js';
-import { prepareOidcCircuitInputs } from '../src/prover/oidcProver.js';
+import { ethers } from 'ethers';
+import { prepareOidcCircuitInputs, oidcStatementSubject, type OidcProvePayload } from '../src/prover/oidcProver.js';
+import { buildProviderKeyStatement, providerKeyModulusBytes } from '../src/input/oidcStatement.js';
+import { signStatement, statementSignerFromEnv } from '../src/input/statementSigner.js';
 import { formatOidcInputs, type OidcCircuitInputs } from '../src/prover/inputFormatter.js';
 
 const circuitPath = process.argv[2];
@@ -36,6 +49,14 @@ const expected = ['pubkey_modulus_limbs', 'domain', 'scope', 'nullifier', 'provi
 if (publicNames.join(',') !== expected.join(',')) {
   throw new Error(`Public parameters are [${publicNames.join(', ')}], expected the v2 layout [${expected.join(', ')}].`);
 }
+const signerParams = ['signer_kind', 'statement_sig', 'credential_tbs', 'credential_tbs_len', 'credential_sig',
+  'att_auth_data', 'att_auth_data_len', 'att_client_data_hash', 'assertion_auth_data', 'assertion_auth_data_len'];
+const allNames = params.map(p => p.name);
+if (allNames.slice(-signerParams.length).join(',') !== signerParams.join(',')) {
+  throw new Error(`The circuit's last parameters are [${allNames.slice(-signerParams.length).join(', ')}]; ` +
+    `a provider-key-statement circuit ends with [${signerParams.join(', ')}]. Is this the circuit from before the statement?`);
+}
+const signer = statementSignerFromEnv();
 
 const GOOGLE_DEVICE = '491923400813-pr17m6kpin2rsbbes18jpb60j1s3qmv4.apps.googleusercontent.com';
 const MICROSOFT = '8b09c842-d7a8-4d9c-a6ea-46c797412bac';
@@ -89,6 +110,8 @@ const tampered: Array<[string, Tamper]> = [
   ['now = exp', i => { i.now = String(clock + 3570); }],
   ['now = iat - 1', i => { i.now = String(clock - 31); }],
   ['base64_decode_offset + 4', i => { i.base64_decode_offset += 4; }],
+  ['statement_sig flipped', i => flip(i.statement_sig, 63)],
+  ['provider-key statement for another modulus', i => { i.pubkey_modulus_limbs = [...i.pubkey_modulus_limbs]; i.pubkey_modulus_limbs[0] = (BigInt(i.pubkey_modulus_limbs[0]) ^ 2n).toString(); }],
 ];
 {
   const kid = kidForHeaderLength(63);
@@ -98,11 +121,18 @@ const tampered: Array<[string, Tamper]> = [
 let failures = 0;
 const noir = new Noir(circuit);
 for (const c of cases) {
-  const built = prepareOidcCircuitInputs({
+  const payload: OidcProvePayload = {
     jwt: c.jwt,
     jwks: { keys: [{ ...baseJwk, kid: c.kid, alg: 'RS256', use: 'sig' } as never] },
     scope: 'check:oidc-inputs',
     ...(c.provider ? { provider: c.provider } : {}),
+  };
+  const subject = oidcStatementSubject(payload, clock);
+  const modulus = providerKeyModulusBytes(subject.modulusB64url);
+  const signature = await signStatement(signer, buildProviderKeyStatement(subject.provider, subject.now, modulus));
+  const built = prepareOidcCircuitInputs({
+    ...payload,
+    providerKeyStatement: { now: subject.now.toString(), modulus: ethers.hexlify(modulus), signature: ethers.hexlify(signature) },
   });
   c.tamper?.(built);
   let solved = true;

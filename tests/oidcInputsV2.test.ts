@@ -21,14 +21,16 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { generateKeyPairSync, sign, createHash, type KeyObject } from 'crypto';
 import { ethers } from 'ethers';
 import {
-  prepareOidcCircuitInputs,
+  prepareOidcCircuitInputs as proverBuild,
+  oidcStatementSubject,
   resolveOidcProvider,
   oidcNowFor,
   OIDC_PROVIDERS,
   OIDC_MAX_PARTIAL_DATA_LENGTH,
   OIDC_IAT_CLOCK_SKEW_SECONDS,
 } from '../src/prover/oidcProver.js';
-import { formatOidcInputs } from '../src/prover/inputFormatter.js';
+import { formatOidcInputs, type OidcCircuitInputs } from '../src/prover/inputFormatter.js';
+import type { OidcProvePayload } from '../src/prover/oidcProver.js';
 import {
   checkDeviceFlowToken,
   prepareOidcInputs,
@@ -61,6 +63,24 @@ const microsoft = (extra: Record<string, unknown> = {}) => ({
   aud: MICROSOFT, iss: MS_ISS, iat: CLOCK - 10, nbf: CLOCK - 10, exp: CLOCK + 3590, email: 'bob@contoso.com',
   xms_edov: true, tid: '72f988bf-86f1-41af-91ab-2d7cd011db47', ...extra,
 });
+
+/**
+ * The server's two steps for one token, as the route runs them: the subject
+ * (validated against the clock, before payment) and then the prover with the
+ * statement signed for that subject. The signature bytes are a placeholder;
+ * the signing itself is tests/oidcStatement.test.ts.
+ */
+const STATEMENT_SIG = '0x' + '11'.repeat(64);
+function prepareOidcCircuitInputs(payload: OidcProvePayload): OidcCircuitInputs {
+  const subject = oidcStatementSubject(payload, Math.floor(Date.now() / 1000));
+  const modulus = '0x' + Buffer.from(subject.modulusB64url, 'base64url').toString('hex');
+  return proverBuild({ ...payload, providerKeyStatement: { now: subject.now.toString(), modulus, signature: STATEMENT_SIG } });
+}
+const SIGNER_FIELDS = [
+  'signer_kind', 'statement_sig', 'credential_tbs', 'credential_tbs_len', 'credential_sig',
+  'att_auth_data', 'att_auth_data_len', 'att_client_data_hash', 'assertion_auth_data', 'assertion_auth_data_len',
+] as const;
+const withoutSigner = (i: OidcCircuitInputs) => Object.fromEntries(Object.entries(i).filter(([k]) => !(SIGNER_FIELDS as readonly string[]).includes(k)));
 
 const serverBuild = (jwt: string, provider?: 'google' | 'microsoft', scope = 'myapp:membership') =>
   prepareOidcCircuitInputs({ jwt, jwks: { keys: [jwk as never] }, scope, ...(provider ? { provider } : {}) });
@@ -174,6 +194,9 @@ describe('server builder: what it refuses before proving', () => {
 });
 
 describe('now', () => {
+  it('oidcNowFor refuses a clock equal to exp', () => {
+    expect(() => oidcNowFor(CLOCK - 100, CLOCK, CLOCK)).toThrow(/expired/);
+  });
   it('is exp - 1 at the last valid second', () => {
     expect(oidcNowFor(CLOCK - 100, CLOCK + 1, CLOCK)).toBe(BigInt(CLOCK));
   });
@@ -266,6 +289,7 @@ describe('noir_js formatting', () => {
     expect(Object.keys(f)).toEqual([
       'pubkey_modulus_limbs', 'domain', 'scope', 'nullifier', 'provider', 'aud_hash', 'nonce_mode', 'nonce_binding', 'now',
       'partial_data', 'partial_hash', 'full_data_length', 'base64_decode_offset', 'redc_params_limbs', 'signature_limbs',
+      ...SIGNER_FIELDS,
     ]);
   });
 });
@@ -307,13 +331,14 @@ describe('client SDK', () => {
     serveJwks();
     const jwt = signJwt(google());
     const sdk = await prepareOidcInputs({ jwt, scope: 'myapp:membership', jwksUrl: 'https://keys' });
-    expect(sdk).toEqual(serverBuild(jwt, undefined, 'myapp:membership'));
+    // The SDK builds no signer inputs: only this server signs, after payment-free checks.
+    expect(sdk).toEqual(withoutSigner(serverBuild(jwt, undefined, 'myapp:membership')));
   });
 
   it('builds the same inputs as the server for a Microsoft token', async () => {
     serveJwks();
     const jwt = signJwt(microsoft());
-    expect(await prepareOidcInputs({ jwt, scope: 'x', jwksUrl: 'https://keys', provider: 'microsoft' })).toEqual(serverBuild(jwt, 'microsoft', 'x'));
+    expect(await prepareOidcInputs({ jwt, scope: 'x', jwksUrl: 'https://keys', provider: 'microsoft' })).toEqual(withoutSigner(serverBuild(jwt, 'microsoft', 'x')));
   });
 });
 
