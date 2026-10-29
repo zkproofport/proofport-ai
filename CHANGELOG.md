@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.6.2](https://github.com/zkproofport/proofport-ai/compare/server-v0.6.1...server-v0.6.2) (2026-10-29)
+
+
+### Features
+
+* **mcp:** accept an EIP-712 action for coinbase_kyc ([5983956](https://github.com/zkproofport/proofport-ai/commit/598395679dab1248b33b4ce91d5798427d297c58))
+* **sdk:** verify Coinbase KYC v2 through @zkproofport-app/core 0.4.0-beta.1 ([3d8047f](https://github.com/zkproofport/proofport-ai/commit/3d8047f7dbcda1d4b02133b4a64845e24851fbc9))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @zkproofport-ai/mcp bumped from ^0.4.3 to ^0.4.4
+    * @zkproofport-ai/sdk bumped from ^0.5.1 to ^0.5.2
+
 ## [0.6.1](https://github.com/zkproofport/proofport-ai/compare/server-v0.6.0...server-v0.6.1) (2026-10-29)
 
 
