@@ -277,13 +277,13 @@ function printUsage() {
   writeError('  --login-google             Login with Google account (device flow)');
   writeError('  --login-google-workspace   Login with Google Workspace (device flow)');
   writeError('  --login-microsoft-365      Login with Microsoft 365 (device flow)');
-  writeError('  --action <file.json>        EIP-712 action; opens a human wallet approval link (GIWA)');
+  writeError('  --action <file.json>        EIP-712 action; opens a human wallet approval link (Coinbase KYC, GIWA)');
   writeError('  --pay-with <key|cdp>        Which wallet pays, when the service charges');
   writeError('  --pay-on <chain>            Which chain to pay on (e.g. base-sepolia, ethereum-sepolia)');
   writeError('  --max-payment <USDC>        Maximum proof fee, up to six decimal places');
   writeError('');
   writeError('Circuits:');
-  writeError('  coinbase_kyc       Prove Coinbase KYC verification (requires ATTESTATION_KEY)');
+  writeError('  coinbase_kyc       Prove Coinbase KYC verification, optionally binding one action (requires ATTESTATION_KEY)');
   writeError('  coinbase_country   Prove KYC country attestation (requires ATTESTATION_KEY)');
   writeError('  oidc_domain        Prove email domain via OIDC JWT (--jwt required)');
   writeError('  giwa_attestation   GIWA account attestation, optionally binding one action');

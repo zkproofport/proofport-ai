@@ -179,7 +179,7 @@ The CLI loads `--action` from a JSON file and calls the local MCP server interna
 | `circuit` | string | `coinbase_kyc`, `coinbase_country`, `oidc_domain`, or experimental `giwa_attestation` |
 | `scope` | string | Optional; default `proofport` |
 | `approval_id` | string | Resume an approved request with all original arguments unchanged |
-| `action` | EIP-712 object | Optional for `giwa_attestation`; rejected for circuits that cannot prove one, rather than dropped |
+| `action` | EIP-712 object | Optional for `coinbase_kyc` and `giwa_attestation`; rejected for circuits that cannot prove one, rather than dropped |
 | `pay_with` | `key` / `cdp` | Select the payment wallet explicitly |
 | `pay_on` | string | Select an actual offered route, e.g. `base-sepolia` or `ethereum-sepolia` |
 | `max_payment` | string | Maximum decimal USDC proof fee |
