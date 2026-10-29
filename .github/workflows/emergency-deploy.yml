@@ -1,0 +1,543 @@
+# Emergency proofport-ai deploy -- FALLBACK ONLY.
+#
+# Why this exists: since 2026-10-28 the monorepo that normally deploys this
+# service (zkproofport/proofport-app-dev, `deploy-ai.yml`) cannot run GitHub
+# Actions (an organisation billing problem refuses every job in private
+# repositories). This repository is public, so its jobs still run. The user
+# chose this fallback on 2026-10-29. Return to `deploy-ai.yml` as soon as it
+# runs again; its next run must use a monorepo commit whose proofport-ai and
+# circuits gitlinks CONTAIN what this workflow deployed (the image tag here
+# carries this repository's commit and the circuits commit, see below), or it
+# rolls the service back.
+#
+# KEEP IN SYNC with the monorepo's deploy-ai.yml. Anything that differs makes
+# switching back change the running service:
+#   - the "Resolve environment row" step = deploy-ai.yml "Set environment
+#     variables" (hostnames, instance counts, chain RPCs, payment mode,
+#     networks and price, ERC-8004 registries and agent token ids, runtime
+#     service account, KMS key)
+#   - the build context: scripts/prepare-build-context.mjs = the monorepo's
+#     scripts/deploy-ai-recording-gcp.mjs (same allowlist, same digest)
+#   - gcloud run deploy flags: port 4002, cpu 2, memory 4Gi, timeout 300,
+#     no cpu throttling, unauthenticated, VPC connector proofport-vpc with
+#     private-ranges-only egress, --no-traffic --tag candidate, then the same
+#     health / identity / verify-deployment checks before traffic moves
+#   - the non-secret environment variables (set below with --update-env-vars)
+#
+# What is deliberately NOT copied: the secret values (PROVER_PRIVATE_KEY,
+# PAYMENT_PAY_TO, REDIS_URL, ETHEREUM_RPC_URL, WALLETCONNECT_PROJECT_ID,
+# OPENAI_API_KEY, GEMINI_API_KEY). They live in the monorepo's secrets, which
+# cannot be read back, and are already set on the running service; this
+# workflow updates only the other variables, so Cloud Run keeps them. Moving a
+# prover key into a public repository's secrets would widen who can use it.
+# Consequences: the payment/wallet consistency check deploy-ai.yml runs before
+# building (validateSettlementConfig) is not repeated here -- the values are
+# unchanged from the running revision -- and the build arg
+# NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID and the payee address checked by
+# verify-deployment.ts are read from the running service.
+#
+# Inputs: `circuits_sha` is the zkproofport/circuits commit whose artifacts are
+# baked into the image -- the commit the monorepo's circuits gitlink would
+# name. A full 40-hex sha, never a branch.
+#
+# Repository secrets (Settings > Secrets and variables > Actions), secrets so
+# this public repository's logs mask them:
+#   GCP_WORKLOAD_IDENTITY_PROVIDER (github-actions-pool/providers/github-proofport-ai,
+#   which accepts only this file on refs/heads/main via workflow_dispatch),
+#   GCP_SERVICE_ACCOUNT, GCP_REGION, GCP_ARTIFACT_REGISTRY, GCP_PROJECT,
+#   GCP_PROJECT_NUMBER
+
+name: Emergency deploy (fallback)
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+      circuits_sha:
+        description: 'zkproofport/circuits commit (40 hex) whose artifacts are baked in'
+        required: true
+        type: string
+      deployed_ai_sha:
+        description: >-
+          proofport-ai commit currently running, when the running image was
+          built by the monorepo (its tag then carries a monorepo commit).
+          Resolve with `git ls-tree <monorepo-sha> proofport-ai`. Leave empty
+          otherwise.
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: proofport-ai-cloud-run-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy proofport-ai ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mask project identifiers
+        env:
+          GCP_PROJECT: ${{ secrets.GCP_PROJECT }}
+          GCP_PROJECT_NUMBER: ${{ secrets.GCP_PROJECT_NUMBER }}
+        run: |
+          if [ -z "$GCP_PROJECT" ] || [ -z "$GCP_PROJECT_NUMBER" ]; then
+            echo "GCP_PROJECT and GCP_PROJECT_NUMBER secrets are required" >&2
+            exit 1
+          fi
+          echo "::add-mask::$GCP_PROJECT"
+          echo "::add-mask::$GCP_PROJECT_NUMBER"
+
+      - name: Refuse anything but main
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "Refusing to deploy from $GITHUB_REF; only refs/heads/main deploys." >&2
+            exit 1
+          fi
+
+      - name: Check the circuits commit
+        env:
+          CIRCUITS_SHA: ${{ inputs.circuits_sha }}
+        run: |
+          if ! printf '%s' "$CIRCUITS_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "circuits_sha must be a full 40-hex commit, got '$CIRCUITS_SHA'" >&2
+            exit 1
+          fi
+
+      # Same rows as deploy-ai.yml's "Set environment variables" step.
+      - name: Resolve environment row
+        id: env
+        env:
+          ENV: ${{ inputs.environment }}
+        run: |
+          {
+            echo "ENV=$ENV"
+            echo "GIWA_RPC_URL=https://sepolia-rpc.giwa.io/"
+            echo "GIWA_EXPLORER_URL=https://sepolia-explorer.giwa.io"
+            echo "COINBASE_STATEMENT_KMS_KEY=projects/masselabs-zkproofport/locations/us-central1/keyRings/proofport-ai/cryptoKeys/coinbase-kyc-v2-statement/cryptoKeyVersions/1"
+          } >> "$GITHUB_OUTPUT"
+          case "$ENV" in
+            staging)
+              {
+                echo "RUNTIME_SERVICE_ACCOUNT=proofport-ai-staging@masselabs-zkproofport.iam.gserviceaccount.com"
+                echo "URL_PREFIX=stg-ai"
+                echo "MIN_INSTANCES=0"
+                echo "MAX_INSTANCES=3"
+                echo "CHAIN_RPC_URL=https://base-sepolia.gateway.tenderly.co"
+                echo "PAYMENT_MODE=testnet"
+                echo "PAYMENT_NETWORKS=base-sepolia,ethereum-sepolia"
+                echo "PAYMENT_PROOF_PRICE=\$0.001"
+                echo "ERC8004_IDENTITY=0x8004A818BFB912233c491871b3d84c89A494BD9e"
+                echo "ERC8004_REPUTATION=0x8004B663056A597Dffe9eCcC1965A193B7388713"
+                echo "ERC8004_VALIDATION=0x8004C269D0A5647E51E121FeB226200ECE932d55"
+                echo "AGENT_TOKEN_ID=592"
+                echo "AGENT_TOKEN_ID_ETHEREUM=3288"
+              } >> "$GITHUB_OUTPUT"
+              ;;
+            production)
+              {
+                echo "RUNTIME_SERVICE_ACCOUNT=proofport-ai-production@masselabs-zkproofport.iam.gserviceaccount.com"
+                echo "URL_PREFIX=ai"
+                echo "MIN_INSTANCES=1"
+                echo "MAX_INSTANCES=10"
+                echo "CHAIN_RPC_URL=https://base.gateway.tenderly.co"
+                echo "PAYMENT_MODE=mainnet"
+                echo "PAYMENT_NETWORKS=base,ethereum"
+                echo "PAYMENT_PROOF_PRICE=\$0.10"
+                echo "ERC8004_IDENTITY=0x8004A169FB4a3325136EB29fA0ceB6D2e539a432"
+                echo "ERC8004_REPUTATION=0x8004BAa17C55a88189AE136b182e5fdA19dE9b63"
+                echo "ERC8004_VALIDATION="
+                echo "AGENT_TOKEN_ID=25331"
+                echo "AGENT_TOKEN_ID_ETHEREUM=31921"
+              } >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Unknown environment '$ENV'. Known: staging, production." >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Checkout proofport-ai
+        uses: actions/checkout@v4
+        with:
+          path: proofport-ai
+          fetch-depth: 0
+
+      - name: Checkout circuits
+        uses: actions/checkout@v4
+        with:
+          repository: zkproofport/circuits
+          ref: ${{ inputs.circuits_sha }}
+          path: circuits
+
+      - name: Record source commits
+        id: src
+        env:
+          CIRCUITS_SHA: ${{ inputs.circuits_sha }}
+        run: |
+          SHA=$(git -C proofport-ai rev-parse HEAD)
+          GOT=$(git -C circuits rev-parse HEAD)
+          if [ "$GOT" != "$CIRCUITS_SHA" ]; then
+            echo "circuits checkout is $GOT, not $CIRCUITS_SHA" >&2
+            exit 1
+          fi
+          # Image tag: <env>-<ai short sha>-c<circuits short sha>. Both commits
+          # are in it, so the running image names what it was built from.
+          echo "SHA=$SHA" >> "$GITHUB_OUTPUT"
+          echo "TAG=${{ steps.env.outputs.ENV }}-${SHA:0:7}-c${GOT:0:7}" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          install_components: beta
+
+      - name: Verify target GCP project
+        run: test "$(gcloud config get-value project)" = "masselabs-zkproofport"
+
+      - name: Refuse to roll back the running service
+        id: running
+        env:
+          SERVICE: proofport-ai-${{ steps.env.outputs.ENV }}
+          REGION: ${{ secrets.GCP_REGION }}
+          DEPLOYED_AI_SHA: ${{ inputs.deployed_ai_sha }}
+          SHA: ${{ steps.src.outputs.SHA }}
+        run: |
+          DESC=$(gcloud run services describe "$SERVICE" --region "$REGION" --format=json)
+          IMAGE=$(printf '%s' "$DESC" | jq -r '.spec.template.spec.containers[0].image')
+          TAG=${IMAGE##*:}
+          TAG_SHA=$(printf '%s' "$TAG" | sed -n 's/^[a-z]*-\([0-9a-f]\{7,40\}\)\(-c[0-9a-f]*\)\{0,1\}$/\1/p')
+          if [ -z "$TAG_SHA" ]; then
+            echo "Running image tag '$TAG' carries no commit; cannot check ancestry." >&2
+            exit 1
+          fi
+          if git -C proofport-ai cat-file -e "${TAG_SHA}^{commit}" 2>/dev/null && [ -z "$DEPLOYED_AI_SHA" ]; then
+            RUNNING="$TAG_SHA"
+            echo "Running image was built by this workflow from $RUNNING"
+          elif [ -n "$DEPLOYED_AI_SHA" ]; then
+            RUNNING="$DEPLOYED_AI_SHA"
+            echo "Running image tag is $TAG; proofport-ai commit given as $RUNNING"
+          else
+            echo "Running image tag $TAG is not a commit of this repository (a monorepo build)." >&2
+            echo "Pass deployed_ai_sha = git ls-tree <monorepo sha> proofport-ai." >&2
+            exit 1
+          fi
+          if ! git -C proofport-ai merge-base --is-ancestor "$RUNNING" "$SHA"; then
+            echo "Running proofport-ai $RUNNING is not an ancestor of $SHA; deploying would drop it." >&2
+            exit 1
+          fi
+          echo "OK: $RUNNING is contained in $SHA"
+          # Public values the build and the checks need, from the running
+          # service (see the header): never printed.
+          WC=$(printf '%s' "$DESC" | jq -r '.spec.template.spec.containers[0].env[] | select(.name=="WALLETCONNECT_PROJECT_ID") | .value')
+          PAY_TO=$(printf '%s' "$DESC" | jq -r '.spec.template.spec.containers[0].env[] | select(.name=="PAYMENT_PAY_TO") | .value')
+          if [ -z "$WC" ] || [ -z "$PAY_TO" ]; then
+            echo "The running service has no WALLETCONNECT_PROJECT_ID or PAYMENT_PAY_TO" >&2
+            exit 1
+          fi
+          echo "::add-mask::$WC"
+          echo "WALLETCONNECT_PROJECT_ID=$WC" >> "$GITHUB_OUTPUT"
+          echo "PAYMENT_PAY_TO=$PAY_TO" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: proofport-ai/package-lock.json
+
+      - name: Install dependencies
+        working-directory: proofport-ai
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Prepare pinned AI build context
+        id: context
+        run: |
+          result=$(node proofport-ai/scripts/prepare-build-context.mjs --prepare)
+          printf '%s\n' "$result"
+          echo "path=$(printf '%s' "$result" | jq -er '.context')" >> "$GITHUB_OUTPUT"
+          echo "digest=$(printf '%s' "$result" | jq -er '.sourceDigest')" >> "$GITHUB_OUTPUT"
+
+      - name: Free runner disk for the image build
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force >/dev/null
+          df -h /
+
+      - name: Configure Docker for Artifact Registry
+        env:
+          REGION: ${{ secrets.GCP_REGION }}
+        run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push AI image
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ steps.context.outputs.path }}
+          file: ${{ steps.context.outputs.path }}/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ secrets.GCP_ARTIFACT_REGISTRY }}/proofport-ai:${{ steps.src.outputs.TAG }}
+            ${{ secrets.GCP_ARTIFACT_REGISTRY }}/proofport-ai:${{ steps.env.outputs.ENV }}-latest
+          build-args: |
+            NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=${{ steps.running.outputs.WALLETCONNECT_PROJECT_ID }}
+            NEXT_PUBLIC_API_BASE_URL=https://${{ steps.env.outputs.URL_PREFIX }}.zkproofport.app
+          labels: |
+            org.opencontainers.image.revision=${{ steps.src.outputs.SHA }}
+          cache-from: type=gha,scope=ai-${{ steps.env.outputs.ENV }}-v2
+          cache-to: type=gha,mode=max,scope=ai-${{ steps.env.outputs.ENV }}-v2
+
+      # --update-env-vars, not --set-env-vars: the secret variables already on
+      # the service are kept (see the header). Every other variable deploy-ai.yml
+      # sets is set here to the same value.
+      - name: Deploy AI to Cloud Run (no traffic)
+        env:
+          SERVICE: proofport-ai-${{ steps.env.outputs.ENV }}
+          REGION: ${{ secrets.GCP_REGION }}
+          IMAGE: ${{ secrets.GCP_ARTIFACT_REGISTRY }}/proofport-ai:${{ steps.src.outputs.TAG }}
+          URL_PREFIX: ${{ steps.env.outputs.URL_PREFIX }}
+          MIN_INSTANCES: ${{ steps.env.outputs.MIN_INSTANCES }}
+          MAX_INSTANCES: ${{ steps.env.outputs.MAX_INSTANCES }}
+          RUNTIME_SERVICE_ACCOUNT: ${{ steps.env.outputs.RUNTIME_SERVICE_ACCOUNT }}
+          CHAIN_RPC_URL: ${{ steps.env.outputs.CHAIN_RPC_URL }}
+          PAYMENT_MODE: ${{ steps.env.outputs.PAYMENT_MODE }}
+          PAYMENT_NETWORKS: ${{ steps.env.outputs.PAYMENT_NETWORKS }}
+          PAYMENT_PROOF_PRICE: ${{ steps.env.outputs.PAYMENT_PROOF_PRICE }}
+          GIWA_RPC_URL: ${{ steps.env.outputs.GIWA_RPC_URL }}
+          GIWA_EXPLORER_URL: ${{ steps.env.outputs.GIWA_EXPLORER_URL }}
+          COINBASE_STATEMENT_KMS_KEY: ${{ steps.env.outputs.COINBASE_STATEMENT_KMS_KEY }}
+          ERC8004_IDENTITY: ${{ steps.env.outputs.ERC8004_IDENTITY }}
+          ERC8004_REPUTATION: ${{ steps.env.outputs.ERC8004_REPUTATION }}
+          ERC8004_VALIDATION: ${{ steps.env.outputs.ERC8004_VALIDATION }}
+          AGENT_TOKEN_ID: ${{ steps.env.outputs.AGENT_TOKEN_ID }}
+          AGENT_TOKEN_ID_ETHEREUM: ${{ steps.env.outputs.AGENT_TOKEN_ID_ETHEREUM }}
+        run: |
+          VARS="^;;^NODE_ENV=production"
+          VARS="$VARS;;BASE_RPC_URL=https://mainnet.base.org"
+          VARS="$VARS;;EAS_GRAPHQL_ENDPOINT=https://base.easscan.org/graphql"
+          VARS="$VARS;;CHAIN_RPC_URL=${CHAIN_RPC_URL}"
+          VARS="$VARS;;PAYMENT_MODE=${PAYMENT_MODE}"
+          VARS="$VARS;;PAYMENT_NETWORKS=${PAYMENT_NETWORKS}"
+          VARS="$VARS;;X402_FACILITATOR_URL=https://x402.dexter.cash"
+          VARS="$VARS;;X402_FALLBACK_FACILITATOR_URL=https://facilitator.payai.network"
+          VARS="$VARS;;X402_FACILITATOR_TIMEOUT_MS=15000"
+          VARS="$VARS;;PAYMENT_PROOF_PRICE=${PAYMENT_PROOF_PRICE}"
+          VARS="$VARS;;A2A_BASE_URL=https://${URL_PREFIX}.zkproofport.app"
+          VARS="$VARS;;SIGN_PAGE_URL=https://${URL_PREFIX}.zkproofport.app/sign"
+          VARS="$VARS;;SIGNING_TTL_SECONDS=300"
+          VARS="$VARS;;TEE_MODE=local"
+          VARS="$VARS;;TEE_ATTESTATION=false"
+          VARS="$VARS;;BB_PATH=/usr/local/bin/bb-wrapper"
+          VARS="$VARS;;CIRCUITS_DIR=/app/circuits"
+          VARS="$VARS;;CIRCUITS_AUTO_UPDATE=false"
+          VARS="$VARS;;GIWA_RPC_URL=${GIWA_RPC_URL}"
+          VARS="$VARS;;GIWA_EXPLORER_URL=${GIWA_EXPLORER_URL}"
+          VARS="$VARS;;COINBASE_STATEMENT_KMS_KEY=${COINBASE_STATEMENT_KMS_KEY}"
+          VARS="$VARS;;ERC8004_IDENTITY_ADDRESS=${ERC8004_IDENTITY}"
+          VARS="$VARS;;ERC8004_REPUTATION_ADDRESS=${ERC8004_REPUTATION}"
+          VARS="$VARS;;ERC8004_VALIDATION_ADDRESS=${ERC8004_VALIDATION}"
+          VARS="$VARS;;AGENT_TOKEN_ID=${AGENT_TOKEN_ID}"
+          VARS="$VARS;;AGENT_TOKEN_ID_ETHEREUM=${AGENT_TOKEN_ID_ETHEREUM}"
+          gcloud run deploy "$SERVICE" \
+            --region "$REGION" \
+            --image "$IMAGE" \
+            --platform managed \
+            --port 4002 \
+            --cpu 2 \
+            --memory 4Gi \
+            --min-instances "$MIN_INSTANCES" \
+            --max-instances "$MAX_INSTANCES" \
+            --timeout 300 \
+            --no-cpu-throttling \
+            --allow-unauthenticated \
+            --update-env-vars "$VARS" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --vpc-connector proofport-vpc \
+            --vpc-egress private-ranges-only \
+            --no-traffic \
+            --tag candidate \
+            --quiet
+
+      - name: Locate the new revision
+        id: candidate
+        env:
+          SERVICE: proofport-ai-${{ steps.env.outputs.ENV }}
+          REGION: ${{ secrets.GCP_REGION }}
+        run: |
+          DESC=$(gcloud run services describe "$SERVICE" --region "$REGION" --format=json)
+          REVISION=$(printf '%s' "$DESC" | jq -r '.status.latestCreatedRevisionName // empty')
+          READY=$(printf '%s' "$DESC" | jq -r '.status.latestReadyRevisionName // empty')
+          TAGGED=$(printf '%s' "$DESC" | jq -r '[.status.traffic[] | select(.tag == "candidate")][0].revisionName // empty')
+          URL=$(printf '%s' "$DESC" | jq -r '[.status.traffic[] | select(.tag == "candidate")][0].url // empty')
+          echo "created: $REVISION, ready: $READY, tagged candidate: $TAGGED"
+          [ -n "$REVISION" ] && [ "$READY" = "$REVISION" ] || {
+            echo "::error::The revision this run created ($REVISION) is not the latest ready one ($READY)"; exit 1; }
+          [ "$TAGGED" = "$REVISION" ] && [ -n "$URL" ] || {
+            echo "::error::The candidate tag names '$TAGGED', not $REVISION"; exit 1; }
+          echo "revision=$REVISION" >> "$GITHUB_OUTPUT"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for the new revision to answer /health
+        env:
+          CANDIDATE_URL: ${{ steps.candidate.outputs.url }}
+        run: |
+          for i in $(seq 1 12); do
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${CANDIDATE_URL}/health" || echo "000")
+            if [ "$HTTP_STATUS" = "200" ]; then
+              curl -s "${CANDIDATE_URL}/health" | jq .
+              exit 0
+            fi
+            echo "Attempt $i: HTTP ${HTTP_STATUS}, waiting 10s..."
+            sleep 10
+          done
+          echo "The revision never answered /health. It has no traffic; the old revision still serves." >&2
+          exit 1
+
+      - name: Verify every identity, circuit and payment offer on the new revision
+        working-directory: proofport-ai
+        env:
+          VERIFY_SERVICE_URL: https://${{ steps.env.outputs.URL_PREFIX }}.zkproofport.app
+          VERIFY_FETCH_URL: ${{ steps.candidate.outputs.url }}
+          VERIFY_PAYMENT_NETWORKS: ${{ steps.env.outputs.PAYMENT_NETWORKS }}
+          VERIFY_PAYMENT_PAY_TO: ${{ steps.running.outputs.PAYMENT_PAY_TO }}
+          VERIFY_PAYMENT_PRICE: ${{ steps.env.outputs.PAYMENT_PROOF_PRICE }}
+          TARGET_ENVIRONMENT: ${{ inputs.environment }}
+          BASE_AGENT_ID: ${{ steps.env.outputs.AGENT_TOKEN_ID }}
+          ETHEREUM_AGENT_ID: ${{ steps.env.outputs.AGENT_TOKEN_ID_ETHEREUM }}
+          IDENTITY_REGISTRY: ${{ steps.env.outputs.ERC8004_IDENTITY }}
+          REVISION: ${{ steps.candidate.outputs.revision }}
+        run: |
+          VERIFY_IDENTITIES=$(node --input-type=module -e '
+            const e=process.env;
+            const networks={staging:[84532,11155111],production:[8453,1]};
+            const ids=networks[e.TARGET_ENVIRONMENT];
+            if(!ids) throw new Error("Unknown deployment environment");
+            const rows=[{chainId:ids[0],agentId:e.BASE_AGENT_ID,registry:e.IDENTITY_REGISTRY},{chainId:ids[1],agentId:e.ETHEREUM_AGENT_ID,registry:e.IDENTITY_REGISTRY}];
+            console.log(JSON.stringify(rows));')
+          export VERIFY_IDENTITIES
+          ready=0
+          for attempt in $(seq 1 90); do
+            body=$(curl -sS --max-time 15 "$VERIFY_FETCH_URL/identity/status") || body='{}'
+            status=$(printf '%s' "$body" | jq -r '.status // "unavailable"')
+            if [ "$status" = failed ]; then
+              echo "Identity registration failed on $REVISION, which has no traffic; the previous revision still serves." >&2
+              exit 1
+            fi
+            if [ "$status" = ready ]; then ready=1; break; fi
+            sleep 10
+          done
+          test "$ready" = 1 || { echo "Configured identities did not become ready on $REVISION"; exit 1; }
+          npx tsx scripts/verify-deployment.ts
+
+      - name: Route all traffic to the verified revision
+        env:
+          SERVICE: proofport-ai-${{ steps.env.outputs.ENV }}
+          REGION: ${{ secrets.GCP_REGION }}
+          REVISION: ${{ steps.candidate.outputs.revision }}
+        run: |
+          gcloud run services update-traffic "$SERVICE" --region "$REGION" --to-revisions "$REVISION=100" --quiet
+          SERVING=$(gcloud run services describe "$SERVICE" --region "$REGION" \
+            --format=json | jq -r '[.status.traffic[] | select(.percent == 100)][0].revisionName // empty')
+          echo "verified: $REVISION, serving 100%: $SERVING"
+          [ "$SERVING" = "$REVISION" ] || {
+            echo "::error::Traffic is not on the verified revision ($REVISION); it is on '$SERVING'"; exit 1; }
+
+      # Refuses, never creates or repoints: the mapping is made once by a
+      # person who owns the domain (deploy-ai.yml's step explains why).
+      - name: Check the custom domain is mapped to this service
+        env:
+          DOMAIN: ${{ steps.env.outputs.URL_PREFIX }}.zkproofport.app
+          SERVICE: proofport-ai-${{ steps.env.outputs.ENV }}
+          REGION: ${{ secrets.GCP_REGION }}
+        run: |
+          MAPPED_TO=$(gcloud beta run domain-mappings describe --domain "$DOMAIN" \
+            --region "$REGION" --format='value(spec.routeName)' 2>/dev/null || true)
+          if [ "$MAPPED_TO" != "$SERVICE" ]; then
+            echo "$DOMAIN is mapped to '$MAPPED_TO', not $SERVICE" >&2
+            exit 1
+          fi
+          echo "$DOMAIN is mapped to $SERVICE"
+
+      - name: Verify discovery endpoints
+        env:
+          SERVICE_URL: https://${{ steps.env.outputs.URL_PREFIX }}.zkproofport.app
+        run: |
+          fail=0
+          check() {
+            echo "--- $1 ---"
+            local body
+            if ! body=$(curl -sf --max-time 30 "${SERVICE_URL}$2"); then
+              echo "FAILED: no response from ${SERVICE_URL}$2"
+              fail=1
+              return
+            fi
+            if ! printf '%s' "$body" | jq -e "$3"; then
+              echo "FAILED: unexpected body from ${SERVICE_URL}$2"
+              fail=1
+            fi
+          }
+          check "OASF Agent (agent.json)"          "/.well-known/agent.json"      '.name, .agentType'
+          check "A2A Agent Card (agent-card.json)" "/.well-known/agent-card.json" '.name, .protocolVersion'
+          check "OASF Agent (oasf.json)"           "/.well-known/oasf.json"       '.name, .x402Support'
+          check "MCP Discovery"                    "/.well-known/mcp.json"        '.serverInfo.name, .protocolVersion'
+          check "Agent registration"               "/.well-known/agent-registration.json" '.registrations'
+          test "$fail" = 0
+
+      - name: Verify the custom domain serves the verified revision
+        working-directory: proofport-ai
+        env:
+          VERIFY_SERVICE_URL: https://${{ steps.env.outputs.URL_PREFIX }}.zkproofport.app
+          VERIFY_FETCH_URL: https://${{ steps.env.outputs.URL_PREFIX }}.zkproofport.app
+          VERIFY_PAYMENT_NETWORKS: ${{ steps.env.outputs.PAYMENT_NETWORKS }}
+          VERIFY_PAYMENT_PAY_TO: ${{ steps.running.outputs.PAYMENT_PAY_TO }}
+          VERIFY_PAYMENT_PRICE: ${{ steps.env.outputs.PAYMENT_PROOF_PRICE }}
+          TARGET_ENVIRONMENT: ${{ inputs.environment }}
+          BASE_AGENT_ID: ${{ steps.env.outputs.AGENT_TOKEN_ID }}
+          ETHEREUM_AGENT_ID: ${{ steps.env.outputs.AGENT_TOKEN_ID_ETHEREUM }}
+          IDENTITY_REGISTRY: ${{ steps.env.outputs.ERC8004_IDENTITY }}
+        run: |
+          VERIFY_IDENTITIES=$(node --input-type=module -e '
+            const e=process.env;
+            const networks={staging:[84532,11155111],production:[8453,1]};
+            const ids=networks[e.TARGET_ENVIRONMENT];
+            if(!ids) throw new Error("Unknown deployment environment");
+            const rows=[{chainId:ids[0],agentId:e.BASE_AGENT_ID,registry:e.IDENTITY_REGISTRY},{chainId:ids[1],agentId:e.ETHEREUM_AGENT_ID,registry:e.IDENTITY_REGISTRY}];
+            console.log(JSON.stringify(rows));')
+          export VERIFY_IDENTITIES
+          npx tsx scripts/verify-deployment.ts
+
+      - name: Deployment summary
+        env:
+          ENV: ${{ steps.env.outputs.ENV }}
+          SHA: ${{ steps.src.outputs.SHA }}
+          CIRCUITS_SHA: ${{ inputs.circuits_sha }}
+          REVISION: ${{ steps.candidate.outputs.revision }}
+          DIGEST: ${{ steps.context.outputs.digest }}
+        run: |
+          {
+            echo "### proofport-ai deployed (emergency workflow)"
+            echo ""
+            echo "- Environment: \`${ENV}\`"
+            echo "- proofport-ai commit: \`${SHA}\`"
+            echo "- circuits commit: \`${CIRCUITS_SHA}\`"
+            echo "- Build context digest: \`${DIGEST}\`"
+            echo "- Revision: \`${REVISION}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
