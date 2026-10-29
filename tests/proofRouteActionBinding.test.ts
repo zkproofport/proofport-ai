@@ -44,7 +44,7 @@ describe('HTTP proof route preserves optional action policy', () => {
       expect(prove).not.toHaveBeenCalled();
     });
   }
-  it.each(['coinbase_attestation', 'coinbase_country_attestation'])('%s refuses an unsupported action before proving', async circuit => {
+  it.each(['coinbase_country_attestation'])('%s refuses an unsupported action before proving', async circuit => {
     const response = await submit(circuit, { ...pair, country_list: ['KR'], is_included: true });
     expect(response.status).toBe(400);
     expect(response.body.message).toContain('does not support action binding');

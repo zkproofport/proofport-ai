@@ -27,9 +27,9 @@ export type AttestationCircuitId = Exclude<CircuitId, typeof CIRCUIT_IDS.OIDC_DO
  *
  *   actionInputs  main() takes domain_separator / action_hash. core's
  *                 circuitActionBinding answers whether an action may be BOUND;
- *                 a circuit can carry the inputs while core still says 'none'
- *                 (coinbase_attestation v2 until core's v2 release), and then
- *                 the inputs are zeros.
+ *                 a circuit can carry the inputs while core says 'none', and
+ *                 then the inputs are zeros. coinbase_attestation v2 and
+ *                 giwa_attestation are 'optional' (core 0.4.0-beta.1).
  *   statement     main() takes the revocation statement (client_data,
  *                 signer_kind, statement_sig, attested_at and the App Attest
  *                 chain) -- coinbase_attestation v2.

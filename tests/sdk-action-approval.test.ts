@@ -316,7 +316,7 @@ describe('approval client validation and capabilities', () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it.each(['coinbase_kyc', 'oidc_domain', 'unknown'])('rejects unsupported helper circuit %s', async circuit => {
+  it.each(['coinbase_country', 'oidc_domain', 'unknown'])('rejects unsupported helper circuit %s', async circuit => {
     const fetcher = transport();
     await expect(createActionApproval(config, { ...request, circuit } as never)).rejects.toMatchObject({ code: 'ACTION_APPROVAL_INVALID' });
     expect(fetcher).not.toHaveBeenCalled();

@@ -98,9 +98,9 @@ Use **SDK 0.2.14 or later** and **MCP 0.2.15 or later** for both GIWA signature 
 
 **For GIWA** (`giwa_attestation`): an attestation from GIWA's attester on **GIWA Sepolia**, and control of that wallet. Without an action, supply its local signer; with an action, the person connects that wallet on the approval page. The attestation must belong to the wallet signing the proof request on the chain the circuit reads.
 
-**For the circuit that can bind an action** (`giwa_attestation`): the GIWA attestation above. What differs is what the wallet signs, and the action is **optional** — see below.
+**For the circuits that can bind an action** (`coinbase_kyc`, `giwa_attestation`): the attestation above. What differs is what the wallet signs, and the action is **optional** — see below.
 
-**One wallet has a different nullifier per circuit, and for `giwa_attestation` it does not depend on what you signed.** `giwa_attestation` derives it from your address, the circuit's own identifier and the scope, so the same wallet in the same scope gives the same nullifier whether or not you bind an action. The Coinbase circuits derive theirs from the signed challenge instead. Nothing to configure — the SDK picks the rule the circuit expects, and refuses a circuit it has no rule for rather than guessing one. Requires **0.2.14 or later**; earlier versions sent the Coinbase rule for every circuit, which a GIWA proof rejects as a nullifier mismatch.
+**One wallet has a different nullifier per circuit, and for `coinbase_kyc` and `giwa_attestation` it does not depend on what you signed.** They derive it from your address, the circuit's own identifier and the scope, so the same wallet in the same scope gives the same nullifier whether or not you bind an action. `coinbase_country` derives its nullifier from the signed challenge instead. Nothing to configure — the SDK picks the rule the circuit expects, and refuses a circuit it has no rule for rather than guessing one. Requires **0.2.14 or later**; earlier versions sent the Coinbase rule for every circuit, which a GIWA proof rejects as a nullifier mismatch.
 
 ## Quick Start
 
@@ -632,7 +632,7 @@ function fromSigner(signer: ethers.Signer): ProofportSigner;
 ```typescript
 interface ProofParams {
   circuit: CircuitName;
-  action?: { domain: { name: string; version: string; chainId: number; verifyingContract: string }; types: Record<string, Array<{name: string; type: string}>>; primaryType: string; message: Record<string, unknown> }; // optional for giwa_attestation
+  action?: { domain: { name: string; version: string; chainId: number; verifyingContract: string }; types: Record<string, Array<{name: string; type: string}>>; primaryType: string; message: Record<string, unknown> }; // optional for coinbase_kyc and giwa_attestation
   actionApproval?: ActionApproval; // private handle; resume the original action after human approval
   payOn?: string;
   maxPayment?: string; // decimal USDC

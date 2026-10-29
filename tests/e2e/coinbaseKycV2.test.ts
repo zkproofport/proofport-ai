@@ -23,8 +23,8 @@
  * On-chain verification calls the verifier contract directly, at an address
  * PINNED HERE from circuits' deployment record (broadcast/
  * DeployCoinbaseAttestationV2.s.sol/84532), not the one the response names:
- * @zkproofport-app/core 0.4.0-beta.0 -- what the SDK's verifyProof uses -- still pins
- * v1 and refuses these proofs until core's v2 release.
+ * independent of @zkproofport-app/core, whose table the SDK's verifyProof uses
+ * (core pins v2 since 0.4.0-beta.1).
  *
  * Needs ATTESTATION_KEY (the Coinbase-attested E2E wallet) and, when the
  * server charges, E2E_PAYER_WALLET_KEY.

@@ -101,14 +101,18 @@ describe('production keeps a core-pinned verifier over an older release', () => 
     }
   });
 
-  it('still takes the release for a row core does not pin (coinbase_attestation v2)', async () => {
+  it('keeps the core-pinned Coinbase KYC v2 row over a release naming another address', async () => {
+    // core 0.4.0-beta.1 pins coinbase_attestation v2 on 8453, so it is a pinned
+    // row like the others (it was the one unpinned row until then).
     vi.resetModules();
     const fresh = await import('../src/config/deployments.js');
+    const { FALLBACK_VERIFIERS } = await import('../src/config/contracts.js');
     vi.stubGlobal('fetch', releaseFetch());
 
     await fresh.syncDeployments('mainnet', 'https://mainnet.base.org', REPO);
 
-    expect(fresh.getVerifierAddress('coinbase_attestation', '8453')).toBe(ADDR);
+    expect(fresh.getVerifierAddress('coinbase_attestation', '8453')).toBe(FALLBACK_VERIFIERS['8453'].coinbase_attestation);
+    expect(fresh.getVerifierAddress('coinbase_attestation', '8453')).not.toBe(ADDR);
   });
 
   it('staging still follows its circuits ref over a pinned row', async () => {

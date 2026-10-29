@@ -77,13 +77,10 @@ export const ATTESTATION_SOURCES: Record<
  * holds the two together. (Ethereum Sepolia was still on the pre-2026-10-22
  * deployments here until 2026-10-27; the live staging server had synced past it.)
  *
- * ONE DELIBERATE EXCEPTION, coinbase_attestation: this server proves v2
- * (circuits coinbase-attestation-v2), deployed on Base Sepolia, Base and
- * Ethereum (circuits deployments/<chain>/CoinbaseAttestationV2.json), while
- * core 0.4.0-beta.0 still pins v1's verifiers for this id. Until core's v2
- * release (circuits-dev.md fix list item 9) the published SDK/MCP refuse these
- * responses; the test names the exception and fails once core pins v2, so it
- * cannot outlive its reason.
+ * coinbase_attestation is v2 (circuits coinbase-attestation-v2), deployed on
+ * Base Sepolia, Base and Ethereum (circuits
+ * deployments/<chain>/CoinbaseAttestationV2.json); core pins the same rows
+ * since 0.4.0-beta.1, so it is held to core like every other circuit.
  *
  * `null` means NOT DEPLOYED on that chain, and is different from a missing
  * key, which would be a circuit somebody forgot. An empty string was used here

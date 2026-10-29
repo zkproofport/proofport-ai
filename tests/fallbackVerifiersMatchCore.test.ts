@@ -8,39 +8,12 @@ import { PROVABLE_CIRCUIT_IDS, type CircuitId } from '../src/config/circuitIds.j
  * Clients verify against @zkproofport-app/core's pinned table and refuse a
  * response naming any other verifier. A server advertising a different address
  * produces proofs its own SDK and MCP refuse. Ethereum Sepolia here was three
- * deployments behind core until 2026-10-27.
+ * deployments behind core until 2026-10-27. coinbase_attestation (v2) was an
+ * exception here until core 0.4.0-beta.1 pinned the v2 verifiers.
  */
-/**
- * coinbase_attestation is served as v2 while core 0.4.0-beta.0 pins v1's
- * verifiers. The exception is checked rather than skipped: v2 is deployed on
- * Base Sepolia, Base and Ethereum (circuits
- * deployments/<chain>/CoinbaseAttestationV2.json), every other chain is null,
- * and core must still pin something other than v2 -- the day core pins v2,
- * this fails and the exception goes.
- */
-const COINBASE_V2: Record<string, string | null> = {
-  '11155111': null, '91342': null,
-  '84532': '0x1885aA2283DB21ad0fc63A2Df98efe92F31908E6',
-  '8453': '0x6FC22d3576FB70457d1529B3F70f711A3cBA7A7F',
-  '1': '0x0e458610BD79893a0855C8F90CEDed70cF7553b6',
-};
-
-describe('coinbase_attestation v2 ahead of core', () => {
-  for (const [chain, address] of Object.entries(COINBASE_V2)) {
-    it(`chain ${chain}`, () => {
-      expect(FALLBACK_VERIFIERS[chain].coinbase_attestation).toBe(address);
-      const theirs = PINNED_VERIFIERS.coinbase_attestation?.[Number(chain)];
-      if (address) expect(theirs && sameAddress(theirs.address, address), 'core now pins v2: remove this exception').toBeFalsy();
-    });
-  }
-  it('covers every chain the fallback table has', () => {
-    expect(Object.keys(COINBASE_V2).sort()).toEqual(Object.keys(FALLBACK_VERIFIERS).sort());
-  });
-});
-
 describe('FALLBACK_VERIFIERS agrees with core PINNED_VERIFIERS', () => {
   for (const [chain, row] of Object.entries(FALLBACK_VERIFIERS)) {
-    for (const circuit of PROVABLE_CIRCUIT_IDS.filter(c => c !== 'coinbase_attestation')) {
+    for (const circuit of PROVABLE_CIRCUIT_IDS) {
       it(`${circuit} on chain ${chain}`, () => {
         const ours = row[circuit];
         const theirs = PINNED_VERIFIERS[circuit]?.[Number(chain)];

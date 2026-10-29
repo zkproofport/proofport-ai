@@ -226,8 +226,8 @@ export interface ProofParams {
   provider?: 'google' | 'microsoft';
 
   /**
-   * Optional for giwa_attestation; rejected for every
-   * other circuit, including OIDC.
+   * Optional for coinbase_attestation and giwa_attestation; rejected for
+   * every other circuit, including OIDC.
    * A human wallet must approve these exact EIP-712 fields. generateProof throws
    * ActionApprovalRequiredError with a resumable handle until approval is ready.
    * The supplied attestation signer is never used for actions.

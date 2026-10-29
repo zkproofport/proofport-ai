@@ -88,10 +88,10 @@ describe('MCP step-by-step optional actions', () => {
       expect(prepareInputs).not.toHaveBeenCalled();
     });
   }
-  it.each(['coinbase_kyc', 'coinbase_country', 'oidc_domain'])('%s rejects an action before signing', async (circuit) => {
+  it.each(['coinbase_country', 'oidc_domain'])('%s rejects an action before signing', async (circuit) => {
     const result = await prepare({ circuit, action });
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('does not bind one. Circuits that do: giwa_attestation.');
+    expect(result.content[0].text).toContain('does not bind one. Circuits that do: coinbase_attestation, giwa_attestation.');
     expect(signer.signTypedData).not.toHaveBeenCalled();
     expect(prepareInputs).not.toHaveBeenCalled();
   });

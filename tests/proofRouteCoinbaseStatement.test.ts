@@ -178,13 +178,24 @@ describe('coinbase_attestation v2 statement in the proof route', () => {
     expect(prove.mock.calls[0][1]).not.toHaveProperty('statement');
   });
 
-  it('refuses an action on coinbase_attestation while core does not let one be bound, before reading', async () => {
+  it('binds an action on coinbase_attestation: the statement carries the EIP-712 digest, the prover the pair', async () => {
+    const d = deps();
+    const ds = '0x' + 'aa'.repeat(32), ah = '0x' + 'bb'.repeat(32);
+    const res = await request(app(baseConfig, d)).post('/api/v1/prove').set('X-Payment-Nonce', 'n')
+      .send({ circuit: 'coinbase_attestation', inputs: inputs({ domain_separator: ds, action_hash: ah }) });
+    expect(res.status).toBe(200);
+    const params = prove.mock.calls[0][1] as { domainSeparator: string; actionHash: string; statement: { clientData: Uint8Array } };
+    expect(params).toMatchObject({ domainSeparator: ds, actionHash: ah });
+    expect(ethers.hexlify(params.statement.clientData.slice(161, 193))).toBe(ethers.keccak256(ethers.concat(['0x1901', ds, ah])));
+  });
+
+  it('refuses half an action on coinbase_attestation before reading the attestation', async () => {
     const d = deps();
     const res = await request(app(baseConfig, d)).post('/api/v1/prove').set('X-Payment-Nonce', 'n')
-      .send({ circuit: 'coinbase_attestation', inputs: inputs({ domain_separator: '0x' + 'aa'.repeat(32), action_hash: '0x' + 'bb'.repeat(32) }) });
+      .send({ circuit: 'coinbase_attestation', inputs: inputs({ domain_separator: '0x' + 'aa'.repeat(32) }) });
     expect(res.status).toBe(400);
-    expect(res.body.message).toContain('does not support action binding');
     expect(d.reader.latestUid).not.toHaveBeenCalled();
+    expect(prove).not.toHaveBeenCalled();
   });
 
   it('signs a fresh statement per request (no reuse across concurrent requests)', async () => {

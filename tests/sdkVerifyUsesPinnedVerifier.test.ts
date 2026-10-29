@@ -27,7 +27,7 @@ function response(overrides: Partial<ProveResponse> = {}): ProveResponse {
     circuit: 'coinbase_attestation',
     proofType: 'kyc',
     proof: '0x' + 'ab'.repeat(64),
-    publicInputs: zeros(128),
+    publicInputs: zeros(193),
     proofWithInputs: '',
     attestation: null,
     timing: { totalMs: 0 },

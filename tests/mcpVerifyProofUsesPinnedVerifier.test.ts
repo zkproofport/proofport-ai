@@ -22,7 +22,7 @@ afterEach(() => vi.unstubAllGlobals());
 const verify = (verification: Record<string, unknown>) => handlers.get('verify_proof')!({
   result: {
     circuit: 'coinbase_attestation', proofType: 'kyc', proof: '0xaabb',
-    publicInputs: '0x' + '00'.repeat(32 * 128), verification,
+    publicInputs: '0x' + '00'.repeat(32 * 193), verification,
   },
 });
 

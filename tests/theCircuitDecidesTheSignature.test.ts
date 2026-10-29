@@ -342,10 +342,9 @@ describe('what the prover hands to noir_js', () => {
 
   /*
    * coinbase_attestation v2 CARRIES the action parameters (GIWA's six public
-   * inputs) while core 0.4.0-beta.0 still says no action may be bound to it. So the
-   * pair goes in as zeros and an action is refused -- not dropped -- until
-   * core's v2 release marks it 'optional'. It also needs the server-signed
-   * revocation statement, with the App Attest inputs all zero.
+   * inputs) and core 0.4.0-beta.1 marks it 'optional': without an action the
+   * pair goes in as zeros, with one signal_hash is zero. It also needs the
+   * server-signed revocation statement, with the App Attest inputs all zero.
    */
   describe('coinbase_attestation v2', () => {
     const STATEMENT = {
@@ -390,8 +389,11 @@ describe('what the prover hands to noir_js', () => {
         .rejects.toThrow(/Invalid attested_at/);
     });
 
-    it('refuses an action while core does not let one be bound', async () => {
-      await expect(format(CIRCUIT_IDS.COINBASE_ATTESTATION, { ...STATEMENT, ...ACTION_PAIR })).rejects.toThrow(/has no inputs for one/);
+    it('binds an action: the pair is sent and signal_hash is zero', async () => {
+      const inputs = await format(CIRCUIT_IDS.COINBASE_ATTESTATION, { ...STATEMENT, ...ACTION_PAIR });
+      expect(inputs.signal_hash).toEqual(ZERO_32);
+      expect(inputs.domain_separator).not.toEqual(ZERO_32);
+      expect(inputs.action_hash).not.toEqual(ZERO_32);
     });
   });
 });
