@@ -711,8 +711,8 @@ describe('prepare_inputs action authorization', () => {
     ['missing field', 'giwa_attestation', { ...CUSTOM_ACTION, message: {} }, /missing/],
     ['malformed value', 'giwa_attestation', { ...CUSTOM_ACTION, message: { ...CUSTOM_ACTION.message, terms: { quantity: 'bad', description: 'bad' } } }, /./],
     ['wrong root', 'giwa_attestation', { ...CUSTOM_ACTION, primaryType: 'Terms', message: { quantity: '1', description: 'bad' } }, /primaryType.*root|root.*primaryType/],
-    ['Coinbase action', 'coinbase_kyc', CUSTOM_ACTION, /does not bind one. Circuits that do: giwa_attestation./],
-    ['OIDC action', 'oidc_domain', CUSTOM_ACTION, /does not bind one. Circuits that do: giwa_attestation./],
+    ['Country action', 'coinbase_country', CUSTOM_ACTION, /does not bind one\. Circuits that do: giwa_attestation, coinbase_attestation\./],
+    ['OIDC action', 'oidc_domain', CUSTOM_ACTION, /does not bind one\. Circuits that do: giwa_attestation, coinbase_attestation\./],
   ])('rejects %s before any signing or input preparation', async (_name, circuit, action, error) => {
     const result = await callTool('prepare_inputs', { circuit, action });
     expect(result.isError).toBe(true);
