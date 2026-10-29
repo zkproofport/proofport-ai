@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.2](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.5.1...sdk-v0.5.2) (2026-10-29)
+
+
+### Features
+
+* **sdk:** verify Coinbase KYC v2 through @zkproofport-app/core 0.4.0-beta.1 ([3d8047f](https://github.com/zkproofport/proofport-ai/commit/3d8047f7dbcda1d4b02133b4a64845e24851fbc9))
+
 ## [0.5.1](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.5.0...sdk-v0.5.1) (2026-10-29)
 
 
