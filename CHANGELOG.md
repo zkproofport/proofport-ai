@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.6.1](https://github.com/zkproofport/proofport-ai/compare/server-v0.6.0...server-v0.6.1) (2026-10-29)
+
+
+### Features
+
+* **coinbase:** prove coinbase_attestation v2 with a Cloud KMS signed statement ([85dc84a](https://github.com/zkproofport/proofport-ai/commit/85dc84af0a968e82f104a6cef38ceaa8aa7cfb43))
+* **oidc:** sign the provider-key statement before proving ([fd661d1](https://github.com/zkproofport/proofport-ai/commit/fd661d15d732d00f5e0fc6fc8225606dcceefbfa))
+* **sdk:** move to @zkproofport-app/core 0.4.0-beta.0 ([d91cca1](https://github.com/zkproofport/proofport-ai/commit/d91cca120136333e0acd468331cbed568b4c436c))
+
+
+### Bug Fixes
+
+* **deploy:** list the circuit id beside each artifact for the pinned manifest ([dfa3c53](https://github.com/zkproofport/proofport-ai/commit/dfa3c534c8be9ea7d6af68816e98aeecff15179b))
+* **server:** keep core-pinned verifiers over an older circuits release ([57b911a](https://github.com/zkproofport/proofport-ai/commit/57b911abd76d2cee6eb22017e6658c558f1f5ac4))
+
+
+### Refactoring
+
+* **statement:** share the KMS statement signer between circuits ([fcd4254](https://github.com/zkproofport/proofport-ai/commit/fcd4254b5e76453a876897a2f04b3096b1ef5685))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @zkproofport-ai/mcp bumped from ^0.4.2 to ^0.4.3
+    * @zkproofport-ai/sdk bumped from ^0.5.0 to ^0.5.1
+
 ## [0.6.0](https://github.com/zkproofport/proofport-ai/compare/server-v0.5.0...server-v0.6.0) (2026-10-27)
 
 

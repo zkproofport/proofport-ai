@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.3](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.4.2...mcp-v0.4.3) (2026-10-29)
+
+
+### Features
+
+* **coinbase:** prove coinbase_attestation v2 with a Cloud KMS signed statement ([85dc84a](https://github.com/zkproofport/proofport-ai/commit/85dc84af0a968e82f104a6cef38ceaa8aa7cfb43))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @zkproofport-ai/sdk bumped from ^0.5.0 to ^0.5.1
+
 ## [0.4.2](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.4.1...mcp-v0.4.2) (2026-10-27)
 
 

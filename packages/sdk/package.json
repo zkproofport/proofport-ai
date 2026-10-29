@@ -1,6 +1,6 @@
 {
   "name": "@zkproofport-ai/sdk",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "TypeScript SDK for ZKProofport Coinbase KYC, country, OIDC and GIWA attestation proofs. Optional EIP-712 action binding for GIWA; x402 USDC payments.",
   "keywords": [
     "sdk",
