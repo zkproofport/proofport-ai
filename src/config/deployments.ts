@@ -207,7 +207,21 @@ async function syncChain(chainId: number, isProduction: boolean, testnetRepoUrl:
       const address = await fetchVerifierFromBroadcast(url);
       if (!address) return;
 
+      const current = verifierAddresses[chainIdStr]?.[circuitId];
       const unpinned = unpinnedVerifierReason(circuitId, chainId, address);
+      // Production reads the circuits release marked Latest, which is held
+      // back on purpose (installed apps read it), so it can name verifiers
+      // older than the ones core pins -- v1.3.0 names OIDC v1 on Base and
+      // Ethereum, which reverts every proof this server makes. A pinned
+      // address is never replaced by an unpinned one there. Staging keeps
+      // following its circuits ref, whose redeploys core has not pinned yet.
+      if (unpinned && isProduction && current && !unpinnedVerifierReason(circuitId, chainId, current)) {
+        log.error(
+          { action: 'deployment.unpinned_ignored', circuitId, chainId, address, kept: current },
+          `${unpinned}; keeping the pinned ${current}`,
+        );
+        return;
+      }
       if (unpinned) {
         log.error(
           { action: 'deployment.unpinned', circuitId, chainId, address },
@@ -215,7 +229,6 @@ async function syncChain(chainId: number, isProduction: boolean, testnetRepoUrl:
         );
       }
 
-      const current = verifierAddresses[chainIdStr]?.[circuitId];
       if (address !== current) {
         if (!verifierAddresses[chainIdStr]) {
           verifierAddresses[chainIdStr] = {};
