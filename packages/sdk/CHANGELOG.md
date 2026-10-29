@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.1](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.5.0...sdk-v0.5.1) (2026-10-29)
+
+
+### Features
+
+* **coinbase:** prove coinbase_attestation v2 with a Cloud KMS signed statement ([85dc84a](https://github.com/zkproofport/proofport-ai/commit/85dc84af0a968e82f104a6cef38ceaa8aa7cfb43))
+* **sdk:** move to @zkproofport-app/core 0.4.0-beta.0 ([d91cca1](https://github.com/zkproofport/proofport-ai/commit/d91cca120136333e0acd468331cbed568b4c436c))
+
 ## [0.5.0](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.4.1...sdk-v0.5.0) (2026-10-27)
 
 
