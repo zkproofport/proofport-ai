@@ -21,7 +21,8 @@ import * as serverIds from '../src/config/circuitIds.js';
 import * as sdkIds from '../packages/sdk/src/circuits.js';
 import { CIRCUITS as SERVER_CIRCUITS } from '../src/config/circuits.js';
 import { FALLBACK_VERIFIERS } from '../src/config/contracts.js';
-import { CIRCUITS as SDK_CIRCUITS } from '../packages/sdk/src/constants.js';
+import { CIRCUITS as SDK_CIRCUITS, attestationSource } from '../packages/sdk/src/constants.js';
+import { computeCircuitParams } from '../src/input/inputBuilder.js';
 import { CIRCUIT_NAME_MAP, CIRCUIT_ID_MAP } from '../packages/sdk/src/types.js';
 
 describe('both trees take the canonical ids from core, not a copy', () => {
@@ -43,9 +44,47 @@ describe('both trees take the canonical ids from core, not a copy', () => {
   });
 
   it('rejects hyphenated route names, which are not circuit ids', () => {
-    for (const notAnId of ['coinbase-kyc', 'coinbase-country', 'oidc-domain', 'mdl-kr-age']) {
+    for (const notAnId of ['coinbase-kyc', 'coinbase-country', 'oidc-domain', 'giwa-attestation']) {
       expect(serverIds.isCanonicalCircuitId(notAnId)).toBe(false);
       expect(sdkIds.isCanonicalCircuitId(notAnId)).toBe(false);
+    }
+  });
+});
+
+/**
+ * The Korean mobile ID circuits were removed from every repository on
+ * 2026-10-29 (core 0.4.0-beta.0). Their ids are now unknown everywhere: not
+ * canonical, not provable, and a lookup by one throws naming the known ids
+ * rather than resolving to another circuit.
+ */
+describe('the removed Korean mobile ID ids are unknown', () => {
+  const REMOVED = ['mdl_kr_age', 'mdl_kr_region', 'mdl_kr_ownership'];
+
+  it('core, the server and the SDK name none of them', () => {
+    for (const id of REMOVED) {
+      expect(core.ALL_CIRCUIT_IDS as readonly string[]).not.toContain(id);
+      expect(Object.values(core.CIRCUIT_IDS) as string[]).not.toContain(id);
+      expect(Object.keys(core.CIRCUIT_SUPPORT_STATUS)).not.toContain(id);
+      expect(serverIds.isCanonicalCircuitId(id)).toBe(false);
+      expect(sdkIds.isCanonicalCircuitId(id)).toBe(false);
+      expect(serverIds.PROVABLE_CIRCUIT_IDS as readonly string[]).not.toContain(id);
+      expect(sdkIds.PROVABLE_CIRCUIT_IDS as readonly string[]).not.toContain(id);
+      expect(Object.keys(CIRCUIT_NAME_MAP)).not.toContain(id);
+    }
+  });
+
+  it('the server input builder throws naming the known circuits', async () => {
+    for (const id of REMOVED) {
+      await expect(
+        computeCircuitParams({ circuitId: id } as unknown as Parameters<typeof computeCircuitParams>[0], '', []),
+      ).rejects.toThrow(new RegExp(`Unknown circuit: ${id}\\. Known: .*coinbase_attestation`));
+    }
+  });
+
+  it('the SDK attestation lookup throws naming the known circuits', () => {
+    for (const id of REMOVED) {
+      expect(() => attestationSource(id as unknown as Parameters<typeof attestationSource>[0]))
+        .toThrow(new RegExp(`Unknown circuit '${id}'\\. Known: .*coinbase_attestation`));
     }
   });
 });

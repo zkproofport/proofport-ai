@@ -38,8 +38,9 @@ import {
  *
  * Core calls this `CircuitId`. It is `CanonicalCircuitId` here because
  * {@link CircuitId} in this repo has always meant the narrower set proofport-ai
- * can prove, and silently widening it would let `circuit: 'mdl_kr_age'`
- * typecheck against an endpoint that cannot serve it.
+ * can prove, and silently widening it would let
+ * `circuit: 'dojang_playground'` typecheck against an endpoint that cannot
+ * serve it.
  */
 export type CanonicalCircuitId = CoreCircuitId;
 

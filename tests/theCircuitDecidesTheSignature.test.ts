@@ -342,7 +342,7 @@ describe('what the prover hands to noir_js', () => {
 
   /*
    * coinbase_attestation v2 CARRIES the action parameters (GIWA's six public
-   * inputs) while core 0.3.0 still says no action may be bound to it. So the
+   * inputs) while core 0.4.0-beta.0 still says no action may be bound to it. So the
    * pair goes in as zeros and an action is refused -- not dropped -- until
    * core's v2 release marks it 'optional'. It also needs the server-signed
    * revocation statement, with the App Attest inputs all zero.

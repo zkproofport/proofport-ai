@@ -111,9 +111,15 @@ describe('server verifyOnChain on OIDC v2 proofs', () => {
     rpcUrl: 'http://127.0.0.1:1',
   });
 
-  it('looks up the v2 verifier core pins on both testnets', () => {
-    expect(FALLBACK_VERIFIERS['84532'].oidc_domain_attestation?.toLowerCase()).toBe('0x003334a7c2ff15ee9ee845ab88e152a2a3694167');
-    expect(FALLBACK_VERIFIERS['11155111'].oidc_domain_attestation?.toLowerCase()).toBe('0x728eed982a3aeb0274fef972ebba9b774a2f9be4');
+  // Read from core rather than written out: these rows moved twice in two
+  // days (v2, then the provider-key statement circuit) and a literal here
+  // only ever measured the previous deployment.
+  it('looks up the verifier core pins, on both testnets and both mainnets', () => {
+    for (const chain of [84532, 11155111, 8453, 1]) {
+      const pinned = PINNED_VERIFIERS.oidc_domain_attestation[chain];
+      expect(pinned, `core pins no OIDC verifier on ${chain}`).toBeDefined();
+      expect(FALLBACK_VERIFIERS[String(chain)].oidc_domain_attestation?.toLowerCase(), String(chain)).toBe(pinned.address.toLowerCase());
+    }
   });
 
   for (const c of refusedByPolicy) {

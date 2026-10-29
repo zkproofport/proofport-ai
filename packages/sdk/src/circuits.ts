@@ -35,7 +35,7 @@ export type { CircuitSupportStatus } from '@zkproofport-app/core/circuits';
  * because {@link CircuitId} is already this package's public name for the
  * narrower set proofport-ai can prove; widening it would be a silent breaking
  * change for anyone writing `Record<CircuitId, ...>`, and would let
- * `circuit: 'mdl_kr_age'` typecheck against an endpoint that cannot serve it.
+ * `circuit: 'dojang_playground'` typecheck against an endpoint that cannot serve it.
  */
 export type CanonicalCircuitId = CoreCircuitId;
 

@@ -48,7 +48,7 @@ describe('the nullifier rule agrees everywhere', () => {
     (id) => {
       // The compiled circuit's inputs decide it, not whether core lets an
       // action be bound yet: coinbase_attestation v2 has the inputs (and the
-      // wallet + tag nullifier) while core 0.3.0 still says 'none'.
+      // wallet + tag nullifier) while core 0.4.0-beta.0 still says 'none'.
       const a = ethers.hexlify(sdkNullifier(id, WALLET, SIGNAL, SCOPE));
       const b = ethers.hexlify(sdkNullifier(id, WALLET, OTHER_SIGNAL, SCOPE));
       if (!CIRCUIT_INPUT_FACTS[id as keyof typeof CIRCUIT_INPUT_FACTS].actionInputs) {

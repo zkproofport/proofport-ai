@@ -248,11 +248,11 @@ describe('no circuit is inferred from field count (regression: detectCircuit rem
     // returned a plausible 32-byte value.
     const nullifierBytes = Array.from({ length: 32 }, () => 0xcd);
     const hex = buildCoinbasePublicInputsHex({ nullifierBytes });
-    const planned = CIRCUIT_IDS.MDL_KR_AGE as unknown as typeof KYC;
+    const unprovable = CIRCUIT_IDS.DOJANG_PLAYGROUND as unknown as typeof KYC;
 
-    expect(extractNullifierFromPublicInputs(hex, planned)).toBeNull();
-    expect(extractScopeFromPublicInputs(hex, planned)).toBeNull();
-    expect(extractDomainFromPublicInputs(hex, planned)).toBeNull();
+    expect(extractNullifierFromPublicInputs(hex, unprovable)).toBeNull();
+    expect(extractScopeFromPublicInputs(hex, unprovable)).toBeNull();
+    expect(extractDomainFromPublicInputs(hex, unprovable)).toBeNull();
   });
 
   it('answers "I don\'t know" when a JavaScript caller omits the circuit', () => {

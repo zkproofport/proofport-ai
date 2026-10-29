@@ -101,7 +101,7 @@ const LAYOUTS: Record<CircuitId, PublicInputLayout> = {
  * Look up the public-input layout for a circuit.
  *
  * Returns `null` for anything without a known layout — including a canonical
- * identifier this server cannot prove, such as `mdl_kr_age`. It never falls
+ * identifier this server cannot prove, such as `dojang_playground`. It never falls
  * back to another circuit's byte ranges.
  */
 function getLayout(circuit: unknown): PublicInputLayout | null {

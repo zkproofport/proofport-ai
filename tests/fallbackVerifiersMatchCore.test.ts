@@ -11,14 +11,18 @@ import { PROVABLE_CIRCUIT_IDS, type CircuitId } from '../src/config/circuitIds.j
  * deployments behind core until 2026-10-27.
  */
 /**
- * coinbase_attestation is served as v2 while core 0.3.0 pins v1's verifiers.
- * The exception is checked rather than skipped: v2's only deployment is Base
- * Sepolia, every other chain is null, and core must still pin something
- * other than v2 -- the day core pins v2, this fails and the exception goes.
+ * coinbase_attestation is served as v2 while core 0.4.0-beta.0 pins v1's
+ * verifiers. The exception is checked rather than skipped: v2 is deployed on
+ * Base Sepolia, Base and Ethereum (circuits
+ * deployments/<chain>/CoinbaseAttestationV2.json), every other chain is null,
+ * and core must still pin something other than v2 -- the day core pins v2,
+ * this fails and the exception goes.
  */
 const COINBASE_V2: Record<string, string | null> = {
-  '1': null, '8453': null, '11155111': null, '91342': null,
+  '11155111': null, '91342': null,
   '84532': '0x1885aA2283DB21ad0fc63A2Df98efe92F31908E6',
+  '8453': '0x6FC22d3576FB70457d1529B3F70f711A3cBA7A7F',
+  '1': '0x0e458610BD79893a0855C8F90CEDed70cF7553b6',
 };
 
 describe('coinbase_attestation v2 ahead of core', () => {
