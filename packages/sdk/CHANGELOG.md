@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.4](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.5.3...sdk-v0.5.4) (2026-10-30)
+
+
+### Features
+
+* **human-passport:** prove human_passport_score with the issuance found on Base ([59ae884](https://github.com/zkproofport/proofport-ai/commit/59ae88487c0dc026edde7c05e66f4296c03bd3a7))
+
 ## [0.5.3](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.5.2...sdk-v0.5.3) (2026-10-30)
 
 
