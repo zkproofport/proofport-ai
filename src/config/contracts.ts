@@ -91,7 +91,8 @@ export const FALLBACK_VERIFIERS: Record<string, Record<CircuitId, string | null>
   '1': {
     // coinbase_attestation v2 (circuits deployments/1/CoinbaseAttestationV2.json).
     [CIRCUIT_IDS.COINBASE_ATTESTATION]: '0x0e458610BD79893a0855C8F90CEDed70cF7553b6',
-    [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: '0x2EB64D21fB29f26cD58901767aD232841a945D46',
+    // coinbase_country_attestation v2 (circuits deployments/1/CoinbaseCountryAttestationV2.json).
+    [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: '0xCD23a61D194D3B00906C49457774cB7E207ccC7B',
     // The provider-key statement circuit.
     [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: '0xb07e18566Db63bb0b4cb72896699E94Faa078fcd',
     // Deployed on GIWA Sepolia (91342) and nowhere else.
@@ -100,7 +101,8 @@ export const FALLBACK_VERIFIERS: Record<string, Record<CircuitId, string | null>
   '8453': {
     // coinbase_attestation v2 (circuits deployments/8453/CoinbaseAttestationV2.json).
     [CIRCUIT_IDS.COINBASE_ATTESTATION]: '0x6FC22d3576FB70457d1529B3F70f711A3cBA7A7F',
-    [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: '0x8e89f11E65f219203f5bE9d6a69a4da084630C56',
+    // coinbase_country_attestation v2 (circuits deployments/8453/CoinbaseCountryAttestationV2.json).
+    [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: '0x509DEE10cc1578361b450fED7475EA3BD69c6e8d',
     // The provider-key statement circuit.
     [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: '0xF1AA88aD844bFd1dc552526a67f5980aAd4E7f35',
     // Deployed on GIWA Sepolia (91342) and nowhere else.
@@ -110,7 +112,8 @@ export const FALLBACK_VERIFIERS: Record<string, Record<CircuitId, string | null>
     // coinbase_attestation v2: deployed on Base Sepolia, Base and Ethereum,
     // not on Ethereum Sepolia.
     [CIRCUIT_IDS.COINBASE_ATTESTATION]: null,
-    [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: '0x0b3Af3DFc67dC65E0145c37ee00230139d579F64',
+    // coinbase_country_attestation v2 (circuits deployments/11155111/CoinbaseCountryAttestationV2.json).
+    [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: '0x99489796751B4939879dcAF5dB35eB4964c58F6c',
     // The provider-key statement circuit.
     [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: '0x8E8F481D98149F13fB756Cab69376814fa854180',
     // Deployed on GIWA Sepolia (91342) and nowhere else.
@@ -126,7 +129,8 @@ export const FALLBACK_VERIFIERS: Record<string, Record<CircuitId, string | null>
   '84532': {
     // coinbase_attestation v2 (circuits e498841).
     [CIRCUIT_IDS.COINBASE_ATTESTATION]: '0x1885aA2283DB21ad0fc63A2Df98efe92F31908E6',
-    [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: '0x9DEea2189aE694D7a36f65Fb7d7Dbe9f75abDDcE',
+    // coinbase_country_attestation v2 (circuits deployments/84532/CoinbaseCountryAttestationV2.json).
+    [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: '0xC5363d7587bd580148373D0d8b7909Be423242CB',
     // The provider-key statement circuit.
     [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: '0xeA5933ABc598401c89F63B3f13AE56A7E78984e8',
     // Deployed on GIWA Sepolia (91342) and nowhere else.

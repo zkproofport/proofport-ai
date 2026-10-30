@@ -15,18 +15,18 @@ const body = { circuit: 'giwa_attestation', scope: 'Gotgan', action };
 const clone = () => structuredClone(body);
 
 describe('approval validation unit boundaries', () => {
-  it.each(['giwa_attestation', 'coinbase_attestation', 'coinbase_kyc'])('accepts %s with exact inert UTF-8 action values and zero', circuit => {
+  it.each(['giwa_attestation', 'coinbase_attestation', 'coinbase_kyc', 'coinbase_country_attestation', 'coinbase_country'])('accepts %s with exact inert UTF-8 action values and zero', circuit => {
     const result = validateApprovalRequest({ ...body, circuit });
     expect(result.action).toEqual(action);
     expect(result.digest).toBe(TypedDataEncoder.hash(action.domain, action.types, action.message));
   });
-  it.each(['arc_eligibility', 'coinbase_country', 'coinbase_country_attestation', 'oidc_domain', 'unknown', '', null, undefined])('refuses unsupported circuit %j', circuit => {
+  it.each(['arc_eligibility', 'oidc_domain', 'unknown', '', null, undefined])('refuses unsupported circuit %j', circuit => {
     expect(() => validateApprovalRequest({ ...body, circuit })).toThrow(/only/);
   });
   it('names the circuits core lets bind an action, read from core rather than a hardcoded id', () => {
-    // core 0.4.0-beta.1 says 'optional' for coinbase_attestation (v2).
+    // core 0.4.0-beta.2 says 'optional' for both Coinbase circuits (v2).
     expect(() => validateApprovalRequest({ ...body, circuit: 'oidc_domain' }))
-      .toThrow('Human action approval supports only circuits that bind an action: coinbase_attestation, giwa_attestation.');
+      .toThrow('Human action approval supports only circuits that bind an action: coinbase_attestation, coinbase_country_attestation, giwa_attestation.');
   });
   it.each([undefined, null, '', ' ', [], {}])('refuses absent or malformed action %j', value => {
     expect(() => validateApprovalRequest({ ...body, action: value })).toThrow();

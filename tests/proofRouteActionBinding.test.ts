@@ -44,8 +44,10 @@ describe('HTTP proof route preserves optional action policy', () => {
       expect(prove).not.toHaveBeenCalled();
     });
   }
-  it.each(['coinbase_country_attestation'])('%s refuses an unsupported action before proving', async circuit => {
-    const response = await submit(circuit, { ...pair, country_list: ['KR'], is_included: true });
+  // Both Coinbase circuits bind an optional action since core 0.4.0-beta.2
+  // (tests/proofRouteCoinbaseStatement.test.ts, tests/proofRouteCountryStatement.test.ts).
+  it.each(['oidc_domain_attestation'])('%s refuses an unsupported action before proving', async circuit => {
+    const response = await submit(circuit, pair);
     expect(response.status).toBe(400);
     expect(response.body.message).toContain('does not support action binding');
     expect(prove).not.toHaveBeenCalled();

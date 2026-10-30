@@ -632,7 +632,7 @@ function fromSigner(signer: ethers.Signer): ProofportSigner;
 ```typescript
 interface ProofParams {
   circuit: CircuitName;
-  action?: { domain: { name: string; version: string; chainId: number; verifyingContract: string }; types: Record<string, Array<{name: string; type: string}>>; primaryType: string; message: Record<string, unknown> }; // optional for coinbase_kyc and giwa_attestation
+  action?: { domain: { name: string; version: string; chainId: number; verifyingContract: string }; types: Record<string, Array<{name: string; type: string}>>; primaryType: string; message: Record<string, unknown> }; // optional for coinbase_kyc, coinbase_country and giwa_attestation
   actionApproval?: ActionApproval; // private handle; resume the original action after human approval
   payOn?: string;
   maxPayment?: string; // decimal USDC
