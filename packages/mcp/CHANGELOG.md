@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.6](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.4.5...mcp-v0.4.6) (2026-10-30)
+
+
+### Features
+
+* **human-passport:** prove human_passport_score with the issuance found on Base ([59ae884](https://github.com/zkproofport/proofport-ai/commit/59ae88487c0dc026edde7c05e66f4296c03bd3a7))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @zkproofport-ai/sdk bumped from ^0.5.3 to ^0.5.4
+
 ## [0.4.5](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.4.4...mcp-v0.4.5) (2026-10-30)
 
 
