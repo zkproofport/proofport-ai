@@ -55,6 +55,7 @@ export const PROVABLE_CIRCUIT_IDS = [
   CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION,
   CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION,
   CIRCUIT_IDS.GIWA_ATTESTATION,
+  CIRCUIT_IDS.HUMAN_PASSPORT_SCORE,
 ] as const satisfies readonly CanonicalCircuitId[];
 
 /** Narrows an unknown value to a circuit the proofport-ai server can prove. */

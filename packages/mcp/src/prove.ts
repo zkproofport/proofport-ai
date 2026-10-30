@@ -207,6 +207,8 @@ let scope = 'proofport';
 let actionFile: string | undefined;
 let countries: string[] | undefined;
 let included: boolean | undefined;
+let minScore: number | undefined;
+let minScoreRaw: string | undefined;
 let jwt: string | undefined;
 let provider: string | undefined;
 let payWith: string | undefined;
@@ -232,6 +234,9 @@ for (; i < args.length; i++) {
     countries = args[++i].split(',').map((c) => c.trim());
   } else if (args[i] === '--included' && args[i + 1]) {
     included = args[++i].toLowerCase() === 'true';
+  } else if (args[i] === '--min-score' && args[i + 1]) {
+    minScoreRaw = args[++i];
+    minScore = Number(minScoreRaw);
   } else if (args[i] === '--jwt' && args[i + 1]) {
     jwt = args[++i];
   } else if (args[i] === '--provider' && args[i + 1]) {
@@ -273,11 +278,12 @@ function printUsage() {
   writeError('  --scope <scope>            Scope for nullifier (default: "proofport")');
   writeError('  --countries <codes>         Comma-separated ISO codes (for coinbase_country)');
   writeError('  --included <true|false>     Inclusion proof (for coinbase_country)');
+  writeError('  --min-score <points>        Human Passport score threshold, e.g. 20 (for human_passport)');
   writeError('  --silent                    Suppress all logs; output raw proof JSON only');
   writeError('  --login-google             Login with Google account (device flow)');
   writeError('  --login-google-workspace   Login with Google Workspace (device flow)');
   writeError('  --login-microsoft-365      Login with Microsoft 365 (device flow)');
-  writeError('  --action <file.json>        EIP-712 action; opens a human wallet approval link (Coinbase KYC, Coinbase Country, GIWA)');
+  writeError('  --action <file.json>        EIP-712 action; opens a human wallet approval link (Coinbase KYC, Coinbase Country, GIWA, Human Passport)');
   writeError('  --pay-with <key|cdp>        Which wallet pays, when the service charges');
   writeError('  --pay-on <chain>            Which chain to pay on (e.g. base-sepolia, ethereum-sepolia)');
   writeError('  --max-payment <USDC>        Maximum proof fee, up to six decimal places');
@@ -287,6 +293,7 @@ function printUsage() {
   writeError('  coinbase_country   Prove KYC country attestation, optionally binding one action (requires ATTESTATION_KEY)');
   writeError('  oidc_domain        Prove email domain via OIDC JWT (--jwt required)');
   writeError('  giwa_attestation   GIWA account attestation, optionally binding one action');
+  writeError('  human_passport     Human Passport score at or above --min-score, optionally binding one action (requires ATTESTATION_KEY)');
   writeError('');
   writeError('ATTESTATION_KEY must be the wallet attested for the circuit you ask for:');
   writeError('  Coinbase attests on Base; GIWA attests on GIWA Sepolia, and one');
@@ -389,6 +396,18 @@ if (circuit === 'coinbase_country') {
     }
     process.exit(1);
   }
+}
+
+if (circuit === 'human_passport') {
+  if (minScoreRaw === undefined || !/^\d+(\.\d{1,4})?$/.test(minScoreRaw) || !(minScore! > 0)) {
+    const msg = '--min-score <points> is required for human_passport: a number above 0 with at most four decimals (e.g. 20)';
+    writeError(silent ? JSON.stringify({ error: msg }) : `Error: ${msg}`);
+    process.exit(1);
+  }
+} else if (minScoreRaw !== undefined) {
+  const msg = `--min-score applies only to human_passport, not '${circuit}'`;
+  writeError(silent ? JSON.stringify({ error: msg }) : `Error: ${msg}`);
+  process.exit(1);
 }
 
 // ─── Validate OIDC-specific args ─────────────────────────────────────
@@ -504,6 +523,7 @@ const toolArgs: Record<string, unknown> = { circuit, scope };
 if (action !== undefined) toolArgs.action = action;
 if (countries !== undefined) toolArgs.country_list = countries;
 if (included !== undefined) toolArgs.is_included = included;
+if (minScore !== undefined) toolArgs.min_score = minScore;
 if (jwt !== undefined) toolArgs.jwt = jwt;
 if (provider !== undefined) toolArgs.provider = provider;
 if (payWith !== undefined) toolArgs.pay_with = payWith;

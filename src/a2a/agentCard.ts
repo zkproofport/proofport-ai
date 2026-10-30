@@ -45,6 +45,7 @@ function circuitGuides(config: Config): Record<string, string> {
     // Preserve existing discovery keys for clients using the original aliases.
     coinbase_kyc: `${config.a2aBaseUrl}/api/v1/guide/coinbase_kyc`,
     coinbase_country: `${config.a2aBaseUrl}/api/v1/guide/coinbase_country`,
+    human_passport: `${config.a2aBaseUrl}/api/v1/guide/human_passport`,
   };
 }
 
@@ -152,6 +153,7 @@ SUPPORTED CIRCUITS:
 ${PROVABLE_CIRCUIT_IDS.join(', ')}
 - coinbase_kyc: Prove Coinbase KYC verification without revealing identity. EAS schema 0xf8b05c79f090979bf4a80270aba232dff11a10d9ca55c4f88de95317970f0de9.
 - coinbase_country: Prove country of residence with inclusion/exclusion list. EAS schema 0x1801901fabd0e6189356b4fb52bb0ab855276d84f7ec140839fbd1f6801ca065.
+- human_passport: Prove a Human Passport score at or above min_score (scoreV2 on Base, EAS schema 0x1f3dce6501d8aad23563c0cf4f0c32264aed9311cb050056ebf72774f89ba912). The server finds the wallet's score itself; send the wallet's signed request and min_score.
 
 REQUIRED INPUTS:
 Inputs are circuit-specific. Read /api/v1/guide/{circuit} and prepare them with the client SDK.

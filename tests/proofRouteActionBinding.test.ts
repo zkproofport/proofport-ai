@@ -59,7 +59,7 @@ describe('the removed arc_eligibility circuit', () => {
     const response = await submit('arc_eligibility');
     expect(response.status).toBe(400);
     expect(response.body.error).toBe('INVALID_CIRCUIT');
-    expect(response.body.message).toBe('Unknown circuit: arc_eligibility. Valid: coinbase_kyc, coinbase_country, oidc_domain, coinbase_attestation, coinbase_country_attestation, oidc_domain_attestation, giwa_attestation');
+    expect(response.body.message).toBe('Unknown circuit: arc_eligibility. Valid: coinbase_kyc, coinbase_country, oidc_domain, human_passport, coinbase_attestation, coinbase_country_attestation, oidc_domain_attestation, giwa_attestation, human_passport_score');
     expect(prove).not.toHaveBeenCalled();
   });
   it('has no guide route', async () => {

@@ -1,6 +1,7 @@
 import { ethers } from 'ethers';
 import type { CircuitId, ProveInputs, ClientConfig } from './types.js';
-import { CIRCUIT_NAME_MAP, type CircuitName } from './types.js';
+import { CIRCUIT_NAME_MAP, type CircuitName, type HumanPassportProveInputs } from './types.js';
+import { humanPassportScoreUnits } from '@zkproofport-app/core/circuits';
 import { CIRCUIT_IDS, PROVABLE_CIRCUIT_IDS, circuitBindsAction } from './circuits.js';
 import {
   CIRCUITS,
@@ -133,6 +134,7 @@ const NULLIFIER_RULE: Record<CircuitId, 'wallet-and-circuit-tag' | 'wallet-and-s
   // v2 (circuits coinbase-country-attestation-v2): the same rule as KYC v2.
   [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: 'wallet-and-circuit-tag',
   [CIRCUIT_IDS.GIWA_ATTESTATION]: 'wallet-and-circuit-tag',
+  [CIRCUIT_IDS.HUMAN_PASSPORT_SCORE]: 'wallet-and-circuit-tag',
   // OIDC's nullifier is derived inside the OIDC payload builder, from the
   // identity token; this function is never asked for it.
   [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: 'built-from-the-token',
@@ -373,4 +375,58 @@ export async function prepareInputs(config: ClientConfig, params: {
   }
 
   return inputs;
+}
+
+/**
+ * Prepare the inputs for `human_passport_score`. No network: the client sends
+ * its signed request and the threshold, and the server finds the wallet's
+ * Human Passport score on Base itself (and refuses, before payment, a wallet
+ * without one or below the threshold).
+ *
+ * `minScore` is in Passport points (20 = 20.0): above 0, at most four
+ * decimals; anything else is refused here, before a signature is spent.
+ */
+export function prepareHumanPassportInputs(params: {
+  userAddress: string;
+  userSignature: string;
+  scope: string;
+  minScore: unknown;
+  domainSeparator?: string;
+  actionHash?: string;
+}): HumanPassportProveInputs {
+  const circuitId = CIRCUIT_IDS.HUMAN_PASSPORT_SCORE;
+  try {
+    humanPassportScoreUnits(params.minScore);
+  } catch (e) {
+    throw new Error(`minScore for human_passport: ${(e as Error).message}`);
+  }
+  if (Boolean(params.domainSeparator) !== Boolean(params.actionHash)) {
+    throw new Error('Half an action: pass both domainSeparator and actionHash, or neither.');
+  }
+  const isAction = Boolean(params.domainSeparator) && Boolean(params.actionHash);
+  const userAddress = ethers.getAddress(params.userAddress);
+  const signalHash = computeSignalHash(userAddress, params.scope, circuitId);
+  const userPubkey = isAction
+    ? ethers.SigningKey.recoverPublicKey(
+        ethers.keccak256(ethers.concat(['0x1901', params.domainSeparator!, params.actionHash!])),
+        params.userSignature,
+      )
+    : recoverUserPubkey(signalHash, params.userSignature);
+  if (ethers.computeAddress(userPubkey) !== userAddress) {
+    throw new Error(`The signature was not made by ${userAddress}; the circuit would refuse the proof.`);
+  }
+  const { x, y } = extractPubkeyCoordinates(userPubkey);
+  const scopeBytes = computeScope(params.scope);
+  const nullifier = nullifierForCircuit(circuitId, userAddress, signalHash, scopeBytes);
+  return {
+    signal_hash: ethers.hexlify(signalHash),
+    ...(isAction ? { domain_separator: params.domainSeparator, action_hash: params.actionHash } : {}),
+    nullifier: ethers.hexlify(nullifier),
+    scope_bytes: ethers.hexlify(scopeBytes),
+    user_address: userAddress,
+    signature: params.userSignature,
+    user_pubkey_x: x,
+    user_pubkey_y: y,
+    min_score: params.minScore as number,
+  };
 }

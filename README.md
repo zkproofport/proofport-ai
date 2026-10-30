@@ -258,7 +258,7 @@ GIWA optional-action support requires **SDK 0.2.14 or later** and **MCP 0.2.15 o
 - Input schema with types and descriptions
 - EAS GraphQL query templates
 
-Circuits use aliases: `coinbase_kyc` → `coinbase_attestation`, `coinbase_country` → `coinbase_country_attestation`, `oidc_domain` → `oidc_domain_attestation`. `giwa_attestation` has no alias — it is named canonically or not at all.
+Circuits use aliases: `coinbase_kyc` → `coinbase_attestation`, `coinbase_country` → `coinbase_country_attestation`, `oidc_domain` → `oidc_domain_attestation`, `human_passport` → `human_passport_score`. `giwa_attestation` has no alias — it is named canonically or not at all.
 
 ## A2A Protocol
 
@@ -311,6 +311,15 @@ Proves holder owns an email address at a specific domain via OIDC JWT verificati
 - **Input type:** OIDC JWT (`id_token` from Google, etc.)
 - **Public Inputs:** domain hash, scope
 - **Nullifier:** Yes (privacy, replay prevention)
+
+### Human Passport score (`human_passport_score`)
+
+Proves the wallet holds an unexpired Human Passport score at or above a threshold, without revealing the wallet or the exact score.
+
+- **Aliases:** `human_passport`, `human_passport_score`
+- **Client inputs:** the wallet's signed request (or one EIP-712 action) and `min_score` in Passport points; the server finds the wallet's score on Base and refuses, before payment, a wallet with no score, an expired one or one below the threshold
+- **Public Inputs:** signal hash / action, issuer root, scope, nullifier, threshold, scorer, time
+- **Nullifier:** Yes (wallet + circuit tag)
 
 ### Human wallet approval links
 

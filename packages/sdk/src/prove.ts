@@ -1,4 +1,4 @@
-import type { ClientConfig, CircuitName, ProveInputs, ProveResponse } from './types.js';
+import type { ClientConfig, CircuitName, HumanPassportProveInputs, ProveInputs, ProveResponse } from './types.js';
 import type { EncryptedEnvelope } from './tee.js';
 
 /**
@@ -13,7 +13,7 @@ export async function submitProof(
   config: ClientConfig,
   request: {
     circuit: CircuitName;
-    inputs?: ProveInputs | Record<string, unknown>;
+    inputs?: ProveInputs | HumanPassportProveInputs | Record<string, unknown>;
     nonce?: string;
     /**
      * Payment headers from `signPayment` -- the x402 `X-Payment` header

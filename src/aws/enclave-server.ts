@@ -77,6 +77,14 @@ const CIRCUITS: Record<CircuitId, { dir: string; bytecode: string; vk: string }>
     bytecode: `${CIRCUIT_IDS.GIWA_ATTESTATION}.json`,
     vk: 'vk/vk',
   },
+  // Listed so the record stays exhaustive; never proved here. Its issuance is
+  // looked up by the server before payment, which needs plaintext inputs, and
+  // nitro mode accepts only encrypted ones (proofRoutes refuses both ways).
+  [CIRCUIT_IDS.HUMAN_PASSPORT_SCORE]: {
+    dir: 'human-passport-score',
+    bytecode: `${CIRCUIT_IDS.HUMAN_PASSPORT_SCORE}.json`,
+    vk: 'vk/vk',
+  },
   [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: {
     dir: 'oidc-domain-attestation',
     bytecode: `${CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION}.json`,
@@ -329,6 +337,9 @@ async function generateProof(
 
     // Step 2: Format inputs for noir_js
     let noirInputs: Record<string, unknown>;
+    if (circuitId === CIRCUIT_IDS.HUMAN_PASSPORT_SCORE) {
+      throw new Error('human_passport_score is not proved in the enclave: the server must read the request to find its issuance.');
+    }
     if (circuitId === CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION) {
       // OIDC: inputs is OidcProvePayload { jwt, jwks, scope, provider } — validate + build circuit inputs
       const { prepareOidcCircuitInputs } = await import('../prover/oidcProver.js');

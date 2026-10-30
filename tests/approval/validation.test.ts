@@ -26,7 +26,7 @@ describe('approval validation unit boundaries', () => {
   it('names the circuits core lets bind an action, read from core rather than a hardcoded id', () => {
     // core 0.4.0-beta.2 says 'optional' for both Coinbase circuits (v2).
     expect(() => validateApprovalRequest({ ...body, circuit: 'oidc_domain' }))
-      .toThrow('Human action approval supports only circuits that bind an action: coinbase_attestation, coinbase_country_attestation, giwa_attestation.');
+      .toThrow('Human action approval supports only circuits that bind an action: coinbase_attestation, coinbase_country_attestation, giwa_attestation, human_passport_score.');
   });
   it.each([undefined, null, '', ' ', [], {}])('refuses absent or malformed action %j', value => {
     expect(() => validateApprovalRequest({ ...body, action: value })).toThrow();

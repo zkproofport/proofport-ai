@@ -7,7 +7,7 @@ import * as crypto from 'node:crypto';
 import { Noir } from '@noir-lang/noir_js';
 import type { CircuitParams } from '../input/inputBuilder.js';
 import type { OidcCircuitInputs } from './inputFormatter.js';
-import { formatAttestationInputs, formatOidcInputs, type AttestationCircuitId } from './inputFormatter.js';
+import { formatAttestationInputs, formatHumanPassportInputs, formatOidcInputs, type AttestationCircuitId, type HumanPassportParams } from './inputFormatter.js';
 import { CIRCUIT_IDS, CIRCUIT_DIRS } from '../config/circuitIds.js';
 import type { CircuitId } from '../config/circuitIds.js';
 import { createLogger } from '../logger.js';
@@ -75,6 +75,8 @@ export class BbProver {
         const { prepareOidcCircuitInputs } = await import('./oidcProver.js');
         const oidcInputs = prepareOidcCircuitInputs(inputs as any);
         noirInputs = formatOidcInputs(oidcInputs);
+      } else if (circuitId === CIRCUIT_IDS.HUMAN_PASSPORT_SCORE) {
+        noirInputs = formatHumanPassportInputs(inputs as HumanPassportParams);
       } else {
         noirInputs = formatAttestationInputs(
           circuitId as AttestationCircuitId,

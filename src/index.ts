@@ -35,6 +35,7 @@ import { ensureAgentRegistered, isIdentityRegistrationEnabled } from './identity
 import { createAgentAuthMiddleware } from './identity/agentAuth.js';
 import { createProofRoutes } from './proof/proofRoutes.js';
 import { easAttestationReader, statementSignerFromEnv } from './input/coinbaseStatement.js';
+import { easHumanPassportReader } from './input/humanPassport.js';
 import { createActionApprovalRouter, approvalSecurityHeaders } from './approval/routes.js';
 import type { LLMProvider } from './chat/llmProvider.js';
 import { OpenAIProvider } from './chat/openaiClient.js';
@@ -227,7 +228,14 @@ function createApp(config: Config) {
         signer: statementSignerFromEnv(),
       }
     : undefined;
-  app.use('/api/v1', createProofRoutes({ redis, config, teeProvider, statement }));
+  // human_passport_score reads the wallet's issuance on Base before payment.
+  // loadConfig requires EAS_GRAPHQL_ENDPOINT and BASE_RPC_URL, so a server
+  // always has both; an app built from a partial test config has neither, and
+  // answers a Human Passport request with an error rather than a proof.
+  const humanPassport = config.easGraphqlEndpoint && config.baseRpcUrl
+    ? { reader: easHumanPassportReader(config.easGraphqlEndpoint, config.baseRpcUrl) }
+    : undefined;
+  app.use('/api/v1', createProofRoutes({ redis, config, teeProvider, statement, humanPassport }));
 
   // MCP StreamableHTTP endpoint (stateless mode)
   // Payment is handled inside skillHandler via request_payment flow (no HTTP-level x402 gate)

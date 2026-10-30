@@ -60,6 +60,10 @@ export const ATTESTATION_SOURCES: Record<
   // The signature is inside the OIDC identity token; there is no attestation
   // transaction to find.
   [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: null,
+  // Not a signed transaction from a known signer: the issuer's EIP-712
+  // signature sits in the verifyAndAttest calldata, found and checked by
+  // src/input/humanPassport.ts.
+  [CIRCUIT_IDS.HUMAN_PASSPORT_SCORE]: null,
 };
 
 /**
@@ -97,6 +101,8 @@ export const FALLBACK_VERIFIERS: Record<string, Record<CircuitId, string | null>
     [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: '0xb07e18566Db63bb0b4cb72896699E94Faa078fcd',
     // Deployed on GIWA Sepolia (91342) and nowhere else.
     [CIRCUIT_IDS.GIWA_ATTESTATION]: null,
+    // Not deployed on Ethereum mainnet yet; production verifies on Base.
+    [CIRCUIT_IDS.HUMAN_PASSPORT_SCORE]: null,
   },
   '8453': {
     // coinbase_attestation v2 (circuits deployments/8453/CoinbaseAttestationV2.json).
@@ -107,6 +113,8 @@ export const FALLBACK_VERIFIERS: Record<string, Record<CircuitId, string | null>
     [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: '0xF1AA88aD844bFd1dc552526a67f5980aAd4E7f35',
     // Deployed on GIWA Sepolia (91342) and nowhere else.
     [CIRCUIT_IDS.GIWA_ATTESTATION]: null,
+    // circuits deployments/8453/HumanPassportScore.json.
+    [CIRCUIT_IDS.HUMAN_PASSPORT_SCORE]: '0x2d055c42a2B0c1024aC4aa83b4995fc8fD45662e',
   },
   '11155111': {
     // coinbase_attestation v2: deployed on Base Sepolia, Base and Ethereum,
@@ -118,6 +126,8 @@ export const FALLBACK_VERIFIERS: Record<string, Record<CircuitId, string | null>
     [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: '0x8E8F481D98149F13fB756Cab69376814fa854180',
     // Deployed on GIWA Sepolia (91342) and nowhere else.
     [CIRCUIT_IDS.GIWA_ATTESTATION]: null,
+    // circuits deployments/11155111/HumanPassportScore.json.
+    [CIRCUIT_IDS.HUMAN_PASSPORT_SCORE]: '0xc78585718Fd27D428d7A90970d09A2121BE36066',
   },
   // GIWA Sepolia. The only chain giwa_attestation is deployed on.
   '91342': {
@@ -125,6 +135,7 @@ export const FALLBACK_VERIFIERS: Record<string, Record<CircuitId, string | null>
     [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: null,
     [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: null,
     [CIRCUIT_IDS.GIWA_ATTESTATION]: '0xF6Edb9d6114B2546B6E559997fdDE08CAeEA83b3',
+    [CIRCUIT_IDS.HUMAN_PASSPORT_SCORE]: null,
   },
   '84532': {
     // coinbase_attestation v2 (circuits e498841).
@@ -135,6 +146,8 @@ export const FALLBACK_VERIFIERS: Record<string, Record<CircuitId, string | null>
     [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: '0xeA5933ABc598401c89F63B3f13AE56A7E78984e8',
     // Deployed on GIWA Sepolia (91342) and nowhere else.
     [CIRCUIT_IDS.GIWA_ATTESTATION]: null,
+    // circuits deployments/84532/HumanPassportScore.json.
+    [CIRCUIT_IDS.HUMAN_PASSPORT_SCORE]: '0x39df92D9C603Fe6d229c7b00272A1E874a628acE',
   },
 };
 

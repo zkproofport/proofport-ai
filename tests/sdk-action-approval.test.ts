@@ -374,7 +374,7 @@ describe('existing proof paths without action', () => {
   it('refuses the removed arc_eligibility circuit before any network call', async () => {
     const fetcher = transport();
     await expect(generateProof(config, { attestation: signer() }, { circuit: 'arc_eligibility' as never, scope: request.scope }))
-      .rejects.toThrow("Unknown circuit 'arc_eligibility'. Known: coinbase_kyc, coinbase_country, oidc_domain, giwa_attestation.");
+      .rejects.toThrow("Unknown circuit 'arc_eligibility'. Known: coinbase_kyc, coinbase_country, oidc_domain, giwa_attestation, human_passport.");
     expect(fetcher).not.toHaveBeenCalled();
   });
   it.each(['coinbase_kyc', 'coinbase_country', 'giwa_attestation'] as const)('keeps personal signing and payment for %s', async (circuit) => {

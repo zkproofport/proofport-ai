@@ -103,6 +103,8 @@ const LAYOUTS: Record<CircuitId, PublicInputLayout> = {
   // offsets returns the Merkle root where the nullifier is -- one value for
   // every user of the circuit.
   [CIRCUIT_IDS.GIWA_ATTESTATION]: { scope: [128, 159], nullifier: [160, 191] },
+  // GIWA's six first, then min_score 192, scorer_id 193, now 194 (195 fields).
+  [CIRCUIT_IDS.HUMAN_PASSPORT_SCORE]: { scope: [128, 159], nullifier: [160, 191] },
 };
 
 /**

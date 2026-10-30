@@ -594,7 +594,7 @@ export function buildSwaggerSpec(baseUrl: string, agentName = 'ZKProofport prove
                 properties: {
                   circuit: {
                     type: 'string',
-                    enum: ['coinbase_kyc', 'coinbase_country', 'oidc_domain', 'giwa_attestation'],
+                    enum: ['coinbase_kyc', 'coinbase_country', 'oidc_domain', 'giwa_attestation', 'human_passport'],
                     description: 'Which circuit to use',
                   },
                   inputs: {
@@ -629,6 +629,10 @@ export function buildSwaggerSpec(baseUrl: string, agentName = 'ZKProofport prove
                       is_included: {
                         type: 'boolean',
                         description: 'Inclusion/exclusion flag (for country circuit only)',
+                      },
+                      min_score: {
+                        type: 'number',
+                        description: 'human_passport only: the Human Passport score threshold in points (e.g. 20; above 0, at most four decimals). For human_passport send only signal_hash, nullifier, scope_bytes, user_address, signature, user_pubkey_x, user_pubkey_y, min_score (and optionally domain_separator + action_hash); the server finds the wallet\'s score on Base itself. See GET /api/v1/guide/human_passport.',
                       },
                     },
                   },
@@ -699,7 +703,7 @@ export function buildSwaggerSpec(baseUrl: string, agentName = 'ZKProofport prove
           name: 'circuit',
           in: 'path',
           required: true,
-          schema: { type: 'string', enum: ['coinbase_kyc', 'coinbase_country', 'oidc_domain', 'giwa_attestation'] },
+          schema: { type: 'string', enum: ['coinbase_kyc', 'coinbase_country', 'oidc_domain', 'giwa_attestation', 'human_passport'] },
           description: 'Circuit alias name',
         }],
         responses: {

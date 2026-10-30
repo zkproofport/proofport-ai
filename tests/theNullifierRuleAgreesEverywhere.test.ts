@@ -51,7 +51,10 @@ describe('the nullifier rule agrees everywhere', () => {
       // wallet + tag nullifier) while core 0.4.0-beta.0 still says 'none'.
       const a = ethers.hexlify(sdkNullifier(id, WALLET, SIGNAL, SCOPE));
       const b = ethers.hexlify(sdkNullifier(id, WALLET, OTHER_SIGNAL, SCOPE));
-      if (!CIRCUIT_INPUT_FACTS[id as keyof typeof CIRCUIT_INPUT_FACTS].actionInputs) {
+      // human_passport_score has its own formatter (no CIRCUIT_INPUT_FACTS
+      // row); its main() takes the action pair like GIWA's.
+      const hasActionInputs = id === 'human_passport_score' || CIRCUIT_INPUT_FACTS[id as keyof typeof CIRCUIT_INPUT_FACTS].actionInputs;
+      if (!hasActionInputs) {
         expect(a).not.toBe(b);
       } else {
         expect(a).toBe(b);

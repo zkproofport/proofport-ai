@@ -7,7 +7,8 @@
 
 import type { CircuitParams } from '../input/inputBuilder.js';
 import { CIRCUIT_IDS, type CircuitId } from '../config/circuitIds.js';
-import { circuitActionBinding } from '@zkproofport-app/core/circuits';
+import { circuitActionBinding, HUMAN_PASSPORT_MAX_DATA_BYTES, HUMAN_PASSPORT_SCORER_ID } from '@zkproofport-app/core/circuits';
+import type { HumanPassportIssuance } from '../input/humanPassport.js';
 
 /**
  * The circuits built from an on-chain attestation: everything this server can
@@ -19,7 +20,10 @@ import { circuitActionBinding } from '@zkproofport-app/core/circuits';
  * did not know giwa existed, and every GIWA request died inside noir_js with
  * "Expected argument `action_hash`, but none was found".
  */
-export type AttestationCircuitId = Exclude<CircuitId, typeof CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION>;
+export type AttestationCircuitId = Exclude<
+  CircuitId,
+  typeof CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION | typeof CIRCUIT_IDS.HUMAN_PASSPORT_SCORE
+>;
 
 /**
  * Facts about the COMPILED circuit each id is served from (CIRCUIT_DIRS),
@@ -361,4 +365,89 @@ export function formatOidcInputs(inputs: OidcCircuitInputs): Record<string, unkn
   result.assertion_auth_data_len = inputs.assertion_auth_data_len.toString();
 
   return result;
+}
+
+// ─── Human Passport score ───────────────────────────────────────────────
+
+/**
+ * What human_passport_score proves from: the wallet's request (as for the
+ * other wallet circuits) and the issuance src/input/humanPassport.ts found and
+ * checked before payment.
+ */
+export interface HumanPassportParams {
+  signalHash: Uint8Array;
+  domainSeparator?: string;
+  actionHash?: string;
+  scopeBytes: Uint8Array;
+  nullifierBytes: Uint8Array;
+  userAddress: string;
+  userSignature: string;
+  userPubkeyX: string;
+  userPubkeyY: string;
+  /** Threshold in score units (score x 10^4). */
+  minScoreUnits: number;
+  /** Unix seconds the attestation must be unexpired at. */
+  now: number;
+  issuance: HumanPassportIssuance;
+}
+
+function word32(v: bigint | string): string[] {
+  const n = typeof v === 'bigint' ? v : BigInt(v);
+  if (n < 0n || n >= 1n << 256n) throw new Error(`value ${n} does not fit 32 bytes`);
+  return toHexArray(hexStringToBytes(n.toString(16).padStart(64, '0')));
+}
+
+/**
+ * Convert HumanPassportParams to noir_js inputs for human_passport_score
+ * (circuits human-passport-score/src/main.nr). Field names are main()'s.
+ */
+export function formatHumanPassportInputs(p: HumanPassportParams): Record<string, unknown> {
+  const bound = Boolean(p.domainSeparator) && Boolean(p.actionHash);
+  if (Boolean(p.domainSeparator) !== Boolean(p.actionHash)) {
+    throw new Error('Half an action: send both domain_separator and action_hash, or neither.');
+  }
+  if (!Number.isSafeInteger(p.minScoreUnits) || p.minScoreUnits < 1 || p.minScoreUnits > 0xffffffff) {
+    throw new Error(`min_score ${p.minScoreUnits} is not a u32 above 0`);
+  }
+  if (!Number.isSafeInteger(p.now) || p.now <= 0) throw new Error(`Invalid now ${p.now}`);
+  const i = p.issuance;
+  if (BigInt(p.now) >= i.request.expirationTime) throw new Error(`now ${p.now} is not before the issuance's expiry ${i.request.expirationTime}`);
+  const data = hexStringToBytes(i.request.data);
+  if (data.length > HUMAN_PASSPORT_MAX_DATA_BYTES) throw new Error(`score data is ${data.length} bytes; the circuit holds ${HUMAN_PASSPORT_MAX_DATA_BYTES}`);
+  if (i.merkleProof.length !== i.merkleDepth || i.merkleDepth < 1 || i.merkleDepth > 8) {
+    throw new Error(`issuer Merkle path has ${i.merkleProof.length} nodes for depth ${i.merkleDepth}`);
+  }
+  const sig = hexStringToBytes(i.issuerSignature);
+  if (sig.length !== 64) throw new Error(`issuer_signature is ${sig.length} bytes, expected 64`);
+  return {
+    signal_hash: bound ? toHexArray(new Uint8Array(32)) : toHexArray(p.signalHash),
+    domain_separator: bound ? toHexArray(hexStringToBytes(p.domainSeparator!)) : toHexArray(new Uint8Array(32)),
+    action_hash: bound ? toHexArray(hexStringToBytes(p.actionHash!)) : toHexArray(new Uint8Array(32)),
+    signer_list_merkle_root: toHexArray(hexStringToBytes(i.merkleRoot)),
+    scope: toHexArray(p.scopeBytes),
+    nullifier: toHexArray(p.nullifierBytes),
+    min_score: p.minScoreUnits.toString(),
+    scorer_id: HUMAN_PASSPORT_SCORER_ID.toString(),
+    now: p.now.toString(),
+    user_address: toHexArray(hexStringToBytes(p.userAddress)),
+    user_signature: toHexArray(splitSignature(p.userSignature)),
+    user_pubkey_x: toHexArray(hexStringToBytes(p.userPubkeyX)),
+    user_pubkey_y: toHexArray(hexStringToBytes(p.userPubkeyY)),
+    passport_domain_separator: toHexArray(hexStringToBytes(i.domainSeparator)),
+    schema_uid: toHexArray(hexStringToBytes(i.request.schema)),
+    expiration_time: i.request.expirationTime.toString(),
+    revocable: i.request.revocable,
+    ref_uid: toHexArray(hexStringToBytes(i.request.refUID)),
+    attestation_value: word32(i.request.value),
+    request_nonce: word32(i.request.nonce),
+    request_fee: word32(i.request.fee),
+    score_data: toHexArray(padBytes(data, HUMAN_PASSPORT_MAX_DATA_BYTES)),
+    score_data_len: data.length.toString(),
+    issuer_signature: toHexArray(sig),
+    issuer_pubkey_x: toHexArray(hexStringToBytes(i.issuerPubkeyX)),
+    issuer_pubkey_y: toHexArray(hexStringToBytes(i.issuerPubkeyY)),
+    issuer_merkle_proof: formatMerkleProofArray(i.merkleProof, 8),
+    issuer_leaf_index: i.leafIndex.toString(),
+    issuer_merkle_depth: i.merkleDepth.toString(),
+  };
 }

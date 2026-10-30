@@ -10,7 +10,9 @@ export type CircuitName =
   | 'coinbase_country'
   | 'oidc_domain'
   /** GIWA account attestation, optionally binding one EIP-712 action. */
-  | 'giwa_attestation';
+  | 'giwa_attestation'
+  /** Human Passport score at or above a threshold, optionally binding one EIP-712 action. */
+  | 'human_passport';
 
 /**
  * Canonical circuit IDs this server can prove.
@@ -27,6 +29,7 @@ export const CIRCUIT_NAME_MAP: Record<CircuitName, CircuitId> = {
   coinbase_country: CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION,
   oidc_domain: CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION,
   giwa_attestation: CIRCUIT_IDS.GIWA_ATTESTATION,
+  human_passport: CIRCUIT_IDS.HUMAN_PASSPORT_SCORE,
 };
 
 /** Map canonical circuit IDs back to client-friendly names. */
@@ -35,6 +38,7 @@ export const CIRCUIT_ID_MAP: Record<CircuitId, CircuitName> = {
   [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: 'coinbase_country',
   [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: 'oidc_domain',
   [CIRCUIT_IDS.GIWA_ATTESTATION]: 'giwa_attestation',
+  [CIRCUIT_IDS.HUMAN_PASSPORT_SCORE]: 'human_passport',
 };
 
 // ─── Configuration ──────────────────────────────────────────────────────
@@ -95,9 +99,27 @@ export interface ProveInputs {
   is_included?: boolean;
 }
 
+/**
+ * What `human_passport` sends: the wallet's signed request and the threshold.
+ * The server finds the wallet's Human Passport score on Base itself.
+ */
+export interface HumanPassportProveInputs {
+  signal_hash: string;
+  domain_separator?: string;
+  action_hash?: string;
+  nullifier: string;
+  scope_bytes: string;
+  user_address: string;
+  signature: string;
+  user_pubkey_x: string;
+  user_pubkey_y: string;
+  /** Threshold in Passport points (20 = 20.0). */
+  min_score: number;
+}
+
 export interface ProveRequest {
   circuit: CircuitName;
-  inputs?: ProveInputs | Record<string, unknown>;
+  inputs?: ProveInputs | HumanPassportProveInputs | Record<string, unknown>;
   encrypted_payload?: EncryptedProveRequest['encrypted_payload'];
 }
 
@@ -220,6 +242,11 @@ export interface ProofParams {
   countryList?: string[];
   /** Whether the country list is an inclusion or exclusion list */
   isIncluded?: boolean;
+  /**
+   * Required for human_passport: the score threshold in Passport points
+   * (e.g. 20; above 0, at most four decimals). The proof carries it.
+   */
+  minScore?: number;
   /** JWT token for OIDC circuit (oidc_domain) */
   jwt?: string;
   /** OIDC provider: 'google' (default) or 'microsoft' for Microsoft 365 */

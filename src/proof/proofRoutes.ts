@@ -33,6 +33,13 @@ import {
   type OidcProviderKeyStatement,
   type ProviderKeyCheck,
 } from '../input/oidcStatement.js';
+import {
+  prepareHumanPassport,
+  type HumanPassportPrepared,
+  type HumanPassportAnchors,
+  type HumanPassportReader,
+} from '../input/humanPassport.js';
+import type { HumanPassportParams } from '../prover/inputFormatter.js';
 import type {
   ProveRequest,
   ProveResponse,
@@ -73,6 +80,13 @@ export interface ProofRoutesDeps {
    * built without it is an error, never a proof without a statement.
    */
   statement?: { reader: AttestationReader; signer: StatementSigner; checkProviderKey?: ProviderKeyCheck };
+  /**
+   * human_passport_score: where the wallet's issuance is read before payment
+   * (EAS index, the EAS contract and the transaction on Base). index.ts always
+   * supplies it; a Human Passport request reaching routes built without it is
+   * an error, never a proof.
+   */
+  humanPassport?: { reader: HumanPassportReader; now?: () => number; anchors?: HumanPassportAnchors };
 }
 
 /**
@@ -120,6 +134,13 @@ const STATEMENT_REFUSAL_STATUS: Record<string, number> = {
   OIDC_TOKEN_REFUSED: 400,
   OIDC_PROVIDER_KEY_INVALID: 400,
   OIDC_PROVIDER_KEY_UNPUBLISHED: 403,
+  NO_HUMAN_PASSPORT_SCORE: 403,
+  HUMAN_PASSPORT_SCORE_EXPIRED: 403,
+  HUMAN_PASSPORT_SCORE_BELOW_THRESHOLD: 403,
+  HUMAN_PASSPORT_DATA_TOO_LARGE: 403,
+  HUMAN_PASSPORT_ISSUANCE_UNREADABLE: 403,
+  // The index or Base did not answer: nothing was charged, try again.
+  HUMAN_PASSPORT_LOOKUP_FAILED: 503,
 };
 
 /** Shared context for proof generation */
@@ -135,6 +156,8 @@ interface ProveContext {
   statement?: ServerStatement;
   /** oidc_domain_attestation: the provider-key statement signed before payment was taken. */
   oidcStatement?: OidcProviderKeyStatement;
+  /** human_passport_score: the issuance found and checked before payment was taken. */
+  humanPassport?: HumanPassportPrepared;
 }
 
 /**
@@ -194,6 +217,7 @@ function proofTypeForCircuit(circuitId: CircuitId, provider?: string): string {
     [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: 'country',
     [CIRCUIT_IDS.GIWA_ATTESTATION]: 'giwa_attestation',
     [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: 'google_login',
+    [CIRCUIT_IDS.HUMAN_PASSPORT_SCORE]: 'human_passport_score',
   };
   const type = types[circuitId];
   if (!type) throw new Error(`Unknown proof type for circuit ${circuitId}`);
@@ -236,7 +260,29 @@ async function generateProofFromInputs(
   if (isOidc !== Boolean(ctx.oidcStatement)) {
     throw new Error(`${circuitId}: the provider-key statement is ${ctx.oidcStatement ? 'present for a circuit that takes none' : 'missing'}`);
   }
-  if (isOidc) {
+  const isPassport = circuitId === CIRCUIT_IDS.HUMAN_PASSPORT_SCORE;
+  if (isPassport !== Boolean(ctx.humanPassport)) {
+    throw new Error(`${circuitId}: the Human Passport issuance is ${ctx.humanPassport ? 'present for a circuit that takes none' : 'missing'}`);
+  }
+  if (isPassport) {
+    // Every field was checked before payment (prepareHumanPassport); the
+    // issuance and `now` are the server's, never the caller's.
+    const hp = inputs as unknown as Record<string, string>;
+    const prepared = ctx.humanPassport!;
+    proverInputs = {
+      signalHash: ethers.getBytes(hp.signal_hash),
+      scopeBytes: ethers.getBytes(hp.scope_bytes),
+      nullifierBytes: ethers.getBytes(hp.nullifier),
+      userAddress: hp.user_address,
+      userSignature: hp.signature,
+      userPubkeyX: hp.user_pubkey_x,
+      userPubkeyY: hp.user_pubkey_y,
+      minScoreUnits: prepared.minScoreUnits,
+      now: prepared.now,
+      issuance: prepared.issuance,
+      ...(hp.domain_separator && hp.action_hash ? { domainSeparator: hp.domain_separator, actionHash: hp.action_hash } : {}),
+    } satisfies HumanPassportParams;
+  } else if (isOidc) {
     // OIDC: pass OidcProvePayload { jwt, jwks, scope, provider } plus the
     // provider-key statement signed before payment — TEE/bbProver validates
     // the JWT again and builds circuit inputs. The statement is set last so a
@@ -729,6 +775,38 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
         }
       }
 
+      // human_passport_score: find the wallet's issuance on Base and check it
+      // as the circuit will -- signature, threshold, expiry, the issuer --
+      // BEFORE payment, so an unscored wallet is refused for free.
+      let humanPassport: HumanPassportPrepared | undefined;
+      if (circuitId === CIRCUIT_IDS.HUMAN_PASSPORT_SCORE) {
+        if (body.encrypted_payload) {
+          res.status(400).json({
+            error: 'E2E_UNSUPPORTED',
+            message: 'human_passport_score needs the server to read the request to find the wallet\'s Human Passport issuance, which it cannot do inside an encrypted payload. Send plaintext inputs.',
+          });
+          return;
+        }
+        const actionError = actionFieldsError(circuitId, body.inputs);
+        if (actionError) {
+          res.status(400).json({ error: 'INVALID_REQUEST', message: actionError });
+          return;
+        }
+        if (!deps.humanPassport) throw new Error('human_passport_score issuance reader is not configured on this server');
+        try {
+          humanPassport = await prepareHumanPassport(body.inputs as Record<string, unknown>, deps.humanPassport);
+        } catch (e) {
+          if (e instanceof StatementRefusal) {
+            const status = STATEMENT_REFUSAL_STATUS[e.code];
+            if (!status) throw new Error(`Unmapped Human Passport refusal ${e.code}: ${e.message}`);
+            log.warn({ action: 'prove.human_passport.refused', code: e.code }, 'Human Passport request refused');
+            res.status(status).json({ error: e.code, message: e.message });
+            return;
+          }
+          throw e;
+        }
+      }
+
       // On-chain payment verification (skip when payment disabled)
       if (config.paymentMode !== 'disabled') {
         const paymentStart = Date.now();
@@ -963,6 +1041,7 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
           verification: chooseVerificationTarget(config, circuitId, isTestnet),
           statement,
           oidcStatement,
+          humanPassport,
         },
         deps,
         config,

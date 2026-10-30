@@ -82,6 +82,10 @@ export const PROVABLE_CIRCUIT_IDS = [
   // own attester on that chain, not from Coinbase's EAS -- see
   // ATTESTATION_SOURCES.
   CIRCUIT_IDS.GIWA_ATTESTATION,
+  // Added 2026-10-30. Its issuance is read from the wallet's scoreV2
+  // attestation on Base and its verifyAndAttest calldata, before payment
+  // (src/input/humanPassport.ts).
+  CIRCUIT_IDS.HUMAN_PASSPORT_SCORE,
 ] as const satisfies readonly CanonicalCircuitId[];
 
 /**
@@ -147,6 +151,10 @@ export const CIRCUIT_DIRS: Record<CircuitId, { dir: string; packageName: string 
     dir: 'giwa-attestation',
     packageName: CIRCUIT_IDS.GIWA_ATTESTATION,
   },
+  [CIRCUIT_IDS.HUMAN_PASSPORT_SCORE]: {
+    dir: 'human-passport-score',
+    packageName: CIRCUIT_IDS.HUMAN_PASSPORT_SCORE,
+  },
 };
 
 /**
@@ -178,6 +186,7 @@ export const CIRCUIT_ALIASES: Readonly<Record<string, CircuitId>> = Object.freez
   coinbase_kyc: CIRCUIT_IDS.COINBASE_ATTESTATION,
   coinbase_country: CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION,
   oidc_domain: CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION,
+  human_passport: CIRCUIT_IDS.HUMAN_PASSPORT_SCORE,
 });
 
 /** The provable circuit a caller-supplied name means, or `undefined` for an unknown name. */

@@ -62,5 +62,15 @@ export const CIRCUITS: Record<CircuitId, {
     requiredInputs: ['address', 'signature', 'scope'],
     functionSelector: '0x56feed5e',
   },
-
+  [CIRCUIT_IDS.HUMAN_PASSPORT_SCORE]: {
+    id: CIRCUIT_IDS.HUMAN_PASSPORT_SCORE,
+    displayName: 'Human Passport',
+    description:
+      'Prove a Human Passport score (scoreV2, recorded on Base) at or above a ' +
+      'threshold without revealing the wallet or the exact score, optionally ' +
+      'binding one EIP-712 action to the same wallet.',
+    requiredInputs: ['address', 'signature', 'scope', 'minScore'],
+    easSchemaId: '0x1f3dce6501d8aad23563c0cf4f0c32264aed9311cb050056ebf72774f89ba912',
+    functionSelector: '0x48a15e6f',
+  },
 };

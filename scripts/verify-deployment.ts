@@ -22,7 +22,7 @@ export function verificationChains(environment: string): Record<string, number> 
   const coreChains: Record<string, number> = { staging: 84532, production: 8453 };
   const core = coreChains[environment];
   if (!core) throw new Error(`Unknown deployment environment: ${environment}`);
-  return { coinbase_attestation: core, coinbase_country_attestation: core, oidc_domain_attestation: core, giwa_attestation: 91342 };
+  return { coinbase_attestation: core, coinbase_country_attestation: core, oidc_domain_attestation: core, giwa_attestation: 91342, human_passport_score: core };
 }
 
 export function validateDeploymentSnapshot(expected: DeploymentExpectation, value: DeploymentSnapshot): void {

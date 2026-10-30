@@ -72,3 +72,14 @@ describe('AI SDK verifyProof -> core', () => {
     expect(await verifyProof(response({ chainId: 84532, verifierAddress: ADDRESS }))).toEqual({ valid: false });
   });
 });
+
+describe('AI SDK verifyProof passes a Human Passport threshold to core', () => {
+  it('hands core the minScore it was given, and nothing when none was given', async () => {
+    coreVerify.mockResolvedValue({ valid: true });
+    const hp = { ...response({ chainId: 84532, verifierAddress: ADDRESS }), circuit: 'human_passport_score' };
+    await verifyProof(hp, { minScore: 20 });
+    expect(coreVerify.mock.calls[0][5]).toEqual({ minScore: 20 });
+    await verifyProof(hp);
+    expect(coreVerify.mock.calls[1]).toHaveLength(5);
+  });
+});

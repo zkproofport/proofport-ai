@@ -38,6 +38,8 @@ const BROADCAST_PATHS: Record<CircuitId, (chainId: number) => string> = {
     `broadcast/DeployOidcDomainAttestation.s.sol/${chainId}/run-latest.json`,
   [CIRCUIT_IDS.GIWA_ATTESTATION]: (chainId) =>
     `broadcast/DeployGiwaAttestation.s.sol/${chainId}/run-latest.json`,
+  [CIRCUIT_IDS.HUMAN_PASSPORT_SCORE]: (chainId) =>
+    `broadcast/DeployHumanPassportScore.s.sol/${chainId}/run-latest.json`,
 };
 
 // ── In-memory cache ─────────────────────────────────────────────────────

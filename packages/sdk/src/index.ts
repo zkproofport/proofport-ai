@@ -5,6 +5,7 @@ export type {
   CircuitId,
   ChallengeResponse,
   ProveInputs,
+  HumanPassportProveInputs,
   ProveRequest,
   ProveResponse,
   VerifyResult,
@@ -69,10 +70,12 @@ export { requestChallenge, createSession } from './session.js';
 export { submitProof, submitEncryptedProof } from './prove.js';
 export { encryptForTee } from './tee.js';
 export { verifyProof } from './verify.js';
+export type { VerifyOptions } from './verify.js';
 
 // Input computation (customer-facing helpers)
 export {
   prepareInputs,
+  prepareHumanPassportInputs,
   computeSignalHash,
   computeScope,
   computeNullifier,

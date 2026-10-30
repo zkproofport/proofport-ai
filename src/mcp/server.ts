@@ -33,6 +33,7 @@ const circuitIds: Record<string, CircuitId> = {
   coinbase_kyc: CIRCUIT_IDS.COINBASE_ATTESTATION,
   coinbase_country: CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION,
   oidc_domain: CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION,
+  human_passport: CIRCUIT_IDS.HUMAN_PASSPORT_SCORE,
 };
 const circuitParam = () => z.enum(Object.keys(circuitIds) as [string, ...string[]])
   .describe('Canonical circuit id or supported alias. Read get_guide for the circuit-specific witness and verification chain.');

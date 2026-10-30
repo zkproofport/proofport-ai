@@ -43,7 +43,7 @@ describe('MCP step-by-step optional actions', () => {
   it('refuses the removed arc_eligibility circuit before signing', async () => {
     const result = await prepare({ circuit: 'arc_eligibility', scope: 'test', action });
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("Unknown circuit 'arc_eligibility'. Known: coinbase_kyc, coinbase_country, oidc_domain, giwa_attestation.");
+    expect(result.content[0].text).toContain("Unknown circuit 'arc_eligibility'. Known: coinbase_kyc, coinbase_country, oidc_domain, giwa_attestation, human_passport.");
     expect(signer.signMessage).not.toHaveBeenCalled();
     expect(signer.signTypedData).not.toHaveBeenCalled();
     expect(prepareInputs).not.toHaveBeenCalled();
@@ -91,7 +91,7 @@ describe('MCP step-by-step optional actions', () => {
   it.each(['oidc_domain'])('%s rejects an action before signing', async (circuit) => {
     const result = await prepare({ circuit, action });
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('does not bind one. Circuits that do: coinbase_attestation, coinbase_country_attestation, giwa_attestation.');
+    expect(result.content[0].text).toContain('does not bind one. Circuits that do: coinbase_attestation, coinbase_country_attestation, giwa_attestation, human_passport_score.');
     expect(signer.signTypedData).not.toHaveBeenCalled();
     expect(prepareInputs).not.toHaveBeenCalled();
   });

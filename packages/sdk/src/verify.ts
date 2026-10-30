@@ -32,6 +32,16 @@ export function verifyRpcUrl(chainId: number): string {
 }
 
 /**
+ * What the verifier asked for, when the proof carries it as a public input the
+ * prover chose. human_passport: `minScore`, the threshold in Passport points;
+ * the proof's min_score must equal it. Without it core still checks the issuer
+ * root, the scorer and the proof time, but not the threshold.
+ */
+export interface VerifyOptions {
+  minScore?: number;
+}
+
+/**
  * Split concatenated public inputs hex into array of bytes32 values.
  */
 function splitPublicInputs(publicInputsHex: string): string[] {
@@ -66,6 +76,7 @@ export async function verifyOnChain(
   claim: { chainId: number; verifierAddress: string },
   proof: string,
   publicInputs: string,
+  options: VerifyOptions = {},
 ): Promise<VerifyResult> {
   if (!isCanonicalCircuitId(circuit)) {
     return { valid: false, error: `Unknown circuit '${circuit}'; cannot verify it on-chain.` };
@@ -86,13 +97,11 @@ export async function verifyOnChain(
   const provider = new ethers.JsonRpcProvider(rpcUrl, chainId, { staticNetwork: true });
   const publicInputsArray = splitPublicInputs(publicInputs);
 
-  const result = await verifyProofOnChain(
-    circuit,
-    { proofHex: proof, publicInputsHex: publicInputsArray, numPublicInputs: publicInputsArray.length },
-    provider,
-    { chainId },
-    { verifierAddress: claim.verifierAddress, chainId },
-  );
+  const parsed = { proofHex: proof, publicInputsHex: publicInputsArray, numPublicInputs: publicInputsArray.length };
+  const claimed = { verifierAddress: claim.verifierAddress, chainId };
+  const result = options.minScore === undefined
+    ? await verifyProofOnChain(circuit, parsed, provider, { chainId }, claimed)
+    : await verifyProofOnChain(circuit, parsed, provider, { chainId }, claimed, { minScore: options.minScore });
   if (result.error !== undefined) {
     return { valid: false, error: `Verification failed: ${result.error}` };
   }
@@ -113,9 +122,9 @@ export async function verifyOnChain(
  * console.log(verified.valid); // true
  * ```
  */
-export async function verifyProof(result: ProveResponse): Promise<VerifyResult> {
+export async function verifyProof(result: ProveResponse, options: VerifyOptions = {}): Promise<VerifyResult> {
   if (!result.verification) {
     return { valid: false, error: 'No verification info in response (verifier not deployed on this network)' };
   }
-  return verifyOnChain(result.circuit, result.verification, result.proof, result.publicInputs);
+  return verifyOnChain(result.circuit, result.verification, result.proof, result.publicInputs, options);
 }

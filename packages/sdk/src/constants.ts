@@ -33,6 +33,13 @@ export const CIRCUITS: Record<CircuitId, {
     // id here would be a value nothing looks up.
     functionSelector: '0x56feed5e',
   },
+  [CIRCUIT_IDS.HUMAN_PASSPORT_SCORE]: {
+    displayName: 'Human Passport',
+    // The server reads the score itself (scoreV2 on Base); the client sends
+    // only its signed request and the threshold.
+    easSchemaId: '0x1f3dce6501d8aad23563c0cf4f0c32264aed9311cb050056ebf72774f89ba912',
+    inputType: 'server-lookup',
+  },
 };
 
 export const COINBASE_ATTESTER_CONTRACT = '0x357458739F90461b99789350868CD7CF330Dd7EE';
@@ -98,6 +105,8 @@ export const ATTESTATION_SOURCES: Record<CircuitId, AttestationSource | null> = 
     explorer: GIWA_EXPLORER,
   },
   [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: null,
+  // The server reads the score's issuance on Base; nothing for the client to fetch.
+  [CIRCUIT_IDS.HUMAN_PASSPORT_SCORE]: null,
 };
 
 /**
@@ -115,7 +124,7 @@ export function attestationSource(circuitId: CircuitId): AttestationSource {
   const source = ATTESTATION_SOURCES[circuitId];
   if (!source) {
     throw new Error(
-      `'${circuitId}' has no on-chain attestation to fetch -- its signature is inside the identity token.`,
+      `'${circuitId}' has no on-chain attestation for the client to fetch (OIDC: the signature is inside the identity token; Human Passport: the server reads the score itself).`,
     );
   }
   return source;

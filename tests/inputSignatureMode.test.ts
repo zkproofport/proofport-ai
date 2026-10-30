@@ -53,6 +53,6 @@ describe('the removed arc_eligibility circuit', () => {
   it('is refused before any witness is prepared, naming the known circuits', async () => {
     await expect(computeCircuitParams({ address: wallet.address, scope: 's', circuitId: 'arc_eligibility' as never, signature: '0x' + '00'.repeat(65) },
       'https://eas.example.com', ['https://base.example.com']))
-      .rejects.toThrow('Unknown circuit: arc_eligibility. Known: coinbase_attestation, coinbase_country_attestation, oidc_domain_attestation, giwa_attestation.');
+      .rejects.toThrow('Unknown circuit: arc_eligibility. Known: coinbase_attestation, coinbase_country_attestation, oidc_domain_attestation, giwa_attestation, human_passport_score.');
   });
 });

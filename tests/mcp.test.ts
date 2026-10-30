@@ -106,10 +106,11 @@ describe('handleGetSupportedCircuits', () => {
     const result = handleGetSupportedCircuits({});
 
     expect(result.circuits).toHaveLength(Object.keys(CIRCUITS).length);
-    // Four since arc_eligibility was removed on 2026-10-13. The literal is
-    // kept alongside the derived count on purpose: without it, deleting a
-    // circuit from CIRCUITS would still pass.
-    expect(result.circuits.length).toBe(4);
+    // Four after arc_eligibility was removed on 2026-10-13, five since
+    // human_passport_score (2026-10-30). The literal is kept alongside the
+    // derived count on purpose: without it, deleting a circuit from CIRCUITS
+    // would still pass.
+    expect(result.circuits.length).toBe(5);
     expect(result.circuits.map(c => c.id)).not.toContain('arc_eligibility');
   });
 

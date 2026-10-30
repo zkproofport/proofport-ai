@@ -6,6 +6,7 @@ import {
   walletFor,
   walletFromEnv,
   prepareInputs,
+  prepareHumanPassportInputs,
   prepareOidcPayload,
   submitProof,
   verifyProof,
@@ -132,6 +133,7 @@ CIRCUITS:
   - "coinbase_kyc": Proves the user passed Coinbase KYC verification, optionally binding the wallet's signature to ONE EIP-712 action (as giwa_attestation). Without action it signs the request signal hash.
   - "coinbase_country": Proves the user's country of residence is (or is not) in a given list, optionally binding the wallet's signature to ONE EIP-712 action (as coinbase_kyc). Requires country_list and is_included.
   - "oidc_domain": Proves the user authenticated via OIDC and their email belongs to a specific domain. Requires jwt and scope.
+  - "human_passport": Proves the wallet holds an unexpired Human Passport score (recorded on Base) at or above min_score, without revealing the wallet or the exact score; optionally binds ONE EIP-712 action (as coinbase_kyc). Requires min_score.
   - "giwa_attestation": GIWA attestation, optionally binding the wallet's signature to ONE EIP-712 action. Without action it signs the request signal hash. With one, the proof carries that action's hash, so a contract can check WHICH instruction was authorised -- not merely that somebody eligible signed something. Uses a GIWA-attested wallet; verified on GIWA Sepolia (chain 91342).
 
 WITH ACTION: Returns awaiting_approval with an approval URL for the HUMAN to review and sign in their wallet. Keep the request parameters unchanged, query get_action_approval, then repeat with approval_id when approved. ATTESTATION_KEY cannot authorize an action on the human's behalf. Ordinary proofs without action retain automatic signing.
@@ -158,7 +160,7 @@ RETURNS: awaiting_approval or the full ProofResult with proof bytes, public inpu
         })
         .optional()
         .describe(
-          'The EIP-712 action to authorise. Optional for coinbase_kyc, coinbase_country and giwa_attestation; rejected for other circuits. ' +
+          'The EIP-712 action to authorise. Optional for coinbase_kyc, coinbase_country, giwa_attestation and human_passport; rejected for other circuits. ' +
           'Any structure is provable: the circuit hashes it without reading it, so a deposit, a grant of authority ' +
           'or an agreement in prose all work. The wallet signs exactly these fields, and the proof carries their hash.',
         ),
@@ -170,6 +172,10 @@ RETURNS: awaiting_approval or the full ProofResult with proof bytes, public inpu
         .boolean()
         .optional()
         .describe('true = prove country IS in list, false = prove NOT in list. Required for coinbase_country circuit.'),
+      min_score: z
+        .number()
+        .optional()
+        .describe('Required for human_passport: the Human Passport score threshold in points (e.g. 20; above 0, at most four decimals). The server finds the wallet\'s score on Base and refuses, before payment, a wallet with none or below it.'),
       jwt: z
         .string()
         .optional()
@@ -226,6 +232,7 @@ RETURNS: awaiting_approval or the full ProofResult with proof bytes, public inpu
             scope: params.scope,
             countryList: params.country_list,
             isIncluded: params.is_included,
+            ...(params.min_score !== undefined && { minScore: params.min_score }),
             ...(params.circuit === 'oidc_domain' && { jwt: params.jwt, provider: params.provider }),
             payOn: params.pay_on,
             maxPayment:params.max_payment,
@@ -314,7 +321,7 @@ RETURNS: awaiting_approval or the full ProofResult with proof bytes, public inpu
         })
         .optional()
         .describe(
-          'The EIP-712 action to authorise. Optional for coinbase_kyc, coinbase_country and giwa_attestation; rejected for other circuits. ' +
+          'The EIP-712 action to authorise. Optional for coinbase_kyc, coinbase_country, giwa_attestation and human_passport; rejected for other circuits. ' +
           'Any structure is provable: the circuit hashes it without reading it, so a deposit, a grant of authority ' +
           'or an agreement in prose all work. The wallet signs exactly these fields, and the proof carries their hash.',
         ),
@@ -326,6 +333,10 @@ RETURNS: awaiting_approval or the full ProofResult with proof bytes, public inpu
         .boolean()
         .optional()
         .describe('true = prove country IS in list, false = prove NOT in list. Required for coinbase_country circuit.'),
+      min_score: z
+        .number()
+        .optional()
+        .describe('Required for human_passport: the Human Passport score threshold in points (e.g. 20; above 0, at most four decimals). The server finds the wallet\'s score on Base and refuses, before payment, a wallet with none or below it.'),
       jwt: z
         .string()
         .optional()
@@ -383,7 +394,9 @@ RETURNS: awaiting_approval or the full ProofResult with proof bytes, public inpu
           ? authorization.signature
           : await signer.signMessage(signalHash);
 
-        const inputs = await prepareInputs(config, {
+        const inputs = circuitId === CIRCUIT_IDS.HUMAN_PASSPORT_SCORE
+          ? prepareHumanPassportInputs({ userAddress, userSignature, scope, minScore: params.min_score, ...actionHashes })
+          : await prepareInputs(config, {
           circuitId,
           userAddress,
           userSignature,
@@ -472,6 +485,10 @@ You MUST pass the nonce returned by request_challenge. POST /api/v1/prove answer
         })
         .passthrough()
         .describe('Full result object from generate_proof — pass it directly without extracting fields'),
+      min_score: z
+        .number()
+        .optional()
+        .describe('human_passport: the threshold you asked for, in points. The proof\'s threshold must equal it; omit it and the threshold is not compared.'),
     },
     async (params) => {
       try {
@@ -484,7 +501,7 @@ You MUST pass the nonce returned by request_challenge. POST /api/v1/prove answer
           attestation: null,
           timing: { totalMs: 0 },
           verification: params.result.verification,
-        });
+        }, params.min_score !== undefined ? { minScore: params.min_score } : {});
 
         return jsonResult(verification);
       } catch (error) {

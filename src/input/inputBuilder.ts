@@ -251,6 +251,7 @@ const NULLIFIER_FROM_WALLET_AND_TAG: Readonly<Record<string, boolean>> = Object.
   // v2 (circuits coinbase-country-attestation-v2), the same rule as KYC v2.
   coinbase_country_attestation: true,
   giwa_attestation: true,
+  human_passport_score: true,
 });
 
 /** The nullifier this circuit expects, by its own rule. */

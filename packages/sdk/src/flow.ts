@@ -9,7 +9,7 @@ import type {
 import { CIRCUIT_NAME_MAP } from './types.js';
 import { requestChallenge } from './session.js';
 import { signPayment } from './payment.js';
-import { prepareInputs, computeSignalHash } from './inputs.js';
+import { prepareInputs, prepareHumanPassportInputs, computeSignalHash } from './inputs.js';
 import { prepareOidcPayload } from './oidc-inputs.js';
 import type { OidcProvePayload } from './oidc-inputs.js';
 import { submitProof, submitEncryptedProof } from './prove.js';
@@ -19,6 +19,7 @@ import { CIRCUITS } from './constants.js';
 import { hashTypedAction } from './action.js';
 import { CIRCUIT_IDS, PROVABLE_CIRCUIT_IDS, circuitBindsAction } from './circuits.js';
 import { encryptForTee } from './tee.js';
+import { humanPassportScoreUnits } from '@zkproofport-app/core/circuits';
 import { ActionApprovalError, resolveActionApproval } from './actionApproval.js';
 
 export interface FlowCallbacks {
@@ -81,7 +82,7 @@ export async function generateProof(
   }
 
   // Steps 1-2: EAS attestation path (skipped for OIDC circuits)
-  let easInputs: Awaited<ReturnType<typeof prepareInputs>> | undefined;
+  let easInputs: Awaited<ReturnType<typeof prepareInputs>> | ReturnType<typeof prepareHumanPassportInputs> | undefined;
   let oidcPayload: OidcProvePayload | undefined;
   let domainSeparator: string | undefined;
   let actionHash: string | undefined;
@@ -104,6 +105,18 @@ export async function generateProof(
         `Signing typed data for '${circuitId}' yields a signature that circuit cannot verify. ` +
         `Ask for one of ${PROVABLE_CIRCUIT_IDS.filter(circuitBindsAction).join(', ')}, or drop the action.`,
     );
+  }
+
+  // The threshold is checked before anything is signed or paid: a value the
+  // circuit cannot carry would only fail later, after the wallet signed.
+  if (circuitId === CIRCUIT_IDS.HUMAN_PASSPORT_SCORE) {
+    try {
+      humanPassportScoreUnits(params.minScore);
+    } catch (e) {
+      throw new Error(`minScore is required for human_passport: ${(e as Error).message}`);
+    }
+  } else if (params.minScore !== undefined) {
+    throw new Error(`minScore applies only to human_passport; '${circuitId}' has no threshold.`);
   }
 
   const actionHashes = action ? hashTypedAction(action) : undefined;
@@ -155,7 +168,16 @@ export async function generateProof(
     // EIP-712 digest. Attaching them to the result left the key recovered from
     // `signal_hash`, and the circuit refused the proof with "User pubkey does
     // not match address" — which reads as a wrong wallet, not a wrong message.
-    easInputs = await prepareInputs(config, {
+    easInputs = circuitId === CIRCUIT_IDS.HUMAN_PASSPORT_SCORE
+      ? prepareHumanPassportInputs({
+          userAddress: attestationAddress,
+          userSignature: signature,
+          scope,
+          minScore: params.minScore,
+          domainSeparator,
+          actionHash,
+        })
+      : await prepareInputs(config, {
       circuitId,
       userAddress: attestationAddress,
       userSignature: signature,

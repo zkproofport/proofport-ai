@@ -38,6 +38,6 @@ describe('every MCP tool takes every circuit', () => {
   });
 
   it('describes the action as something the agent supplies, not a default', () => {
-    expect(source).toMatch(/Optional for coinbase_kyc, coinbase_country and giwa_attestation; rejected for other circuits/);
+    expect(source).toMatch(/Optional for coinbase_kyc, coinbase_country, giwa_attestation and human_passport; rejected for other circuits/);
   });
 });
