@@ -4,7 +4,7 @@ import { loadConfig, getChainId } from '../config/index.js';
 import { handleGetSupportedCircuits } from '../skills/skillHandler.js';
 import { getTaskOutcome } from '../skills/flowGuidance.js';
 import { buildGuide } from '../proof/guideBuilder.js';
-import { CIRCUIT_IDS, PROVABLE_CIRCUIT_IDS } from '../config/circuitIds.js';
+import { CIRCUIT_IDS, PROVABLE_CIRCUIT_IDS, actionCapableCircuitIds } from '../config/circuitIds.js';
 import type { CircuitId } from '../config/circuits.js';
 import type { RateLimiter } from '../redis/rateLimiter.js';
 import type { ProofCache } from '../redis/proofCache.js';
@@ -48,7 +48,7 @@ export function createMcpServer(_deps: McpServerDeps = {}, config?: ReturnType<t
   const baseUrl = resolvedConfig.a2aBaseUrl;
   const guideUrl = (id: CircuitId) => `${baseUrl}/api/v1/guide/${id}`;
   const guideLinks = PROVABLE_CIRCUIT_IDS.map(id => `- ${id}: ${guideUrl(id)}`).join('\n');
-  const actionGuidance = 'Action binding is optional for giwa_attestation: send both domain_separator and action_hash for a signed EIP-712 action, or omit both for an identity-only proof. Other circuits do not support actions.';
+  const actionGuidance = `Action binding is optional for ${actionCapableCircuitIds().join(', ')}: send both domain_separator and action_hash for a signed EIP-712 action, or omit both for an identity-only proof. Other circuits do not support actions.`;
   const privacyGuidance = resolvedConfig.teeMode === 'nitro'
     ? 'Encrypt with the attested teePublicKey when supplied by the challenge. Verify its attestation before sending private witnesses.'
     : 'This deployment provides no hardware TEE attestation. HTTPS protects transport, but the prover receives proof inputs.';

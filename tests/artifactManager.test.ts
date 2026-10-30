@@ -68,8 +68,8 @@ describe('artifactManager', () => {
       expect(calls).toContain(`${repoBaseUrl}/giwa-attestation/target/giwa_attestation.json`);
       expect(calls.some(url => String(url).includes('arc-eligibility'))).toBe(false);
       expect(calls).toContain(`${repoBaseUrl}/coinbase-attestation-v2/target/vk/vk`);
-      expect(calls).toContain(`${repoBaseUrl}/coinbase-country-attestation/target/coinbase_country_attestation.json`);
-      expect(calls).toContain(`${repoBaseUrl}/coinbase-country-attestation/target/vk/vk`);
+      expect(calls).toContain(`${repoBaseUrl}/coinbase-country-attestation-v2/target/coinbase_country_attestation_v2.json`);
+      expect(calls).toContain(`${repoBaseUrl}/coinbase-country-attestation-v2/target/vk/vk`);
       expect(calls).toContain(`${repoBaseUrl}/oidc-domain-attestation/target/oidc_domain_attestation.json`);
       expect(calls).toContain(`${repoBaseUrl}/oidc-domain-attestation/target/vk/vk`);
     });
@@ -87,7 +87,7 @@ describe('artifactManager', () => {
       // Check directory structure for every provable circuit
       const circuit1Dir = path.join(circuitsDir, 'coinbase-attestation-v2', 'target');
       const circuit1VkDir = path.join(circuit1Dir, 'vk');
-      const circuit2Dir = path.join(circuitsDir, 'coinbase-country-attestation', 'target');
+      const circuit2Dir = path.join(circuitsDir, 'coinbase-country-attestation-v2', 'target');
       const circuit2VkDir = path.join(circuit2Dir, 'vk');
       const circuit3Dir = path.join(circuitsDir, 'oidc-domain-attestation', 'target');
       const circuit4Dir = path.join(circuitsDir, 'giwa-attestation', 'target');

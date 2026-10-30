@@ -248,7 +248,8 @@ const NULLIFIER_FROM_WALLET_AND_TAG: Readonly<Record<string, boolean>> = Object.
   // v2 (circuits coinbase-attestation-v2) moved to the wallet + tag rule, as
   // decided 2026-10-23: v1 nullifiers do not carry over.
   coinbase_attestation: true,
-  coinbase_country_attestation: false,
+  // v2 (circuits coinbase-country-attestation-v2), the same rule as KYC v2.
+  coinbase_country_attestation: true,
   giwa_attestation: true,
 });
 
@@ -572,9 +573,9 @@ export interface CircuitParams {
   domainSeparator?: string;
   actionHash?: string;
   /**
-   * coinbase_attestation v2 only: the revocation statement this server signed
-   * with its Cloud KMS key (src/input/coinbaseStatement.ts). Required there,
-   * refused everywhere else.
+   * Coinbase v2 (KYC and Country) only: the revocation statement this server
+   * signed with its Cloud KMS key (src/input/coinbaseStatement.ts). Required
+   * there, refused everywhere else.
    */
   statement?: {
     clientData: Uint8Array;

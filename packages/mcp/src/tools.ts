@@ -130,7 +130,7 @@ function hasAnyPaymentWalletConfigured(): boolean {
 
 CIRCUITS:
   - "coinbase_kyc": Proves the user passed Coinbase KYC verification, optionally binding the wallet's signature to ONE EIP-712 action (as giwa_attestation). Without action it signs the request signal hash.
-  - "coinbase_country": Proves the user's country of residence is (or is not) in a given list. Requires country_list and is_included.
+  - "coinbase_country": Proves the user's country of residence is (or is not) in a given list, optionally binding the wallet's signature to ONE EIP-712 action (as coinbase_kyc). Requires country_list and is_included.
   - "oidc_domain": Proves the user authenticated via OIDC and their email belongs to a specific domain. Requires jwt and scope.
   - "giwa_attestation": GIWA attestation, optionally binding the wallet's signature to ONE EIP-712 action. Without action it signs the request signal hash. With one, the proof carries that action's hash, so a contract can check WHICH instruction was authorised -- not merely that somebody eligible signed something. Uses a GIWA-attested wallet; verified on GIWA Sepolia (chain 91342).
 
@@ -158,7 +158,7 @@ RETURNS: awaiting_approval or the full ProofResult with proof bytes, public inpu
         })
         .optional()
         .describe(
-          'The EIP-712 action to authorise. Optional for coinbase_kyc and giwa_attestation; rejected for other circuits. ' +
+          'The EIP-712 action to authorise. Optional for coinbase_kyc, coinbase_country and giwa_attestation; rejected for other circuits. ' +
           'Any structure is provable: the circuit hashes it without reading it, so a deposit, a grant of authority ' +
           'or an agreement in prose all work. The wallet signs exactly these fields, and the proof carries their hash.',
         ),
@@ -314,7 +314,7 @@ RETURNS: awaiting_approval or the full ProofResult with proof bytes, public inpu
         })
         .optional()
         .describe(
-          'The EIP-712 action to authorise. Optional for coinbase_kyc and giwa_attestation; rejected for other circuits. ' +
+          'The EIP-712 action to authorise. Optional for coinbase_kyc, coinbase_country and giwa_attestation; rejected for other circuits. ' +
           'Any structure is provable: the circuit hashes it without reading it, so a deposit, a grant of authority ' +
           'or an agreement in prose all work. The wallet signs exactly these fields, and the proof carries their hash.',
         ),

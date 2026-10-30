@@ -364,7 +364,7 @@ describe('BbProver', () => {
 
       const args = bbProveCall![1] as string[];
       const bIdx = args.indexOf('-b');
-      expect(args[bIdx + 1]).toMatch(/coinbase-country-attestation\/target\/coinbase_country_attestation\.json$/);
+      expect(args[bIdx + 1]).toMatch(/coinbase-country-attestation-v2\/target\/coinbase_country_attestation_v2\.json$/);
     });
 
     it('creates temp dir with proofDir subdirectory', async () => {

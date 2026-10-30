@@ -74,7 +74,7 @@ try {
     'node_modules/vitest/vitest.mjs', 'run', '--config', 'vitest.published.config.ts', '--project', 'e2e',
     'tests/e2e/sdk-client.test.ts', 'tests/e2e/mcp-client.test.ts',
     'tests/e2e/actionProofs.test.ts', 'tests/e2e/mcpActionPreparation.test.ts', 'tests/e2e/payment.test.ts',
-    'tests/e2e/mcp-payment.test.ts', 'tests/e2e/mcp-step-flow.test.ts', ...extra,
+    'tests/e2e/mcp-payment.test.ts', 'tests/e2e/mcp-step-flow.test.ts', 'tests/e2e/coinbaseCountryV2.test.ts', ...extra,
   ], root, childEnv);
 } finally {
   await rm(install, { recursive: true, force: true });

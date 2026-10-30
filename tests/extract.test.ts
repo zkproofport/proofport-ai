@@ -229,6 +229,34 @@ describe('extractScopeFromPublicInputs', () => {
   });
 });
 
+/**
+ * coinbase_country_attestation v2: 215 fields -- signal_hash 0-31,
+ * domain_separator 32-63, action_hash 64-95, signer root 96-127, country list
+ * 128-147, list length 148, is_included 149, scope 150-181, nullifier 182-213,
+ * attested_at 214 (circuits coinbase-country-attestation-v2).
+ */
+describe('coinbase_country_attestation v2 layout', () => {
+  function countryHex(count = 215) {
+    const fields: string[] = new Array(count).fill('00'.repeat(32));
+    for (let i = 96; i <= 127 && i < count; i++) fields[i] = field(0x96); // signer root
+    for (let i = 128; i <= 149 && i < count; i++) fields[i] = field(0x4b); // country fields
+    for (let i = 150; i <= 181 && i < count; i++) fields[i] = field(0x5c);
+    for (let i = 182; i <= 213 && i < count; i++) fields[i] = field(0x7a);
+    return '0x' + fields.join('');
+  }
+  it('reads scope at 150-181 and the nullifier at 182-213', () => {
+    expect(extractScopeFromPublicInputs(countryHex(), COUNTRY)).toBe('0x' + '5c'.repeat(32));
+    expect(extractNullifierFromPublicInputs(countryHex(), COUNTRY)).toBe('0x' + '7a'.repeat(32));
+  });
+  it("does not read a v1-length (150-field) vector at v2's offsets", () => {
+    expect(extractScopeFromPublicInputs(countryHex(150), COUNTRY)).toBeNull();
+    expect(extractNullifierFromPublicInputs(countryHex(150), COUNTRY)).toBeNull();
+  });
+  it('reads a vector one field short of the nullifier end as unknown', () => {
+    expect(extractNullifierFromPublicInputs(countryHex(213), COUNTRY)).toBeNull();
+  });
+});
+
 describe('no circuit is inferred from field count (regression: detectCircuit removed)', () => {
   it('does not read a domain out of a coinbase proof', () => {
     // 128 fields clears the old `fields.length < 83` guard, and the bytes that

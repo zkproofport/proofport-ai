@@ -21,6 +21,7 @@ import { ethers } from 'ethers';
 import { createLogger } from '../logger.js';
 import { parseAttestationDocument, verifyAttestationDocument } from '../tee/attestation.js';
 import {
+  isStatementCircuit,
   prepareServerStatement,
   StatementRefusal,
   type AttestationReader,
@@ -62,8 +63,9 @@ export interface ProofRoutesDeps {
   config: Config;
   teeProvider?: TeeProvider;
   /**
-   * The server's signed statements: coinbase_attestation v2's revocation
-   * statement (the on-chain read `reader`) and oidc_domain_attestation's
+   * The server's signed statements: the Coinbase v2 revocation statement
+   * (coinbase_attestation and coinbase_country_attestation; the on-chain read
+   * `reader`) and oidc_domain_attestation's
    * provider-key statement (the live key-list check `checkProviderKey`,
    * core's by default), both signed by the one Cloud KMS `signer` the
    * circuits pin. index.ts always supplies it (startup fails without
@@ -91,12 +93,30 @@ function actionFieldsError(circuitId: CircuitId, inputs: unknown): string | null
   return null;
 }
 
+/**
+ * The country circuit's public list, checked as the circuit checks it: 1 to 10
+ * ISO 3166-1 alpha-2 codes (two ASCII letters A-Z each, since the circuit
+ * compares bytes with the attested country) and an explicit inclusion flag.
+ * Before payment, so a list the circuit refuses is never charged for.
+ */
+function countryFieldsError(inputs: unknown): string | null {
+  const cb = (inputs ?? {}) as { country_list?: unknown; is_included?: unknown };
+  if (!Array.isArray(cb.country_list) || cb.country_list.length === 0) return 'country_list required for country circuit';
+  if (cb.country_list.length > 10) return `country_list has ${cb.country_list.length} entries; the circuit takes at most 10.`;
+  const bad = cb.country_list.find(c => typeof c !== 'string' || !/^[A-Z]{2}$/.test(c));
+  if (bad !== undefined) return `country_list entry ${JSON.stringify(bad)} is not an ISO 3166-1 alpha-2 code (two letters A-Z).`;
+  if (typeof cb.is_included !== 'boolean') return 'is_included required for country circuit';
+  return null;
+}
+
 const STATEMENT_REFUSAL_STATUS: Record<string, number> = {
   INVALID_REQUEST: 400,
   NULLIFIER_RULE: 400,
   NO_COINBASE_ATTESTATION: 403,
   COINBASE_ATTESTATION_REVOKED: 403,
   COINBASE_ATTESTATION_EXPIRED: 403,
+  COINBASE_COUNTRY_UNREADABLE: 403,
+  COINBASE_COUNTRY_MISMATCH: 403,
   OIDC_TOKEN_REFUSED: 400,
   OIDC_PROVIDER_KEY_INVALID: 400,
   OIDC_PROVIDER_KEY_UNPUBLISHED: 403,
@@ -111,7 +131,7 @@ interface ProveContext {
   startTime: number;
   requestId: string;
   verification: ProveResponse['verification'];
-  /** coinbase_attestation v2: the statement signed before payment was taken. */
+  /** Coinbase v2 (KYC and Country): the statement signed before payment was taken. */
   statement?: ServerStatement;
   /** oidc_domain_attestation: the provider-key statement signed before payment was taken. */
   oidcStatement?: OidcProviderKeyStatement;
@@ -210,7 +230,7 @@ async function generateProofFromInputs(
     res.status(400).json({ error: 'INVALID_REQUEST', message: actionError });
     return;
   }
-  if ((circuitId === CIRCUIT_IDS.COINBASE_ATTESTATION) !== Boolean(ctx.statement)) {
+  if (isStatementCircuit(circuitId) !== Boolean(ctx.statement)) {
     throw new Error(`${circuitId}: the server statement is ${ctx.statement ? 'present for a circuit that takes none' : 'missing'}`);
   }
   if (isOidc !== Boolean(ctx.oidcStatement)) {
@@ -237,12 +257,9 @@ async function generateProofFromInputs(
 
 
     if (circuitId === CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION) {
-      if (!cb.country_list || cb.country_list.length === 0) {
-        res.status(400).json({ error: 'INVALID_REQUEST', message: 'country_list required for country circuit' });
-        return;
-      }
-      if (typeof cb.is_included !== 'boolean') {
-        res.status(400).json({ error: 'INVALID_REQUEST', message: 'is_included required for country circuit' });
+      const countryError = countryFieldsError(cb);
+      if (countryError) {
+        res.status(400).json({ error: 'INVALID_REQUEST', message: countryError });
         return;
       }
     }
@@ -596,16 +613,18 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
         return;
       }
 
-      // coinbase_attestation v2: read the attestation on chain and sign the
-      // revocation statement BEFORE any payment is taken, so a revoked or
-      // unattested wallet, or an SDK still deriving v1's nullifier, is refused
-      // for free. The statement is bound to this request's digest and scope.
+      // Coinbase v2 (KYC and Country): read the attestation on chain and sign
+      // the revocation statement BEFORE any payment is taken, so a revoked or
+      // unattested wallet, an SDK still deriving v1's nullifier, or (Country)
+      // a transaction whose country the current attestation does not name, is
+      // refused for free. The statement is bound to this request's digest and
+      // scope.
       let statement: ServerStatement | undefined;
-      if (circuitId === CIRCUIT_IDS.COINBASE_ATTESTATION) {
+      if (isStatementCircuit(circuitId)) {
         if (body.encrypted_payload) {
           res.status(400).json({
             error: 'E2E_UNSUPPORTED',
-            message: 'coinbase_attestation needs the server to sign a revocation statement over the request, which it cannot read inside an encrypted payload. Send plaintext inputs.',
+            message: `${circuitId} needs the server to sign a revocation statement over the request, which it cannot read inside an encrypted payload. Send plaintext inputs.`,
           });
           return;
         }
@@ -619,6 +638,13 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
           res.status(400).json({ error: 'INVALID_REQUEST', message: 'Missing required derived fields: signal_hash, nullifier, scope_bytes, user_address' });
           return;
         }
+        if (circuitId === CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION) {
+          const countryError = countryFieldsError(cb);
+          if (countryError) {
+            res.status(400).json({ error: 'INVALID_REQUEST', message: countryError });
+            return;
+          }
+        }
         const HASH32 = /^0x[0-9a-fA-F]{64}$/;
         const badField = (['signal_hash', 'nullifier', 'scope_bytes'] as const).find(k => typeof cb[k] !== 'string' || !HASH32.test(cb[k]));
         if (badField || typeof cb.user_address !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(cb.user_address)) {
@@ -630,16 +656,21 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
           });
           return;
         }
-        if (!deps.statement) throw new Error('coinbase_attestation statement signer is not configured on this server');
+        if (!deps.statement) throw new Error(`${circuitId} statement signer is not configured on this server`);
         try {
           statement = await prepareServerStatement(
             {
+              circuitId,
               userAddress: cb.user_address,
               signalHash: ethers.getBytes(cb.signal_hash),
               scopeBytes: ethers.getBytes(cb.scope_bytes),
               nullifierBytes: ethers.getBytes(cb.nullifier),
               domainSeparator: cb.domain_separator,
               actionHash: cb.action_hash,
+              ...(circuitId === CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION && {
+                rawTransaction: cb.raw_transaction,
+                txLength: cb.tx_length,
+              }),
             },
             deps.statement,
           );
@@ -647,7 +678,7 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
           if (e instanceof StatementRefusal) {
             const status = STATEMENT_REFUSAL_STATUS[e.code];
             if (!status) throw new Error(`Unmapped statement refusal ${e.code}: ${e.message}`);
-            log.warn({ action: 'prove.coinbase.statement_refused', code: e.code }, 'Coinbase statement refused');
+            log.warn({ action: 'prove.coinbase.statement_refused', circuit: circuitId, code: e.code }, 'Coinbase statement refused');
             res.status(status).json({ error: e.code, message: e.message });
             return;
           }

@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 import type { CircuitId, ProveInputs, ClientConfig } from './types.js';
 import { CIRCUIT_NAME_MAP, type CircuitName } from './types.js';
-import { CIRCUIT_IDS } from './circuits.js';
+import { CIRCUIT_IDS, PROVABLE_CIRCUIT_IDS, circuitBindsAction } from './circuits.js';
 import {
   CIRCUITS,
   RAW_TX_PADDED_LENGTH,
@@ -130,7 +130,8 @@ const NULLIFIER_RULE: Record<CircuitId, 'wallet-and-circuit-tag' | 'wallet-and-s
   // coinbase_attestation v2 (circuits coinbase-attestation-v2): the wallet +
   // circuit-tag rule, decided 2026-10-23; v1 nullifiers do not carry over.
   [CIRCUIT_IDS.COINBASE_ATTESTATION]: 'wallet-and-circuit-tag',
-  [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: 'wallet-and-signal-hash',
+  // v2 (circuits coinbase-country-attestation-v2): the same rule as KYC v2.
+  [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: 'wallet-and-circuit-tag',
   [CIRCUIT_IDS.GIWA_ATTESTATION]: 'wallet-and-circuit-tag',
   // OIDC's nullifier is derived inside the OIDC payload builder, from the
   // identity token; this function is never asked for it.
@@ -282,6 +283,15 @@ export async function prepareInputs(config: ClientConfig, params: {
     if (params.isIncluded === undefined || params.isIncluded === null) {
       throw new Error('isIncluded is required for coinbase_country_attestation');
     }
+    if (params.countryList.length > COUNTRY_LIST_MAX_LENGTH) {
+      throw new Error(`countryList has ${params.countryList.length} codes; the circuit takes at most ${COUNTRY_LIST_MAX_LENGTH}`);
+    }
+    // The circuit compares two bytes with the attested country, so "kr" or
+    // "KOR" would never match: refuse before anything is signed or paid.
+    const badCode = params.countryList.find(c => typeof c !== 'string' || !/^[A-Z]{2}$/.test(c));
+    if (badCode !== undefined) {
+      throw new Error(`countryList entry ${JSON.stringify(badCode)} is not an ISO 3166-1 alpha-2 code (two letters A-Z)`);
+    }
   }
 
   // Step 1: Compute signal hash
@@ -289,16 +299,16 @@ export async function prepareInputs(config: ClientConfig, params: {
 
   // Step 2: Recover the user's public key from the digest they actually signed.
   /*
-   * The one circuit that can carry an action, optionally, since its circuit
-   * gained the branch on 2026-09-22.
+   * Whether this circuit can carry an action: core's table, the one every
+   * layer reads (giwa_attestation and both Coinbase v2 circuits, optionally).
    */
-  const canBindAction = circuitId === CIRCUIT_IDS.GIWA_ATTESTATION;
+  const canBindAction = circuitBindsAction(circuitId);
   const isAction = Boolean(params.domainSeparator) && Boolean(params.actionHash);
 
   if (!canBindAction && (params.domainSeparator || params.actionHash)) {
     throw new Error(
       `An EIP-712 action was given but '${circuitId}' has no inputs for one. ` +
-      `Only ${CIRCUIT_IDS.GIWA_ATTESTATION} carries one.`,
+      `Circuits that do: ${PROVABLE_CIRCUIT_IDS.filter(circuitBindsAction).join(', ')}.`,
     );
   }
   if (Boolean(params.domainSeparator) !== Boolean(params.actionHash)) {

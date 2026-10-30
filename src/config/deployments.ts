@@ -30,8 +30,10 @@ const BROADCAST_PATHS: Record<CircuitId, (chainId: number) => string> = {
   // records name verifiers that refuse every v2 proof on proof length.
   [CIRCUIT_IDS.COINBASE_ATTESTATION]: (chainId) =>
     `broadcast/DeployCoinbaseAttestationV2.s.sol/${chainId}/run-latest.json`,
+  // v2 (circuits coinbase-country-attestation-v2); v1's records name
+  // verifiers that refuse every v2 proof.
   [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: (chainId) =>
-    `broadcast/DeployCoinbaseCountryAttestation.s.sol/${chainId}/run-latest.json`,
+    `broadcast/DeployCoinbaseCountryAttestationV2.s.sol/${chainId}/run-latest.json`,
   [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: (chainId) =>
     `broadcast/DeployOidcDomainAttestation.s.sol/${chainId}/run-latest.json`,
   [CIRCUIT_IDS.GIWA_ATTESTATION]: (chainId) =>

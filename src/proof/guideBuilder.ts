@@ -98,10 +98,9 @@ function buildConstants(config: Config, circuitId: CircuitId) {
 }
 
 /**
- * Each wallet circuit's nullifier rule, as a table: coinbase_attestation v2
- * moved to the wallet + circuit-tag rule (v1 nullifiers do not carry over),
- * the country circuit still derives it from signal_hash. Must agree with
- * nullifierForCircuit in src/input/inputBuilder.ts.
+ * Each wallet circuit's nullifier rule, as a table: both Coinbase circuits'
+ * v2 moved to the wallet + circuit-tag rule (v1 nullifiers do not carry
+ * over). Must agree with nullifierForCircuit in src/input/inputBuilder.ts.
  */
 const NULLIFIER_GUIDES: Partial<Record<CircuitId, { description: string; formula: string; ethers_v6_code: string }>> = {
   [CIRCUIT_IDS.COINBASE_ATTESTATION]: {
@@ -114,10 +113,11 @@ const NULLIFIER_GUIDES: Partial<Record<CircuitId, { description: string; formula
     ].join('\n'),
   },
   [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: {
-    description: 'Prevents double-proving for the same user + scope. Deterministic from address, signal_hash, and scope_bytes.',
-    formula: 'nullifier = keccak256(keccak256(address_bytes || signal_hash_bytes) || scope_bytes_bytes)',
+    description: 'Deterministic from the wallet, the circuit id and scope_bytes; signal_hash does not enter it, so it is the same with or without an action.',
+    formula: 'nullifier = keccak256(keccak256(address_bytes || keccak256(UTF8("coinbase_country_attestation"))) || scope_bytes)',
     ethers_v6_code: [
-      `const userSecret = ethers.keccak256(ethers.concat([ethers.getBytes(userAddress), ethers.getBytes(signal_hash)]));`,
+      `const tag = ethers.keccak256(ethers.toUtf8Bytes('coinbase_country_attestation'));`,
+      `const userSecret = ethers.keccak256(ethers.concat([ethers.getBytes(userAddress), ethers.getBytes(tag)]));`,
       `const nullifier = ethers.keccak256(ethers.concat([ethers.getBytes(userSecret), ethers.getBytes(scope_bytes)]));`,
     ].join('\n'),
   },
@@ -185,10 +185,22 @@ function buildFormulas(circuitId: CircuitId) {
         description:
           'coinbase_attestation v2: before any payment is taken the server reads the wallet\'s Coinbase KYC attestation ' +
           'on EAS (Base) and refuses unless it is Coinbase\'s, for this wallet, unrevoked and unexpired; it then signs a ' +
-          '225-byte statement (wallet, time, attestation uid, this request\'s signed digest, scope) with its Cloud KMS key, ' +
+          '225-byte statement (wallet, time, attestation uid, this request\'s signed digest, scope) with its statement key, ' +
           'which the circuit pins. Clients send nothing extra. The proof carries the statement time as public input ' +
-          '`attested_at` (the last of 193 public inputs); verifiers should require it to be recent (e.g. 10 minutes).',
+          '`attested_at` (the last of 193 public inputs); verifiers should require it to be recent (e.g. 15 minutes).',
         refusals: 'NO_COINBASE_ATTESTATION / COINBASE_ATTESTATION_REVOKED / COINBASE_ATTESTATION_EXPIRED (403), NULLIFIER_RULE (400) -- all before payment.',
+      },
+    }),
+    ...(circuitId === CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION && {
+      revocation_statement: {
+        description:
+          'coinbase_country_attestation v2: before any payment is taken the server reads the wallet\'s Coinbase Verified ' +
+          'Country attestation on EAS (Base) and refuses unless it is Coinbase\'s, for this wallet, unrevoked and unexpired, ' +
+          'and names the same country as the attestCountry transaction in raw_transaction; it then signs a 227-byte ' +
+          'statement (wallet, time, attestation uid, this request\'s signed digest, scope, country) with its statement key, ' +
+          'which the circuit pins. Clients send nothing extra. The proof carries the statement time as public input ' +
+          '`attested_at` (the last of 215 public inputs); verifiers should require it to be recent (e.g. 15 minutes).',
+        refusals: 'NO_COINBASE_ATTESTATION / COINBASE_ATTESTATION_REVOKED / COINBASE_ATTESTATION_EXPIRED / COINBASE_COUNTRY_MISMATCH / COINBASE_COUNTRY_UNREADABLE (403), NULLIFIER_RULE / INVALID_REQUEST (400) -- all before payment.',
       },
     }),
     merkle_leaf: {

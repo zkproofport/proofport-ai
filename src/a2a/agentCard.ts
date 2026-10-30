@@ -3,7 +3,7 @@ import type { Request, Response } from 'express';
 import type { AgentCard as SDKAgentCard } from '@a2a-js/sdk';
 import { ERC8004_ADDRESSES } from '../config/contracts.js';
 import { getChainVerifiers } from '../config/deployments.js';
-import { CIRCUIT_IDS, PROVABLE_CIRCUIT_IDS } from '../config/circuitIds.js';
+import { CIRCUIT_IDS, PROVABLE_CIRCUIT_IDS, actionCapableCircuitIds } from '../config/circuitIds.js';
 import { ethers } from 'ethers';
 import { resolvePaymentNetworks } from '../payment/networks.js';
 
@@ -155,7 +155,7 @@ ${PROVABLE_CIRCUIT_IDS.join(', ')}
 
 REQUIRED INPUTS:
 Inputs are circuit-specific. Read /api/v1/guide/{circuit} and prepare them with the client SDK.
-Coinbase circuits use wallet/attestation witnesses. giwa_attestation supports optional EIP-712 action binding: provide both domain_separator and action_hash for a signed action, or omit both for an identity-only proof. GIWA uses its own configured attester. OIDC domain verification uses its OIDC witness.
+Coinbase circuits use wallet/attestation witnesses. ${actionCapableCircuitIds().join(', ')} support optional EIP-712 action binding: provide both domain_separator and action_hash for a signed action, or omit both for an identity-only proof. GIWA uses its own configured attester. OIDC domain verification uses its OIDC witness.
 
 PAYMENT: ${config.paymentProofPrice} USDC. Configured networks: ${paymentNetworks(config)}. Read the returned x402 offers.
 
@@ -248,7 +248,7 @@ export function buildMcpDiscovery(config: Config) {
     tools: [
       {
         name: 'prove',
-        description: `[SINGLE-STEP x402] Generate a zero-knowledge proof via x402 single-step flow. POST circuit + inputs → receive 402 with nonce → pay USDC → retry with X-Payment-TX and X-Payment-Nonce headers. Generates the ZK proof in ${executionDescription(config)}. Configured payment networks: ${paymentNetworks(config)}. Takes 30-90 seconds. Provable circuits: ${PROVABLE_CIRCUIT_IDS.join(', ')}. EAS schemas — coinbase_attestation 0xf8b05c79f090979bf4a80270aba232dff11a10d9ca55c4f88de95317970f0de9, coinbase_country_attestation 0x1801901fabd0e6189356b4fb52bb0ab855276d84f7ec140839fbd1f6801ca065. giwa_attestation supports optional EIP-712 action binding; omit the action for an identity-only proof. GIWA uses its configured attester. Read each circuit guide for its verification chain and witness fields. Authorized signers: [0x952f32128AF084422539C4Ff96df5C525322E564, 0x8844591D47F17bcA6F5dF8f6B64F4a739F1C0080, 0x88fe64ea2e121f49bb77abea6c0a45e93638c3c5, 0x44ace9abb148e8412ac4492e9a1ae6bd88226803]. Returns proof (hex), publicInputs, proofWithInputs (for on-chain verification)${config.teeMode === 'nitro' && config.teeAttestationEnabled ? ", hardware TEE attestation when requested" : ". No hardware TEE attestation is advertised"}. ${verifiers}.`,
+        description: `[SINGLE-STEP x402] Generate a zero-knowledge proof via x402 single-step flow. POST circuit + inputs → receive 402 with nonce → pay USDC → retry with X-Payment-TX and X-Payment-Nonce headers. Generates the ZK proof in ${executionDescription(config)}. Configured payment networks: ${paymentNetworks(config)}. Takes 30-90 seconds. Provable circuits: ${PROVABLE_CIRCUIT_IDS.join(', ')}. EAS schemas — coinbase_attestation 0xf8b05c79f090979bf4a80270aba232dff11a10d9ca55c4f88de95317970f0de9, coinbase_country_attestation 0x1801901fabd0e6189356b4fb52bb0ab855276d84f7ec140839fbd1f6801ca065. ${actionCapableCircuitIds().join(', ')} support optional EIP-712 action binding; omit the action for an identity-only proof. GIWA uses its configured attester. Read each circuit guide for its verification chain and witness fields. Authorized signers: [0x952f32128AF084422539C4Ff96df5C525322E564, 0x8844591D47F17bcA6F5dF8f6B64F4a739F1C0080, 0x88fe64ea2e121f49bb77abea6c0a45e93638c3c5, 0x44ace9abb148e8412ac4492e9a1ae6bd88226803]. Returns proof (hex), publicInputs, proofWithInputs (for on-chain verification)${config.teeMode === 'nitro' && config.teeAttestationEnabled ? ", hardware TEE attestation when requested" : ". No hardware TEE attestation is advertised"}. ${verifiers}.`,
         inputSchema: {
           type: 'object',
           properties: {
@@ -560,7 +560,7 @@ there is no automatic payment fallback to the attestation signer's key.
 
 After proof generation, call \`verify_proof\` with the proof result. The application must also bind
 its domain, action, expiry, nonce, scope and trusted attester root before acting on it.
-GIWA proves the configured attestation and, when an action is supplied, that same wallet's authorization in one circuit. Without an action, the wallet signs the challenge instead; an identity-only proof does not authorize an application action. Coinbase KYC, Coinbase country and OIDC domain circuits do not take an action.
+${actionCapableCircuitIds().join(', ')} prove the attestation and, when an action is supplied, that same wallet's authorization in one circuit. Without an action, the wallet signs the challenge instead; an identity-only proof does not authorize an application action. ${PROVABLE_CIRCUIT_IDS.filter(id => !actionCapableCircuitIds().includes(id)).join(', ')} do not take an action.
 
 ## x402 payment
 

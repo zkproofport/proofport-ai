@@ -28,6 +28,7 @@ export {
 import {
   ALL_CIRCUIT_IDS,
   CIRCUIT_IDS,
+  circuitActionBinding,
   isCircuitId,
   type CircuitId as CoreCircuitId,
   type CircuitSupportStatus as CoreCircuitSupportStatus,
@@ -89,6 +90,16 @@ export const PROVABLE_CIRCUIT_IDS = [
  */
 export type CircuitId = (typeof PROVABLE_CIRCUIT_IDS)[number];
 
+/**
+ * The provable circuits a caller may bind an EIP-712 action to, from core's
+ * `circuitActionBinding` -- the one table every layer reads. Discovery text
+ * lists these rather than naming circuits, so it cannot fall behind a
+ * circuit gaining an action (as it did for coinbase_attestation v2).
+ */
+export function actionCapableCircuitIds(): CircuitId[] {
+  return PROVABLE_CIRCUIT_IDS.filter(id => circuitActionBinding(id) !== 'none');
+}
+
 /** Narrows an unknown value to a circuit this server can prove. */
 export function isProvableCircuitId(value: unknown): value is CircuitId {
   return typeof value === 'string' && (PROVABLE_CIRCUIT_IDS as readonly string[]).includes(value);
@@ -112,10 +123,12 @@ export function isProvableCircuitId(value: unknown): value is CircuitId {
  */
 /*
  * `packageName` is the compiled artifact's file name (Nargo.toml `name`). It
- * equals the canonical id for every circuit except coinbase_attestation, whose
- * v2 is built from circuits `coinbase-attestation-v2` as package
- * `coinbase_attestation_v2` while v1 still lives beside it; the circuit id it
- * proves is still `coinbase_attestation` (nullifier tag, statement kind).
+ * equals the canonical id for every circuit except the two Coinbase ones,
+ * whose v2 is built from circuits `coinbase-attestation-v2` /
+ * `coinbase-country-attestation-v2` as packages `coinbase_attestation_v2` /
+ * `coinbase_country_attestation_v2` while v1 still lives beside each; the
+ * circuit id each proves is still the canonical one (nullifier tag,
+ * statement kind).
  */
 export const CIRCUIT_DIRS: Record<CircuitId, { dir: string; packageName: string }> = {
   [CIRCUIT_IDS.COINBASE_ATTESTATION]: {
@@ -123,8 +136,8 @@ export const CIRCUIT_DIRS: Record<CircuitId, { dir: string; packageName: string 
     packageName: 'coinbase_attestation_v2',
   },
   [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: {
-    dir: 'coinbase-country-attestation',
-    packageName: CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION,
+    dir: 'coinbase-country-attestation-v2',
+    packageName: 'coinbase_country_attestation_v2',
   },
   [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: {
     dir: 'oidc-domain-attestation',
@@ -140,7 +153,8 @@ export const CIRCUIT_DIRS: Record<CircuitId, { dir: string; packageName: string 
  * `<directory> <artifact-name> <circuit-id>` per line, for a shell script to read.
  *
  * The id is there because the artifact name is not always the id
- * (coinbase_attestation is served from coinbase_attestation_v2.json), and the
+ * (coinbase_attestation is served from coinbase_attestation_v2.json, and
+ * coinbase_country_attestation from coinbase_country_attestation_v2.json), and the
  * pinned-artifact manifest the deploy writes is keyed by circuit id: keyed by
  * artifact name, the first v2 staging revision refused to start with
  * "Pinned artifact hashes are missing or invalid for coinbase_attestation"

@@ -59,6 +59,13 @@ describe('the nullifier rule agrees everywhere', () => {
     },
   );
 
+  it('coinbase_country_attestation v2 uses its own circuit tag, not KYC\'s and not signal_hash', async () => {
+    const { computeWalletNullifier } = await import('../packages/sdk/src/inputs.js');
+    const country = ethers.hexlify(sdkNullifier(CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION, WALLET, SIGNAL, SCOPE));
+    expect(country).toBe(ethers.hexlify(computeWalletNullifier(WALLET, 'coinbase_country_attestation', SCOPE)));
+    expect(country).not.toBe(ethers.hexlify(sdkNullifier(CIRCUIT_IDS.COINBASE_ATTESTATION, WALLET, SIGNAL, SCOPE)));
+  });
+
   it('separates wallets and scopes', () => {
     const other = '0x5A3E649208Ae15ec52496c1Ae23b2Ff89Ac02f0c';
     const otherScope = ethers.getBytes(ethers.keccak256(ethers.toUtf8Bytes('test:other-scope')));

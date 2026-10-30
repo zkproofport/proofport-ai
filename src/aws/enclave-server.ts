@@ -65,9 +65,11 @@ const CIRCUITS: Record<CircuitId, { dir: string; bytecode: string; vk: string }>
     bytecode: 'coinbase_attestation_v2.json',
     vk: 'vk/vk',
   },
+  // v2 (package coinbase_country_attestation_v2), with the same server
+  // statement as coinbase_attestation and the same refusal of encrypted payloads.
   [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: {
-    dir: 'coinbase-country-attestation',
-    bytecode: `${CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION}.json`,
+    dir: 'coinbase-country-attestation-v2',
+    bytecode: 'coinbase_country_attestation_v2.json',
     vk: 'vk/vk',
   },
   [CIRCUIT_IDS.GIWA_ATTESTATION]: {

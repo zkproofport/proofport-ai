@@ -32,14 +32,18 @@ export type AttestationCircuitId = Exclude<CircuitId, typeof CIRCUIT_IDS.OIDC_DO
  *                 giwa_attestation are 'optional' (core 0.4.0-beta.1).
  *   statement     main() takes the revocation statement (client_data,
  *                 signer_kind, statement_sig, attested_at and the App Attest
- *                 chain) -- coinbase_attestation v2.
+ *                 chain), and its client_data length -- coinbase_attestation
+ *                 v2 (225 bytes) and coinbase_country_attestation v2 (227:
+ *                 the country appended).
  *
  * BbProver compares the formatted inputs with the compiled circuit's ABI
  * before every proof, which holds this table to the artifact actually served.
  */
-export const CIRCUIT_INPUT_FACTS: Record<AttestationCircuitId, { actionInputs: boolean; statement: boolean }> = {
-  [CIRCUIT_IDS.COINBASE_ATTESTATION]: { actionInputs: true, statement: true },
-  [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: { actionInputs: false, statement: false },
+export const CIRCUIT_INPUT_FACTS: Record<AttestationCircuitId, { actionInputs: boolean; statement: false | { clientDataLength: number } }> = {
+  [CIRCUIT_IDS.COINBASE_ATTESTATION]: { actionInputs: true, statement: { clientDataLength: 225 } },
+  // v2 (circuits coinbase-country-attestation-v2): KYC v2's action pair and
+  // statement, with the 2-byte country after the scope.
+  [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: { actionInputs: true, statement: { clientDataLength: 227 } },
   [CIRCUIT_IDS.GIWA_ATTESTATION]: { actionInputs: true, statement: false },
 };
 
@@ -242,6 +246,11 @@ export function formatAttestationInputs(
     if (!params.countryList || params.countryListLength === undefined || params.isIncluded === undefined) {
       throw new Error('countryList, countryListLength, and isIncluded are required for coinbase_country_attestation');
     }
+    if (params.countryList.length < 1 || params.countryList.length > 10 || params.countryListLength !== params.countryList.length) {
+      throw new Error(`country_list must hold 1 to 10 codes and country_list_length its length; got ${params.countryList.length} codes, length ${params.countryListLength}`);
+    }
+    const badCode = params.countryList.find(c => typeof c !== 'string' || !/^[A-Z]{2}$/.test(c));
+    if (badCode !== undefined) throw new Error(`country_list entry ${JSON.stringify(badCode)} is not two letters A-Z`);
     inputs.country_list = formatCountryListArray(params.countryList, 10);
     inputs.country_list_length = params.countryListLength.toString();
     inputs.is_included = params.isIncluded;
@@ -266,7 +275,8 @@ export function formatAttestationInputs(
     if (!st) {
       throw new Error(`${circuitId} needs the server-signed revocation statement (client_data, statement_sig, attested_at).`);
     }
-    if (st.clientData.length !== 225) throw new Error(`client_data is ${st.clientData.length} bytes, expected 225`);
+    const want = facts.statement.clientDataLength;
+    if (st.clientData.length !== want) throw new Error(`client_data is ${st.clientData.length} bytes, expected ${want}`);
     if (st.signature.length !== 64) throw new Error(`statement_sig is ${st.signature.length} bytes, expected 64`);
     if (!Number.isSafeInteger(st.attestedAt) || st.attestedAt <= 0) throw new Error(`Invalid attested_at ${st.attestedAt}`);
     inputs.attested_at = st.attestedAt.toString();

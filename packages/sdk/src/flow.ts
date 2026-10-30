@@ -17,7 +17,7 @@ import type { ProofportSigner } from './signer.js';
 import type { PaymentWallet } from './types.js';
 import { CIRCUITS } from './constants.js';
 import { hashTypedAction } from './action.js';
-import { CIRCUIT_IDS } from './circuits.js';
+import { CIRCUIT_IDS, PROVABLE_CIRCUIT_IDS, circuitBindsAction } from './circuits.js';
 import { encryptForTee } from './tee.js';
 import { ActionApprovalError, resolveActionApproval } from './actionApproval.js';
 
@@ -89,19 +89,20 @@ export async function generateProof(
   /*
    * Which circuit carries an action, and what happens when one is given.
    *
-   * giwa_attestation branches in-circuit: with an action the wallet signs the
-   * typed data, without one it signs the request's signal hash. The only
-   * refusal is an action sent where nothing can prove it, which must be an
-   * error rather than a silent drop: a dropped action leaves the caller
+   * The circuits that can (core's circuitActionBinding: giwa_attestation and
+   * both Coinbase v2 circuits) branch in-circuit: with an action the wallet
+   * signs the typed data, without one it signs the request's signal hash.
+   * The only refusal is an action sent where nothing can prove it, which must
+   * be an error rather than a silent drop: a dropped action leaves the caller
    * believing the proof authorized something.
    */
-  const canBindAction = circuitId === CIRCUIT_IDS.GIWA_ATTESTATION;
+  const canBindAction = circuitBindsAction(circuitId);
 
   if (action && !canBindAction) {
     throw new Error(
       `An action was given but '${circuitId}' was requested, and it has no inputs for one. ` +
         `Signing typed data for '${circuitId}' yields a signature that circuit cannot verify. ` +
-        `Ask for ${CIRCUIT_IDS.GIWA_ATTESTATION}, or drop the action.`,
+        `Ask for one of ${PROVABLE_CIRCUIT_IDS.filter(circuitBindsAction).join(', ')}, or drop the action.`,
     );
   }
 

@@ -106,10 +106,15 @@ describe('the circuit decides the signature', () => {
     expect(signer.signMessage).not.toHaveBeenCalled();
   });
 
+  // Until 2026-10-30 these used coinbase_kyc as the circuit that cannot carry
+  // an action, and passed only because the SDK flow still named GIWA as the
+  // one action circuit while core (0.4.0-beta.1) already let Coinbase KYC v2
+  // bind one -- so the SDK refused what the MCP and the server accepted.
+  // OIDC is the circuit with no action inputs.
   it('refuses an action on a circuit that cannot carry one', async () => {
     const signer = watchfulSigner();
     await expect(
-      runFlow({ circuit: 'coinbase_kyc', scope: 'test', action: ACTION }, signer),
+      runFlow({ circuit: 'oidc_domain', scope: 'test', action: ACTION }, signer),
     ).rejects.toThrow(/An action was given but/);
     expect(signer.signTypedData).not.toHaveBeenCalled();
   });
@@ -117,10 +122,12 @@ describe('the circuit decides the signature', () => {
   it('names the circuits that do carry an action, so a caller knows where to go', async () => {
     const signer = watchfulSigner();
     const extra = await runFlow(
-      { circuit: 'coinbase_kyc', scope: 'test', action: ACTION },
+      { circuit: 'oidc_domain', scope: 'test', action: ACTION },
       signer,
     ).catch((e: Error) => e.message);
     expect(extra).toContain(CIRCUIT_IDS.GIWA_ATTESTATION);
+    expect(extra).toContain(CIRCUIT_IDS.COINBASE_ATTESTATION);
+    expect(extra).not.toContain(CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION + ',');
     expect(extra).not.toContain('arc_eligibility');
   });
 
@@ -327,19 +334,6 @@ describe('what the prover hands to noir_js', () => {
     });
   }
 
-  for (const circuitId of [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]) {
-    it(`gives ${circuitId} no action parameters at all`, async () => {
-      const inputs = await format(circuitId, { countryList: ['US'], countryListLength: 1, isIncluded: true });
-      expect('domain_separator' in inputs).toBe(false);
-      expect('action_hash' in inputs).toBe(false);
-      expect(inputs.signal_hash).not.toEqual(ZERO_32);
-    });
-
-    it(`refuses an action on ${circuitId} instead of dropping it`, async () => {
-      await expect(format(circuitId, ACTION_PAIR)).rejects.toThrow(/has no inputs for one/);
-    });
-  }
-
   /*
    * coinbase_attestation v2 CARRIES the action parameters (GIWA's six public
    * inputs) and core 0.4.0-beta.1 marks it 'optional': without an action the
@@ -394,6 +388,68 @@ describe('what the prover hands to noir_js', () => {
       expect(inputs.signal_hash).toEqual(ZERO_32);
       expect(inputs.domain_separator).not.toEqual(ZERO_32);
       expect(inputs.action_hash).not.toEqual(ZERO_32);
+    });
+  });
+
+  /*
+   * coinbase_country_attestation v2 (circuits coinbase-country-attestation-v2)
+   * is KYC v2 with v1's country list: the same action pair (optional in
+   * core), the same server statement with every App Attest input zero, and a
+   * 227-byte client_data -- KYC's 225 plus the attested country.
+   */
+  describe('coinbase_country_attestation v2', () => {
+    const COUNTRY = { countryList: ['US', 'KR'], countryListLength: 2, isIncluded: true };
+    const STATEMENT = {
+      statement: { clientData: new Uint8Array(227).fill(9), signature: new Uint8Array(64).fill(8), attestedAt: 1_800_000_000 },
+    };
+    const id = CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION;
+
+    it('sends an empty action pair, the signed signal hash and the country list', async () => {
+      const inputs = await format(id, { ...COUNTRY, ...STATEMENT });
+      expect(inputs.domain_separator).toEqual(ZERO_32);
+      expect(inputs.action_hash).toEqual(ZERO_32);
+      expect(inputs.signal_hash).not.toEqual(ZERO_32);
+      expect(inputs.country_list).toEqual([['0x55', '0x53'], ['0x4b', '0x52'], ...Array(8).fill(['0x00', '0x00'])]);
+      expect(inputs.country_list_length).toBe('2');
+      expect(inputs.is_included).toBe(true);
+    });
+
+    it('sends the 227-byte statement as the server kind with every App Attest input zero', async () => {
+      const inputs = await format(id, { ...COUNTRY, ...STATEMENT }) as Record<string, unknown>;
+      expect(inputs.signer_kind).toBe('2');
+      expect(inputs.attested_at).toBe('1800000000');
+      expect(inputs.client_data).toEqual(Array(227).fill('0x09'));
+      expect(inputs.credential_tbs).toEqual(Array(1000).fill('0x00'));
+      expect([inputs.credential_tbs_len, inputs.att_auth_data_len, inputs.assertion_auth_data_len]).toEqual(['0', '0', '0']);
+    });
+
+    it("refuses KYC's 225-byte statement and a missing one", async () => {
+      await expect(format(id, { ...COUNTRY, statement: { ...STATEMENT.statement, clientData: new Uint8Array(225) } }))
+        .rejects.toThrow(/client_data is 225 bytes, expected 227/);
+      await expect(format(id, COUNTRY)).rejects.toThrow(/server-signed revocation statement/);
+    });
+
+    it('binds an action: the pair is sent and signal_hash is zero', async () => {
+      const inputs = await format(id, { ...COUNTRY, ...STATEMENT, ...ACTION_PAIR });
+      expect(inputs.signal_hash).toEqual(ZERO_32);
+      expect(inputs.domain_separator).toEqual(Array(32).fill('0xaa'));
+      expect(inputs.action_hash).toEqual(Array(32).fill('0xbb'));
+    });
+
+    it.each([
+      ['an empty list', { countryList: [], countryListLength: 0 }, /1 to 10 codes/],
+      ['11 codes', { countryList: Array(11).fill('US'), countryListLength: 11 }, /1 to 10 codes/],
+      ['a length that is not the list', { countryList: ['US'], countryListLength: 2 }, /1 to 10 codes/],
+      ['lowercase', { countryList: ['kr'], countryListLength: 1 }, /not two letters A-Z/],
+      ['three letters', { countryList: ['KOR'], countryListLength: 1 }, /not two letters A-Z/],
+      ['Korean', { countryList: ['한국'], countryListLength: 1 }, /not two letters A-Z/],
+    ])('refuses %s', async (_name, list, error) => {
+      await expect(format(id, { ...COUNTRY, ...list, ...STATEMENT })).rejects.toThrow(error);
+    });
+
+    it('accepts exactly 10 codes', async () => {
+      const inputs = await format(id, { ...COUNTRY, countryList: Array(10).fill('KR'), countryListLength: 10, ...STATEMENT });
+      expect(inputs.country_list_length).toBe('10');
     });
   });
 });

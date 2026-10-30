@@ -667,7 +667,14 @@ const CUSTOM_ACTION = {
 };
 
 describe('prepare_inputs action authorization', () => {
-  it.each(['giwa_attestation'])('%s uses the human signature and keeps the action witness behind a private handle', async (circuit) => {
+  // Every circuit core lets bind an action: GIWA, and both Coinbase v2
+  // circuits (KYC since core 0.4.0-beta.1, Country since its v2).
+  const ACTION_CIRCUITS: Record<string, string> = {
+    giwa_attestation: 'giwa_attestation',
+    coinbase_kyc: 'coinbase_attestation',
+    coinbase_country: 'coinbase_country_attestation',
+  };
+  it.each(Object.keys(ACTION_CIRCUITS))('%s uses the human signature and keeps the action witness behind a private handle', async (circuit) => {
     mockResolveApproval.mockResolvedValue({ address: '0xHumanAddress', signature: '0xHumanSignature' });
     mockPrepareInputs.mockResolvedValue({ field: 'prepared', user_signature: '0xHumanSignature' });
     const params = { circuit, action: CUSTOM_ACTION };
@@ -680,7 +687,7 @@ describe('prepare_inputs action authorization', () => {
     const domainSeparator = ethers.TypedDataEncoder.hashDomain(CUSTOM_ACTION.domain);
     const actionHash = ethers.TypedDataEncoder.hashStruct('Instruction', CUSTOM_ACTION.types, CUSTOM_ACTION.message);
     expect(mockPrepareInputs).toHaveBeenCalledWith(testConfig, expect.objectContaining({
-      circuitId: circuit, userAddress: '0xHumanAddress', userSignature: '0xHumanSignature', domainSeparator, actionHash,
+      circuitId: ACTION_CIRCUITS[circuit], userAddress: '0xHumanAddress', userSignature: '0xHumanSignature', domainSeparator, actionHash,
     }));
     expect(parseToolResult(result)).toMatchObject({ prepared_inputs_id: expect.any(String), domain_separator: domainSeparator, action_hash: actionHash });
     expect(JSON.stringify(result)).not.toContain('0xHumanSignature');
@@ -711,8 +718,7 @@ describe('prepare_inputs action authorization', () => {
     ['missing field', 'giwa_attestation', { ...CUSTOM_ACTION, message: {} }, /missing/],
     ['malformed value', 'giwa_attestation', { ...CUSTOM_ACTION, message: { ...CUSTOM_ACTION.message, terms: { quantity: 'bad', description: 'bad' } } }, /./],
     ['wrong root', 'giwa_attestation', { ...CUSTOM_ACTION, primaryType: 'Terms', message: { quantity: '1', description: 'bad' } }, /primaryType.*root|root.*primaryType/],
-    ['Country action', 'coinbase_country', CUSTOM_ACTION, /does not bind one\. Circuits that do: giwa_attestation, coinbase_attestation\./],
-    ['OIDC action', 'oidc_domain', CUSTOM_ACTION, /does not bind one\. Circuits that do: giwa_attestation, coinbase_attestation\./],
+    ['OIDC action', 'oidc_domain', CUSTOM_ACTION, /does not bind one\. Circuits that do: giwa_attestation, coinbase_attestation, coinbase_country_attestation\./],
   ])('rejects %s before any signing or input preparation', async (_name, circuit, action, error) => {
     const result = await callTool('prepare_inputs', { circuit, action });
     expect(result.isError).toBe(true);

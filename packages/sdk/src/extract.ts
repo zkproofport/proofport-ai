@@ -31,13 +31,17 @@
  *   Index 64-95:  scope (32 bytes)
  *   Index 96-127: nullifier (32 bytes)
  *
- * coinbase_country_attestation (150 fields):
- *   Index 0-63:   attestation fields
- *   Index 64-83:  country_list (20 bytes)
- *   Index 84:     country_list_length
- *   Index 85:     is_included
- *   Index 86-117: scope (32 bytes)
- *   Index 118-149: nullifier (32 bytes)
+ * coinbase_country_attestation (215 fields, circuit v2):
+ *   Index 0-31:    signal_hash (32 bytes)
+ *   Index 32-63:   domain_separator (32 bytes)
+ *   Index 64-95:   action_hash (32 bytes)
+ *   Index 96-127:  signer_list_merkle_root (32 bytes)
+ *   Index 128-147: country_list (20 bytes)
+ *   Index 148:     country_list_length
+ *   Index 149:     is_included
+ *   Index 150-181: scope (32 bytes)
+ *   Index 182-213: nullifier (32 bytes)
+ *   Index 214:     attested_at (u64 unix seconds)
  *
  * oidc_domain_attestation (214 fields, circuit v2; 0-147 are v1's, unchanged):
  *   Index 0-17:    pubkey_modulus_limbs (18 x u128)
@@ -79,7 +83,11 @@ const LAYOUTS: Record<CircuitId, PublicInputLayout> = {
   // GIWA's do; v1's [64, 95] / [96, 127] would read the action hash and the
   // signer root.
   [CIRCUIT_IDS.COINBASE_ATTESTATION]: { scope: [128, 159], nullifier: [160, 191] },
-  [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: { scope: [86, 117], nullifier: [118, 149] },
+  // v2 (circuits coinbase-country-attestation-v2): KYC v2's first four
+  // inputs, v1's country fields, then scope, nullifier and attested_at -- 215
+  // fields. v1's [86, 117] / [118, 149] would read the signer root and the
+  // country list.
+  [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: { scope: [150, 181], nullifier: [182, 213] },
   [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: {
     scope: [83, 114],
     nullifier: [115, 146],
