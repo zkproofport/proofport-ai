@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.5](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.4.4...mcp-v0.4.5) (2026-10-30)
+
+
+### Features
+
+* **country:** prove coinbase_country_attestation v2 with a signed statement ([87540ea](https://github.com/zkproofport/proofport-ai/commit/87540ea73241325dd74c8c73be4a5ff6986b192e))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @zkproofport-ai/sdk bumped from ^0.5.2 to ^0.5.3
+
 ## [0.4.4](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.4.3...mcp-v0.4.4) (2026-10-29)
 
 
