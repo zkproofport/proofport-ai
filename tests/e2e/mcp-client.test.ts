@@ -65,7 +65,7 @@ describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
   });
 
   describe('get_supported_circuits', () => {
-    it('should list all 4 circuits', async () => {
+    it('should list all 5 circuits', async () => {
       const result = await client.callTool({
         name: 'get_supported_circuits',
         arguments: {},
@@ -77,6 +77,7 @@ describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
       expect(Object.keys(data.circuits)).toContain('coinbase_attestation');
       expect(Object.keys(data.circuits)).toContain('coinbase_country_attestation');
       expect(Object.keys(data.circuits)).toContain('oidc_domain_attestation');
+      expect(Object.keys(data.circuits)).toContain('human_passport_score');
       expect(Object.keys(data.circuits)).not.toContain('arc_eligibility');
       expect(Object.keys(data.circuits)).toContain('giwa_attestation');
     });
