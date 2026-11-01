@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.5](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.5.4...sdk-v0.5.5) (2026-11-01)
+
+
+### Features
+
+* **human-passport:** read the score on the chain the request names ([3fe1b00](https://github.com/zkproofport/proofport-ai/commit/3fe1b00b3c5ad4b36f6ed3cc83005ec4ca6df9e7))
+
 ## [0.5.4](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.5.3...sdk-v0.5.4) (2026-10-30)
 
 

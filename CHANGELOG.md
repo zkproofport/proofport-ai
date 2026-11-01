@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.6.5](https://github.com/zkproofport/proofport-ai/compare/server-v0.6.4...server-v0.6.5) (2026-11-01)
+
+
+### Features
+
+* **human-passport:** read the score on the chain the request names ([3fe1b00](https://github.com/zkproofport/proofport-ai/commit/3fe1b00b3c5ad4b36f6ed3cc83005ec4ca6df9e7))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @zkproofport-ai/mcp bumped from ^0.4.6 to ^0.4.7
+    * @zkproofport-ai/sdk bumped from ^0.5.4 to ^0.5.5
+
 ## [0.6.4](https://github.com/zkproofport/proofport-ai/compare/server-v0.6.3...server-v0.6.4) (2026-10-30)
 
 
