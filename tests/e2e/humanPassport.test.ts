@@ -89,7 +89,9 @@ describe('human_passport_score (refusals before payment)', () => {
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).toBe('INVALID_REQUEST');
-    expect(body.message).toMatch(/Known: 8453, 10, 42161, 59144, 534352, 360, 324/);
+    const known = String(body.message).split('Known: ')[1] ?? '';
+    // Every chain core lists, in whatever order the server prints them.
+    expect(known.replace(/\.$/, '').split(', ').map(Number).sort((a, b) => a - b)).toEqual([10, 324, 360, 8453, 42161, 59144, 534352]);
   });
 
   it.each([undefined, 1])('SDK: refuses chain %p before the wallet signs', async bad => {
