@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 import type { CircuitId, ProveInputs, ClientConfig } from './types.js';
 import { CIRCUIT_NAME_MAP, type CircuitName, type HumanPassportProveInputs } from './types.js';
-import { humanPassportScoreUnits } from '@zkproofport-app/core/circuits';
+import { humanPassportChain, humanPassportScoreUnits } from '@zkproofport-app/core/circuits';
 import { CIRCUIT_IDS, PROVABLE_CIRCUIT_IDS, circuitBindsAction } from './circuits.js';
 import {
   CIRCUITS,
@@ -391,6 +391,7 @@ export function prepareHumanPassportInputs(params: {
   userSignature: string;
   scope: string;
   minScore: unknown;
+  chain: unknown;
   domainSeparator?: string;
   actionHash?: string;
 }): HumanPassportProveInputs {
@@ -399,6 +400,11 @@ export function prepareHumanPassportInputs(params: {
     humanPassportScoreUnits(params.minScore);
   } catch (e) {
     throw new Error(`minScore for human_passport: ${(e as Error).message}`);
+  }
+  try {
+    humanPassportChain(params.chain);
+  } catch (e) {
+    throw new Error(`chain for human_passport: ${(e as Error).message}`);
   }
   if (Boolean(params.domainSeparator) !== Boolean(params.actionHash)) {
     throw new Error('Half an action: pass both domainSeparator and actionHash, or neither.');
@@ -428,5 +434,6 @@ export function prepareHumanPassportInputs(params: {
     user_pubkey_x: x,
     user_pubkey_y: y,
     min_score: params.minScore as number,
+    chain: params.chain as number,
   };
 }

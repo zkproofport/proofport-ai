@@ -35,7 +35,7 @@ import { ensureAgentRegistered, isIdentityRegistrationEnabled } from './identity
 import { createAgentAuthMiddleware } from './identity/agentAuth.js';
 import { createProofRoutes } from './proof/proofRoutes.js';
 import { easAttestationReader, statementSignerFromEnv } from './input/coinbaseStatement.js';
-import { easHumanPassportReader } from './input/humanPassport.js';
+import { chainHumanPassportReader } from './input/humanPassport.js';
 import { createActionApprovalRouter, approvalSecurityHeaders } from './approval/routes.js';
 import type { LLMProvider } from './chat/llmProvider.js';
 import { OpenAIProvider } from './chat/openaiClient.js';
@@ -228,12 +228,13 @@ function createApp(config: Config) {
         signer: statementSignerFromEnv(),
       }
     : undefined;
-  // human_passport_score reads the wallet's issuance on Base before payment.
-  // loadConfig requires EAS_GRAPHQL_ENDPOINT and BASE_RPC_URL, so a server
-  // always has both; an app built from a partial test config has neither, and
+  // human_passport_score reads the wallet's issuance, on the chain the
+  // request names, before payment (src/input/humanPassport.ts
+  // HUMAN_PASSPORT_SOURCES; Base through BASE_RPC_URL). loadConfig requires
+  // BASE_RPC_URL; an app built from a partial test config has none, and
   // answers a Human Passport request with an error rather than a proof.
-  const humanPassport = config.easGraphqlEndpoint && config.baseRpcUrl
-    ? { reader: easHumanPassportReader(config.easGraphqlEndpoint, config.baseRpcUrl) }
+  const humanPassport = config.baseRpcUrl
+    ? { reader: chainHumanPassportReader(config.baseRpcUrl) }
     : undefined;
   app.use('/api/v1', createProofRoutes({ redis, config, teeProvider, statement, humanPassport }));
 

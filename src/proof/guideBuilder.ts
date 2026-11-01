@@ -11,9 +11,9 @@ import {
   HUMAN_PASSPORT_ISSUER_LEAVES,
   HUMAN_PASSPORT_ISSUER_ROOT,
   HUMAN_PASSPORT_MAX_DATA_BYTES,
-  HUMAN_PASSPORT_SCORE_SCHEMA,
-  HUMAN_PASSPORT_SCORER_ID,
+  HUMAN_PASSPORT_CHAINS,
 } from '@zkproofport-app/core/circuits';
+import { humanPassportSource } from '../input/humanPassport.js';
 
 const require = createRequire(import.meta.url);
 let mcpPkgVersion: string | null;
@@ -561,13 +561,13 @@ function buildHumanPassportGuide(config: Config) {
   const verifier = getChainVerifiers(String(chainId))[circuitId];
   if (!verifier) throw new Error(`No ${circuitId} verifier configured on chain ${chainId}`);
   const networks = resolvePaymentNetworks(config.paymentNetworks);
-  const cliBase = `PROOFPORT_URL=${config.a2aBaseUrl} zkproofport-prove human_passport --min-score 20 --scope myapp:membership`;
+  const cliBase = `PROOFPORT_URL=${config.a2aBaseUrl} zkproofport-prove human_passport --min-score 20 --chain 8453 --scope myapp:membership`;
   return {
     circuit_id: circuitId, display_name: circuit.displayName, description: circuit.description,
     overview: {
       what: 'Prove the wallet holds an unexpired Human Passport score at or above min_score, without revealing the wallet or the exact score.',
-      how: 'The wallet signs the request (or one EIP-712 action). The server finds the wallet\'s newest scoreV2 attestation on Base, reads the issuer-signed request from the transaction that recorded it, and proves the issuer signature, the threshold and the expiry in the circuit.',
-      prerequisite: 'The wallet must already have a Human Passport score recorded on Base (scoreV2, scorer 335).',
+      how: 'The wallet signs the request (or one EIP-712 action). The server finds the wallet\'s newest scoreV2 attestation on the chain the request names, reads the issuer-signed request from the transaction that recorded it, and proves the issuer signature, the threshold and the expiry in the circuit.',
+      prerequisite: 'The wallet must already have a Human Passport score recorded on one of the chains below; the request names that chain (`chain`, its chain id).',
     },
     e2e_encryption: {
       ...encryptionGuide(config),
@@ -576,8 +576,8 @@ function buildHumanPassportGuide(config: Config) {
     local_mcp_server: {
       recommended: true, npm_package: '@zkproofport-ai/mcp', version: mcpPkgVersion,
       install: 'npm install -g @zkproofport-ai/mcp@latest', command: 'zkproofport-mcp', transport: 'stdio',
-      required_arguments: ['circuit', 'min_score'], optional_arguments: ['scope', 'action', 'pay_with', 'pay_on', 'max_payment'],
-      generate_proof: { circuit: 'human_passport', scope: 'myapp:membership', min_score: 20 },
+      required_arguments: ['circuit', 'min_score', 'chain'], optional_arguments: ['scope', 'action', 'pay_with', 'pay_on', 'max_payment'],
+      generate_proof: { circuit: 'human_passport', scope: 'myapp:membership', min_score: 20, chain: 8453 },
     },
     sdk: {
       package: '@zkproofport-ai/sdk',
@@ -585,12 +585,15 @@ function buildHumanPassportGuide(config: Config) {
 const result = await generateProof(
   createConfig({ baseUrl: '${config.a2aBaseUrl}' }),
   { attestation: existingAttestationSigner, payment },
-  { circuit: 'human_passport', scope: 'myapp:membership', minScore: 20 },
+  { circuit: 'human_passport', scope: 'myapp:membership', minScore: 20, chain: 8453 },
 );`,
       cli: `${cliBase} --silent`,
     },
     constants: {
-      score_source: { chain_id: 8453, graphql_endpoint: config.easGraphqlEndpoint, schema_id: HUMAN_PASSPORT_SCORE_SCHEMA, scorer_id: HUMAN_PASSPORT_SCORER_ID },
+      score_chains: Object.values(HUMAN_PASSPORT_CHAINS).map(c => ({
+        chain_id: c.chainId, name: c.name, schema_id: c.schema, scorer_id: c.scorerId,
+        index: humanPassportSource(c.chainId).index.url,
+      })),
       issuer: HUMAN_PASSPORT_ISSUER,
       issuer_list: { root: HUMAN_PASSPORT_ISSUER_ROOT, leaves: HUMAN_PASSPORT_ISSUER_LEAVES, leaf: 'keccak256(issuer ++ GitcoinVerifier EIP-712 domain separator ++ scoreV2 schema); tree padded to a power of two, node = keccak256(left || right)' },
       max_score_data_bytes: HUMAN_PASSPORT_MAX_DATA_BYTES,
@@ -600,7 +603,7 @@ const result = await generateProof(
         verifier_address: verifier, chain_id: chainId, rpc_url: config.chainRpcUrl,
         function_signature: 'verify(bytes proof, bytes32[] publicInputs) external view returns (bool)', public_input_count: 195,
         public_inputs: 'signal_hash 0-31, domain_separator 32-63, action_hash 64-95, signer_list_merkle_root 96-127, scope 128-159, nullifier 160-191, min_score 192 (score x 10^4), scorer_id 193, now 194',
-        verifier_policy: 'The contract checks the proof only. Also require signer_list_merkle_root = the issuer root above, scorer_id = 335, min_score = the threshold you asked for, and now within 15 minutes of your clock (@zkproofport-app/core checkHumanPassportProof does all four).',
+        verifier_policy: 'The contract checks the proof only. Also require signer_list_merkle_root = the issuer root above, scorer_id one of the score_chains scorers, min_score = the threshold you asked for, and now within 15 minutes of your clock (@zkproofport-app/core checkHumanPassportProof does all four).',
       },
     },
     formulas: {
@@ -617,6 +620,7 @@ const result = await generateProof(
         { name: 'user_address', bytes: 20 }, { name: 'signature', bytes: 65 },
         { name: 'user_pubkey_x', bytes: 32 }, { name: 'user_pubkey_y', bytes: 32 },
         { name: 'min_score', type: 'number', description: 'Threshold in Passport points (e.g. 20), above 0, at most four decimals' },
+        { name: 'chain', type: 'number', description: 'Chain id the score is recorded on (one of score_chains). Required; an unknown or missing chain is INVALID_REQUEST.' },
         { name: 'domain_separator', bytes: 32, optional: true }, { name: 'action_hash', bytes: 32, optional: true },
       ],
       refusals: 'NO_HUMAN_PASSPORT_SCORE / HUMAN_PASSPORT_SCORE_EXPIRED / HUMAN_PASSPORT_SCORE_BELOW_THRESHOLD / HUMAN_PASSPORT_DATA_TOO_LARGE / HUMAN_PASSPORT_ISSUANCE_UNREADABLE (403), HUMAN_PASSPORT_LOOKUP_FAILED (503), NULLIFIER_RULE / INVALID_REQUEST (400) -- all before payment.',

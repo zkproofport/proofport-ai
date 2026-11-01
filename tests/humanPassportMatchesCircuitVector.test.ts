@@ -4,7 +4,8 @@
  * (tests/fixtures/humanPassportAcceptedVector.json, written by circuits
  * scripts/human-passport/export-app-vector.js from Prover.toml, action mode).
  *
- * The fixture's issuer is a test key (depth-2 tree with a third test leaf),
+ * The fixture's issuer is a test key (the eight production leaves plus a test
+ * leaf, index 8, depth 4),
  * so this checks the FORMATTER -- every field, its size, its order and its
  * encoding -- not the production anchors; those are checked against real
  * issuances in humanPassport.test.ts. Regenerate the fixture whenever the
@@ -62,7 +63,7 @@ describe('server inputs equal the circuit-accepted vector', () => {
       minScoreUnits: V.minScoreUnits,
       now: V.now,
       issuance: {
-        txHash: V.sourceIssuanceTx, attestationUid: '0x' + '00'.repeat(32), verifier: '0x' + '00'.repeat(20),
+        chainId: 8453, txHash: V.sourceIssuanceTx, attestationUid: '0x' + '00'.repeat(32), verifier: '0x' + '00'.repeat(20),
         domainSeparator: V.issuance.domainSeparator,
         request: {
           schema: V.issuance.schema, recipient: V.issuance.recipient, expirationTime: BigInt(V.issuance.expirationTime),

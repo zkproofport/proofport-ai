@@ -50,7 +50,7 @@ describe('human_passport_score (refusals before payment)', () => {
     await expect(sdk.generateProof(
       config,
       { attestation: fromPrivateKey(ATTESTATION_KEY!), payment: plan?.wallet },
-      { circuit: 'human_passport' as never, scope: 'e2e:human-passport', minScore: 20, payOn: plan?.payOn } as never,
+      { circuit: 'human_passport' as never, scope: 'e2e:human-passport', minScore: 20, chain: 8453, payOn: plan?.payOn } as never,
     )).rejects.toThrow(/NO_HUMAN_PASSPORT_SCORE/);
   }, 120_000);
 
@@ -58,7 +58,7 @@ describe('human_passport_score (refusals before payment)', () => {
     let signed = 0;
     const signer = fromPrivateKey(ATTESTATION_KEY!);
     const counting = { getAddress: () => signer.getAddress(), signMessage: async (m: unknown) => { signed++; return signer.signMessage(m as never); } };
-    await expect(sdk.generateProof(config, { attestation: counting as never }, { circuit: 'human_passport', minScore: bad } as never))
+    await expect(sdk.generateProof(config, { attestation: counting as never }, { circuit: 'human_passport', minScore: bad, chain: 8453 } as never))
       .rejects.toThrow(/minScore/);
     expect(signed).toBe(0);
   });
@@ -68,7 +68,7 @@ describe('human_passport_score (refusals before payment)', () => {
     const prepared = sdk.prepareHumanPassportInputs({
       userAddress: wallet.address,
       userSignature: await wallet.signMessage(sdk.computeSignalHash(wallet.address, 'e2e:raw', 'human_passport_score')),
-      scope: 'e2e:raw', minScore: 20,
+      scope: 'e2e:raw', minScore: 20, chain: 8453,
     });
     const challenge = await sdk.requestChallenge(config, 'human_passport' as never);
     return fetch(`${BASE_URL}/api/v1/prove`, {
@@ -82,6 +82,29 @@ describe('human_passport_score (refusals before payment)', () => {
     const res = await rawRequest({ min_score: bad });
     expect(res.status).toBe(400);
     expect((await res.json()).error).toBe('INVALID_REQUEST');
+  });
+
+  it.each([['missing', undefined], ['unknown (Ethereum mainnet)', 1], ['a string', '8453']])('REST: a %s chain is INVALID_REQUEST naming the known chains', async (_n, chain) => {
+    const res = await rawRequest({ chain });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe('INVALID_REQUEST');
+    expect(body.message).toMatch(/Known: 8453, 10, 42161, 59144, 534352, 360, 324/);
+  });
+
+  it.each([undefined, 1])('SDK: refuses chain %p before the wallet signs', async bad => {
+    let signed = 0;
+    const signer = fromPrivateKey(ATTESTATION_KEY!);
+    const counting = { getAddress: () => signer.getAddress(), signMessage: async (m: unknown) => { signed++; return signer.signMessage(m as never); } };
+    await expect(sdk.generateProof(config, { attestation: counting as never }, { circuit: 'human_passport', minScore: 20, chain: bad } as never))
+      .rejects.toThrow(/chain/);
+    expect(signed).toBe(0);
+  });
+
+  it.each([10, 360])('REST: an unscored wallet on chain %i is NO_HUMAN_PASSPORT_SCORE (that chain\'s index answered)', async chain => {
+    const res = await rawRequest({ chain });
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe('NO_HUMAN_PASSPORT_SCORE');
   });
 
   it('REST: a nullifier from the signal-hash rule is NULLIFIER_RULE', async () => {
@@ -113,7 +136,7 @@ describe('human_passport_score (refusals before payment)', () => {
         name: 'generate_proof',
         // .env.test also configures a CDP wallet; name the key wallet, as the MCP
         // refuses to pick between two.
-        arguments: { circuit: 'human_passport', scope: 'e2e:mcp', min_score: 20, ...(PAYER_KEY ? { pay_with: 'key' } : {}), ...(plan?.payOn ? { pay_on: plan.payOn } : {}) },
+        arguments: { circuit: 'human_passport', scope: 'e2e:mcp', min_score: 20, chain: 8453, ...(PAYER_KEY ? { pay_with: 'key' } : {}), ...(plan?.payOn ? { pay_on: plan.payOn } : {}) },
       }, undefined, { timeout: 120_000 });
       expect((result as { isError?: boolean }).isError).toBe(true);
       expect(JSON.stringify(result)).toMatch(/NO_HUMAN_PASSPORT_SCORE/);

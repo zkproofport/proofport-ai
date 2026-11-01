@@ -19,7 +19,7 @@ import { CIRCUITS } from './constants.js';
 import { hashTypedAction } from './action.js';
 import { CIRCUIT_IDS, PROVABLE_CIRCUIT_IDS, circuitBindsAction } from './circuits.js';
 import { encryptForTee } from './tee.js';
-import { humanPassportScoreUnits } from '@zkproofport-app/core/circuits';
+import { humanPassportChain, humanPassportScoreUnits } from '@zkproofport-app/core/circuits';
 import { ActionApprovalError, resolveActionApproval } from './actionApproval.js';
 
 export interface FlowCallbacks {
@@ -115,8 +115,13 @@ export async function generateProof(
     } catch (e) {
       throw new Error(`minScore is required for human_passport: ${(e as Error).message}`);
     }
-  } else if (params.minScore !== undefined) {
-    throw new Error(`minScore applies only to human_passport; '${circuitId}' has no threshold.`);
+    try {
+      humanPassportChain(params.chain);
+    } catch (e) {
+      throw new Error(`chain is required for human_passport (the chain id the score is recorded on): ${(e as Error).message}`);
+    }
+  } else if (params.minScore !== undefined || params.chain !== undefined) {
+    throw new Error(`minScore and chain apply only to human_passport; '${circuitId}' has neither.`);
   }
 
   const actionHashes = action ? hashTypedAction(action) : undefined;
@@ -174,6 +179,7 @@ export async function generateProof(
           userSignature: signature,
           scope,
           minScore: params.minScore,
+          chain: params.chain,
           domainSeparator,
           actionHash,
         })

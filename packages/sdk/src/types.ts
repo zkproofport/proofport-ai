@@ -115,6 +115,8 @@ export interface HumanPassportProveInputs {
   user_pubkey_y: string;
   /** Threshold in Passport points (20 = 20.0). */
   min_score: number;
+  /** Chain id the score is recorded on (core HUMAN_PASSPORT_CHAIN_IDS). */
+  chain: number;
 }
 
 export interface ProveRequest {
@@ -247,6 +249,13 @@ export interface ProofParams {
    * (e.g. 20; above 0, at most four decimals). The proof carries it.
    */
   minScore?: number;
+  /**
+   * Required for human_passport: the chain id the person recorded their
+   * score on (8453 Base, 10 OP Mainnet, 42161 Arbitrum One, 59144 Linea,
+   * 534352 Scroll, 360 Shape, 324 zkSync Era). No default: a score lives only
+   * on the chain its owner chose.
+   */
+  chain?: number;
   /** JWT token for OIDC circuit (oidc_domain) */
   jwt?: string;
   /** OIDC provider: 'google' (default) or 'microsoft' for Microsoft 365 */

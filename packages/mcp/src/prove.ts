@@ -209,6 +209,7 @@ let countries: string[] | undefined;
 let included: boolean | undefined;
 let minScore: number | undefined;
 let minScoreRaw: string | undefined;
+let chainRaw: string | undefined;
 let jwt: string | undefined;
 let provider: string | undefined;
 let payWith: string | undefined;
@@ -234,6 +235,8 @@ for (; i < args.length; i++) {
     countries = args[++i].split(',').map((c) => c.trim());
   } else if (args[i] === '--included' && args[i + 1]) {
     included = args[++i].toLowerCase() === 'true';
+  } else if (args[i] === '--chain' && args[i + 1]) {
+    chainRaw = args[++i];
   } else if (args[i] === '--min-score' && args[i + 1]) {
     minScoreRaw = args[++i];
     minScore = Number(minScoreRaw);
@@ -279,6 +282,7 @@ function printUsage() {
   writeError('  --countries <codes>         Comma-separated ISO codes (for coinbase_country)');
   writeError('  --included <true|false>     Inclusion proof (for coinbase_country)');
   writeError('  --min-score <points>        Human Passport score threshold, e.g. 20 (for human_passport)');
+  writeError('  --chain <chain id>          Chain the Human Passport score is recorded on, e.g. 8453 (for human_passport)');
   writeError('  --silent                    Suppress all logs; output raw proof JSON only');
   writeError('  --login-google             Login with Google account (device flow)');
   writeError('  --login-google-workspace   Login with Google Workspace (device flow)');
@@ -404,8 +408,13 @@ if (circuit === 'human_passport') {
     writeError(silent ? JSON.stringify({ error: msg }) : `Error: ${msg}`);
     process.exit(1);
   }
-} else if (minScoreRaw !== undefined) {
-  const msg = `--min-score applies only to human_passport, not '${circuit}'`;
+  if (chainRaw === undefined || !/^\d+$/.test(chainRaw)) {
+    const msg = '--chain <chain id> is required for human_passport: the chain the score is recorded on (8453 Base, 10 OP Mainnet, 42161 Arbitrum One, 59144 Linea, 534352 Scroll, 360 Shape, 324 zkSync Era)';
+    writeError(silent ? JSON.stringify({ error: msg }) : `Error: ${msg}`);
+    process.exit(1);
+  }
+} else if (minScoreRaw !== undefined || chainRaw !== undefined) {
+  const msg = `--min-score and --chain apply only to human_passport, not '${circuit}'`;
   writeError(silent ? JSON.stringify({ error: msg }) : `Error: ${msg}`);
   process.exit(1);
 }
@@ -524,6 +533,7 @@ if (action !== undefined) toolArgs.action = action;
 if (countries !== undefined) toolArgs.country_list = countries;
 if (included !== undefined) toolArgs.is_included = included;
 if (minScore !== undefined) toolArgs.min_score = minScore;
+if (chainRaw !== undefined) toolArgs.chain = Number(chainRaw);
 if (jwt !== undefined) toolArgs.jwt = jwt;
 if (provider !== undefined) toolArgs.provider = provider;
 if (payWith !== undefined) toolArgs.pay_with = payWith;

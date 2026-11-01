@@ -40,9 +40,12 @@ import {
 } from '../src/input/humanPassport.js';
 import { formatHumanPassportInputs } from '../src/prover/inputFormatter.js';
 import { StatementRefusal } from '../src/input/statementSigner.js';
-import { HUMAN_PASSPORT_ISSUER, HUMAN_PASSPORT_ISSUER_ROOT, HUMAN_PASSPORT_SCORE_SCHEMA } from '@zkproofport-app/core/circuits';
+import { HUMAN_PASSPORT_CHAINS, HUMAN_PASSPORT_CHAIN_IDS, HUMAN_PASSPORT_ISSUER, HUMAN_PASSPORT_ISSUER_ROOT } from '@zkproofport-app/core/circuits';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { HUMAN_PASSPORT_SOURCES } from '../src/input/humanPassport.js';
 import {
-  buildIssuance, OTHER_ISSUER, OTHER_WALLET, REAL, requestInputs, TEST_WALLET, withDecoy,
+  BASE_SCHEMA, buildIssuance, OTHER_ISSUER, OTHER_WALLET, REAL, requestInputs, TEST_WALLET, withDecoy,
 } from './helpers/humanPassportFixture.js';
 
 const refusal = (fn: () => unknown, code: string) => {
@@ -72,10 +75,11 @@ function scoreData(length: number, over: Partial<{ decimals: number; scorer: num
 
 describe('real Base issuances, production anchors', () => {
   it.each(REAL.issuances.map(i => [i.to, i] as const))('accepts the issuance sent to %s', (_to, real) => {
-    const i = issuanceFromCalldata({ calldata: real.input, txHash: real.txid, attestationUid: real.uid, wallet: real.recipient, attestationData: real.data });
+    const i = issuanceFromCalldata({ calldata: real.input, txHash: real.txid, attestationUid: real.uid, wallet: real.recipient, attestationData: real.data, chainId: 8453 });
     expect(i.leafIndex).toBe(0);
+    expect(i.chainId).toBe(8453);
     expect(i.merkleRoot).toBe(HUMAN_PASSPORT_ISSUER_ROOT);
-    expect(i.merkleDepth).toBe(1);
+    expect(i.merkleDepth).toBe(3);
     expect(ethers.computeAddress('0x04' + i.issuerPubkeyX.slice(2) + i.issuerPubkeyY.slice(2))).toBe(ethers.getAddress(HUMAN_PASSPORT_ISSUER));
     expect(i.scorerId).toBe(335);
     expect(i.score).toBe(Number(readScoreHead(real.data).score));
@@ -84,20 +88,56 @@ describe('real Base issuances, production anchors', () => {
 
   it('refuses a real issuance for any other wallet', () => {
     const real = REAL.issuances[0];
-    refusal(() => issuanceFromCalldata({ calldata: real.input, txHash: real.txid, attestationUid: real.uid, wallet: OTHER_WALLET.address, attestationData: real.data }), 'HUMAN_PASSPORT_ISSUANCE_UNREADABLE');
+    refusal(() => issuanceFromCalldata({ calldata: real.input, txHash: real.txid, attestationUid: real.uid, wallet: OTHER_WALLET.address, attestationData: real.data, chainId: 8453 }), 'HUMAN_PASSPORT_ISSUANCE_UNREADABLE');
   });
 
   it('refuses a real issuance whose data was changed by one byte', () => {
     const real = REAL.issuances[0];
     const b = ethers.getBytes(real.data);
     b[b.length - 1] ^= 1;
-    refusal(() => issuanceFromCalldata({ calldata: real.input, txHash: real.txid, attestationUid: real.uid, wallet: real.recipient, attestationData: ethers.hexlify(b) }), 'HUMAN_PASSPORT_ISSUANCE_UNREADABLE');
+    refusal(() => issuanceFromCalldata({ calldata: real.input, txHash: real.txid, attestationUid: real.uid, wallet: real.recipient, attestationData: ethers.hexlify(b), chainId: 8453 }), 'HUMAN_PASSPORT_ISSUANCE_UNREADABLE');
   });
 
   it('refuses a real issuance against anchors naming another issuer', () => {
     const real = REAL.issuances[0];
     const anchors = { ...HUMAN_PASSPORT_ANCHORS, issuer: OTHER_ISSUER.address };
-    refusal(() => issuanceFromCalldata({ calldata: real.input, txHash: real.txid, attestationUid: real.uid, wallet: real.recipient, attestationData: real.data }, anchors), 'HUMAN_PASSPORT_ISSUANCE_UNREADABLE');
+    refusal(() => issuanceFromCalldata({ calldata: real.input, txHash: real.txid, attestationUid: real.uid, wallet: real.recipient, attestationData: real.data, chainId: 8453 }, anchors), 'HUMAN_PASSPORT_ISSUANCE_UNREADABLE');
+  });
+});
+
+const CHAIN_REAL = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'humanPassportChainIssuances.json'), 'utf8')) as {
+  issuances: { chainId: number; uid: string; recipient: string; txid: string; data: string; input: string }[];
+};
+
+describe('every chain Human Passport records on', () => {
+  it('has a source row for every chain core lists, and none it does not', () => {
+    expect(Object.keys(HUMAN_PASSPORT_SOURCES).map(Number).sort()).toEqual([...HUMAN_PASSPORT_CHAIN_IDS].sort());
+  });
+
+  it('the fixture covers every chain', () => {
+    expect(CHAIN_REAL.issuances.map(i => i.chainId).sort()).toEqual([...HUMAN_PASSPORT_CHAIN_IDS].sort());
+  });
+
+  it.each(CHAIN_REAL.issuances.map(i => [HUMAN_PASSPORT_CHAINS[i.chainId].name, i] as const))('accepts a real %s issuance against the production list', (_n, real) => {
+    const i = issuanceFromCalldata({ calldata: real.input, txHash: real.txid, attestationUid: real.uid, wallet: real.recipient, attestationData: real.data, chainId: real.chainId });
+    expect(i.chainId).toBe(real.chainId);
+    expect(i.merkleRoot).toBe(HUMAN_PASSPORT_ISSUER_ROOT);
+    expect(i.scorerId).toBe(HUMAN_PASSPORT_CHAINS[real.chainId].scorerId);
+  });
+
+  it.each(CHAIN_REAL.issuances.filter(i => i.chainId !== 8453).map(i => [HUMAN_PASSPORT_CHAINS[i.chainId].name, i] as const))('refuses a real %s issuance claimed as Base', (_n, real) => {
+    refusal(() => issuanceFromCalldata({ calldata: real.input, txHash: real.txid, attestationUid: real.uid, wallet: real.recipient, attestationData: real.data, chainId: 8453 }), 'HUMAN_PASSPORT_ISSUANCE_UNREADABLE');
+  });
+
+  it.each([[1], [84532], [0], ['8453'], [null], [undefined], [8453.5]])('refuses chain %p as INVALID_REQUEST naming the chains', bad => {
+    const real = CHAIN_REAL.issuances[0];
+    try {
+      issuanceFromCalldata({ calldata: real.input, txHash: real.txid, attestationUid: real.uid, wallet: real.recipient, attestationData: real.data, chainId: bad as never });
+      throw new Error('accepted');
+    } catch (e) {
+      expect((e as StatementRefusal).code).toBe('INVALID_REQUEST');
+      expect((e as Error).message).toMatch(/8453.*324|Known/);
+    }
   });
 });
 
@@ -108,7 +148,7 @@ describe('calldata scan', () => {
   });
 
   const check = (calldata: string, b = buildIssuance()) =>
-    issuanceFromCalldata({ calldata, txHash: '0x' + '11'.repeat(32), attestationUid: '0x' + '22'.repeat(32), wallet: TEST_WALLET.address, attestationData: b.data }, b.anchors);
+    issuanceFromCalldata({ calldata, txHash: '0x' + '11'.repeat(32), attestationUid: '0x' + '22'.repeat(32), wallet: TEST_WALLET.address, attestationData: b.data, chainId: 8453 }, b.anchors);
 
   it('finds a call nested inside a wallet call', () => {
     const b = buildIssuance({ wrap: 'execute' });
@@ -151,17 +191,22 @@ describe('calldata scan', () => {
 
 describe('score data', () => {
   it('accepts 192 and 10,240 bytes', () => {
-    expect(checkScoreData(scoreData(192), 'x').score).toBe(233860n);
-    expect(checkScoreData(scoreData(10240), 'x').scorerId).toBe(335n);
+    expect(checkScoreData(scoreData(192), 'x', HUMAN_PASSPORT_CHAINS[8453]).score).toBe(233860n);
+    expect(checkScoreData(scoreData(10240), 'x', HUMAN_PASSPORT_CHAINS[8453]).scorerId).toBe(335n);
   });
   it('refuses 10,241 bytes as too large and 191 as unreadable', () => {
-    refusal(() => checkScoreData(scoreData(10241), 'x'), 'HUMAN_PASSPORT_DATA_TOO_LARGE');
-    refusal(() => checkScoreData(scoreData(191), 'x'), 'HUMAN_PASSPORT_ISSUANCE_UNREADABLE');
+    refusal(() => checkScoreData(scoreData(10241), 'x', HUMAN_PASSPORT_CHAINS[8453]), 'HUMAN_PASSPORT_DATA_TOO_LARGE');
+    refusal(() => checkScoreData(scoreData(191), 'x', HUMAN_PASSPORT_CHAINS[8453]), 'HUMAN_PASSPORT_ISSUANCE_UNREADABLE');
+  });
+  it('holds the scorer to the chain\'s: 7922 only on Shape, 335 nowhere on Shape', () => {
+    expect(checkScoreData(scoreData(256, { scorer: 7922 }), 'x', HUMAN_PASSPORT_CHAINS[360]).scorerId).toBe(7922n);
+    refusal(() => checkScoreData(scoreData(256, { scorer: 7922 }), 'x', HUMAN_PASSPORT_CHAINS[8453]), 'NO_HUMAN_PASSPORT_SCORE');
+    refusal(() => checkScoreData(scoreData(256), 'x', HUMAN_PASSPORT_CHAINS[360]), 'NO_HUMAN_PASSPORT_SCORE');
   });
   it('refuses other decimals, another scorer and dirty padding', () => {
-    refusal(() => checkScoreData(scoreData(256, { decimals: 2 }), 'x'), 'HUMAN_PASSPORT_ISSUANCE_UNREADABLE');
-    refusal(() => checkScoreData(scoreData(256, { scorer: 336 }), 'x'), 'NO_HUMAN_PASSPORT_SCORE');
-    refusal(() => checkScoreData(scoreData(256, { padding: true }), 'x'), 'HUMAN_PASSPORT_ISSUANCE_UNREADABLE');
+    refusal(() => checkScoreData(scoreData(256, { decimals: 2 }), 'x', HUMAN_PASSPORT_CHAINS[8453]), 'HUMAN_PASSPORT_ISSUANCE_UNREADABLE');
+    refusal(() => checkScoreData(scoreData(256, { scorer: 336 }), 'x', HUMAN_PASSPORT_CHAINS[8453]), 'NO_HUMAN_PASSPORT_SCORE');
+    refusal(() => checkScoreData(scoreData(256, { padding: true }), 'x', HUMAN_PASSPORT_CHAINS[8453]), 'HUMAN_PASSPORT_ISSUANCE_UNREADABLE');
   });
 });
 
@@ -173,7 +218,7 @@ function fakeReader(b: ReturnType<typeof buildIssuance>, over: Partial<{
   const reader: HumanPassportReader = {
     latest: over.latest ?? vi.fn(async () => ({ uid, txid })),
     onChain: vi.fn(async () => ({
-      uid, schema: over.schema ?? HUMAN_PASSPORT_SCORE_SCHEMA, recipient: over.recipient ?? TEST_WALLET.address,
+      uid, schema: over.schema ?? BASE_SCHEMA, recipient: over.recipient ?? TEST_WALLET.address,
       attester: over.attester ?? '0xCc90105D4A2aa067ee768120AdA19886021dF422',
       revocationTime: over.revoked ?? 0n, expirationTime: over.expiration ?? 1_900_000_000n, data: b.data,
     })),
@@ -204,6 +249,19 @@ describe('prepareHumanPassport', () => {
     const reader = fakeReader(buildIssuance());
     await asyncRefusal(prepareHumanPassport(await requestInputs({ minScore: bad }), { reader, now: NOW }), 'INVALID_REQUEST');
     expect(reader.latest).not.toHaveBeenCalled();
+  });
+
+  it.each([[undefined], [1], ['8453'], [null]])('refuses chain %p before any lookup', async bad => {
+    const reader = fakeReader(buildIssuance());
+    await asyncRefusal(prepareHumanPassport(await requestInputs({ chain: bad }), { reader, now: NOW }), 'INVALID_REQUEST');
+    expect(reader.latest).not.toHaveBeenCalled();
+  });
+
+  it('asks the reader about the chain the request names', async () => {
+    const b = buildIssuance();
+    const reader = fakeReader(b);
+    await prepareHumanPassport(await requestInputs(), { reader, now: NOW, anchors: b.anchors });
+    expect((reader.latest as ReturnType<typeof vi.fn>).mock.calls[0][0]).toMatchObject({ chainId: 8453 });
   });
 
   it('refuses a nullifier made by another rule before any lookup', async () => {

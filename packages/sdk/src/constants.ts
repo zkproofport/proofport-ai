@@ -35,9 +35,8 @@ export const CIRCUITS: Record<CircuitId, {
   },
   [CIRCUIT_IDS.HUMAN_PASSPORT_SCORE]: {
     displayName: 'Human Passport',
-    // The server reads the score itself (scoreV2 on Base); the client sends
-    // only its signed request and the threshold.
-    easSchemaId: '0x1f3dce6501d8aad23563c0cf4f0c32264aed9311cb050056ebf72774f89ba912',
+    // The server reads the score itself, on the chain the request names; the
+    // client sends only its signed request, the threshold and the chain.
     inputType: 'server-lookup',
   },
 };

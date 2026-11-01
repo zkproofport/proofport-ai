@@ -133,7 +133,7 @@ CIRCUITS:
   - "coinbase_kyc": Proves the user passed Coinbase KYC verification, optionally binding the wallet's signature to ONE EIP-712 action (as giwa_attestation). Without action it signs the request signal hash.
   - "coinbase_country": Proves the user's country of residence is (or is not) in a given list, optionally binding the wallet's signature to ONE EIP-712 action (as coinbase_kyc). Requires country_list and is_included.
   - "oidc_domain": Proves the user authenticated via OIDC and their email belongs to a specific domain. Requires jwt and scope.
-  - "human_passport": Proves the wallet holds an unexpired Human Passport score (recorded on Base) at or above min_score, without revealing the wallet or the exact score; optionally binds ONE EIP-712 action (as coinbase_kyc). Requires min_score.
+  - "human_passport": Proves the wallet holds an unexpired Human Passport score at or above min_score, without revealing the wallet or the exact score; optionally binds ONE EIP-712 action (as coinbase_kyc). Requires min_score and chain (the chain id the person recorded the score on).
   - "giwa_attestation": GIWA attestation, optionally binding the wallet's signature to ONE EIP-712 action. Without action it signs the request signal hash. With one, the proof carries that action's hash, so a contract can check WHICH instruction was authorised -- not merely that somebody eligible signed something. Uses a GIWA-attested wallet; verified on GIWA Sepolia (chain 91342).
 
 WITH ACTION: Returns awaiting_approval with an approval URL for the HUMAN to review and sign in their wallet. Keep the request parameters unchanged, query get_action_approval, then repeat with approval_id when approved. ATTESTATION_KEY cannot authorize an action on the human's behalf. Ordinary proofs without action retain automatic signing.
@@ -175,7 +175,11 @@ RETURNS: awaiting_approval or the full ProofResult with proof bytes, public inpu
       min_score: z
         .number()
         .optional()
-        .describe('Required for human_passport: the Human Passport score threshold in points (e.g. 20; above 0, at most four decimals). The server finds the wallet\'s score on Base and refuses, before payment, a wallet with none or below it.'),
+        .describe('Required for human_passport: the Human Passport score threshold in points (e.g. 20; above 0, at most four decimals). The server finds the wallet\'s score on the chain named by `chain` and refuses, before payment, a wallet with none or below it.'),
+      chain: z
+        .number()
+        .optional()
+        .describe('Required for human_passport: the chain id the Human Passport score is recorded on -- 8453 Base, 10 OP Mainnet, 42161 Arbitrum One, 59144 Linea, 534352 Scroll, 360 Shape, 324 zkSync Era. Ask the user; there is no default.'),
       jwt: z
         .string()
         .optional()
@@ -233,6 +237,7 @@ RETURNS: awaiting_approval or the full ProofResult with proof bytes, public inpu
             countryList: params.country_list,
             isIncluded: params.is_included,
             ...(params.min_score !== undefined && { minScore: params.min_score }),
+            ...(params.chain !== undefined && { chain: params.chain }),
             ...(params.circuit === 'oidc_domain' && { jwt: params.jwt, provider: params.provider }),
             payOn: params.pay_on,
             maxPayment:params.max_payment,
@@ -336,7 +341,11 @@ RETURNS: awaiting_approval or the full ProofResult with proof bytes, public inpu
       min_score: z
         .number()
         .optional()
-        .describe('Required for human_passport: the Human Passport score threshold in points (e.g. 20; above 0, at most four decimals). The server finds the wallet\'s score on Base and refuses, before payment, a wallet with none or below it.'),
+        .describe('Required for human_passport: the Human Passport score threshold in points (e.g. 20; above 0, at most four decimals). The server finds the wallet\'s score on the chain named by `chain` and refuses, before payment, a wallet with none or below it.'),
+      chain: z
+        .number()
+        .optional()
+        .describe('Required for human_passport: the chain id the Human Passport score is recorded on -- 8453 Base, 10 OP Mainnet, 42161 Arbitrum One, 59144 Linea, 534352 Scroll, 360 Shape, 324 zkSync Era. Ask the user; there is no default.'),
       jwt: z
         .string()
         .optional()
@@ -395,7 +404,7 @@ RETURNS: awaiting_approval or the full ProofResult with proof bytes, public inpu
           : await signer.signMessage(signalHash);
 
         const inputs = circuitId === CIRCUIT_IDS.HUMAN_PASSPORT_SCORE
-          ? prepareHumanPassportInputs({ userAddress, userSignature, scope, minScore: params.min_score, ...actionHashes })
+          ? prepareHumanPassportInputs({ userAddress, userSignature, scope, minScore: params.min_score, chain: params.chain, ...actionHashes })
           : await prepareInputs(config, {
           circuitId,
           userAddress,

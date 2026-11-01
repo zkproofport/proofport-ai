@@ -632,7 +632,11 @@ export function buildSwaggerSpec(baseUrl: string, agentName = 'ZKProofport prove
                       },
                       min_score: {
                         type: 'number',
-                        description: 'human_passport only: the Human Passport score threshold in points (e.g. 20; above 0, at most four decimals). For human_passport send only signal_hash, nullifier, scope_bytes, user_address, signature, user_pubkey_x, user_pubkey_y, min_score (and optionally domain_separator + action_hash); the server finds the wallet\'s score on Base itself. See GET /api/v1/guide/human_passport.',
+                        description: 'human_passport only: the Human Passport score threshold in points (e.g. 20; above 0, at most four decimals). For human_passport send only signal_hash, nullifier, scope_bytes, user_address, signature, user_pubkey_x, user_pubkey_y, min_score, chain (and optionally domain_separator + action_hash); the server finds the wallet\'s score on that chain itself. See GET /api/v1/guide/human_passport.',
+                      },
+                      chain: {
+                        type: 'number',
+                        description: 'human_passport only, required: the chain id the Human Passport score is recorded on (8453 Base, 10 OP Mainnet, 42161 Arbitrum One, 59144 Linea, 534352 Scroll, 360 Shape, 324 zkSync Era). An unknown or missing chain is INVALID_REQUEST.',
                       },
                     },
                   },

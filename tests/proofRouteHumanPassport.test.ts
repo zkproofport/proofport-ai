@@ -26,8 +26,7 @@ vi.mock('../src/proof/paymentVerifier.js', () => ({ verifyPaymentOnChain: verify
 import { createProofRoutes } from '../src/proof/proofRoutes.js';
 import type { HumanPassportReader } from '../src/input/humanPassport.js';
 import type { Config } from '../src/config/index.js';
-import { HUMAN_PASSPORT_SCORE_SCHEMA } from '@zkproofport-app/core/circuits';
-import { buildIssuance, requestInputs, TEST_WALLET } from './helpers/humanPassportFixture.js';
+import { BASE_SCHEMA, buildIssuance, requestInputs, TEST_WALLET } from './helpers/humanPassportFixture.js';
 
 const ID = 'human_passport_score';
 const NOW_MS = 1_800_000_000_000;
@@ -39,8 +38,8 @@ function reader(b = buildIssuance(), over: { none?: boolean; down?: boolean } = 
       if (over.down) throw new Error('EAS GraphQL request failed: HTTP 503');
       return over.none ? null : { uid: '0x' + 'ab'.repeat(32), txid: '0x' + 'cd'.repeat(32) };
     }),
-    onChain: vi.fn(async (uid: string) => ({
-      uid, schema: HUMAN_PASSPORT_SCORE_SCHEMA, recipient: TEST_WALLET.address, attester: '0xCc90105D4A2aa067ee768120AdA19886021dF422',
+    onChain: vi.fn(async (_chain: unknown, uid: string) => ({
+      uid, schema: BASE_SCHEMA, recipient: TEST_WALLET.address, attester: '0xCc90105D4A2aa067ee768120AdA19886021dF422',
       revocationTime: 0n, expirationTime: 1_900_000_000n, data: b.data,
     })),
     calldata: vi.fn(async () => b.calldata),
@@ -81,7 +80,7 @@ describe('human_passport_score in the proof route', () => {
     expect(res.status).toBe(200);
     expect(res.body.proofType).toBe('human_passport_score');
     expect(calls).toEqual(['lookup', 'settle']);
-    expect(r.latest).toHaveBeenCalledWith(TEST_WALLET.address, NOW_MS / 1000);
+    expect(r.latest).toHaveBeenCalledWith(expect.objectContaining({ chainId: 8453 }), TEST_WALLET.address, NOW_MS / 1000);
     const params = prove.mock.calls[0][1] as { now: number; minScoreUnits: number; issuance: { request: { recipient: string }; score: number } };
     expect(prove.mock.calls[0][0]).toBe(ID);
     expect(params.now).toBe(NOW_MS / 1000);
@@ -116,6 +115,17 @@ describe('human_passport_score in the proof route', () => {
       .send({ circuit: 'human_passport', inputs: await requestInputs({ minScore: undefined }) });
     expect(res.status).toBe(400);
     expect(res.body.error).toBe('INVALID_REQUEST');
+    expect(r.latest).not.toHaveBeenCalled();
+    expect(settle).not.toHaveBeenCalled();
+  });
+
+  it.each([['missing', undefined], ['unknown', 1]])('refuses a %s chain before looking anything up', async (_n, chain) => {
+    const r = reader();
+    const res = await paid(request(app(baseConfig, r)).post('/api/v1/prove'))
+      .send({ circuit: 'human_passport', inputs: await requestInputs({ chain }) });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('INVALID_REQUEST');
+    expect(res.body.message).toMatch(/Known: /);
     expect(r.latest).not.toHaveBeenCalled();
     expect(settle).not.toHaveBeenCalled();
   });

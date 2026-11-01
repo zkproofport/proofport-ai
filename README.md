@@ -317,7 +317,7 @@ Proves holder owns an email address at a specific domain via OIDC JWT verificati
 Proves the wallet holds an unexpired Human Passport score at or above a threshold, without revealing the wallet or the exact score.
 
 - **Aliases:** `human_passport`, `human_passport_score`
-- **Client inputs:** the wallet's signed request (or one EIP-712 action) and `min_score` in Passport points; the server finds the wallet's score on Base and refuses, before payment, a wallet with no score, an expired one or one below the threshold
+- **Client inputs:** the wallet's signed request (or one EIP-712 action), `min_score` in Passport points and `chain`, the chain id the score is recorded on (Base, OP Mainnet, Arbitrum One, Linea, Scroll, Shape or zkSync Era); the server finds the wallet's score on that chain and refuses, before payment, a wallet with no score there, an expired one or one below the threshold
 - **Public Inputs:** signal hash / action, issuer root, scope, nullifier, threshold, scorer, time
 - **Nullifier:** Yes (wallet + circuit tag)
 

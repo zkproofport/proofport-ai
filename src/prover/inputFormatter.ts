@@ -7,7 +7,7 @@
 
 import type { CircuitParams } from '../input/inputBuilder.js';
 import { CIRCUIT_IDS, type CircuitId } from '../config/circuitIds.js';
-import { circuitActionBinding, HUMAN_PASSPORT_MAX_DATA_BYTES, HUMAN_PASSPORT_SCORER_ID } from '@zkproofport-app/core/circuits';
+import { circuitActionBinding, HUMAN_PASSPORT_MAX_DATA_BYTES, HUMAN_PASSPORT_SCORER_IDS } from '@zkproofport-app/core/circuits';
 import type { HumanPassportIssuance } from '../input/humanPassport.js';
 
 /**
@@ -417,6 +417,11 @@ export function formatHumanPassportInputs(p: HumanPassportParams): Record<string
   if (i.merkleProof.length !== i.merkleDepth || i.merkleDepth < 1 || i.merkleDepth > 8) {
     throw new Error(`issuer Merkle path has ${i.merkleProof.length} nodes for depth ${i.merkleDepth}`);
   }
+  // The issuance's own scorer (Shape's is 7922, every other chain's 335);
+  // core refuses a proof naming any scorer not in its list.
+  if (!HUMAN_PASSPORT_SCORER_IDS.includes(i.scorerId)) {
+    throw new Error(`scorer ${i.scorerId} is not one of Human Passport's (${HUMAN_PASSPORT_SCORER_IDS.join(', ')})`);
+  }
   const sig = hexStringToBytes(i.issuerSignature);
   if (sig.length !== 64) throw new Error(`issuer_signature is ${sig.length} bytes, expected 64`);
   return {
@@ -427,7 +432,7 @@ export function formatHumanPassportInputs(p: HumanPassportParams): Record<string
     scope: toHexArray(p.scopeBytes),
     nullifier: toHexArray(p.nullifierBytes),
     min_score: p.minScoreUnits.toString(),
-    scorer_id: HUMAN_PASSPORT_SCORER_ID.toString(),
+    scorer_id: i.scorerId.toString(),
     now: p.now.toString(),
     user_address: toHexArray(hexStringToBytes(p.userAddress)),
     user_signature: toHexArray(splitSignature(p.userSignature)),

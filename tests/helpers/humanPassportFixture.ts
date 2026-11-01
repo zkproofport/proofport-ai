@@ -14,7 +14,10 @@ import {
   type PassportRequest,
 } from '../../src/input/humanPassport.js';
 import { computeSignalHash, computeScope, computeWalletNullifier } from '../../src/input/inputBuilder.js';
-import { HUMAN_PASSPORT_SCORE_SCHEMA } from '@zkproofport-app/core/circuits';
+import { HUMAN_PASSPORT_CHAINS } from '@zkproofport-app/core/circuits';
+
+/** Base's scoreV2 schema (the real data below is a Base issuance). */
+export const BASE_SCHEMA = HUMAN_PASSPORT_CHAINS[8453].schema;
 
 export const REAL = JSON.parse(readFileSync(join(__dirname, '..', 'fixtures', 'humanPassportIssuances.json'), 'utf8')) as {
   issuances: { uid: string; recipient: string; txid: string; to: string; data: string; input: string }[];
@@ -36,13 +39,13 @@ export function domainSeparator(chainId: number, verifier: string): string {
 
 export const TEST_VERIFIERS = ['0x45fA2E93d79Fc44d44b697A94330031b8ccbF68e', '0x16db23c4b99bbC9A6Bf55dF7a787C9AEFD261185'];
 
-/** The production tree's shape (two Base verifiers), with the test issuer. */
+/** Two Base verifiers signed for by the test issuer; Base's chain row. */
 export function testAnchors(issuer = TEST_ISSUER.address): HumanPassportAnchors {
   const leaves = TEST_VERIFIERS.map(verifier => {
     const ds = domainSeparator(8453, verifier);
-    return { verifier, domainSeparator: ds, leaf: ethers.keccak256(ethers.concat([issuer, ds, HUMAN_PASSPORT_SCORE_SCHEMA])) };
+    return { chainId: 8453, verifier, domainSeparator: ds, leaf: ethers.keccak256(ethers.concat([issuer, ds, BASE_SCHEMA])) };
   });
-  return { issuer, leaves, root: ethers.keccak256(ethers.concat([leaves[0].leaf, leaves[1].leaf])) };
+  return { issuer, leaves, root: ethers.keccak256(ethers.concat([leaves[0].leaf, leaves[1].leaf])), chains: { 8453: HUMAN_PASSPORT_CHAINS[8453] } };
 }
 
 const iface = new ethers.Interface([
@@ -74,7 +77,7 @@ export function buildIssuance(opts: {
 } = {}): Built {
   const data = opts.data ?? REAL.issuances[0].data;
   const request: PassportRequest = {
-    schema: opts.schema ?? HUMAN_PASSPORT_SCORE_SCHEMA,
+    schema: opts.schema ?? BASE_SCHEMA,
     recipient: opts.wallet ?? TEST_WALLET.address,
     expirationTime: opts.expirationTime ?? 1_900_000_000n,
     revocable: true,
@@ -103,7 +106,7 @@ export function withDecoy(calldata: string): string {
 }
 
 /** The client fields a request for TEST_WALLET carries (personal_sign over signal_hash). */
-export async function requestInputs(opts: { wallet?: ethers.Wallet; scope?: string; minScore?: unknown } = {}) {
+export async function requestInputs(opts: { wallet?: ethers.Wallet; scope?: string; minScore?: unknown; chain?: unknown } = {}) {
   const wallet = opts.wallet ?? TEST_WALLET;
   const scope = opts.scope ?? 'human-passport-test-scope';
   const signalHash = computeSignalHash(wallet.address, scope, 'human_passport_score');
@@ -119,5 +122,6 @@ export async function requestInputs(opts: { wallet?: ethers.Wallet; scope?: stri
     user_pubkey_x: ethers.hexlify(pub.slice(1, 33)),
     user_pubkey_y: ethers.hexlify(pub.slice(33, 65)),
     min_score: 'minScore' in opts ? opts.minScore : 20,
+    chain: 'chain' in opts ? opts.chain : 8453,
   };
 }
