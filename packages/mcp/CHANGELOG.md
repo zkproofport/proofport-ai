@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.7](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.4.6...mcp-v0.4.7) (2026-11-01)
+
+
+### Features
+
+* **human-passport:** read the score on the chain the request names ([3fe1b00](https://github.com/zkproofport/proofport-ai/commit/3fe1b00b3c5ad4b36f6ed3cc83005ec4ca6df9e7))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @zkproofport-ai/sdk bumped from ^0.5.4 to ^0.5.5
+
 ## [0.4.6](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.4.5...mcp-v0.4.6) (2026-10-30)
 
 
