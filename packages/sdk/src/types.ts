@@ -252,7 +252,7 @@ export interface ProofParams {
   /**
    * Required for human_passport: the chain id the person recorded their
    * score on (8453 Base, 10 OP Mainnet, 42161 Arbitrum One, 59144 Linea,
-   * 534352 Scroll, 360 Shape, 324 zkSync Era). No default: a score lives only
+   * 534352 Scroll, 324 zkSync Era). No default: a score lives only
    * on the chain its owner chose.
    */
   chain?: number;

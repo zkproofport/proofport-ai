@@ -14,7 +14,9 @@
  *
  *   1. that chain's attestation index names the wallet's newest unrevoked,
  *      unexpired scoreV2 attestation and the transaction that created it
- *      (EAS GraphQL; Shape, which has none, through its Blockscout logs);
+ *      (EAS GraphQL; on Linea the same transaction also writes the score to
+ *      Verax, and Linea's EAS index holds every one -- circuits
+ *      human-passport-score/README.md);
  *   2. that chain's EAS contract confirms the record (Passport's attester,
  *      the chain's schema, recipient, unrevoked, unexpired, data);
  *   3. the transaction's calldata holds a verifyAndAttest call -- directly
@@ -50,12 +52,12 @@ export const HUMAN_PASSPORT_CIRCUIT_ID = 'human_passport_score';
  * BASE_RPC_URL). Keyed by chain id and exhaustive over core's
  * HUMAN_PASSPORT_CHAINS (tests/humanPassport.test.ts); an unknown id throws.
  * EAS and attester addresses: passportxyz/passport deployments/onchainInfo.json
- * (read 2026-10-31). Shape has no EAS indexer, so its Blockscout logs stand in.
+ * (read 2026-10-31).
  */
 export interface HumanPassportSource {
   eas: string;
   attester: string;
-  index: { kind: 'easscan'; url: string } | { kind: 'blockscout'; url: string };
+  index: { kind: 'easscan'; url: string };
   /** A public RPC, or 'BASE_RPC_URL' for the configured Base RPC. */
   rpc: string;
 }
@@ -66,7 +68,6 @@ export const HUMAN_PASSPORT_SOURCES: Readonly<Record<number, HumanPassportSource
   42161: { eas: '0xbD75f629A22Dc1ceD33dDA0b68c546A1c035c458', attester: '0x7848a3578Ff2E1F134659a23f64A404a4D710475', index: { kind: 'easscan', url: 'https://arbitrum.easscan.org/graphql' }, rpc: 'https://arb1.arbitrum.io/rpc' },
   59144: { eas: '0xaEF4103A04090071165F78D45D83A0C0782c2B2a', attester: '0xBC778313E52b1184A15D163b5d3a72AEF8d510A2', index: { kind: 'easscan', url: 'https://linea.easscan.org/graphql' }, rpc: 'https://rpc.linea.build' },
   534352: { eas: '0xC47300428b6AD2c7D03BB76D05A176058b47E6B0', attester: '0xCc90105D4A2aa067ee768120AdA19886021dF422', index: { kind: 'easscan', url: 'https://scroll.easscan.org/graphql' }, rpc: 'https://rpc.scroll.io' },
-  360: { eas: '0x4200000000000000000000000000000000000021', attester: '0xCc90105D4A2aa067ee768120AdA19886021dF422', index: { kind: 'blockscout', url: 'https://shapescan.xyz/api' }, rpc: 'https://mainnet.shape.network' },
   324: { eas: '0x21d8d4eE83b80bc0Cc0f2B7df3117Cf212d02901', attester: '0x2B5D97CBE50eA9bf809CbE18A2003E4Cb4D283cC', index: { kind: 'easscan', url: 'https://zksync.easscan.org/graphql' }, rpc: 'https://mainnet.era.zksync.io' },
 });
 
@@ -415,8 +416,6 @@ export interface HumanPassportReader {
 
 const EAS_ABI = ['function getAttestation(bytes32 uid) view returns ((bytes32 uid, bytes32 schema, uint64 time, uint64 expirationTime, uint64 revocationTime, bytes32 refUID, address recipient, address attester, bool revocable, bytes data))'];
 
-/** keccak256("Attested(address,address,bytes32,bytes32)"): recipient, attester and schema indexed; uid in data. */
-export const EAS_ATTESTED_TOPIC = '0x8bf46bf4cfd674fa735a3d63ec1c9ad4153f033c290341f3a588b75685141b35';
 
 const LATEST_QUERY = `query HumanPassportScore($recipient: String!, $schemaId: String!, $now: Int!) {
   attestations(
@@ -425,9 +424,6 @@ const LATEST_QUERY = `query HumanPassportScore($recipient: String!, $schemaId: S
     take: 1
   ) { id txid }
 }`;
-
-/** How many of a wallet's newest Shape issuances are read on chain looking for a live one. */
-const BLOCKSCOUT_CANDIDATES = 5;
 
 /**
  * The reader the server uses: each chain's index and RPC from
@@ -456,51 +452,22 @@ export function chainHumanPassportReader(baseRpcUrl: string, timeoutMs = 10_000)
   return {
     async latest(chain, wallet, nowSeconds) {
       const index = humanPassportSource(chain.chainId).index;
-      if (index.kind === 'easscan') {
-        const response = await fetch(index.url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            query: LATEST_QUERY,
-            // Checked 2026-10-30: easscan matches a recipient in either case.
-            variables: { recipient: ethers.getAddress(wallet), schemaId: chain.schema, now: nowSeconds },
-          }),
-          signal: AbortSignal.timeout(timeoutMs),
-        });
-        if (!response.ok) throw new Error(`EAS GraphQL (${chain.name}) request failed: HTTP ${response.status}`);
-        const body = await response.json() as { data?: { attestations?: { id: string; txid: string }[] }; errors?: { message: string }[] };
-        if (body.errors?.length) throw new Error(`EAS GraphQL (${chain.name}) error: ${body.errors[0].message}`);
-        const a = body.data?.attestations;
-        if (!Array.isArray(a)) throw new Error(`EAS GraphQL (${chain.name}) answered without an attestations list`);
-        return a.length ? { uid: a[0].id, txid: a[0].txid } : null;
-      }
-      // Blockscout: the Attested logs naming this wallet and schema, newest
-      // first; the first one the EAS contract holds unrevoked and unexpired.
-      const source = humanPassportSource(chain.chainId);
-      const url = new URL(index.url);
-      const params: Record<string, string> = {
-        module: 'logs', action: 'getLogs', fromBlock: '0', toBlock: 'latest', address: source.eas,
-        topic0: EAS_ATTESTED_TOPIC, topic1: ethers.zeroPadValue(ethers.getAddress(wallet), 32).toLowerCase(), topic3: chain.schema.toLowerCase(),
-        topic0_1_opr: 'and', topic0_3_opr: 'and', topic1_3_opr: 'and',
-      };
-      for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-      const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
-      if (!response.ok) throw new Error(`Blockscout (${chain.name}) request failed: HTTP ${response.status}`);
-      const body = await response.json() as { status?: string; message?: string; result?: unknown };
-      if (!Array.isArray(body.result)) {
-        // Blockscout answers status "0" / "No logs found" with an empty or non-array result.
-        if (body.status === '0' && /no (records|logs) found/i.test(String(body.message))) return null;
-        throw new Error(`Blockscout (${chain.name}) answered without a log list: ${String(body.message)}`);
-      }
-      const logs = (body.result as { transactionHash: string; data: string; blockNumber: string; logIndex: string }[])
-        .slice()
-        .sort((a, b) => Number(BigInt(b.blockNumber) - BigInt(a.blockNumber)) || Number(BigInt(b.logIndex || '0') - BigInt(a.logIndex || '0')));
-      for (const log of logs.slice(0, BLOCKSCOUT_CANDIDATES)) {
-        const uid = ethers.dataSlice(log.data, 0, 32);
-        const a = await onChain(chain, uid);
-        if (a.revocationTime === 0n && a.expirationTime > BigInt(nowSeconds)) return { uid, txid: log.transactionHash };
-      }
-      return null;
+      const response = await fetch(index.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: LATEST_QUERY,
+          // Checked 2026-10-30: easscan matches a recipient in either case.
+          variables: { recipient: ethers.getAddress(wallet), schemaId: chain.schema, now: nowSeconds },
+        }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!response.ok) throw new Error(`EAS GraphQL (${chain.name}) request failed: HTTP ${response.status}`);
+      const body = await response.json() as { data?: { attestations?: { id: string; txid: string }[] }; errors?: { message: string }[] };
+      if (body.errors?.length) throw new Error(`EAS GraphQL (${chain.name}) error: ${body.errors[0].message}`);
+      const a = body.data?.attestations;
+      if (!Array.isArray(a)) throw new Error(`EAS GraphQL (${chain.name}) answered without an attestations list`);
+      return a.length ? { uid: a[0].id, txid: a[0].txid } : null;
     },
     onChain,
     async calldata(chain, txHash) {

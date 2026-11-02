@@ -636,7 +636,7 @@ export function buildSwaggerSpec(baseUrl: string, agentName = 'ZKProofport prove
                       },
                       chain: {
                         type: 'number',
-                        description: 'human_passport only, required: the chain id the Human Passport score is recorded on (8453 Base, 10 OP Mainnet, 42161 Arbitrum One, 59144 Linea, 534352 Scroll, 360 Shape, 324 zkSync Era). An unknown or missing chain is INVALID_REQUEST.',
+                        description: 'human_passport only, required: the chain id the Human Passport score is recorded on (8453 Base, 10 OP Mainnet, 42161 Arbitrum One, 59144 Linea, 534352 Scroll, 324 zkSync Era). An unknown or missing chain is INVALID_REQUEST.',
                       },
                     },
                   },

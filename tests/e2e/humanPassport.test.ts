@@ -84,17 +84,17 @@ describe('human_passport_score (refusals before payment)', () => {
     expect((await res.json()).error).toBe('INVALID_REQUEST');
   });
 
-  it.each([['missing', undefined], ['unknown (Ethereum mainnet)', 1], ['a string', '8453']])('REST: a %s chain is INVALID_REQUEST naming the known chains', async (_n, chain) => {
+  it.each([['missing', undefined], ['unknown (Ethereum mainnet)', 1], ['a string', '8453'], ['Shape (360, not offered by Passport)', 360], ['named \'shape\'', 'shape'], ['named \'Shape\'', 'Shape'], ['empty', ''], ['null', null]])('REST: a %s chain is INVALID_REQUEST naming the known chains', async (_n, chain) => {
     const res = await rawRequest({ chain });
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).toBe('INVALID_REQUEST');
     const known = String(body.message).split('Known: ')[1] ?? '';
     // Every chain core lists, in whatever order the server prints them.
-    expect(known.replace(/\.$/, '').split(', ').map(Number).sort((a, b) => a - b)).toEqual([10, 324, 360, 8453, 42161, 59144, 534352]);
+    expect(known.replace(/\.$/, '').split(', ').map(Number).sort((a, b) => a - b)).toEqual([10, 324, 8453, 42161, 59144, 534352]);
   });
 
-  it.each([undefined, 1])('SDK: refuses chain %p before the wallet signs', async bad => {
+  it.each([undefined, 1, 360])('SDK: refuses chain %p before the wallet signs', async bad => {
     let signed = 0;
     const signer = fromPrivateKey(ATTESTATION_KEY!);
     const counting = { getAddress: () => signer.getAddress(), signMessage: async (m: unknown) => { signed++; return signer.signMessage(m as never); } };
@@ -103,7 +103,7 @@ describe('human_passport_score (refusals before payment)', () => {
     expect(signed).toBe(0);
   });
 
-  it.each([10, 360])('REST: an unscored wallet on chain %i is NO_HUMAN_PASSPORT_SCORE (that chain\'s index answered)', async chain => {
+  it.each([10, 59144])('REST: an unscored wallet on chain %i is NO_HUMAN_PASSPORT_SCORE (that chain\'s index answered)', async chain => {
     const res = await rawRequest({ chain });
     expect(res.status).toBe(403);
     expect((await res.json()).error).toBe('NO_HUMAN_PASSPORT_SCORE');

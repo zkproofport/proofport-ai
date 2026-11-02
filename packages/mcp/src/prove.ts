@@ -409,7 +409,7 @@ if (circuit === 'human_passport') {
     process.exit(1);
   }
   if (chainRaw === undefined || !/^\d+$/.test(chainRaw)) {
-    const msg = '--chain <chain id> is required for human_passport: the chain the score is recorded on (8453 Base, 10 OP Mainnet, 42161 Arbitrum One, 59144 Linea, 534352 Scroll, 360 Shape, 324 zkSync Era)';
+    const msg = '--chain <chain id> is required for human_passport: the chain the score is recorded on (8453 Base, 10 OP Mainnet, 42161 Arbitrum One, 59144 Linea, 534352 Scroll, 324 zkSync Era)';
     writeError(silent ? JSON.stringify({ error: msg }) : `Error: ${msg}`);
     process.exit(1);
   }

@@ -129,14 +129,29 @@ describe('every chain Human Passport records on', () => {
     refusal(() => issuanceFromCalldata({ calldata: real.input, txHash: real.txid, attestationUid: real.uid, wallet: real.recipient, attestationData: real.data, chainId: 8453 }), 'HUMAN_PASSPORT_ISSUANCE_UNREADABLE');
   });
 
-  it.each([[1], [84532], [0], ['8453'], [null], [undefined], [8453.5]])('refuses chain %p as INVALID_REQUEST naming the chains', bad => {
+  it('refuses a REAL Shape issuance: as chain 360 by name, and claimed as any listed chain as unreadable', () => {
+    const shape = (JSON.parse(readFileSync(join(__dirname, 'fixtures', 'humanPassportShapeIssuance.json'), 'utf8')) as typeof CHAIN_REAL).issuances[0];
+    expect(shape.chainId).toBe(360);
+    const args = (chainId: unknown) => ({ calldata: shape.input, txHash: shape.txid, attestationUid: shape.uid, wallet: shape.recipient, attestationData: shape.data, chainId: chainId as never });
+    refusal(() => issuanceFromCalldata(args(360)), 'INVALID_REQUEST');
+    // Same schema as Base / Arbitrum / Scroll, but signed under Shape's verifier domain: no listed leaf recovers the issuer.
+    for (const id of HUMAN_PASSPORT_CHAIN_IDS) refusal(() => issuanceFromCalldata(args(id)), 'HUMAN_PASSPORT_ISSUANCE_UNREADABLE');
+  });
+
+  it('lists exactly the six chains Passport offers, Shape (360) not among them', () => {
+    expect([...HUMAN_PASSPORT_CHAIN_IDS].sort((a, b) => a - b)).toEqual([10, 324, 8453, 42161, 59144, 534352]);
+    expect(Object.prototype.hasOwnProperty.call(HUMAN_PASSPORT_SOURCES, 360)).toBe(false);
+  });
+
+  it.each([[360], ['shape'], ['Shape'], ['SHAPE'], ['360'], [''], [' '], [1], [84532], [0], ['8453'], ['base'], ['Base'], [null], [undefined], [8453.5], [NaN], [[8453]], [{}]])('refuses chain %p as INVALID_REQUEST naming the chains', bad => {
     const real = CHAIN_REAL.issuances[0];
     try {
       issuanceFromCalldata({ calldata: real.input, txHash: real.txid, attestationUid: real.uid, wallet: real.recipient, attestationData: real.data, chainId: bad as never });
       throw new Error('accepted');
     } catch (e) {
       expect((e as StatementRefusal).code).toBe('INVALID_REQUEST');
-      expect((e as Error).message).toMatch(/8453.*324|Known/);
+      const known = /Known: ([\d, ]+)\.$/.exec((e as Error).message);
+      expect(known?.[1].split(', ').map(Number).sort((x, y) => x - y)).toEqual([10, 324, 8453, 42161, 59144, 534352]);
     }
   });
 });
@@ -198,10 +213,9 @@ describe('score data', () => {
     refusal(() => checkScoreData(scoreData(10241), 'x', HUMAN_PASSPORT_CHAINS[8453]), 'HUMAN_PASSPORT_DATA_TOO_LARGE');
     refusal(() => checkScoreData(scoreData(191), 'x', HUMAN_PASSPORT_CHAINS[8453]), 'HUMAN_PASSPORT_ISSUANCE_UNREADABLE');
   });
-  it('holds the scorer to the chain\'s: 7922 only on Shape, 335 nowhere on Shape', () => {
-    expect(checkScoreData(scoreData(256, { scorer: 7922 }), 'x', HUMAN_PASSPORT_CHAINS[360]).scorerId).toBe(7922n);
-    refusal(() => checkScoreData(scoreData(256, { scorer: 7922 }), 'x', HUMAN_PASSPORT_CHAINS[8453]), 'NO_HUMAN_PASSPORT_SCORE');
-    refusal(() => checkScoreData(scoreData(256), 'x', HUMAN_PASSPORT_CHAINS[360]), 'NO_HUMAN_PASSPORT_SCORE');
+  it.each(HUMAN_PASSPORT_CHAIN_IDS.map(id => [HUMAN_PASSPORT_CHAINS[id].name, id] as const))('refuses scorer 7922 (Shape\'s) on %s', (_n, id) => {
+    refusal(() => checkScoreData(scoreData(256, { scorer: 7922 }), 'x', HUMAN_PASSPORT_CHAINS[id]), 'NO_HUMAN_PASSPORT_SCORE');
+    expect(checkScoreData(scoreData(256), 'x', HUMAN_PASSPORT_CHAINS[id]).scorerId).toBe(335n);
   });
   it('refuses other decimals, another scorer and dirty padding', () => {
     refusal(() => checkScoreData(scoreData(256, { decimals: 2 }), 'x', HUMAN_PASSPORT_CHAINS[8453]), 'HUMAN_PASSPORT_ISSUANCE_UNREADABLE');
@@ -251,7 +265,7 @@ describe('prepareHumanPassport', () => {
     expect(reader.latest).not.toHaveBeenCalled();
   });
 
-  it.each([[undefined], [1], ['8453'], [null]])('refuses chain %p before any lookup', async bad => {
+  it.each([[undefined], [1], ['8453'], [null], [360], ['shape'], ['Shape'], ['']])('refuses chain %p before any lookup', async bad => {
     const reader = fakeReader(buildIssuance());
     await asyncRefusal(prepareHumanPassport(await requestInputs({ chain: bad }), { reader, now: NOW }), 'INVALID_REQUEST');
     expect(reader.latest).not.toHaveBeenCalled();

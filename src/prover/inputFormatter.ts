@@ -417,8 +417,7 @@ export function formatHumanPassportInputs(p: HumanPassportParams): Record<string
   if (i.merkleProof.length !== i.merkleDepth || i.merkleDepth < 1 || i.merkleDepth > 8) {
     throw new Error(`issuer Merkle path has ${i.merkleProof.length} nodes for depth ${i.merkleDepth}`);
   }
-  // The issuance's own scorer (Shape's is 7922, every other chain's 335);
-  // core refuses a proof naming any scorer not in its list.
+  // The issuance's own scorer (335 on every listed chain); core refuses a proof naming any scorer not in its list.
   if (!HUMAN_PASSPORT_SCORER_IDS.includes(i.scorerId)) {
     throw new Error(`scorer ${i.scorerId} is not one of Human Passport's (${HUMAN_PASSPORT_SCORER_IDS.join(', ')})`);
   }

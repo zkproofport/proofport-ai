@@ -5,7 +5,7 @@
  * For each chain in HUMAN_PASSPORT_SOURCES, from one real issuance transaction:
  *   1. read its calldata through the server's reader (the chain's RPC) and take
  *      the recipient from the verifyAndAttest call;
- *   2. ask the chain's index (EAS GraphQL, or Shape's Blockscout logs) for that
+ *   2. ask the chain's index (EAS GraphQL) for that
  *      wallet's newest live scoreV2 attestation, exactly as the route does;
  *   3. read that attestation on the chain's EAS contract and check attester,
  *      schema and recipient as the route does;

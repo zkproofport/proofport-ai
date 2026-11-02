@@ -179,7 +179,7 @@ RETURNS: awaiting_approval or the full ProofResult with proof bytes, public inpu
       chain: z
         .number()
         .optional()
-        .describe('Required for human_passport: the chain id the Human Passport score is recorded on -- 8453 Base, 10 OP Mainnet, 42161 Arbitrum One, 59144 Linea, 534352 Scroll, 360 Shape, 324 zkSync Era. Ask the user; there is no default.'),
+        .describe('Required for human_passport: the chain id the Human Passport score is recorded on -- 8453 Base, 10 OP Mainnet, 42161 Arbitrum One, 59144 Linea, 534352 Scroll, 324 zkSync Era. Ask the user; there is no default.'),
       jwt: z
         .string()
         .optional()
@@ -345,7 +345,7 @@ RETURNS: awaiting_approval or the full ProofResult with proof bytes, public inpu
       chain: z
         .number()
         .optional()
-        .describe('Required for human_passport: the chain id the Human Passport score is recorded on -- 8453 Base, 10 OP Mainnet, 42161 Arbitrum One, 59144 Linea, 534352 Scroll, 360 Shape, 324 zkSync Era. Ask the user; there is no default.'),
+        .describe('Required for human_passport: the chain id the Human Passport score is recorded on -- 8453 Base, 10 OP Mainnet, 42161 Arbitrum One, 59144 Linea, 534352 Scroll, 324 zkSync Era. Ask the user; there is no default.'),
       jwt: z
         .string()
         .optional()
