@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.8](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.4.7...mcp-v0.4.8) (2026-11-02)
+
+
+### Features
+
+* **human-passport:** accept scores from the six chains Passport offers ([d049875](https://github.com/zkproofport/proofport-ai/commit/d0498758e2b0655eddd03eb308c4cb765dd12888))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @zkproofport-ai/sdk bumped from ^0.5.5 to ^0.5.6
+
 ## [0.4.7](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.4.6...mcp-v0.4.7) (2026-11-01)
 
 
