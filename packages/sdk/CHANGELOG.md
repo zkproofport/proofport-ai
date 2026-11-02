@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.6](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.5.5...sdk-v0.5.6) (2026-11-02)
+
+
+### Features
+
+* **human-passport:** accept scores from the six chains Passport offers ([d049875](https://github.com/zkproofport/proofport-ai/commit/d0498758e2b0655eddd03eb308c4cb765dd12888))
+
 ## [0.5.5](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.5.4...sdk-v0.5.5) (2026-11-01)
 
 
