@@ -101,8 +101,8 @@ export const FALLBACK_VERIFIERS: Record<string, Record<CircuitId, string | null>
     [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: '0xb07e18566Db63bb0b4cb72896699E94Faa078fcd',
     // Deployed on GIWA Sepolia (91342) and nowhere else.
     [CIRCUIT_IDS.GIWA_ATTESTATION]: null,
-    // Not deployed on Ethereum mainnet yet; production verifies on Base.
-    [CIRCUIT_IDS.HUMAN_PASSPORT_SCORE]: null,
+    // circuits deployments/1/HumanPassportScore.json.
+    [CIRCUIT_IDS.HUMAN_PASSPORT_SCORE]: '0xbb8a7e058F86680dDCfe0Df00E8F729EBCf27605',
   },
   '8453': {
     // coinbase_attestation v2 (circuits deployments/8453/CoinbaseAttestationV2.json).
