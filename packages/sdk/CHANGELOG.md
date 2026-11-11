@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.7](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.5.6...sdk-v0.5.7) (2026-11-11)
+
+
+### Bug Fixes
+
+* **oidc:** let the plain Google login accept a personal Gmail account ([bd6d91c](https://github.com/zkproofport/proofport-ai/commit/bd6d91c81468b9e9eefd5505ab05974d85afc158))
+
 ## [0.5.6](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.5.5...sdk-v0.5.6) (2026-11-02)
 
 

@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.6.7](https://github.com/zkproofport/proofport-ai/compare/server-v0.6.6...server-v0.6.7) (2026-11-11)
+
+
+### Bug Fixes
+
+* **mcp:** wait for the device code's own expiry ([27f0ba5](https://github.com/zkproofport/proofport-ai/commit/27f0ba575a8b241151bd413cb1243e0de0256ddd))
+* **oidc:** let the plain Google login accept a personal Gmail account ([bd6d91c](https://github.com/zkproofport/proofport-ai/commit/bd6d91c81468b9e9eefd5505ab05974d85afc158))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @zkproofport-ai/mcp bumped from ^0.4.8 to ^0.4.9
+    * @zkproofport-ai/sdk bumped from ^0.5.6 to ^0.5.7
+
 ## [0.6.6](https://github.com/zkproofport/proofport-ai/compare/server-v0.6.5...server-v0.6.6) (2026-11-02)
 
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.9](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.4.8...mcp-v0.4.9) (2026-11-11)
+
+
+### Bug Fixes
+
+* **mcp:** wait for the device code's own expiry ([27f0ba5](https://github.com/zkproofport/proofport-ai/commit/27f0ba575a8b241151bd413cb1243e0de0256ddd))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @zkproofport-ai/sdk bumped from ^0.5.6 to ^0.5.7
+
 ## [0.4.8](https://github.com/zkproofport/proofport-ai/compare/mcp-v0.4.7...mcp-v0.4.8) (2026-11-02)
 
 
