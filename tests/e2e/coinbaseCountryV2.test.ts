@@ -144,7 +144,12 @@ describe('coinbase_country_attestation v2 (server statement)', () => {
     const client = new Client({ name: 'country-v2-e2e', version: '1.0.0' }, { capabilities: {} });
     try {
       await client.connect(transport);
-      const args = { circuit: 'coinbase_country', scope, country_list: COUNTRY_LIST, is_included: true, ...(plan && { pay_with: 'key', pay_on: plan.payOn }) };
+      // Name the wallet whenever one is handed over, charged or not: .env.test
+      // also carries a CDP credential, and with two configured the MCP refuses
+      // to guess (as it should). Until 2026-11-11 this named it only when the
+      // server charged, so every free local run failed here.
+      const args = { circuit: 'coinbase_country', scope, country_list: COUNTRY_LIST, is_included: true,
+        ...(PAYER_KEY && { pay_with: 'key' }), ...(plan && { pay_on: plan.payOn }) };
       const before = Math.floor(Date.now() / 1000);
       const call = async (bound: boolean): Promise<ProofResult> => {
         const result = await callToolWithSimulatedApproval(client, config, fromPrivateKey(ATTESTATION_KEY!), 'generate_proof',
