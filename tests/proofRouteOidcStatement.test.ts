@@ -140,6 +140,26 @@ describe('oidc_domain_attestation provider-key statement in the proof route', ()
     expect(BigInt(ethers.hexlify(Uint8Array.from(built.statement_sig.slice(32)))) <= BigInt('0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551') >> 1n).toBe(true);
   });
 
+  // OpenStoa's sign-in accepts only proofType google_login. From 2026-10-27 to
+  // 2026-11-11 a plain login was labelled (and checked) as a Workspace proof.
+  it.each([
+    ['a plain Gmail login (no provider named)', { jwt: signJwt({ email: 'carol@gmail.com', hd: undefined }), provider: undefined }, 200, 'google_login'],
+    ['a Workspace account with no provider named', { provider: undefined }, 200, 'google_login'],
+    ['a Workspace proof', {}, 200, 'google_workspace'],
+  ] as const)('responds with the proof type of %s', async (_label, extra, status, proofType) => {
+    const res = await paid(request(paidApp(deps())).post('/api/v1/prove')).send({ circuit: 'oidc_domain', inputs: oidcInputs(extra) });
+    expect(res.status).toBe(status);
+    expect(res.body.proofType).toBe(proofType);
+  });
+
+  it('refuses a Gmail account a Workspace proof before settling', async () => {
+    const res = await paid(request(paidApp(deps())).post('/api/v1/prove'))
+      .send({ circuit: 'oidc_domain', inputs: oidcInputs({ jwt: signJwt({ email: 'carol@gmail.com', hd: undefined }) }) });
+    expect(res.status).not.toBe(200);
+    expect(JSON.stringify(res.body)).toMatch(/missing hd claim/);
+    expect(settle).not.toHaveBeenCalled();
+  });
+
   it('overwrites a caller-sent providerKeyStatement', async () => {
     const forged = { now: '1', modulus: '0x' + 'ff'.repeat(256), signature: '0x' + '01'.repeat(64) };
     const res = await request(app(baseConfig, deps())).post('/api/v1/prove').set('X-Payment-Nonce', 'n')

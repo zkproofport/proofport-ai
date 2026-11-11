@@ -28,6 +28,7 @@ import {
   type ServerStatement,
   type StatementSigner,
 } from '../input/coinbaseStatement.js';
+import { oidcProofType } from '../prover/oidcProver.js';
 import {
   prepareOidcProviderKeyStatement,
   type OidcProviderKeyStatement,
@@ -211,7 +212,7 @@ export function chooseVerificationTarget(
     : null;
 }
 
-function proofTypeForCircuit(circuitId: CircuitId, provider?: string): string {
+function proofTypeForCircuit(circuitId: CircuitId, inputs?: unknown): string {
   const types: Record<CircuitId, string> = {
     [CIRCUIT_IDS.COINBASE_ATTESTATION]: 'kyc',
     [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: 'country',
@@ -221,10 +222,8 @@ function proofTypeForCircuit(circuitId: CircuitId, provider?: string): string {
   };
   const type = types[circuitId];
   if (!type) throw new Error(`Unknown proof type for circuit ${circuitId}`);
-  if (circuitId === CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION && provider) {
-    const providers: Record<string, string> = { google: 'google_workspace', microsoft: 'microsoft_365' };
-    if (!providers[provider]) throw new Error(`Unknown OIDC provider ${provider}`);
-    return providers[provider];
+  if (circuitId === CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION) {
+    return oidcProofType((inputs ?? {}) as { jwt?: unknown; provider?: unknown });
   }
   return type;
 }
@@ -409,7 +408,7 @@ async function generateProofFromInputs(
     }
   }
 
-  const proofType = proofTypeForCircuit(ctx.circuitId, (ctx.inputs as { provider?: string }).provider);
+  const proofType = proofTypeForCircuit(ctx.circuitId, ctx.inputs);
 
   // Build response
   const response: ProveResponse = {

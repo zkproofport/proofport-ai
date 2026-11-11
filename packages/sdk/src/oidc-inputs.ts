@@ -161,7 +161,7 @@ export function checkDeviceFlowToken(
     throw new Error(
       `JWT aud ${JSON.stringify(payload.aud)} is not the ZKProofport ${provider} device-flow client ` +
       `(${deviceClientId}). Sign in with the @zkproofport-ai/mcp device login (zkproofport-prove ` +
-      '--login-google-workspace or --login-microsoft-365); id_tokens issued to other clients cannot be proved here.',
+      '--login-google, --login-google-workspace or --login-microsoft-365); id_tokens issued to other clients cannot be proved here.',
     );
   }
 
@@ -184,6 +184,7 @@ export function checkDeviceFlowToken(
   if (now >= (exp as number)) {
     throw new Error(`JWT expired at ${exp} (now ${now}). Sign in again for a fresh id_token.`);
   }
+  if (provider === 'google') checkGoogleAccount(payload, named === 'google');
   return { provider, aud: deviceClientId, now: BigInt(now) };
 }
 
@@ -352,6 +353,34 @@ function keccak256Bytes(data: Uint8Array): Uint8Array {
   return ethers.getBytes(ethers.keccak256(data));
 }
 
+/** Addresses Google itself issues, so a verified one is Google's word on the domain. */
+const GOOGLE_CONSUMER_DOMAINS = new Set(['gmail.com', 'googlemail.com']);
+
+/**
+ * The account rules for a Google token, the same as the server's
+ * (src/prover/oidcProver.ts `checkGoogleAccount`): a Workspace proof
+ * (provider 'google' named) needs `hd`; a plain login (none named) takes any
+ * Google account, but without `hd` only a Google-owned address, because the
+ * proof carries the email's domain and on chain looks like a Workspace proof.
+ */
+export function checkGoogleAccount(claims: { email_verified?: unknown; hd?: unknown; email?: unknown }, workspace: boolean): void {
+  if (claims.email_verified !== true) {
+    throw new Error('JWT email_verified is not true');
+  }
+  if (claims.hd) return;
+  if (workspace) {
+    throw new Error('Google JWT missing hd claim (not a Google Workspace account)');
+  }
+  const email = typeof claims.email === 'string' ? claims.email : '';
+  const domain = email.slice(email.lastIndexOf('@') + 1).toLowerCase();
+  if (!GOOGLE_CONSUMER_DOMAINS.has(domain)) {
+    throw new Error(
+      `A Google account without a Workspace (no hd claim) can sign in only with a Google address ` +
+      `(${[...GOOGLE_CONSUMER_DOMAINS].join(', ')}); ${JSON.stringify(domain)} would be proven without its owner's word.`,
+    );
+  }
+}
+
 // ─── Main export ────────────────────────────────────────────────────────
 
 /**
@@ -393,12 +422,7 @@ export async function prepareOidcInputs(params: PrepareOidcParams): Promise<Oidc
       throw new Error('Microsoft JWT missing tid claim (not an organizational account)');
     }
   } else {
-    if (payload.email_verified !== true) {
-      throw new Error('JWT email_verified is not true');
-    }
-    if (!payload.hd) {
-      throw new Error('Google JWT missing hd claim (not a Google Workspace account)');
-    }
+    checkGoogleAccount(payload, params.provider === 'google');
   }
 
   const email = payload.email as string;
@@ -490,7 +514,8 @@ export interface OidcProvePayload {
   jwt: string;
   jwks: { keys: { kid: string; kty: string; n: string; e: string; [key: string]: unknown }[] };
   scope: string;
-  provider: OidcProviderName;
+  /** Absent for a plain Google login; 'google' / 'microsoft' for an affiliation proof. */
+  provider?: OidcProviderName;
 }
 
 /**
@@ -509,7 +534,11 @@ export async function prepareOidcPayload(params: PrepareOidcParams): Promise<Oid
     jwt: params.jwt,
     jwks,
     scope: params.scope,
-    provider: token.provider,
+    // The provider the CALLER named, not the issuer: naming none is a plain
+    // Google login (proofType google_login), naming 'google' a Workspace
+    // proof. Sending the issuer here turned every plain login into a
+    // Workspace one from 2026-10-27 to 2026-11-11.
+    ...(params.provider !== undefined && { provider: params.provider }),
   };
 }
 

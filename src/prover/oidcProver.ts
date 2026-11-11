@@ -104,6 +104,62 @@ export interface OidcProviderKeyStatement {
   signature: string;
 }
 
+/** Addresses Google itself issues, so a verified one is Google's word on the domain. */
+const GOOGLE_CONSUMER_DOMAINS = new Set(['gmail.com', 'googlemail.com']);
+
+/**
+ * The account rules for a Google token. Two different requests reach here:
+ *
+ * - a Workspace proof (the caller named `provider: 'google'`,
+ *   `--login-google-workspace`): the account must belong to a Workspace,
+ *   so `hd` is required;
+ * - a plain Google login (no provider named, `--login-google`, OpenStoa's
+ *   sign-in): any Google account, Gmail included.
+ *
+ * A plain login still produces a proof whose public inputs carry the email's
+ * domain, and on chain it is indistinguishable from a Workspace proof
+ * (provider 0 either way). So without `hd` the domain must be one Google owns:
+ * otherwise a personal Google account registered with alice@company.com would
+ * prove "company.com" with no word from company.com.
+ *
+ * Until 2026-11-11 the plain login met the Workspace rule: a862521
+ * (2026-10-27) started reading the provider off `iss` and folded the
+ * no-provider branch into the Google one, so every Gmail sign-in was refused.
+ */
+export function checkGoogleAccount(claims: { email_verified?: unknown; hd?: unknown; email?: unknown }, workspace: boolean): void {
+  if (claims.email_verified !== true) {
+    throw new Error('JWT email_verified is not true');
+  }
+  if (claims.hd) return;
+  if (workspace) {
+    throw new Error('Google JWT missing hd claim (not a Google Workspace account)');
+  }
+  const email = typeof claims.email === 'string' ? claims.email : '';
+  const domain = email.slice(email.lastIndexOf('@') + 1).toLowerCase();
+  if (!GOOGLE_CONSUMER_DOMAINS.has(domain)) {
+    throw new Error(
+      `A Google account without a Workspace (no hd claim) can sign in only with a Google address ` +
+      `(${[...GOOGLE_CONSUMER_DOMAINS].join(', ')}); ${JSON.stringify(domain)} would be proven without its owner's word.`,
+    );
+  }
+}
+
+/**
+ * What an oidc_domain_attestation proof is, for the response's `proofType`:
+ * a Microsoft 365 proof for a Microsoft token, a Workspace proof when the
+ * caller named 'google', and otherwise a plain Google login (OpenStoa reads
+ * `google_login`). Decided from the caller's request and the issuer, never
+ * from one alone: an unnamed Microsoft token is still Microsoft.
+ */
+export function oidcProofType(payload: { jwt?: unknown; provider?: unknown }): 'google_login' | 'google_workspace' | 'microsoft_365' {
+  const part = typeof payload.jwt === 'string' ? payload.jwt.split('.')[1] : undefined;
+  if (!part) throw new Error('oidc_domain_attestation inputs carry no JWT to name the proof type from');
+  const claims = JSON.parse(new TextDecoder().decode(base64urlToBytes(part)));
+  const issuer = resolveOidcProvider(claims.iss, payload.provider);
+  if (issuer === 'microsoft') return 'microsoft_365';
+  return payload.provider === 'google' ? 'google_workspace' : 'google_login';
+}
+
 /**
  * The provider a token is from, read off its `iss`. A `provider` the caller
  * names must agree; an issuer no provider claims is an error.
@@ -407,12 +463,7 @@ function buildUnsignedOidcInputs(
       throw new Error('Microsoft JWT missing tid claim (not an organizational account)');
     }
   } else {
-    if (jwtPayload.email_verified !== true) {
-      throw new Error('JWT email_verified is not true');
-    }
-    if (!jwtPayload.hd) {
-      throw new Error('Google JWT missing hd claim (not a Google Workspace account)');
-    }
+    checkGoogleAccount(jwtPayload, payload.provider === 'google');
   }
 
   const email = jwtPayload.email as string;

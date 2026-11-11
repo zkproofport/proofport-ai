@@ -28,6 +28,7 @@ import {
   OIDC_PROVIDERS,
   OIDC_MAX_PARTIAL_DATA_LENGTH,
   OIDC_IAT_CLOCK_SKEW_SECONDS,
+  oidcProofType,
 } from '../src/prover/oidcProver.js';
 import { formatOidcInputs, type OidcCircuitInputs } from '../src/prover/inputFormatter.js';
 import type { OidcProvePayload } from '../src/prover/oidcProver.js';
@@ -311,10 +312,12 @@ describe('client SDK', () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
-  it('sends the provider the issuer names when none was given', async () => {
+  it('sends only the provider the caller named: none named stays none (a plain login)', async () => {
     serveJwks();
-    const payload = await prepareOidcPayload({ jwt: signJwt(microsoft()), scope: 's', jwksUrl: 'https://keys' });
-    expect(payload.provider).toBe('microsoft');
+    const unnamed = await prepareOidcPayload({ jwt: signJwt(microsoft()), scope: 's', jwksUrl: 'https://keys' });
+    expect(unnamed).not.toHaveProperty('provider');
+    const named = await prepareOidcPayload({ jwt: signJwt(google()), scope: 's', jwksUrl: 'https://keys', provider: 'google' });
+    expect(named.provider).toBe('google');
   });
 
   it.each([
@@ -371,3 +374,85 @@ function compress(H: Uint32Array, block: Buffer, K: number[]) {
   }
   H[0] += a; H[1] += b; H[2] += c; H[3] += d; H[4] += e; H[5] += f; H[6] += g; H[7] += h;
 }
+
+/**
+ * A plain Google login (no provider named: `--login-google`, OpenStoa's
+ * sign-in) against a Workspace proof (provider 'google' named). From
+ * 2026-10-27 to 2026-11-11 the plain login met the Workspace rule, so every
+ * Gmail sign-in was refused and nothing here tested a token without hd.
+ */
+describe('plain Google login and Workspace proof', () => {
+  const serveJwks = () => {
+    global.fetch = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ keys: [jwk] }) })) as never;
+  };
+  const gmail = (extra: Record<string, unknown> = {}) => {
+    const { hd: _hd, ...rest } = google({ email: 'carol@gmail.com', ...extra });
+    return rest;
+  };
+
+  it('server: a Gmail account signs in when no provider is named', () => {
+    const out = serverBuild(signJwt(gmail()));
+    expect(out.provider).toBe(0);
+  });
+
+  it.each(['carol@googlemail.com', 'Carol@GMAIL.COM'])('server: %s is a Google address too', (email) => {
+    expect(() => serverBuild(signJwt(gmail({ email })))).not.toThrow();
+  });
+
+  it('server: the same Gmail account is refused a Workspace proof', () => {
+    expect(() => serverBuild(signJwt(gmail()), 'google')).toThrow(/missing hd claim/);
+  });
+
+  it.each([
+    ['a company address on a personal Google account', 'alice@company.com'],
+    ['a look-alike domain', 'alice@gmail.com.evil.io'],
+    ['a subdomain of gmail', 'alice@mail.gmail.com'],
+    ['no domain at all', 'alice@'],
+  ])('server: without hd, %s is refused even for a plain login', (_label, email) => {
+    expect(() => serverBuild(signJwt(gmail({ email })))).toThrow(/without its owner's word/);
+  });
+
+  it.each([
+    ['false', false], ['the string "true"', 'true'], ['missing', undefined],
+  ])('server: email_verified %s is refused for a plain login', (_label, value) => {
+    expect(() => serverBuild(signJwt(gmail({ email_verified: value })))).toThrow(/email_verified/);
+  });
+
+  it('server: a Workspace account still signs in with no provider named', () => {
+    expect(() => serverBuild(signJwt(google()))).not.toThrow();
+  });
+
+  it('SDK: checkDeviceFlowToken applies the same rule before anything is fetched', () => {
+    expect(() => checkDeviceFlowToken(signJwt(gmail()), undefined, CLOCK)).not.toThrow();
+    expect(() => checkDeviceFlowToken(signJwt(gmail()), 'google', CLOCK)).toThrow(/missing hd claim/);
+    expect(() => checkDeviceFlowToken(signJwt(gmail({ email: 'alice@company.com' })), undefined, CLOCK)).toThrow(/without its owner's word/);
+  });
+
+  it('SDK: a refused plain login fetches no keys', async () => {
+    serveJwks();
+    await expect(prepareOidcPayload({ jwt: signJwt(gmail({ email: 'alice@company.com' })), scope: 's', jwksUrl: 'https://keys' }))
+      .rejects.toThrow(/without its owner's word/);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('SDK and server build the same inputs for a Gmail login', async () => {
+    serveJwks();
+    const jwt = signJwt(gmail());
+    expect(await prepareOidcInputs({ jwt, scope: 'x', jwksUrl: 'https://keys' })).toEqual(withoutSigner(serverBuild(jwt, undefined, 'x')));
+  });
+
+  it.each([
+    ['a plain Google login', () => signJwt(gmail()), undefined, 'google_login'],
+    ['a Workspace account with no provider named', () => signJwt(google()), undefined, 'google_login'],
+    ['a Workspace proof', () => signJwt(google()), 'google', 'google_workspace'],
+    ['a Microsoft token, named', () => signJwt(microsoft()), 'microsoft', 'microsoft_365'],
+    ['a Microsoft token, not named', () => signJwt(microsoft()), undefined, 'microsoft_365'],
+  ] as const)('proofType of %s', (_label, jwt, provider, expected) => {
+    expect(oidcProofType({ jwt: jwt(), ...(provider && { provider }) })).toBe(expected);
+  });
+
+  it('proofType refuses a provider that disagrees with the issuer, and inputs with no token', () => {
+    expect(() => oidcProofType({ jwt: signJwt(microsoft()), provider: 'google' })).toThrow(/was given, but/);
+    expect(() => oidcProofType({})).toThrow(/no JWT/);
+  });
+});
