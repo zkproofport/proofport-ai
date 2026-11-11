@@ -12,15 +12,16 @@ AI_DIR="$(dirname "$SCRIPT_DIR")"
 # script inherited it and built the image under emulation, where `npm ci` alone
 # ran for twenty minutes. Measured 2026-09-22.
 #
-# The shared library selects Colima's aarch64 default VM for the length of this
+# The shared library selects Colima's default VM for the length of this
 # process only, exactly as the root dev scripts do, and never touches the
-# user's global context. Non-Colima setups (Desktop, plain Linux, remote) are
+# user's global context. The image carries a bb built for its own
+# architecture (see the Dockerfile), so the arm64 default VM proves natively. Non-Colima setups (Desktop, plain Linux, remote) are
 # left alone.
 REPO_ROOT="$(cd "$AI_DIR/.." && pwd)"
 if [ -f "$REPO_ROOT/scripts/lib/dev-docker.sh" ]; then
   # shellcheck source=/dev/null
   source "$REPO_ROOT/scripts/lib/dev-docker.sh"
-  dev_docker_init x86_64 || exit 1
+  dev_docker_init || exit 1
   docker() { command docker "${DEV_DOCKER_ARGS[@]}" "$@"; }
 fi
 
@@ -63,6 +64,13 @@ if [ "$WITH_PAYMENT" = "1" ]; then
   fi
   COMPOSE_FILES+=(-f docker-compose.e2e-payment.yml)
   echo "[*] Payment ON — \$0.01, chains: base-sepolia, ethereum-sepolia"
+else
+  # .env.development sets PAYMENT_MODE=testnet, so "off" has to be said here.
+  # Until 2026-11-11 it was not: the stack started with testnet payment and the
+  # file's placeholder wallet, and the startup check that the settling wallet
+  # is the payee refused to start the server at all.
+  COMPOSE_FILES+=(-f docker-compose.e2e-free.yml)
+  echo "[*] Payment OFF (run with --payment to switch it on)"
 fi
 
 echo "=========================================="

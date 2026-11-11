@@ -1,21 +1,36 @@
-# Stage 1: bb, the official Barretenberg release asset for linux/amd64.
+# Stage 1: bb, the official Barretenberg release asset for the image's OWN
+# architecture -- amd64 for Cloud Run, arm64 on an Apple-silicon dev VM.
 # BB_VERSION must equal BB_VERSION in circuits/toolchain.env: the proof format
-# belongs to the bb that wrote the circuit artifacts. (The 2025 nightly came
-# from the aztecprotocol/aztec image because its GitHub release was deleted;
-# 4.2.0-aztecnr-rc.2 is a published release asset.) bb + its x86_64 runtime
-# deps go to /opt/{bb,x86-libs} so Stage 3 can copy them verbatim.
-FROM --platform=linux/amd64 ubuntu:24.04 AS bb-extractor
+# belongs to the bb that wrote the circuit artifacts.
+#
+# This stage used to be pinned to linux/amd64. The 2025 nightly it held had no
+# arm64 Linux build, and an x86 bb run under the arm64 VM's emulation computes
+# wrong field arithmetic and aborts on every call -- so local proving needed an
+# x86_64 VM and a ~20-minute emulated build. 4.2.0-aztecnr-rc.2 publishes both
+# barretenberg-amd64-linux and barretenberg-arm64-linux, so each image now
+# carries a native bb.
+#
+# BuildKit sets TARGETARCH; the classic builder (docker without buildx, as on
+# a plain Colima install) leaves it empty, and there the stage runs on the
+# daemon's own machine, so `uname -m` names the target. An architecture with
+# no release asset stops the build.
+FROM ubuntu:24.04 AS bb-extractor
 ARG BB_VERSION=4.2.0-aztecnr-rc.2
+ARG TARGETARCH
 
 RUN set -e; \
+    machine="${TARGETARCH:-$(uname -m)}"; \
+    case "$machine" in \
+      amd64|x86_64) asset=amd64 ;; \
+      arm64|aarch64) asset=arm64 ;; \
+      *) echo "No bb release asset for architecture '$machine'. Known: amd64/x86_64, arm64/aarch64" >&2; exit 1 ;; \
+    esac; \
     apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*; \
-    mkdir -p /opt/bb /opt/x86-libs; \
-    curl -fsSL "https://github.com/AztecProtocol/aztec-packages/releases/download/v${BB_VERSION}/barretenberg-amd64-linux.tar.gz" | tar -xz -C /opt/bb; \
+    mkdir -p /opt/bb; \
+    curl -fsSL "https://github.com/AztecProtocol/aztec-packages/releases/download/v${BB_VERSION}/barretenberg-${asset}-linux.tar.gz" | tar -xz -C /opt/bb; \
     chmod +x /opt/bb/bb; \
     got="$(/opt/bb/bb --version)"; \
-    [ "$got" = "$BB_VERSION" ] || { echo "bb reports '$got', expected $BB_VERSION" >&2; exit 1; }; \
-    ldd /opt/bb/bb | awk '/=>/{print $3}' | grep -v '^$' | xargs -I{} cp -L {} /opt/x86-libs/; \
-    cp /lib64/ld-linux-x86-64.so.2 /opt/x86-libs/
+    [ "$got" = "$BB_VERSION" ] || { echo "bb reports '$got', expected $BB_VERSION" >&2; exit 1; }
 
 # Stage 2: TypeScript Build (native arch)
 FROM node:20-slim AS builder
@@ -45,18 +60,13 @@ RUN apt-get update && \
     apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/*
 
-# Copy bb binary and x86 libs from Stage 1
+# bb from Stage 1, same architecture as this stage, so it runs directly.
+# /usr/local/bin/bb-wrapper is the path BB_PATH names here, in docker-compose
+# and in both deploy workflows; it once chose an x86 loader on arm64 and is now
+# a plain link. Running it here fails the build if this stage lacks a library
+# bb needs, instead of failing the first proof request.
 COPY --from=bb-extractor /opt/bb/bb /opt/bb/bb
-COPY --from=bb-extractor /opt/x86-libs /opt/x86-libs
-
-# Create bb wrapper script for cross-architecture execution
-RUN echo '#!/bin/bash\n\
-if [ "$(uname -m)" = "aarch64" ]; then\n\
-  /opt/x86-libs/ld-linux-x86-64.so.2 --library-path /opt/x86-libs /opt/bb/bb "$@"\n\
-else\n\
-  /opt/bb/bb "$@"\n\
-fi' > /usr/local/bin/bb-wrapper && \
-    chmod +x /usr/local/bin/bb-wrapper
+RUN ln -s /opt/bb/bb /usr/local/bin/bb-wrapper && /usr/local/bin/bb-wrapper --version
 
 WORKDIR /app
 

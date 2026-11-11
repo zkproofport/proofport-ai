@@ -11,10 +11,9 @@ set -euo pipefail
 # (~/.bb/bb, arm64, the same build that produced the committed verification
 # keys). That is the accurate prover and it needs no image.
 #
-# --container runs it in the image instead, which must be on an x86_64 daemon --
-# scripts/lib/dev-docker.sh selects one. The image's bb is a Linux x86 binary;
-# on an arm64 daemon it runs through a loader that gets the field arithmetic
-# wrong and aborts on every call, including --version.
+# --container runs it in the image instead, on the same default Docker VM as
+# the rest of the stack. The image carries the official bb release built for
+# its own architecture, so it proves natively on arm64 and on amd64.
 #
 # Locally only the free phase runs. Paying is exercised against staging, where
 # the wallets, the settler key and the facilitator are the ones customers meet;
@@ -28,7 +27,7 @@ set -euo pipefail
 #
 # Usage:
 #   ./scripts/run-e2e.sh                     # server on this Mac, native bb, free phase
-#   ./scripts/run-e2e.sh --container         # in the container instead (x86_64 daemon)
+#   ./scripts/run-e2e.sh --container         # in the container instead
 #   ./scripts/run-e2e.sh --build             # rebuild the image first
 #   ./scripts/run-e2e.sh --with-payment      # also pay locally (spends testnet USDC)
 #   ./scripts/run-e2e.sh --only sdk-client   # one suite (substring of the file name)
@@ -97,13 +96,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 if [ "$REMOTE" = false ] && [ -f "$REPO_ROOT/scripts/lib/dev-docker.sh" ]; then
   # shellcheck source=/dev/null
   source "$REPO_ROOT/scripts/lib/dev-docker.sh"
-  # Only the containerized prover needs an x86_64 daemon. The native path uses
-  # Docker for Redis alone, which runs anywhere.
-  if [ "$CONTAINER" = true ]; then
-    dev_docker_init x86_64 || exit 1
-  else
-    dev_docker_init || exit 1
-  fi
+  dev_docker_init || exit 1
   docker() { command docker "${DEV_DOCKER_ARGS[@]}" "$@"; }
 fi
 
@@ -180,10 +173,11 @@ wait_for_mode() {
   done
 }
 
-# The prover is an x86-64 binary. Ask it its version before running a suite
-# that expects proofs: under the arm64 VM's user-mode emulation it does not
-# refuse to start, it aborts mid-arithmetic, and every proof test then fails
-# with a bb assertion that reads like a broken circuit.
+# Ask the prover its version before running a suite that expects proofs. A bb
+# built for another architecture does not refuse to start under emulation; it
+# aborts mid-arithmetic, and every proof test then fails with a bb assertion
+# that reads like a broken circuit. The image now carries a native bb, so this
+# catches a regression in the Dockerfile rather than a choice of VM.
 check_prover() {
   local out
   if out=$(docker exec proofport-ai /usr/local/bin/bb-wrapper --version 2>&1); then
@@ -192,8 +186,8 @@ check_prover() {
   fi
   err "The prover cannot run in this container — every proof test below would fail:"
   echo "$out" | sed 's/^/        /'
-  echo "        This is the Docker target's architecture, not the circuits."
-  echo "        Run the stack on an x86_64 daemon (scripts/ai-dev.sh selects one)."
+  echo "        This is the image's bb, not the circuits: check that the Dockerfile"
+  echo "        fetched the bb release asset for this daemon's architecture."
   return 1
 }
 
