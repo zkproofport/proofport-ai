@@ -33,6 +33,9 @@
 
 import type { PaymentWallet } from './types.js';
 
+/** Packages `@coinbase/cdp-sdk/x402` imports that a customer installs alongside it. */
+export const CDP_ADAPTER_PEERS = ['@x402/extensions', '@x402/svm'] as const;
+
 /**
  * Pay from a raw private key.
  *
@@ -78,11 +81,13 @@ export async function walletFromCdp(opts: {
     // The original message is included rather than replaced: this fired once
     // saying "install @coinbase/cdp-sdk" when cdp-sdk WAS installed and the
     // missing package was its own peer, `@x402/extensions`. A message that
-    // names the wrong cause costs more time than no message.
+    // names the wrong cause costs more time than no message. The adapter also
+    // loads `@x402/svm`; until 2026-11-11 this message and the peer list left
+    // it out, so a customer who installed exactly what they said still failed.
     throw new Error(
-      `Could not load the CDP wallet support. Both @coinbase/cdp-sdk (>=1.55, for its ` +
-      `x402 adapter) and its peer @x402/extensions must be installed. ` +
-      `Underlying error: ${(e as Error).message}`,
+      `Could not load the CDP wallet support. Install @coinbase/cdp-sdk (>=1.55, for its ` +
+      `x402 adapter) together with the x402 packages that adapter loads: ` +
+      `${CDP_ADAPTER_PEERS.join(', ')}. Underlying error: ${(e as Error).message}`,
     );
   }
   const cdp = new CdpClient({

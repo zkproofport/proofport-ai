@@ -34,3 +34,23 @@ describe('published E2E includes all optional wallet adapters', () => {
     expect(() => publishedWalletDependencies(invalid, sdk)).toThrow('exact tested');
   });
 });
+
+describe('the SDK declares every package the CDP adapter loads', () => {
+  // A customer installs what the SDK's peer list and its error message name.
+  // Until 2026-11-11 both left out @x402/svm, which @coinbase/cdp-sdk/x402
+  // imports, so the CDP wallet failed on a clean install; inside this
+  // repository another package had already installed it and nothing noticed.
+  const cdpPeers = Object.keys(lock.packages['node_modules/@coinbase/cdp-sdk'].peerDependencies);
+  const provided = { ...sdk.dependencies, ...sdk.peerDependencies };
+
+  it.each(cdpPeers)('%s is a dependency or an optional peer of the SDK', name => {
+    expect(provided, name).toHaveProperty([name]);
+    if (!(name in sdk.dependencies)) expect(sdk.peerDependenciesMeta[name]?.optional, name).toBe(true);
+  });
+
+  it('the CDP load error names every peer the SDK leaves to the customer', async () => {
+    const { CDP_ADAPTER_PEERS } = await import('../packages/sdk/src/wallets.js');
+    const leftToCustomer = cdpPeers.filter(name => !(name in sdk.dependencies));
+    expect([...CDP_ADAPTER_PEERS].sort()).toEqual(leftToCustomer.sort());
+  });
+});

@@ -56,13 +56,17 @@
   },
   "peerDependencies": {
     "@coinbase/cdp-sdk": ">=1.55.0",
-    "@x402/extensions": ">=2.25.0"
+    "@x402/extensions": ">=2.25.0",
+    "@x402/svm": ">=2.25.0"
   },
   "peerDependenciesMeta": {
     "@coinbase/cdp-sdk": {
       "optional": true
     },
     "@x402/extensions": {
+      "optional": true
+    },
+    "@x402/svm": {
       "optional": true
     }
   }
