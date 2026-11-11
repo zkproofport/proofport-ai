@@ -42,6 +42,19 @@ const GOOGLE_CLIENT_SECRET = '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';
 const MICROSOFT_CLIENT_ID = '8b09c842-d7a8-4d9c-a6ea-46c797412bac';
 const MICROSOFT_TENANT = 'organizations'; // allows any org account
 
+/**
+ * When the provider stops honouring this device code. RFC 8628 makes
+ * `expires_in` required; Google issues codes for 30 minutes. Until 2026-11-11
+ * the CLI stopped waiting after a fixed 5 minutes while the code was still
+ * valid, so a person who took six minutes to sign in got a timeout.
+ */
+function codeExpiry(expiresIn: unknown): number {
+  if (typeof expiresIn !== 'number' || !Number.isFinite(expiresIn) || expiresIn <= 0) {
+    throw new Error(`Device code response has no usable expires_in (got ${JSON.stringify(expiresIn)})`);
+  }
+  return Date.now() + expiresIn * 1000;
+}
+
 interface DeviceFlowResult {
   idToken: string;
 }
@@ -75,7 +88,7 @@ async function googleDeviceFlow(): Promise<DeviceFlowResult> {
   writeError('  Waiting for authorization...');
 
   // 2. Poll for token
-  const deadline = Date.now() + 5 * 60 * 1000; // 5 minute timeout
+  const deadline = codeExpiry(codeData.expires_in);
   let interval = (codeData.interval || 5) * 1000;
 
   while (Date.now() < deadline) {
@@ -115,7 +128,7 @@ async function googleDeviceFlow(): Promise<DeviceFlowResult> {
     throw new Error(`Google token polling failed: ${JSON.stringify(tokenData)}`);
   }
 
-  throw new Error('Device code flow timed out after 5 minutes');
+  throw new Error('Device code expired before the sign-in finished. Please try again.');
 }
 
 async function microsoftDeviceFlow(): Promise<DeviceFlowResult> {
@@ -151,7 +164,7 @@ async function microsoftDeviceFlow(): Promise<DeviceFlowResult> {
   writeError('  Waiting for authorization...');
 
   // 2. Poll for token
-  const deadline = Date.now() + 5 * 60 * 1000;
+  const deadline = codeExpiry(codeData.expires_in);
   let interval = (codeData.interval || 5) * 1000;
 
   while (Date.now() < deadline) {
@@ -192,7 +205,7 @@ async function microsoftDeviceFlow(): Promise<DeviceFlowResult> {
     throw new Error(`Microsoft token polling failed: ${JSON.stringify(tokenData)}`);
   }
 
-  throw new Error('Device code flow timed out after 5 minutes');
+  throw new Error('Device code expired before the sign-in finished. Please try again.');
 }
 
 // ─── Parse CLI arguments (before validation, so --silent works early) ──
