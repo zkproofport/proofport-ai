@@ -128,6 +128,14 @@ export function loadConfig() {
     virtualsWalletPk: process.env.VIRTUALS_WALLET_PK || '',
     virtualsEntityId: process.env.VIRTUALS_ENTITY_ID ? parseInt(process.env.VIRTUALS_ENTITY_ID, 10) : 0,
     virtualsAgentWallet: process.env.VIRTUALS_AGENT_WALLET || '',
+
+    // Optional Ed25519 HTTP delivery receipts (Payment-Receipt / X-Paxiom-Receipt)
+    ...(process.env.PAXIOM_PRIVATE_KEY_PEM?.trim()
+      ? { paxiomPrivateKeyPem: process.env.PAXIOM_PRIVATE_KEY_PEM.replace(/\\n/g, '\n').trim() }
+      : ({} as { paxiomPrivateKeyPem?: string })),
+    ...(process.env.PAXIOM_KEY_ID?.trim()
+      ? { paxiomKeyId: process.env.PAXIOM_KEY_ID.trim() }
+      : ({} as { paxiomKeyId?: string })),
   };
   return config;
 }

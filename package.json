@@ -42,6 +42,7 @@
     "@opentelemetry/sdk-trace-base": "^2.5.1",
     "@opentelemetry/sdk-trace-node": "^2.5.1",
     "@opentelemetry/semantic-conventions": "^1.39.0",
+    "@paxiom/receipts": "^0.2.0",
     "@virtuals-protocol/acp-node": "^0.3.0-beta.38",
     "@x402/core": "^2.25.0",
     "@x402/evm": "^2.25.0",
