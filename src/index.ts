@@ -3,9 +3,11 @@ import express from 'express';
 import { createLogger } from './logger.js';
 
 const log = createLogger('Server');
+import { createPublicKey } from 'node:crypto';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { createReceiptMiddleware } from '@paxiom/receipts/middleware';
 
 const require = createRequire(import.meta.url);
 const { version } = require('../package.json');
@@ -196,6 +198,34 @@ function createApp(config: Config) {
   app.get('/.well-known/agent-registration.json', getAgentRegistrationHandler(config, tokenIdRef));
   app.get('/.well-known/did.json', getDidHandler(config));
 
+  const paxiomPrivateKey = config.paxiomPrivateKeyPem?.trim() || '';
+  const paxiomKeyId = config.paxiomKeyId?.trim() || 'proofport-01';
+  if (paxiomPrivateKey) {
+    const jwk = createPublicKey(paxiomPrivateKey).export({ format: 'jwk' }) as {
+      kty?: string;
+      crv?: string;
+      x?: string;
+    };
+    if (jwk.kty !== 'OKP' || jwk.crv !== 'Ed25519' || !jwk.x) {
+      throw new Error('PAXIOM_PRIVATE_KEY_PEM must be an Ed25519 PKCS#8 private key');
+    }
+    const paxiomPublicKey = Buffer.from(jwk.x, 'base64url').toString('base64');
+    app.get('/.well-known/x402-keys.json', (_req, res) => {
+      res.json({
+        version: 'x402-keys.v1',
+        issuer: config.a2aBaseUrl,
+        ...(config.paymentPayTo ? { payTo: config.paymentPayTo } : {}),
+        keys: [
+          {
+            keyId: paxiomKeyId,
+            algorithm: 'ed25519',
+            publicKey: paxiomPublicKey,
+          },
+        ],
+      });
+    });
+  }
+
   // LLM providers (created early — needed by both A2A text inference and chat endpoint)
   const llmProviders: LLMProvider[] = [];
   if (config.openaiApiKey) {
@@ -236,6 +266,40 @@ function createApp(config: Config) {
   const humanPassport = config.baseRpcUrl
     ? { reader: chainHumanPassportReader(config.baseRpcUrl) }
     : undefined;
+  if (paxiomPrivateKey) {
+    const issuerName = discoveryName(config);
+    app.use(
+      '/api/v1',
+      createReceiptMiddleware({
+        privateKey: paxiomPrivateKey,
+        baseUrl: config.a2aBaseUrl,
+        issuer: {
+          name: issuerName,
+          uri: config.a2aBaseUrl,
+          keyId: paxiomKeyId,
+          ...(config.paymentPayTo ? { payTo: config.paymentPayTo } : {}),
+        },
+        serviceName: issuerName,
+        paymentDefaults: config.paymentPayTo ? { payTo: config.paymentPayTo } : {},
+        resolvePayment: ({ req, txHash }) => {
+          if (txHash) return {};
+          const directTx = typeof req?.headers?.['x-payment-tx'] === 'string'
+            ? req.headers['x-payment-tx'].trim()
+            : '';
+          if (/^0x[0-9a-fA-F]{64}$/.test(directTx)) {
+            return {
+              settlement: {
+                status: 'claimed_not_checked',
+                transactionHash: directTx.toLowerCase(),
+                checkedByVerifier: false,
+              },
+            };
+          }
+          return {};
+        },
+      }),
+    );
+  }
   app.use('/api/v1', createProofRoutes({ redis, config, teeProvider, statement, humanPassport }));
 
   // MCP StreamableHTTP endpoint (stateless mode)
