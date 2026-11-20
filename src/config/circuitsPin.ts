@@ -22,23 +22,24 @@
  * moves by design, while a commit can be checked offline at boot against the
  * image's stamp. A release tag is recorded in the comment below for people.
  *
- * Current value: circuits `toolchain-upgrade` at ddf11f0 -- the Noir 1.0.0 /
+ * Current value: circuits `toolchain-upgrade` at 2181748 -- the Noir 1.0.0 /
  * bb 6.0.0 rebuild with the OPRF nullifier circuits (33be413), the zkTLS size
- * tiers (0c8bd51) and an ignore-file change on top. The monorepo's `circuits`
- * gitlink names the same commit. Toolchain: that commit's `toolchain.env`
- * (nargo 1.0.0 / bb 6.0.0); the image's bb is read from the stamp, and boot
- * refuses a mismatch. Its broadcast records still hold the bb 4.2 verifiers:
- * the bb 6 verifiers are not deployed yet, so on-chain verification against
- * this pin waits for that redeploy. Previous pin: 9651df8 (circuits `main`,
- * nargo 1.0.0-beta.19 / bb 4.2.0-aztecnr-rc.2).
+ * tiers (0c8bd51), the request-auth circuit's artifacts (9c877ee) and the
+ * bb 6.0.0 verifier records on Base Sepolia, Ethereum Sepolia and GIWA
+ * Sepolia (5a1f906). The monorepo's `circuits` gitlink names the same commit.
+ * Toolchain: that commit's `toolchain.env` (nargo 1.0.0 / bb 6.0.0); the
+ * image's bb is read from the stamp, and boot refuses a mismatch. Its mainnet
+ * broadcast records still hold the bb 4.2 verifiers. Previous pins: ddf11f0
+ * (same artifacts, no bb 6 records), 9651df8 (circuits `main`, nargo
+ * 1.0.0-beta.19 / bb 4.2.0-aztecnr-rc.2).
  *
  * RELEASING NEW CIRCUITS (e.g. the Noir 1.0.0 / bb 6.0.0 set): set this to
  * the commit the new circuits release tag points at
  * (`git -C circuits rev-list -n1 <tag>`), name the tag here, and move the
  * monorepo's `circuits` gitlink to the same commit in the same parent commit.
- * Release tag: none yet for ddf11f0.
+ * Release tag: none yet for 2181748.
  */
-export const CIRCUITS_COMMIT = 'ddf11f03d6f0af70e42cea35b93f53f9c614ea85';
+export const CIRCUITS_COMMIT = '2181748bfb7216552ffdd9109486f7ebfbce2cb6';
 
 export const CIRCUITS_REPOSITORY = 'zkproofport/circuits';
 
