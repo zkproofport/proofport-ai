@@ -31,7 +31,7 @@ import { CIRCUITS } from '../config/circuits.js';
 import { CIRCUIT_IDS } from '../config/circuitIds.js';
 import { COINBASE_ATTESTER_CONTRACT } from '../config/contracts.js';
 import { fetchAttestationFromEAS } from './attestationFetcher.js';
-import { computeWalletNullifier } from './inputBuilder.js';
+import { OPRF_FIELD_MODULUS } from './oprfInputs.js';
 import { signStatement, StatementRefusal, type StatementSigner } from './statementSigner.js';
 
 // The signer, its DER handling and the refusal type are shared with the OIDC
@@ -54,7 +54,7 @@ const MAGIC = new TextEncoder().encode('ZKProofport/AA/1');
 export const CLIENT_DATA_LEN = 225;
 /** coinbase_country_attestation v2's: KYC's layout plus the 2-byte country (coinbase-country-v2-libs). */
 export const COUNTRY_CLIENT_DATA_LEN = 227;
-/** keccak256(<canonical circuit id>): the statement kind and nullifier tag, never the package name. */
+/** keccak256(<canonical circuit id>): the statement kind, never the package name. (It left the nullifier with the OPRF change.) */
 export const circuitTag = (circuitId: StatementCircuitId): Uint8Array =>
   ethers.getBytes(ethers.keccak256(ethers.toUtf8Bytes(statementSpec(circuitId).id)));
 /** keccak256("coinbase_attestation"). */
@@ -326,20 +326,23 @@ export async function confirmUnrevoked(
 /**
  * Everything the server kind adds to a Coinbase v2 witness (KYC or Country).
  *
- * Refuses (before anything is charged) a nullifier that does not follow v2's
- * wallet + circuit-tag rule -- an SDK still on v1's signal-hash rule would
- * otherwise pay and then fail inside the circuit with "Nullifier mismatch" --
- * and, for Country, a transaction whose country is not the one the unrevoked
- * attestation names (the circuit refuses that too: "clientData names another
- * country").
+ * The statement binds the OPRF scope FIELD (keccak256(scope name) mod p, as
+ * the SDK sent it and readOprfInputs checked it) as 32 bytes big-endian --
+ * the circuit compares `scope.to_be_bytes::<32>()` with clientData, so the
+ * unreduced keccak would be refused for most names. The nullifier is not
+ * checked here: it is the OPRF nullifier, which the circuit verifies.
+ *
+ * Refuses (before anything is charged), for Country, a transaction whose
+ * country is not the one the unrevoked attestation names (the circuit refuses
+ * that too: "clientData names another country").
  */
 export async function prepareServerStatement(
   input: {
     circuitId: StatementCircuitId;
     userAddress: string;
     signalHash: Uint8Array;
-    scopeBytes: Uint8Array;
-    nullifierBytes: Uint8Array;
+    /** The OPRF scope field, 0x + 64 hex, below p. */
+    scopeField: string;
     domainSeparator?: string;
     actionHash?: string;
     /** coinbase_country_attestation only: the request's attestCountry transaction. */
@@ -350,16 +353,10 @@ export async function prepareServerStatement(
 ): Promise<ServerStatement> {
   const spec = statementSpec(input.circuitId);
   const wallet = ethers.getAddress(input.userAddress);
-  if (input.scopeBytes.length !== 32) throw new StatementRefusal('INVALID_REQUEST', 'scope_bytes must be 32 bytes');
-  const expected = computeWalletNullifier(wallet, spec.id, input.scopeBytes);
-  if (ethers.hexlify(expected) !== ethers.hexlify(input.nullifierBytes)) {
-    throw new StatementRefusal(
-      'NULLIFIER_RULE',
-      `${spec.id} v2 derives the nullifier from the wallet and the circuit tag: ` +
-      `keccak256(keccak256(address ++ keccak256("${spec.id}")) ++ scope). The request carries ` +
-      'a different one (an SDK built for v1 derives it from signal_hash); update the SDK.',
-    );
+  if (typeof input.scopeField !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(input.scopeField) || BigInt(input.scopeField) >= OPRF_FIELD_MODULUS) {
+    throw new StatementRefusal('INVALID_REQUEST', 'scope must be the OPRF scope field: 0x + 64 hex, below p.');
   }
+  const scopeBytes = ethers.getBytes(input.scopeField);
   // The transaction's country first: a malformed request is refused without
   // touching the index, the chain or the key.
   let txCountry: string | undefined;
@@ -388,7 +385,7 @@ export async function prepareServerStatement(
     timestamp: nowSeconds,
     attestationUid: found.uid,
     requestDigest: requestDigest(input.signalHash, input.domainSeparator, input.actionHash),
-    scope: input.scopeBytes,
+    scope: scopeBytes,
     ...(country !== undefined && { country }),
   });
   const signature = await signStatement(deps.signer, clientData);

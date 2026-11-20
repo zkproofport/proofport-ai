@@ -33,6 +33,7 @@ import { formatAttestationInputs, formatOidcInputs, type AttestationCircuitId } 
 import type { OidcCircuitInputs } from '../prover/inputFormatter.js';
 import type { CircuitParams } from '../input/inputBuilder.js';
 import { CIRCUIT_IDS } from '../config/circuitIds.js';
+import { enclaveOprfInputs } from './enclaveOprf.js';
 import type { CircuitId } from '../config/circuitIds.js';
 
 const execFileAsync = promisify(execFile);
@@ -269,8 +270,9 @@ function normalizeToCircuitParams(circuitId: string, inputs: Record<string, any>
     const converted: Record<string, any> = {
       signalHash: hexToBytes(inputs.signal_hash),
       merkleRoot: inputs.merkle_root,
-      scopeBytes: hexToBytes(inputs.scope_bytes),
-      nullifierBytes: hexToBytes(inputs.nullifier),
+      // The OPRF nullifier inputs: shape, modulus and the key hash pinned for
+      // this enclave's OPRF_ENVIRONMENT (the host cannot read this payload).
+      oprf: enclaveOprfInputs(process.env.OPRF_ENVIRONMENT, circuitId, inputs),
       userAddress: inputs.user_address,
       userSignature: inputs.signature,
       userPubkeyX: inputs.user_pubkey_x,

@@ -11,6 +11,8 @@ import {
   extractDomainFromPublicInputs,
   extractNullifierFromPublicInputs,
   extractScopeFromPublicInputs,
+  extractOprfDomainFromPublicInputs,
+  extractOprfKeyHashFromPublicInputs,
 } from '../packages/sdk/src/extract.js';
 import { CIRCUIT_IDS } from '../packages/sdk/src/circuits.js';
 
@@ -52,27 +54,26 @@ function buildPublicInputsHex(opts: {
 }
 
 /**
- * Build a coinbase_attestation v2 publicInputs hex string: 193 fields,
- * GIWA's six inputs then attested_at -- scope 128..159, nullifier 160..191.
- * `fieldCount` shortens it (v1 proofs had 128 fields).
+ * A wallet circuit's publicInputs since the OPRF nullifier: `count` fields,
+ * oprf_key_hash, domain, scope, nullifier as ONE field each from `start`
+ * (coinbase_attestation v2: 133 fields, 128..131).
  */
 function buildCoinbasePublicInputsHex(opts: {
-  scopeBytes?: number[];
-  nullifierBytes?: number[];
+  keyHash?: bigint; domain?: bigint; scope?: bigint; nullifier?: bigint;
   /** Bytes to place at indices 18.. — where OIDC keeps its domain storage. */
   bytesAtOidcDomainSlot?: string;
   /** Value to place at index 82 — where OIDC keeps its domain length. */
   oidcDomainLenSlot?: number;
   fieldCount?: number;
-}): string {
-  const fields: string[] = new Array(opts.fieldCount ?? 193).fill('00'.repeat(32));
-
-  for (let i = 0; i < (opts.scopeBytes?.length ?? 0); i++) {
-    fields[128 + i] = field(opts.scopeBytes![i]);
-  }
-  for (let i = 0; i < (opts.nullifierBytes?.length ?? 0); i++) {
-    fields[160 + i] = field(opts.nullifierBytes![i]);
-  }
+  start?: number;
+} = {}): string {
+  const fields: string[] = new Array(opts.fieldCount ?? 133).fill('00'.repeat(32));
+  const start = opts.start ?? 128;
+  const put = (i: number, v: bigint | undefined) => { if (v !== undefined && i < fields.length) fields[i] = v.toString(16).padStart(64, '0'); };
+  put(start, opts.keyHash);
+  put(start + 1, opts.domain);
+  put(start + 2, opts.scope);
+  put(start + 3, opts.nullifier);
   if (opts.bytesAtOidcDomainSlot) {
     for (let i = 0; i < opts.bytesAtOidcDomainSlot.length; i++) {
       fields[18 + i] = field(opts.bytesAtOidcDomainSlot.charCodeAt(i));
@@ -81,9 +82,12 @@ function buildCoinbasePublicInputsHex(opts: {
   if (opts.oidcDomainLenSlot !== undefined) {
     fields[82] = field(opts.oidcDomainLenSlot);
   }
-
   return '0x' + fields.join('');
 }
+
+const P = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
+const h64 = (v: bigint) => '0x' + v.toString(16).padStart(64, '0');
+const ONE_EACH = { keyHash: 0x0aan, domain: 0x0bbn, scope: 0x0ccn, nullifier: P - 1n };
 
 describe('extractDomainFromPublicInputs', () => {
   it('extracts domain from valid 148-field publicInputs', () => {
@@ -197,63 +201,53 @@ describe('extractNullifierFromPublicInputs', () => {
     expect(result).toBe('0x' + 'ab'.repeat(32));
   });
 
-  it('reads the coinbase range for a coinbase proof', () => {
-    const nullifierBytes = Array.from({ length: 32 }, () => 0xcd);
-    const hex = buildCoinbasePublicInputsHex({ nullifierBytes });
-    expect(extractNullifierFromPublicInputs(hex, KYC)).toBe('0x' + 'cd'.repeat(32));
-  });
 });
 
-describe('extractScopeFromPublicInputs', () => {
-  it('reads the coinbase scope range', () => {
-    const scopeBytes = Array.from({ length: 32 }, () => 0x11);
-    const hex = buildCoinbasePublicInputsHex({ scopeBytes });
-    expect(extractScopeFromPublicInputs(hex, KYC)).toBe('0x' + '11'.repeat(32));
+describe('wallet circuits: one field each for oprf_key_hash, domain, scope, nullifier', () => {
+  it.each([
+    ['coinbase_attestation', 133, 128],
+    ['coinbase_country_attestation', 155, 150],
+    ['giwa_attestation', 132, 128],
+    ['human_passport_score', 135, 128],
+  ] as const)('%s: %i fields, OPRF values from %i', (circuit, count, start) => {
+    const hex = buildCoinbasePublicInputsHex({ ...ONE_EACH, fieldCount: count, start });
+    expect(extractScopeFromPublicInputs(hex, circuit)).toBe(h64(0x0ccn));
+    expect(extractNullifierFromPublicInputs(hex, circuit)).toBe(h64(P - 1n));
+    expect(extractOprfDomainFromPublicInputs(hex, circuit)).toBe(h64(0x0bbn));
+    expect(extractOprfKeyHashFromPublicInputs(hex, circuit)).toBe(h64(0x0aan));
   });
 
-  it('reads the oidc scope range', () => {
+  it.each([
+    ['coinbase_attestation', 193], ['coinbase_attestation', 132], ['coinbase_attestation', 134],
+    ['coinbase_country_attestation', 215], ['giwa_attestation', 192], ['human_passport_score', 195],
+  ] as const)('%s: a %i-field vector (superseded layout or off by one) reads as unknown', (circuit, count) => {
+    const hex = buildCoinbasePublicInputsHex({ ...ONE_EACH, fieldCount: count });
+    expect(extractScopeFromPublicInputs(hex, circuit)).toBeNull();
+    expect(extractNullifierFromPublicInputs(hex, circuit)).toBeNull();
+    expect(extractOprfDomainFromPublicInputs(hex, circuit)).toBeNull();
+    expect(extractOprfKeyHashFromPublicInputs(hex, circuit)).toBeNull();
+  });
+
+  it('a value at or above p is not a field and reads as unknown, never reduced', () => {
+    expect(extractNullifierFromPublicInputs(buildCoinbasePublicInputsHex({ ...ONE_EACH, nullifier: P }), KYC)).toBeNull();
+    expect(extractScopeFromPublicInputs(buildCoinbasePublicInputsHex({ ...ONE_EACH, scope: 2n ** 256n - 1n }), KYC)).toBeNull();
+  });
+
+  it('non-hex inside the vector reads as unknown', () => {
+    const hex = buildCoinbasePublicInputsHex(ONE_EACH).replace(/0{64}$/, 'zz'.repeat(32));
+    expect(extractNullifierFromPublicInputs(hex, KYC)).toBeNull();
+  });
+
+  it('OIDC still reads its 32-byte scope at 83-114', () => {
     const fields: string[] = new Array(148).fill('00'.repeat(32));
     for (let i = 83; i <= 114; i++) fields[i] = field(0x22);
-    const hex = '0x' + fields.join('');
-    expect(extractScopeFromPublicInputs(hex, OIDC)).toBe('0x' + '22'.repeat(32));
+    expect(extractScopeFromPublicInputs('0x' + fields.join(''), OIDC)).toBe('0x' + '22'.repeat(32));
   });
 
-  it('returns null when the vector is too short for the circuit layout', () => {
-    // 128 fields was a complete coinbase_attestation v1 proof; v2's scope and
-    // nullifier sit at 128..191, so a v1-length vector must not be read as v2.
-    const v1Length = buildCoinbasePublicInputsHex({ fieldCount: 128 });
-    expect(extractScopeFromPublicInputs(v1Length, KYC)).toBeNull();
-    expect(extractNullifierFromPublicInputs(v1Length, KYC)).toBeNull();
-    // A full v2 vector reads.
-    expect(extractScopeFromPublicInputs(buildCoinbasePublicInputsHex({}), KYC)).not.toBeNull();
-  });
-});
-
-/**
- * coinbase_country_attestation v2: 215 fields -- signal_hash 0-31,
- * domain_separator 32-63, action_hash 64-95, signer root 96-127, country list
- * 128-147, list length 148, is_included 149, scope 150-181, nullifier 182-213,
- * attested_at 214 (circuits coinbase-country-attestation-v2).
- */
-describe('coinbase_country_attestation v2 layout', () => {
-  function countryHex(count = 215) {
-    const fields: string[] = new Array(count).fill('00'.repeat(32));
-    for (let i = 96; i <= 127 && i < count; i++) fields[i] = field(0x96); // signer root
-    for (let i = 128; i <= 149 && i < count; i++) fields[i] = field(0x4b); // country fields
-    for (let i = 150; i <= 181 && i < count; i++) fields[i] = field(0x5c);
-    for (let i = 182; i <= 213 && i < count; i++) fields[i] = field(0x7a);
-    return '0x' + fields.join('');
-  }
-  it('reads scope at 150-181 and the nullifier at 182-213', () => {
-    expect(extractScopeFromPublicInputs(countryHex(), COUNTRY)).toBe('0x' + '5c'.repeat(32));
-    expect(extractNullifierFromPublicInputs(countryHex(), COUNTRY)).toBe('0x' + '7a'.repeat(32));
-  });
-  it("does not read a v1-length (150-field) vector at v2's offsets", () => {
-    expect(extractScopeFromPublicInputs(countryHex(150), COUNTRY)).toBeNull();
-    expect(extractNullifierFromPublicInputs(countryHex(150), COUNTRY)).toBeNull();
-  });
-  it('reads a vector one field short of the nullifier end as unknown', () => {
-    expect(extractNullifierFromPublicInputs(countryHex(213), COUNTRY)).toBeNull();
+  it('OIDC carries no OPRF domain or key hash', () => {
+    const hex = buildPublicInputsHex({ domain: 'example.com' });
+    expect(extractOprfDomainFromPublicInputs(hex, OIDC)).toBeNull();
+    expect(extractOprfKeyHashFromPublicInputs(hex, OIDC)).toBeNull();
   });
 });
 
@@ -274,8 +268,7 @@ describe('no circuit is inferred from field count (regression: detectCircuit rem
     // The old code did `LAYOUTS[ct] || LAYOUTS.coinbase_attestation`, so a
     // canonical-but-unprovable id silently read coinbase's byte ranges and
     // returned a plausible 32-byte value.
-    const nullifierBytes = Array.from({ length: 32 }, () => 0xcd);
-    const hex = buildCoinbasePublicInputsHex({ nullifierBytes });
+    const hex = buildCoinbasePublicInputsHex(ONE_EACH);
     const unprovable = CIRCUIT_IDS.DOJANG_PLAYGROUND as unknown as typeof KYC;
 
     expect(extractNullifierFromPublicInputs(hex, unprovable)).toBeNull();
@@ -286,17 +279,13 @@ describe('no circuit is inferred from field count (regression: detectCircuit rem
   it('answers "I don\'t know" when a JavaScript caller omits the circuit', () => {
     // TypeScript callers get a compile error. Untyped callers used to get a
     // guess; they now get null.
-    const hex = buildCoinbasePublicInputsHex({
-      nullifierBytes: Array.from({ length: 32 }, () => 0xcd),
-    });
+    const hex = buildCoinbasePublicInputsHex(ONE_EACH);
     const loose = extractNullifierFromPublicInputs as unknown as (pi: string) => string | null;
     expect(loose(hex)).toBeNull();
   });
 
   it('rejects a hyphenated route name rather than treating it as a circuit', () => {
-    const hex = buildCoinbasePublicInputsHex({
-      nullifierBytes: Array.from({ length: 32 }, () => 0xcd),
-    });
+    const hex = buildCoinbasePublicInputsHex(ONE_EACH);
     const notAnId = 'coinbase-kyc' as unknown as typeof KYC;
     expect(extractNullifierFromPublicInputs(hex, notAnId)).toBeNull();
   });

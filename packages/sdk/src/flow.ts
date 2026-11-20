@@ -9,7 +9,9 @@ import type {
 import { CIRCUIT_NAME_MAP } from './types.js';
 import { requestChallenge } from './session.js';
 import { signPayment } from './payment.js';
-import { prepareInputs, prepareHumanPassportInputs, computeSignalHash } from './inputs.js';
+import { prepareInputs, prepareHumanPassportInputs, requestSignalHash } from './inputs.js';
+import { resolveRequestId } from './signalHash.js';
+import { prepareOprf, requireOprfScope, resolveOprfDomain } from './oprf/index.js';
 import { prepareOidcPayload } from './oidc-inputs.js';
 import type { OidcProvePayload } from './oidc-inputs.js';
 import { submitProof, submitEncryptedProof } from './prove.js';
@@ -67,7 +69,12 @@ export async function generateProof(
     throw new Error(`Unknown circuit '${String(circuit)}'. Known: ${Object.keys(CIRCUIT_NAME_MAP).join(', ')}.`);
   }
   const circuitId: CircuitId = CIRCUIT_NAME_MAP[circuit];
-  const scope = params.scope || 'proofport';
+  // No default scope: the caller names it (wallet circuits: the OPRF name
+  // rules, checked below; OIDC: its own rules in prepareOidcPayload).
+  if (params.scope === undefined) {
+    throw new Error('scope is required: name what the proof is for within the service. Nothing is filled in.');
+  }
+  const scope = params.scope;
   const isOidc = CIRCUITS[circuitId]?.inputType === 'oidc';
   if (params.actionApproval && !action) {
     throw new ActionApprovalError('ACTION_APPROVAL_INVALID', 'Resuming an action approval requires its original action.');
@@ -125,6 +132,16 @@ export async function generateProof(
   }
 
   const actionHashes = action ? hashTypedAction(action) : undefined;
+  // The request this proof answers: the relying party's id, or a fresh one.
+  // Validated before anything is signed or paid.
+  const requestId = isOidc ? undefined : resolveRequestId(params.requestId);
+  // The OPRF nullifier's names: checked before anything is signed or paid.
+  // oprfDomain has no default -- each service is its own nullifier namespace.
+  if (isOidc && params.oprfDomain !== undefined) {
+    throw new Error(`oprfDomain applies to wallet circuits; '${circuitId}' has no OPRF nullifier.`);
+  }
+  const oprfDomain = isOidc ? undefined : resolveOprfDomain(params.oprfDomain);
+  if (!isOidc) requireOprfScope(scope);
 
   if (!isOidc) {
     const credentialSigner = signers.attestation;
@@ -133,20 +150,23 @@ export async function generateProof(
     }
     // Step 1: Sign.
     //
-    // `signal_hash` is computed either way, because the nullifier derives from
-    // it and must stay one value per wallet per scope no matter how many
-    // actions that wallet authorizes.
-    //
-    // Without an action the wallet signs `signal_hash` through personal_sign,
-    // which shows the person a hex string. With one it signs the typed
-    // structure, which the wallet renders as named fields, and the verifying
-    // contract can recompute.
+    // Without an action the wallet signs `signal_hash` = keccak256(scope ++
+    // circuitId ++ requestId) through personal_sign. No wallet address is in
+    // it: it is public, and the nullifier no longer derives from it. With an
+    // action it is all zeros and the wallet signs the typed structure, which
+    // it renders as named fields and the verifying contract can recompute.
     let t = Date.now();
     const approved = action
       ? await resolveActionApproval(config, { circuit, scope, action }, params.actionApproval)
       : undefined;
     const attestationAddress = approved ? approved.address : await credentialSigner!.getAddress();
-    const signalHash = computeSignalHash(attestationAddress, scope, circuitId);
+    // Step 0: the OPRF nullifier for this wallet in (oprfDomain, scope). Before
+    // the wallet signs, so a service or network that cannot answer (production
+    // has no OPRF network yet) costs no signature and no payment.
+    const tOprf = Date.now();
+    const oprf = await prepareOprf(config, { circuitId, address: attestationAddress, oprfDomain, scope });
+    recordStep(0, 'OPRF Nullifier', { environment: oprf.environment, nullifier: oprf.inputs.nullifier }, tOprf);
+    const signalHash = requestSignalHash(circuitId, scope, requestId, Boolean(action));
     const signalHashHex = ethers.hexlify(signalHash);
 
     let signature: string;
@@ -182,6 +202,8 @@ export async function generateProof(
           chain: params.chain,
           domainSeparator,
           actionHash,
+          requestId,
+          oprf,
         })
       : await prepareInputs(config, {
       circuitId,
@@ -192,6 +214,8 @@ export async function generateProof(
       isIncluded: params.isIncluded,
       domainSeparator,
       actionHash,
+      requestId,
+      oprf,
     });
     if (domainSeparator && actionHash) {
       easInputs = { ...easInputs, domain_separator: domainSeparator, action_hash: actionHash };
@@ -288,5 +312,7 @@ export async function generateProof(
     attestation: proveResponse.attestation,
     timing: proveResponse.timing,
     verification: proveResponse.verification,
+    ...(requestId !== undefined && { requestId, scope }),
+    ...(oprfDomain !== undefined && { oprfDomain }),
   };
 }

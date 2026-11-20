@@ -15,6 +15,7 @@ vi.mock('../packages/sdk/src/inputs.js', async (original) => ({
     return { signal_hash: '0xprepared' };
   }),
 }));
+vi.mock('../packages/sdk/src/oprf/index.js', async orig => (await import('./helpers/oprfStub.js')).stubOprf(await orig()));
 vi.mock('../packages/sdk/src/payment.js', () => ({
   signPayment: vi.fn(async () => {
     boundary.order.push('pay');
@@ -37,7 +38,9 @@ const action: TypedAction = {
   primaryType: 'Instruction',
   message: { terms: { amount: '90071992547409930000', enabled: false, nonce: '0' }, labels: ['한글🙂', '<script>inert</script>'] },
 };
-const request = { circuit: 'giwa_attestation' as const, scope: 'vault-session', action };
+const request = { circuit: 'giwa_attestation' as const, scope: 'vault-session', oprfDomain: 'vault.example', action };
+/** What the approval service is sent: the action request, without the OPRF domain (it is not part of what the human approves). */
+const approvalBody = { circuit: request.circuit, scope: request.scope, action };
 const approval = {
   approvalId: 'approval-fixture', approvalUrl: `${config.baseUrl}/approve/approval-fixture#browser-capability`,
   requesterToken: 'requester-capability', expiresAt: '2099-01-01T00:00:00.000Z',
@@ -96,7 +99,9 @@ function transport(overrides: {
 }
 
 function prove(params: ProofParams = request, localSigner = signer(), onStep = vi.fn()) {
-  return generateProof(config, { attestation: localSigner, payment: {} as never }, params, { onStep });
+  // Wallet circuits need the OPRF domain (OPRF step stubbed: tests/helpers/oprfStub.ts).
+  const withDomain = params.circuit === 'oidc_domain' || params.oprfDomain !== undefined ? params : { ...params, oprfDomain: 'vault.example' };
+  return generateProof(config, { attestation: localSigner, payment: {} as never }, withDomain, { onStep });
 }
 
 beforeEach(() => { vi.clearAllMocks(); boundary.order.length = 0; });
@@ -113,7 +118,7 @@ describe('human approval before action proof work', () => {
     expect(keySigner.getAddress).not.toHaveBeenCalled();
     expect(keySigner.signTypedData).not.toHaveBeenCalled();
     expect(keySigner.signMessage).not.toHaveBeenCalled();
-    expect(JSON.parse(fetcher.mock.calls[0][1]!.body as string)).toEqual({ ...request, circuit });
+    expect(JSON.parse(fetcher.mock.calls[0][1]!.body as string)).toEqual({ ...approvalBody, circuit });
   });
 
   it.each(['pending', 'rejected', 'expired', 'consumed'])('does not consume or pay when the session is %s', async (status) => {
@@ -140,11 +145,13 @@ describe('human approval before action proof work', () => {
     expect(keySigner.getAddress).not.toHaveBeenCalled();
     expect(keySigner.signTypedData).not.toHaveBeenCalled();
     expect(keySigner.signMessage).not.toHaveBeenCalled();
+    // With an action, signal_hash is all zeros: the wallet signed only the EIP-712 digest.
+    expect(onStep.mock.calls.find(([step]) => step.step === 1)?.[0].data.signalHash).toBe('0x' + '00'.repeat(32));
     expect(JSON.stringify(onStep.mock.calls)).not.toContain(signature);
     expect(JSON.stringify(onStep.mock.calls)).not.toContain(approval.requesterToken);
     expect(fetcher.mock.calls.slice(0, 2).map(call => new Headers(call[1]?.headers).get('Authorization')))
       .toEqual([`Bearer ${approval.requesterToken}`, `Bearer ${approval.requesterToken}`]);
-    expect(JSON.parse(fetcher.mock.calls[1][1]!.body as string)).toEqual(request);
+    expect(JSON.parse(fetcher.mock.calls[1][1]!.body as string)).toEqual(approvalBody);
   });
 
   it.each([
@@ -207,7 +214,7 @@ describe('human approval before action proof work', () => {
   it('does not treat a resume handle without its original action as a new personal-sign proof', async () => {
     const fetcher = transport();
     const local = signer();
-    await expect(prove({ circuit: 'giwa_attestation', actionApproval: approval }, local)).rejects.toMatchObject({ code: 'ACTION_APPROVAL_INVALID' });
+    await expect(prove({ circuit: 'giwa_attestation', scope: 'vault-session', actionApproval: approval }, local)).rejects.toMatchObject({ code: 'ACTION_APPROVAL_INVALID' });
     expect(fetcher).not.toHaveBeenCalled();
     expect(local.signMessage).not.toHaveBeenCalled();
   });
@@ -368,7 +375,7 @@ describe('approval client validation and capabilities', () => {
 describe('existing proof paths without action', () => {
   it('gives a helpful error when the credential signer is missing on a nonaction EAS request', async () => {
     const fetcher = transport();
-    await expect(generateProof(config, {}, { circuit: 'giwa_attestation' })).rejects.toThrow(/attestation signer.*without an action/);
+    await expect(generateProof(config, {}, { circuit: 'giwa_attestation', scope: 'vault-session', oprfDomain: 'vault.example' })).rejects.toThrow(/attestation signer.*without an action/);
     expect(fetcher).not.toHaveBeenCalled();
   });
   it('refuses the removed arc_eligibility circuit before any network call', async () => {

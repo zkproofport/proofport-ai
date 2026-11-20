@@ -192,9 +192,10 @@ describe('coinbase_country_attestation v2 (server statement)', () => {
 
   it("refuses another wallet's attestCountry transaction before payment", async () => {
     const stranger = ethers.Wallet.createRandom().address;
+    const requestId = sdk.newRequestId();
     const prepared = await sdk.prepareInputs(config, {
-      circuitId: ID, userAddress: wallet, userSignature: await fromPrivateKey(ATTESTATION_KEY!).signMessage(sdk.computeSignalHash(wallet, 'e2e:country-v2:refusal', ID)),
-      scope: 'e2e:country-v2:refusal', countryList: COUNTRY_LIST, isIncluded: true,
+      circuitId: ID, userAddress: wallet, userSignature: await fromPrivateKey(ATTESTATION_KEY!).signMessage(sdk.computeSignalHash({ scope: 'e2e:country-v2:refusal', circuitId: ID, requestId })),
+      scope: 'e2e:country-v2:refusal', countryList: COUNTRY_LIST, isIncluded: true, requestId,
     }) as Record<string, unknown>;
     // The E2E wallet's real transaction, claimed for a stranger with the
     // stranger's own (rule-correct) nullifier: refused on the calldata wallet.

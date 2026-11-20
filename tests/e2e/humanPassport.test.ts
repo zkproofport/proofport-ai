@@ -65,10 +65,11 @@ describe('human_passport_score (refusals before payment)', () => {
 
   async function rawRequest(over: Record<string, unknown>) {
     const wallet = new ethers.Wallet(ATTESTATION_KEY!);
+    const requestId = sdk.newRequestId();
     const prepared = sdk.prepareHumanPassportInputs({
       userAddress: wallet.address,
-      userSignature: await wallet.signMessage(sdk.computeSignalHash(wallet.address, 'e2e:raw', 'human_passport_score')),
-      scope: 'e2e:raw', minScore: 20, chain: 8453,
+      userSignature: await wallet.signMessage(sdk.computeSignalHash({ scope: 'e2e:raw', circuitId: 'human_passport_score', requestId })),
+      scope: 'e2e:raw', minScore: 20, chain: 8453, requestId,
     });
     const challenge = await sdk.requestChallenge(config, 'human_passport' as never);
     return fetch(`${BASE_URL}/api/v1/prove`, {

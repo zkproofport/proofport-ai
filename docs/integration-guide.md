@@ -47,7 +47,7 @@ ZKProofport AI는 Coinbase KYC 및 거주국 인증의 영지식 증명(zero-kno
 - 파라미터: `circuit` — `"coinbase_kyc"` 또는 `"coinbase_country"`
 - 반환값: 상수, 공식, 입력 스키마, SDK 사용법, 코드 예제
 
-**반드시 `prove` 호출 전에 가이드를 읽으세요.** 가이드에는 signal_hash, nullifier, scope_bytes, merkle_root 계산법, EAS GraphQL 쿼리, RLP 인코딩, secp256k1 공개키 복구, Merkle proof 구성법이 포함되어 있습니다.
+**반드시 `prove` 호출 전에 가이드를 읽으세요.** 가이드에는 signal_hash, OPRF 널리파이어 값(oprf_key_hash, domain, scope, nullifier 와 비공개 값 일곱 개), merkle_root 계산법, EAS GraphQL 쿼리, RLP 인코딩, secp256k1 공개키 복구, Merkle proof 구성법이 포함되어 있습니다.
 
 ### 3. `prove`
 
@@ -356,8 +356,17 @@ X-Payment-Nonce: 0x7f3a...(Step 1에서 받은 nonce)
   "circuit": "coinbase_kyc",
   "inputs": {
     "signal_hash": "0x...",
+    "oprf_key_hash": "0x...",
+    "domain": "0x...",
+    "scope": "0x...",
     "nullifier": "0x...",
-    "scope_bytes": "0x...",
+    "oprf_public_key_x": "0x...",
+    "oprf_public_key_y": "0x...",
+    "oprf_beta": "0x...",
+    "oprf_dlog_e": "0x...",
+    "oprf_dlog_s": "0x...",
+    "oprf_response_x": "0x...",
+    "oprf_response_y": "0x...",
     "merkle_root": "0x...",
     "user_address": "0x...",
     "signature": "0x...",
@@ -564,7 +573,7 @@ const paymentSigner = fromPrivateKey('0x...');
 const result = await generateProof(
   { baseUrl: 'https://stg-ai.zkproofport.app' },
   { attestation: attestationSigner, payment: paymentSigner },
-  { circuit: 'coinbase_kyc', scope: 'proofport' },
+  { circuit: 'coinbase_kyc', scope: 'myapp:membership', oprfDomain: 'myapp.example.com' },
 );
 
 console.log(result.proof);           // ZK proof hex
@@ -589,11 +598,13 @@ npx tsx packages/sdk/examples/full-flow.ts
 ```typescript
 import {
   prepareInputs,
+  prepareOprf,
   requestChallenge,
   makePayment,
   submitProof,
   verifyProof,
   computeSignalHash,
+  newRequestId,
   fromPrivateKey,
   CIRCUIT_NAME_MAP,
 } from '@zkproofport-ai/sdk';
@@ -603,15 +614,24 @@ const signer = fromPrivateKey('0x...');
 const paymentSigner = fromPrivateKey('0x...');
 
 // Step 1: 입력 준비
+// signal_hash = keccak256(abi.encodePacked(scope, circuitId, requestId)) -- 지갑 주소는 들어가지 않습니다.
+// requestId 는 검증하는 쪽이 발급한 요청 id 이고, 없으면 새로 만든 UUID 를 쓰고 검증하는 쪽에 함께 넘깁니다.
+// scope 와 oprfDomain 은 호출하는 쪽이 정합니다 (기본값 없음).
+const scope = 'myapp:membership';
 const userAddress = await signer.getAddress();
-const signalHash = computeSignalHash(userAddress, 'proofport', 'coinbase_attestation');
+// OPRF 널리파이어: 서명 전에 이 지갑의 (oprfDomain, scope) 값을 받습니다.
+const oprf = await prepareOprf(config, { circuitId: 'coinbase_attestation', address: userAddress, oprfDomain: 'myapp.example.com', scope });
+const requestId = newRequestId();
+const signalHash = computeSignalHash({ scope, circuitId: 'coinbase_attestation', requestId });
 const userSignature = await signer.signMessage(signalHash);
 
 const inputs = await prepareInputs(config, {
   circuitId: 'coinbase_attestation',
   userAddress,
   userSignature,
-  scope: 'proofport',
+  scope,
+  requestId,
+  oprf,
 });
 
 // Step 2: 402 챌린지 요청

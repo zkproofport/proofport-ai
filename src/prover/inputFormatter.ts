@@ -9,6 +9,7 @@ import type { CircuitParams } from '../input/inputBuilder.js';
 import { CIRCUIT_IDS, type CircuitId } from '../config/circuitIds.js';
 import { circuitActionBinding, HUMAN_PASSPORT_MAX_DATA_BYTES, HUMAN_PASSPORT_SCORER_IDS } from '@zkproofport-app/core/circuits';
 import type { HumanPassportIssuance } from '../input/humanPassport.js';
+import { OPRF_INPUT_KEYS, type OprfCircuitInputs } from '../input/oprfInputs.js';
 
 /**
  * The circuits built from an on-chain attestation: everything this server can
@@ -179,6 +180,24 @@ function formatCountryListArray(countries: string[], maxEntries: number): string
 // ─── Public API ─────────────────────────────────────────────────────────
 
 /**
+ * The OPRF nullifier inputs for noir_js: each a Field, passed as the 0x hex
+ * string the SDK computed (readOprfInputs checked it is below its modulus).
+ * Names are the circuits' main() parameters: oprf_key_hash, domain, scope,
+ * nullifier (public) and oprf_public_key_x/y, oprf_beta, oprf_dlog_e/s,
+ * oprf_response_x/y (private). Every key is required.
+ */
+export function formatOprfInputs(oprf: OprfCircuitInputs | undefined): Record<string, string> {
+  if (!oprf) throw new Error('The OPRF nullifier inputs are missing (oprf_key_hash, domain, scope, nullifier and the seven private values).');
+  const out: Record<string, string> = {};
+  for (const key of OPRF_INPUT_KEYS) {
+    const v = oprf[key];
+    if (typeof v !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(v)) throw new Error(`OPRF input ${key} must be 0x + 64 hex, got ${JSON.stringify(v)}`);
+    out[key] = v;
+  }
+  return out;
+}
+
+/**
  * Convert CircuitParams to a noir_js-compatible input object for the circuits
  * built from an on-chain attestation.
  *
@@ -260,8 +279,9 @@ export function formatAttestationInputs(
     inputs.is_included = params.isIncluded;
   }
 
-  inputs.scope = toHexArray(params.scopeBytes);
-  inputs.nullifier = toHexArray(params.nullifierBytes);
+  // The OPRF public four follow the signer root (and Country's list) in
+  // every wallet circuit's ABI; the seven private values close it.
+  Object.assign(inputs, formatOprfInputs(params.oprf));
   inputs.user_address = toHexArray(hexStringToBytes(params.userAddress));
   inputs.user_signature = toHexArray(splitSignature(params.userSignature));
   inputs.user_pubkey_x = toHexArray(hexStringToBytes(params.userPubkeyX));
@@ -378,8 +398,8 @@ export interface HumanPassportParams {
   signalHash: Uint8Array;
   domainSeparator?: string;
   actionHash?: string;
-  scopeBytes: Uint8Array;
-  nullifierBytes: Uint8Array;
+  /** The OPRF nullifier inputs, checked before payment (src/input/oprfInputs.ts). */
+  oprf: OprfCircuitInputs;
   userAddress: string;
   userSignature: string;
   userPubkeyX: string;
@@ -428,8 +448,7 @@ export function formatHumanPassportInputs(p: HumanPassportParams): Record<string
     domain_separator: bound ? toHexArray(hexStringToBytes(p.domainSeparator!)) : toHexArray(new Uint8Array(32)),
     action_hash: bound ? toHexArray(hexStringToBytes(p.actionHash!)) : toHexArray(new Uint8Array(32)),
     signer_list_merkle_root: toHexArray(hexStringToBytes(i.merkleRoot)),
-    scope: toHexArray(p.scopeBytes),
-    nullifier: toHexArray(p.nullifierBytes),
+    ...formatOprfInputs(p.oprf),
     min_score: p.minScoreUnits.toString(),
     scorer_id: i.scorerId.toString(),
     now: p.now.toString(),

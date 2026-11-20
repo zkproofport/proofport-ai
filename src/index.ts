@@ -13,7 +13,8 @@ import swaggerUi from 'swagger-ui-express';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { Config } from './config/index.js';
 import { getChainIdentities, loadConfig } from './config/index.js';
-import { ensureArtifacts } from './circuit/artifactManager.js';
+import { verifyCircuitsAtBoot } from './circuit/circuitsSource.js';
+import { CIRCUITS_COMMIT } from './config/circuitsPin.js';
 import { createMcpServer } from './mcp/server.js';
 import { buildSwaggerSpec } from './swagger.js';
 import { createRedisClient } from './redis/client.js';
@@ -287,9 +288,21 @@ async function startServer() {
   const paymentModeConfig = getPaymentModeConfig(config.paymentMode);
 
   try {
-    // Download circuit artifacts if not present
-    await ensureArtifacts(config.circuitsDir, config.circuitsRepoUrl);
-    log.info({ action: 'server.artifacts.ready' }, 'Circuit artifacts ready');
+    // The baked circuit artifacts: from the pinned circuits commit, intact,
+    // and built by the same nargo/bb this image proves with. Nothing is
+    // downloaded; any mismatch stops the server here.
+    const circuitsStamp = await verifyCircuitsAtBoot({
+      circuitsDir: config.circuitsDir,
+      bbPath: config.bbPath,
+      paymentMode: config.paymentMode,
+    });
+    if (circuitsStamp.worktree) {
+      log.warn(
+        { action: 'server.artifacts.worktree', ...circuitsStamp, pinned: CIRCUITS_COMMIT },
+        'Circuit artifacts come from a local circuits working tree, not the pinned commit (local run only)',
+      );
+    }
+    log.info({ action: 'server.artifacts.ready', ...circuitsStamp }, 'Circuit artifacts ready');
 
     // The statement key (coinbase_attestation v2 and oidc_domain_attestation)
     // must be reachable and be EC_SIGN_P256_SHA256 before this serves
@@ -305,9 +318,9 @@ async function startServer() {
       );
     }
 
-    // Sync verifier addresses from GitHub broadcast JSON
+    // Sync verifier addresses from the pinned circuits commit's broadcast JSON
     try {
-      const deploymentsUpdated = await syncDeployments(config.paymentMode, config.chainRpcUrl, config.circuitsRepoUrl);
+      const deploymentsUpdated = await syncDeployments(config.paymentMode, config.chainRpcUrl);
       log.info({ action: 'server.deployments.synced', updated: deploymentsUpdated }, 'Deployment addresses synced');
     } catch (err) {
       log.warn({ action: 'server.deployments.failed', err }, 'Deployment sync failed, using fallback addresses');

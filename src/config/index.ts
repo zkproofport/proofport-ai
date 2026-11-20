@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module';
+import { parseOprfEnvironment } from './oprfKeyHashes.js';
 
 const serverVersion: string = createRequire(import.meta.url)('../../package.json').version;
 
@@ -43,7 +44,7 @@ export function loadConfig() {
     bbPath: process.env.BB_PATH || 'bb',
     // nargoPath removed — witness generation now uses @noir-lang/noir_js instead of nargo CLI
     circuitsDir: process.env.CIRCUITS_DIR || '/app/circuits',
-    circuitsRepoUrl: process.env.CIRCUITS_REPO_URL || 'https://raw.githubusercontent.com/zkproofport/circuits/main',
+    // Which circuits commit is not configuration: src/config/circuitsPin.ts.
     redisUrl: getRequiredEnv('REDIS_URL'),
     baseRpcUrl: getRequiredEnv('BASE_RPC_URL'),
     easGraphqlEndpoint: getRequiredEnv('EAS_GRAPHQL_ENDPOINT'),
@@ -92,6 +93,14 @@ export function loadConfig() {
      * public facilitator serves.
      */
     x402FacilitatorUrl: process.env.X402_FACILITATOR_URL || 'https://x402.dexter.cash',
+
+    /**
+     * Which OPRF network and pinned key hash wallet credential proofs use
+     * (src/config/oprfKeyHashes.ts): production | staging | local. Unset: the
+     * server runs, and every wallet credential prove request is refused before
+     * payment naming this variable. An unknown value stops startup.
+     */
+    oprfEnvironment: parseOprfEnvironment(process.env.OPRF_ENVIRONMENT),
 
     // TEE (optional)
     teeMode: validateTeeMode(process.env.TEE_MODE || 'disabled'),

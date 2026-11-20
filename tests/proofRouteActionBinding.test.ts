@@ -3,15 +3,17 @@ import express from 'express';
 import request from 'supertest';
 import { createProofRoutes } from '../src/proof/proofRoutes.js';
 import type { Config } from '../src/config/index.js';
+import { oprfWireInputs } from './helpers/oprfInputs.js';
 
 const prove = vi.hoisted(() => vi.fn(async () => ({ proof: '0x11', publicInputs: '0x22', proofWithInputs: '0x1122' })));
 vi.mock('../src/prover/bbProver.js', () => ({ BbProver: class { prove = prove; } }));
 const config = {
   paymentMode: 'disabled', paymentNetworks: 'base-sepolia', paymentProofPrice: '$0', paymentPayTo: '0x' + '11'.repeat(20),
   teeMode: 'local', chainRpcUrl: 'https://sepolia.base.org', a2aBaseUrl: 'https://proof.example.com',
+  oprfEnvironment: 'staging',
 } as Config;
 const inputs = {
-  signal_hash: '0x' + '11'.repeat(32), nullifier: '0x' + '22'.repeat(32), scope_bytes: '0x' + '33'.repeat(32),
+  signal_hash: '0x' + '11'.repeat(32), ...oprfWireInputs(),
   merkle_root: '0x' + '44'.repeat(32), user_address: '0x' + '55'.repeat(20), raw_transaction: '0x00',
   signature: '0x' + '66'.repeat(65), user_pubkey_x: '0x' + '77'.repeat(32), user_pubkey_y: '0x' + '88'.repeat(32),
 };

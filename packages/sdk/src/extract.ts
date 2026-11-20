@@ -25,23 +25,17 @@
  * for anything this server cannot prove. Only the *identifiers* come from
  * `./circuits.js` (re-exporting `@zkproofport-app/core/circuits`).
  *
- * coinbase_attestation (128 fields):
- *   Index 0-31:   signal_hash (32 bytes)
- *   Index 32-63:  merkle_root (32 bytes)
- *   Index 64-95:  scope (32 bytes)
- *   Index 96-127: nullifier (32 bytes)
- *
- * coinbase_country_attestation (215 fields, circuit v2):
- *   Index 0-31:    signal_hash (32 bytes)
- *   Index 32-63:   domain_separator (32 bytes)
- *   Index 64-95:   action_hash (32 bytes)
- *   Index 96-127:  signer_list_merkle_root (32 bytes)
- *   Index 128-147: country_list (20 bytes)
- *   Index 148:     country_list_length
- *   Index 149:     is_included
- *   Index 150-181: scope (32 bytes)
- *   Index 182-213: nullifier (32 bytes)
- *   Index 214:     attested_at (u64 unix seconds)
+ * Wallet circuits (the OPRF nullifier; every value below is ONE field):
+ *   coinbase_attestation (133):         signal_hash 0-31, domain_separator 32-63,
+ *                                       action_hash 64-95, signer root 96-127,
+ *                                       oprf_key_hash 128, domain 129, scope 130,
+ *                                       nullifier 131, attested_at 132
+ *   coinbase_country_attestation (155): 0-127 as above, country_list 128-147,
+ *                                       length 148, is_included 149, OPRF 150-153,
+ *                                       attested_at 154
+ *   giwa_attestation (132):             0-127 as above, OPRF 128-131
+ *   human_passport_score (135):         0-127 as above, OPRF 128-131, min_score 132,
+ *                                       scorer_id 133, now 134
  *
  * oidc_domain_attestation (214 fields, circuit v2; 0-147 are v1's, unchanged):
  *   Index 0-17:    pubkey_modulus_limbs (18 x u128)
@@ -59,64 +53,62 @@
 import { CIRCUIT_IDS } from './circuits.js';
 import type { CircuitId } from './types.js';
 
-/** Byte ranges within the public-input vector, per circuit. */
-interface PublicInputLayout {
-  /** Inclusive `[start, end]` field indices holding the 32-byte scope. */
-  scope: readonly [number, number];
-  /** Inclusive `[start, end]` field indices holding the 32-byte nullifier. */
-  nullifier: readonly [number, number];
-  /** First field of the domain byte storage, for circuits that carry a domain. */
-  domainStorage?: number;
-  /** Field holding the domain length, for circuits that carry a domain. */
-  domainLen?: number;
-}
+/**
+ * Where scope and nullifier sit, per circuit. Two shapes:
+ *
+ * - `oprf`: the wallet circuits since the OPRF nullifier (circuits-dev.md,
+ *   "OPRF nullifier in every wallet credential circuit"). oprf_key_hash,
+ *   domain, scope and nullifier are ONE field each at `start`..`start + 3`,
+ *   and the proof has exactly `count` public inputs. The count is checked, so
+ *   a proof in the superseded 32-bytes-per-value layout reads as null rather
+ *   than as other values at these offsets.
+ * - `bytes`: OIDC, whose scope and nullifier are still 32 one-byte fields.
+ */
+type PublicInputLayout =
+  | { kind: 'oprf'; start: number; count: number }
+  | {
+      kind: 'bytes';
+      /** Inclusive `[start, end]` field indices holding the 32-byte scope. */
+      scope: readonly [number, number];
+      /** Inclusive `[start, end]` field indices holding the 32-byte nullifier. */
+      nullifier: readonly [number, number];
+      domainStorage: number;
+      domainLen: number;
+    };
 
 /**
- * Public-input layout for every circuit proofport-ai can prove.
- *
- * Keyed by the canonical identifiers, so a rename in the customer SDK is a
- * compile error here rather than a lookup that quietly misses.
+ * Public-input layout for every circuit proofport-ai can prove, keyed by the
+ * canonical identifiers so a rename is a compile error here.
  */
 const LAYOUTS: Record<CircuitId, PublicInputLayout> = {
-  // v2 (circuits coinbase-attestation-v2): giwa_attestation's six inputs in
-  // its order, then attested_at -- 193 fields. Scope and nullifier sit where
-  // GIWA's do; v1's [64, 95] / [96, 127] would read the action hash and the
-  // signer root.
-  [CIRCUIT_IDS.COINBASE_ATTESTATION]: { scope: [128, 159], nullifier: [160, 191] },
-  // v2 (circuits coinbase-country-attestation-v2): KYC v2's first four
-  // inputs, v1's country fields, then scope, nullifier and attested_at -- 215
-  // fields. v1's [86, 117] / [118, 149] would read the signer root and the
-  // country list.
-  [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: { scope: [150, 181], nullifier: [182, 213] },
+  // signal_hash 0-31, domain_separator 32-63, action_hash 64-95, signer root
+  // 96-127, OPRF 128-131, attested_at 132.
+  [CIRCUIT_IDS.COINBASE_ATTESTATION]: { kind: 'oprf', start: 128, count: 133 },
+  // 0-127 as KYC, country_list 128-147, length 148, is_included 149, OPRF
+  // 150-153, attested_at 154.
+  [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: { kind: 'oprf', start: 150, count: 155 },
   [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: {
+    kind: 'bytes',
     scope: [83, 114],
     nullifier: [115, 146],
     domainStorage: 18,
     domainLen: 82,
   },
-  // Read off the compiled ABI, not counted by hand:
-  //   signal_hash 0-31, domain_separator 32-63, action_hash 64-95,
-  //   signer_list_merkle_root 96-127, scope 128-159, nullifier 160-191.
-  // giwa_attestation gained the EIP-712 pair on 2026-09-22; the two extra
-  // 32-byte fields before the Merkle root push scope and nullifier 64 fields
-  // past where they sit in coinbase_attestation. Reading it at Coinbase's
-  // offsets returns the Merkle root where the nullifier is -- one value for
-  // every user of the circuit.
-  [CIRCUIT_IDS.GIWA_ATTESTATION]: { scope: [128, 159], nullifier: [160, 191] },
-  // GIWA's six first, then min_score 192, scorer_id 193, now 194 (195 fields).
-  [CIRCUIT_IDS.HUMAN_PASSPORT_SCORE]: { scope: [128, 159], nullifier: [160, 191] },
+  // 0-127 as KYC, OPRF 128-131.
+  [CIRCUIT_IDS.GIWA_ATTESTATION]: { kind: 'oprf', start: 128, count: 132 },
+  // 0-127 as KYC, OPRF 128-131, min_score 132, scorer_id 133, now 134.
+  [CIRCUIT_IDS.HUMAN_PASSPORT_SCORE]: { kind: 'oprf', start: 128, count: 135 },
 };
 
-/**
- * Look up the public-input layout for a circuit.
- *
- * Returns `null` for anything without a known layout — including a canonical
- * identifier this server cannot prove, such as `dojang_playground`. It never falls
- * back to another circuit's byte ranges.
- */
+/** Offsets of the four OPRF values from the layout's start. */
+const OPRF_OFFSET = Object.freeze({ keyHash: 0, domain: 1, scope: 2, nullifier: 3 });
+
+const BN254_P = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
+
+/** The layout for a circuit, or null (never another circuit's) for anything unknown, e.g. dojang_playground. */
 function getLayout(circuit: unknown): PublicInputLayout | null {
-  if (typeof circuit !== 'string') return null;
-  return (LAYOUTS as Record<string, PublicInputLayout | undefined>)[circuit] ?? null;
+  if (typeof circuit !== 'string' || !Object.hasOwn(LAYOUTS, circuit)) return null;
+  return LAYOUTS[circuit as CircuitId];
 }
 
 /**
@@ -157,16 +149,7 @@ export function extractScopeFromPublicInputs(
   publicInputs: string,
   circuit: CircuitId,
 ): string | null {
-  try {
-    const layout = getLayout(circuit);
-    if (!layout) return null;
-    const fields = splitFields(publicInputs);
-    const [start, end] = layout.scope;
-    if (fields.length <= end) return null;
-    return extractBytes32(fields, start, end);
-  } catch {
-    return null;
-  }
+  return readValue(publicInputs, circuit, 'scope');
 }
 
 /**
@@ -183,11 +166,43 @@ export function extractNullifierFromPublicInputs(
   publicInputs: string,
   circuit: CircuitId,
 ): string | null {
+  return readValue(publicInputs, circuit, 'nullifier');
+}
+
+/**
+ * The OPRF domain (keccak256(utf8(name)) mod p, 0x + 64 hex) of a wallet
+ * circuit's proof; null for OIDC, an unknown circuit or a malformed input.
+ */
+export function extractOprfDomainFromPublicInputs(publicInputs: string, circuit: CircuitId): string | null {
+  return readOprf(publicInputs, circuit, 'domain');
+}
+
+/** The OPRF key hash a wallet circuit's proof carries; null otherwise. Compare it with getPinnedOprfKeyHash. */
+export function extractOprfKeyHashFromPublicInputs(publicInputs: string, circuit: CircuitId): string | null {
+  return readOprf(publicInputs, circuit, 'keyHash');
+}
+
+function readOprf(publicInputs: string, circuit: CircuitId, which: keyof typeof OPRF_OFFSET): string | null {
+  try {
+    const layout = getLayout(circuit);
+    if (!layout || layout.kind !== 'oprf') return null;
+    const fields = splitFields(publicInputs);
+    if (fields.length !== layout.count || fields.some(f => !/^0x[0-9a-fA-F]{64}$/.test(f))) return null;
+    const v = BigInt(fields[layout.start + OPRF_OFFSET[which]]);
+    if (v >= BN254_P) return null;
+    return '0x' + v.toString(16).padStart(64, '0');
+  } catch {
+    return null;
+  }
+}
+
+function readValue(publicInputs: string, circuit: CircuitId, which: 'scope' | 'nullifier'): string | null {
   try {
     const layout = getLayout(circuit);
     if (!layout) return null;
+    if (layout.kind === 'oprf') return readOprf(publicInputs, circuit, which);
     const fields = splitFields(publicInputs);
-    const [start, end] = layout.nullifier;
+    const [start, end] = layout[which];
     if (fields.length <= end) return null;
     return extractBytes32(fields, start, end);
   } catch {
@@ -219,8 +234,8 @@ export function extractDomainFromPublicInputs(
     const layout = getLayout(circuit);
     if (!layout) return null;
 
+    if (layout.kind !== 'bytes') return null;
     const { domainStorage, domainLen } = layout;
-    if (domainStorage === undefined || domainLen === undefined) return null;
 
     const fields = splitFields(publicInputs);
     if (fields.length <= domainLen) return null;

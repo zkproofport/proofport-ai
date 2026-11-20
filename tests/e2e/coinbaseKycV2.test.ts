@@ -75,9 +75,10 @@ describe('coinbase_attestation v2 (server statement signed with Cloud KMS)', () 
   it('proves with the server statement; the proof verifies on the v2 verifier and a changed input does not', async () => {
     const scope = `e2e:coinbase-v2:${Date.now()}`;
     const before = Math.floor(Date.now() / 1000);
-    const signalHash = sdk.computeSignalHash(wallet, scope, 'coinbase_attestation');
+    const requestId = sdk.newRequestId();
+    const signalHash = sdk.computeSignalHash({ scope, circuitId: 'coinbase_attestation', requestId });
     const signature = await signer.signMessage(signalHash);
-    const inputs = await sdk.prepareInputs(config, { circuitId: 'coinbase_attestation', userAddress: wallet, userSignature: signature, scope });
+    const inputs = await sdk.prepareInputs(config, { circuitId: 'coinbase_attestation', userAddress: wallet, userSignature: signature, scope, requestId });
     const v2Nullifier = ethers.keccak256(ethers.concat([
       ethers.keccak256(ethers.concat([wallet, ethers.keccak256(ethers.toUtf8Bytes('coinbase_attestation'))])),
       ethers.keccak256(ethers.toUtf8Bytes(scope)),

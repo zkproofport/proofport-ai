@@ -91,7 +91,8 @@ tests/
 │   ├── tee-http.test.ts              (7 tests)  TEE HTTP status endpoint
 │   ├── tee-integration.test.ts       (9 tests)  TEE with full app integration
 │   └── types.test.ts                 (15 tests) Type definitions
-├── artifactManager.test.ts           (15 tests) Circuit artifact download
+├── artifactManager.test.ts           (6 tests)  Baked artifacts, no downloads
+├── circuitsSource.test.ts            (35 tests) Pinned circuits commit, stamp, bb/nargo checks
 ├── bbProver.test.ts                  (11 tests) bb CLI prover subprocess
 ├── circuits.test.ts                  (8 tests)  Circuit metadata and configuration
 ├── config.test.ts                    (24 tests) Environment variable parsing

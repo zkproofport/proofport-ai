@@ -1,22 +1,31 @@
 # Stage 1: bb, the official Barretenberg release asset for the image's OWN
 # architecture -- amd64 for Cloud Run, arm64 on an Apple-silicon dev VM.
-# BB_VERSION must equal BB_VERSION in circuits/toolchain.env: the proof format
-# belongs to the bb that wrote the circuit artifacts.
+#
+# WHICH bb: the one the baked circuits were built with, read from
+# circuits/circuits-source.json (bbVersion = BB_VERSION of that circuits
+# commit's toolchain.env). The proof format belongs to the bb that wrote the
+# circuit artifacts, so the version is not written here: until 2026-11-17 it
+# was an ARG default, a second copy of toolchain.env that a toolchain move had
+# to remember to change, and an image could pair bb 6 with beta.19 artifacts.
+# The stamp is written by scripts/bake-circuits.sh (local, AWS) or the build
+# context scripts (GCP deploys); without it the build stops here. The server
+# checks the same pairing again at boot (src/circuit/circuitsSource.ts).
 #
 # This stage used to be pinned to linux/amd64. The 2025 nightly it held had no
 # arm64 Linux build, and an x86 bb run under the arm64 VM's emulation computes
 # wrong field arithmetic and aborts on every call -- so local proving needed an
-# x86_64 VM and a ~20-minute emulated build. 4.2.0-aztecnr-rc.2 publishes both
-# barretenberg-amd64-linux and barretenberg-arm64-linux, so each image now
-# carries a native bb.
+# x86_64 VM and a ~20-minute emulated build. Since 4.2.0-aztecnr-rc.2 the
+# release publishes both barretenberg-amd64-linux and barretenberg-arm64-linux,
+# so each image carries a native bb. 6.0.0 (paired with nargo 1.0.0) publishes
+# both too; its binaries need glibc >= 2.34 (Ubuntu 24.04 has 2.39).
 #
 # BuildKit sets TARGETARCH; the classic builder (docker without buildx, as on
 # a plain Colima install) leaves it empty, and there the stage runs on the
 # daemon's own machine, so `uname -m` names the target. An architecture with
 # no release asset stops the build.
 FROM ubuntu:24.04 AS bb-extractor
-ARG BB_VERSION=4.2.0-aztecnr-rc.2
 ARG TARGETARCH
+COPY circuits/circuits-source.json /tmp/circuits-source.json
 
 RUN set -e; \
     machine="${TARGETARCH:-$(uname -m)}"; \
@@ -25,7 +34,9 @@ RUN set -e; \
       arm64|aarch64) asset=arm64 ;; \
       *) echo "No bb release asset for architecture '$machine'. Known: amd64/x86_64, arm64/aarch64" >&2; exit 1 ;; \
     esac; \
-    apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*; \
+    apt-get update && apt-get install -y --no-install-recommends curl ca-certificates jq && rm -rf /var/lib/apt/lists/*; \
+    BB_VERSION="$(jq -er '.bbVersion | select(type == "string" and length > 0)' /tmp/circuits-source.json)" \
+      || { echo "circuits/circuits-source.json names no bbVersion" >&2; exit 1; }; \
     mkdir -p /opt/bb; \
     curl -fsSL "https://github.com/AztecProtocol/aztec-packages/releases/download/v${BB_VERSION}/barretenberg-${asset}-linux.tar.gz" | tar -xz -C /opt/bb; \
     chmod +x /opt/bb/bb; \
@@ -88,10 +99,10 @@ COPY --from=builder /app/public/approval ./public/approval
 # These are extracted by deploy-ai-aws.yml during EC2 deployment.
 COPY aws/ ./aws/
 
-# Copy compiled circuit artifacts (JSON + VK).
+# Copy compiled circuit artifacts (JSON + VK), their hashes and their stamp.
 # circuits/ is empty in source — artifacts are copied into the build context before docker build:
-#   - Local dev: scripts/ai-dev.sh copies compiled JSON + VK from parent circuits/ repo
-#   - CI/CD: deploy-ai-aws.yml copies compiled JSON + VK before running docker build
+#   - Local dev and deploy-ai-aws.yml: scripts/bake-circuits.sh
+#   - deploy-ai.yml / emergency-deploy.yml: the build context scripts
 # The artifacts baked here are used by the enclave build step (EIF) for Nitro TEE mode.
 COPY circuits/ /app/circuits/
 

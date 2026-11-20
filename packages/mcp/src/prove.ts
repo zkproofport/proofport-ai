@@ -216,7 +216,10 @@ let silent = false;
 // check it, so guessing one produces a proof nobody asked for -- the caller
 // finds out much later, somewhere else. See the identifier rule in CLAUDE.md.
 let circuit: string | undefined;
-let scope = 'proofport';
+// No default scope or OPRF domain either: the caller names both (the
+// generate_proof tool refuses a wallet proof without them, naming the flag).
+let scope: string | undefined;
+let oprfDomain: string | undefined;
 let actionFile: string | undefined;
 let countries: string[] | undefined;
 let included: boolean | undefined;
@@ -244,6 +247,8 @@ for (; i < args.length; i++) {
     silent = true;
   } else if (args[i] === '--scope' && args[i + 1]) {
     scope = args[++i];
+  } else if (args[i] === '--oprf-domain' && args[i + 1]) {
+    oprfDomain = args[++i];
   } else if (args[i] === '--countries' && args[i + 1]) {
     countries = args[++i].split(',').map((c) => c.trim());
   } else if (args[i] === '--included' && args[i + 1]) {
@@ -291,7 +296,8 @@ function printUsage() {
   writeError('  and no native balance are needed on the paying chain — only USDC.');
   writeError('');
   writeError('Options:');
-  writeError('  --scope <scope>            Scope for nullifier (default: "proofport")');
+  writeError('  --scope <scope>             Required. What the proof is for within the service; no default');
+  writeError('  --oprf-domain <name>        Required for wallet circuits. The service the proof is for (usually its host); no default');
   writeError('  --countries <codes>         Comma-separated ISO codes (for coinbase_country)');
   writeError('  --included <true|false>     Inclusion proof (for coinbase_country)');
   writeError('  --min-score <points>        Human Passport score threshold, e.g. 20 (for human_passport)');
@@ -318,11 +324,11 @@ function printUsage() {
   writeError('');
   writeError('Examples:');
   writeError('  # pay on Ethereum Sepolia from a raw private key');
-  writeError('  PAYMENT_PRIVATE_KEY=0x... zkproofport-prove coinbase_kyc --pay-with key --pay-on ethereum-sepolia');
+  writeError('  PAYMENT_PRIVATE_KEY=0x... zkproofport-prove coinbase_kyc --scope my-app --oprf-domain my-app.example.com --pay-with key --pay-on ethereum-sepolia');
   writeError('  # pay on Base Sepolia from a CDP wallet');
-  writeError('  zkproofport-prove coinbase_kyc --pay-with cdp --pay-on base-sepolia');
-  writeError('  ATTESTATION_KEY=0x... zkproofport-prove coinbase_kyc --scope my-app');
-  writeError('  ATTESTATION_KEY=0x... zkproofport-prove coinbase_country --countries US,KR --included true');
+  writeError('  zkproofport-prove coinbase_kyc --scope my-app --oprf-domain my-app.example.com --pay-with cdp --pay-on base-sepolia');
+  writeError('  ATTESTATION_KEY=0x... zkproofport-prove coinbase_kyc --scope my-app --oprf-domain my-app.example.com');
+  writeError('  ATTESTATION_KEY=0x... zkproofport-prove coinbase_country --scope my-app --oprf-domain my-app.example.com --countries US,KR --included true');
   writeError('  zkproofport-prove oidc_domain --jwt eyJhbGciOi... --scope my-app');
 }
 
@@ -541,7 +547,18 @@ if (canBindAction && actionFile) {
 }
 
 // ─── Build tool arguments ──────────────────────────────────────────────
+if (scope === undefined) {
+  const message = '--scope is required: name what the proof is for within the service. There is no default.';
+  writeError(silent ? JSON.stringify({ error: message }) : `Error: ${message}`);
+  process.exit(1);
+}
+if (circuit !== 'oidc_domain' && oprfDomain === undefined) {
+  const message = `--oprf-domain is required for ${circuit}: name the service the proof is for (usually its host). It is never filled in.`;
+  writeError(silent ? JSON.stringify({ error: message }) : `Error: ${message}`);
+  process.exit(1);
+}
 const toolArgs: Record<string, unknown> = { circuit, scope };
+if (oprfDomain !== undefined) toolArgs.oprf_domain = oprfDomain;
 if (action !== undefined) toolArgs.action = action;
 if (countries !== undefined) toolArgs.country_list = countries;
 if (included !== undefined) toolArgs.is_included = included;
@@ -556,6 +573,7 @@ if (maxPayment !== undefined) toolArgs.max_payment = maxPayment;
 // ─── Start MCP server and call generate_proof ──────────────────────────
 log(`[zkproofport-prove] Circuit: ${circuit}`);
 log(`[zkproofport-prove] Scope: ${scope}`);
+if (oprfDomain !== undefined) log(`[zkproofport-prove] OPRF domain: ${oprfDomain}`);
 if (countries) log(`[zkproofport-prove] Countries: ${countries.join(', ')}`);
 if (included !== undefined) log(`[zkproofport-prove] Included: ${included}`);
 if (jwt) log('[zkproofport-prove] OIDC token provided (hidden)');

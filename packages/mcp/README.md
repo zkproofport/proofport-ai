@@ -50,8 +50,11 @@ holder signs the exact EIP-712 action, so the person reads named fields instead
 of an opaque hash and the verifying contract recomputes what they approved.
 
 **The action is optional.** Send none and the wallet signs the request's
-signal hash, exactly as `coinbase_kyc` does. The circuit branches on this and
-refuses a request carrying both.
+signal hash, `keccak256(abi.encodePacked(scope, circuitId, request_id))` (no
+wallet address), exactly as `coinbase_kyc` does. The circuit branches on this
+and refuses a request carrying both. Pass `request_id` when the verifier issued
+one; otherwise a fresh one is minted and returned. The action hash is public:
+an action whose proof is shown off-chain should not contain the wallet's address.
 
 | Circuit | Attested by | Chain | Verifier |
 |---|---|---|---|
@@ -75,6 +78,10 @@ The CLI prints the URL to stderr, waits for approval, and resumes automatically.
 
 ### Exact-action authorization and paid proof
 
+Every tool call needs `scope` (no default). Every wallet circuit (`coinbase_kyc`, `coinbase_country`, `giwa_attestation`, `human_passport`) also requires `oprf_domain`: the name of the service the proof is for, usually its host; the server never fills it in. The CLI takes them as `--scope` and `--oprf-domain`. The nullifier is one per wallet per (`oprf_domain`, `scope`).
+
+**Requires Node.js 22 or later** (`engines.node` `>=22.0.0`): the OPRF step uses the global WebSocket and fails with an error naming this requirement on an older runtime. The result names `oprf_domain` with `request_id` and `scope` for the verifier.
+
 Call `generate_proof` only after the user approves the exact action and live payment offer. Tool arguments use snake_case; the SDK equivalents are `payOn`, `maxPayment` and `approvedPayment`.
 
 ```typescript
@@ -82,6 +89,7 @@ const proof = await mcp.callTool({
   name: 'generate_proof',
   arguments: {
     circuit: 'giwa_attestation',
+    oprf_domain: 'myapp.example.com',
     scope: 'myapp:membership',
     action: approvedAction,
     pay_with: 'key',

@@ -8,11 +8,16 @@ export interface ProofportSigner {
   getAddress(): string | Promise<string>;
   signMessage(message: Uint8Array): Promise<string>;
   signTypedData(
+    /**
+     * An EIP-712 domain. chainId and verifyingContract are optional: the OPRF
+     * request (oprf/index.ts signOprfRequest) is signed under a domain of name
+     * and version only.
+     */
     domain: {
       name: string;
       version: string;
-      chainId: number;
-      verifyingContract: string;
+      chainId?: number;
+      verifyingContract?: string;
     },
     types: Record<string, Array<{ name: string; type: string }>>,
     message: Record<string, unknown>,
@@ -43,11 +48,16 @@ export class EthersWalletSigner implements ProofportSigner {
   }
 
   async signTypedData(
+    /**
+     * An EIP-712 domain. chainId and verifyingContract are optional: the OPRF
+     * request (oprf/index.ts signOprfRequest) is signed under a domain of name
+     * and version only.
+     */
     domain: {
       name: string;
       version: string;
-      chainId: number;
-      verifyingContract: string;
+      chainId?: number;
+      verifyingContract?: string;
     },
     types: Record<string, Array<{ name: string; type: string }>>,
     message: Record<string, unknown>,

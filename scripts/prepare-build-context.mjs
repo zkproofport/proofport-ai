@@ -79,6 +79,17 @@ await copyTree('src', new Set(['.ts', '.json']));
 await copyTree('packages/approval-web/src', new Set(['.ts', '.css']));
 await copyTree('public', new Set(['.png', '.svg', '.ico', '.webp', '.jpg', '.jpeg', '.html', '.css', '.js']), new Set(['public/approval']));
 await copyTree('aws', new Set(['.sh', '.py', '.yml', '.service', '.conf', '.enclave', '']));
+// Which circuits commit is baked, and its toolchain. Refused unless the
+// circuits checkout is exactly the commit proofport-ai pins
+// (src/config/circuitsPin.ts), with every artifact as committed there. The
+// server refuses to start without this stamp, and the Dockerfile installs the
+// bb it names.
+const stampText = capture(path.join(ai, 'node_modules/.bin/tsx'),
+  ['scripts/circuits-source.ts', '--checkout', path.join(root, 'circuits'), '--mode', 'pinned'], ai);
+const stampBytes = Buffer.from(`${JSON.stringify(JSON.parse(stampText), null, 2)}\n`);
+await fs.mkdir(path.join(context, 'circuits'), { recursive: true });
+await fs.writeFile(path.join(context, 'circuits/circuits-source.json'), stampBytes);
+files.push({ path: 'circuits/circuits-source.json', bytes: stampBytes.length, sha256: sha256(stampBytes) });
 // Ask the same circuit map the server uses; never maintain a second circuit list.
 const circuitLines = capture(path.join(ai, 'node_modules/.bin/tsx'), ['scripts/print-circuit-dirs.ts'], ai).trim().split('\n');
 const artifactHashes = {};

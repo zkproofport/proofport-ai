@@ -1,6 +1,7 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import { ethers } from 'ethers';
-import { computeCircuitParams, computeSignalHash, recoverUserPubkeyFromDigest, eip712Digest } from '../src/input/inputBuilder.js';
+import { computeCircuitParams, recoverUserPubkeyFromDigest, eip712Digest } from '../src/input/inputBuilder.js';
+import { computeSignalHash } from '../packages/sdk/src/signalHash.js';
 import { ATTESTATION_SOURCES } from '../src/config/contracts.js';
 const fixture = vi.hoisted(() => ({ attesterAddress: '', attesterPublicKey: '' }));
 vi.mock('../src/input/attestationFetcher.js', () => ({
@@ -37,11 +38,11 @@ describe('full server input preparation preserves each action mode', () => {
       const scope = 'recovery-mode-test';
       const domainSeparator = '0x' + '33'.repeat(32);
       const actionHash = '0x' + '44'.repeat(32);
-      const signalHash = computeSignalHash(wallet.address, scope, circuitId);
+      const signalHash = hasAction ? new Uint8Array(32) : computeSignalHash({ scope, circuitId, requestId: '3f2b8c1e-9d4a-4f6b-8e2c-1a7d5b9c0e4f' });
       const signature = hasAction
         ? wallet.signingKey.sign(eip712Digest(domainSeparator, actionHash)).serialized
         : await wallet.signMessage(signalHash);
-      const result = await computeCircuitParams({ address: wallet.address, scope, circuitId, signature,
+      const result = await computeCircuitParams({ address: wallet.address, scope, circuitId, signature, signalHash: ethers.hexlify(signalHash),
         ...(hasAction ? { domainSeparator, actionHash } : {}),
       }, 'https://eas.example.com', ['https://base.example.com']);
       expect(`0x04${result.userPubkeyX.replace(/^0x/, '')}${result.userPubkeyY.replace(/^0x/, '')}`).toBe(wallet.signingKey.publicKey);
@@ -51,7 +52,7 @@ describe('full server input preparation preserves each action mode', () => {
 
 describe('the removed arc_eligibility circuit', () => {
   it('is refused before any witness is prepared, naming the known circuits', async () => {
-    await expect(computeCircuitParams({ address: wallet.address, scope: 's', circuitId: 'arc_eligibility' as never, signature: '0x' + '00'.repeat(65) },
+    await expect(computeCircuitParams({ address: wallet.address, scope: 's', circuitId: 'arc_eligibility' as never, signature: '0x' + '00'.repeat(65), signalHash: '0x' + '00'.repeat(32) },
       'https://eas.example.com', ['https://base.example.com']))
       .rejects.toThrow('Unknown circuit: arc_eligibility. Known: coinbase_attestation, coinbase_country_attestation, oidc_domain_attestation, giwa_attestation, human_passport_score.');
   });

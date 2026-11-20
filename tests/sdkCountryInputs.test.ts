@@ -8,7 +8,8 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ethers } from 'ethers';
-import { computeSignalHash, prepareInputs } from '../packages/sdk/src/inputs.js';
+import { prepareInputs } from '../packages/sdk/src/inputs.js';
+import { computeSignalHash } from '../packages/sdk/src/signalHash.js';
 
 const config = { baseUrl: 'https://proof.example.com' } as never;
 const base = {
@@ -38,8 +39,8 @@ describe('prepareInputs for coinbase_country_attestation', () => {
 
   it('lets exactly 10 codes through to the attestation fetch', async () => {
     const wallet = ethers.Wallet.createRandom();
-    const signal = computeSignalHash(wallet.address, 'proofport', 'coinbase_country_attestation');
-    const signed = { userAddress: wallet.address, userSignature: await wallet.signMessage(signal) };
+    const signal = computeSignalHash({ scope: 'proofport', circuitId: 'coinbase_country_attestation', requestId: '3f2b8c1e-9d4a-4f6b-8e2c-1a7d5b9c0e4f' });
+    const signed = { userAddress: wallet.address, userSignature: await wallet.signMessage(signal), requestId: '3f2b8c1e-9d4a-4f6b-8e2c-1a7d5b9c0e4f' };
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network stopped by the test'));
     await expect(prepareInputs(config, { ...base, ...signed, countryList: ['KR', 'US', 'JP', 'DE', 'FR', 'GB', 'CA', 'AU', 'SG', 'NZ'] }))
       .rejects.toThrow(/network stopped by the test|attestation/i);

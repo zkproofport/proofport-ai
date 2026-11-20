@@ -17,10 +17,8 @@ import { ethers } from 'ethers';
 import fs from 'node:fs';
 import path from 'node:path';
 import { computeCircuitParams } from '../src/input/inputBuilder.js';
+import { computeSignalHash, newRequestId } from '../packages/sdk/src/signalHash.js';
 import {
-  computeSignalHash,
-  computeScope,
-  computeNullifier,
   splitSignatureToBytes,
   hexToBytes,
   padBytes,
@@ -32,6 +30,15 @@ import { CIRCUIT_IDS } from '../src/config/circuitIds.js';
 const EAS_GRAPHQL = process.env.EAS_GRAPHQL_ENDPOINT || 'https://base.easscan.org/graphql';
 const RPC_URLS = (process.env.BASE_RPC_URL || 'https://mainnet.base.org').split(',');
 const SCOPE = 'proofport';
+// keccak256(scope), UNREDUCED: the keccak-shaped Prover.toml this script writes
+// carries it, and circuits/scripts/oprf-nullifier/oprf.js `convert` checks it
+// against the scope string, then replaces scope and nullifier with the OPRF
+// values (scope as keccak mod p, the nullifier from the circuit's test key).
+// No nullifier line is written here: convert writes it.
+const SCOPE_KECCAK = Array.from(ethers.getBytes(ethers.keccak256(ethers.toUtf8Bytes(SCOPE))));
+// signal_hash = keccak256(scope ++ circuitId ++ requestId): a fresh request id
+// per run, as a real request carries; no wallet address in it.
+const REQUEST_ID = newRequestId();
 const CIRCUITS_DIR = path.resolve(process.cwd(), '..', 'circuits');
 
 function attestationKey(): string {
@@ -71,11 +78,11 @@ async function main() {
 
   // ── coinbase_attestation: the wallet signs signal_hash, EIP-191 ───────────
   const kycId = CIRCUIT_IDS.COINBASE_ATTESTATION;
-  const kycSignal = computeSignalHash(wallet.address, SCOPE, kycId);
+  const kycSignal = computeSignalHash({ scope: SCOPE, circuitId: kycId, requestId: REQUEST_ID });
   const kycSignature = await wallet.signMessage(kycSignal);
 
   const params = await computeCircuitParams(
-    { address: wallet.address, signature: kycSignature, scope: SCOPE, circuitId: kycId },
+    { address: wallet.address, signature: kycSignature, circuitId: kycId, signalHash: ethers.hexlify(kycSignal) },
     EAS_GRAPHQL,
     RPC_URLS,
   );
@@ -84,7 +91,7 @@ async function main() {
   const merkleProofRows = buildPaddedMerkleProof(params.merkleProof, params.merkleDepth);
   const shared = [
     list('signer_list_merkle_root', hexToBytes(params.merkleRoot)),
-    list('scope', Array.from(params.scopeBytes)),
+    list('scope', SCOPE_KECCAK),
   ];
   const privateTail = (signature: string) => [
     list('user_address', hexToBytes(params.userAddress)),
@@ -115,7 +122,6 @@ async function main() {
       header(kycId),
       list('signal_hash', Array.from(kycSignal)),
       ...shared,
-      list('nullifier', Array.from(params.nullifierBytes)),
       '',
       '# ============ Private Inputs ============',
       ...privateTail(kycSignature),
@@ -137,14 +143,14 @@ async function main() {
     const countryList = ['US', 'KR'];
     const isIncluded = true;
 
-    const signal = computeSignalHash(wallet.address, SCOPE, countryId);
+    const signal = computeSignalHash({ scope: SCOPE, circuitId: countryId, requestId: REQUEST_ID });
     const signature = await wallet.signMessage(signal);
     const cp = await computeCircuitParams(
       {
         address: wallet.address,
         signature,
-        scope: SCOPE,
         circuitId: countryId,
+        signalHash: ethers.hexlify(signal),
         countryList,
         isIncluded,
       },
@@ -161,8 +167,7 @@ async function main() {
       nested('country_list', encodeCountryList(countryList), 2),
       `country_list_length = ${countryList.length}`,
       `is_included = ${isIncluded}`,
-      list('scope', Array.from(cp.scopeBytes)),
-      list('nullifier', Array.from(cp.nullifierBytes)),
+      list('scope', SCOPE_KECCAK),
       '',
       '# ============ Private Inputs ============',
       list('user_address', hexToBytes(cp.userAddress)),

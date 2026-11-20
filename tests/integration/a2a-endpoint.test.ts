@@ -3,6 +3,7 @@
  * Tests the full HTTP endpoint flow for Agent-to-Agent protocol
  */
 
+import { oprfParams } from '../helpers/oprfInputs.js';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import request from 'supertest';
 import type { Server } from 'http';
@@ -72,8 +73,7 @@ vi.mock('../../src/input/inputBuilder.js', () => ({
   computeCircuitParams: vi.fn().mockResolvedValue({
     signalHash: new Uint8Array(32).fill(1),
     merkleRoot: '0x' + '22'.repeat(32),
-    scopeBytes: new Uint8Array(32).fill(3),
-    nullifierBytes: new Uint8Array(32).fill(4),
+    oprf: oprfParams(),
     userAddress: '0x' + '55'.repeat(20),
     userSignature: '0x' + '66'.repeat(65),
     userPubkeyX: '0x' + '77'.repeat(32),
@@ -183,7 +183,6 @@ describe('A2A Endpoint E2E', () => {
       proverUrl: '',
       bbPath: '/usr/local/bin/bb',
       circuitsDir: '/circuits',
-      circuitsRepoUrl: 'https://example.com/circuits',
       redisUrl: 'redis://localhost:6379',
       baseRpcUrl: 'https://base-rpc.example.com',
       easGraphqlEndpoint: 'https://eas.example.com',

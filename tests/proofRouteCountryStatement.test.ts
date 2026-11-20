@@ -30,7 +30,7 @@ const verifyPayment = vi.hoisted(() => vi.fn(async () => ({ valid: true })));
 vi.mock('../src/proof/paymentVerifier.js', () => ({ verifyPaymentOnChain: verifyPayment }));
 
 import { createProofRoutes } from '../src/proof/proofRoutes.js';
-import { computeWalletNullifier } from '../src/input/inputBuilder.js';
+import { oprfWireInputs, NETWORK } from './helpers/oprfInputs.js';
 import { COINBASE_COUNTRY_SCHEMA, type AttestationReader, type StatementSigner } from '../src/input/coinbaseStatement.js';
 import { COINBASE_ATTESTER_CONTRACT } from '../src/config/contracts.js';
 import type { Config } from '../src/config/index.js';
@@ -40,7 +40,6 @@ import { createPublicKey } from 'node:crypto';
 const ID = 'coinbase_country_attestation';
 const WALLET = '0xD6C714247037E5201B7e3dEC97a3ab59a9d2F739';
 const UID = '0x' + '5a'.repeat(32);
-const SCOPE = ethers.keccak256(ethers.toUtf8Bytes('proofport'));
 const ATTESTER_KEY = new ethers.Wallet(ethers.keccak256(ethers.toUtf8Bytes('country route attester')));
 
 const priv = nobleP256.utils.randomPrivateKey();
@@ -75,13 +74,13 @@ function deps(o: { revocationTime?: bigint; country?: string } = {}) {
 const baseConfig = {
   paymentMode: 'disabled', paymentNetworks: 'base-sepolia', paymentProofPrice: '$0.10', paymentPayTo: '0x' + '11'.repeat(20),
   teeMode: 'local', chainRpcUrl: 'https://sepolia.base.org', a2aBaseUrl: 'https://proof.example.com',
+  oprfEnvironment: 'staging',
 } as Config;
 
 async function inputs(extra: Record<string, unknown> = {}, txCountry = 'KR') {
   return {
     signal_hash: '0x' + '11'.repeat(32),
-    nullifier: ethers.hexlify(computeWalletNullifier(WALLET, ID, ethers.getBytes(SCOPE))),
-    scope_bytes: SCOPE,
+    ...oprfWireInputs(),
     merkle_root: '0x' + '44'.repeat(32), user_address: WALLET, ...(await countryTx(txCountry)),
     signature: '0x' + '66'.repeat(65), user_pubkey_x: '0x' + '77'.repeat(32), user_pubkey_y: '0x' + '88'.repeat(32),
     coinbase_attester_pubkey_x: '0x' + '99'.repeat(32), coinbase_attester_pubkey_y: '0x' + 'aa'.repeat(32),
@@ -150,15 +149,13 @@ describe('coinbase_country_attestation v2 statement in the proof route', () => {
     expect(d.reader.latestUid).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ['a v1 (signal-hash) nullifier', () => ethers.keccak256(ethers.concat([ethers.keccak256(ethers.concat([WALLET, '0x' + '11'.repeat(32)])), SCOPE]))],
-    ["the KYC tag's nullifier", () => ethers.hexlify(computeWalletNullifier(WALLET, 'coinbase_attestation', ethers.getBytes(SCOPE)))],
-  ])('refuses %s before reading anything', async (_name, nullifier) => {
+  it('refuses an OPRF answer under another key hash before reading anything', async () => {
     const d = deps();
+    const other = '0x' + (BigInt(NETWORK.keyHash) ^ 1n).toString(16).padStart(64, '0');
     const res = await request(app(baseConfig, d)).post('/api/v1/prove').set('X-Payment-Nonce', 'n')
-      .send({ circuit: ID, inputs: await inputs({ nullifier: nullifier() }) });
+      .send({ circuit: ID, inputs: await inputs({ oprf_key_hash: other }) });
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe('NULLIFIER_RULE');
+    expect(res.body.error).toBe('OPRF_KEY_HASH_MISMATCH');
     expect(d.reader.latestUid).not.toHaveBeenCalled();
   });
 

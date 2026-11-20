@@ -39,6 +39,16 @@ export function verifyRpcUrl(chainId: number): string {
  */
 export interface VerifyOptions {
   minScore?: number;
+  /**
+   * The request the proof answers: `{ scope, requestId }`, as returned on the
+   * ProofResult. Passed to core's verify options. Core checks an OIDC proof's
+   * nonce against it today; the check that a wallet proof without an action
+   * carries keccak256(scope ++ circuitId ++ requestId) as its signal_hash runs
+   * once this package depends on a core release later than 0.4.0-beta.8
+   * (core's `checkSignalHash`). Until then, compare it yourself:
+   * `computeSignalHash({ scope, circuitId, requestId })` against public inputs 0-31.
+   */
+  request?: { scope: string; requestId: string };
 }
 
 /**
@@ -99,9 +109,13 @@ export async function verifyOnChain(
 
   const parsed = { proofHex: proof, publicInputsHex: publicInputsArray, numPublicInputs: publicInputsArray.length };
   const claimed = { verifierAddress: claim.verifierAddress, chainId };
-  const result = options.minScore === undefined
+  const checks = {
+    ...(options.minScore !== undefined && { minScore: options.minScore }),
+    ...(options.request !== undefined && { request: options.request }),
+  };
+  const result = Object.keys(checks).length === 0
     ? await verifyProofOnChain(circuit, parsed, provider, { chainId }, claimed)
-    : await verifyProofOnChain(circuit, parsed, provider, { chainId }, claimed, { minScore: options.minScore });
+    : await verifyProofOnChain(circuit, parsed, provider, { chainId }, claimed, checks);
   if (result.error !== undefined) {
     return { valid: false, error: `Verification failed: ${result.error}` };
   }

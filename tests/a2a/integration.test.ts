@@ -44,7 +44,6 @@ describe('A2A Integration Tests', () => {
       proverUrl: '',
       bbPath: 'bb',
       circuitsDir: '/tmp/circuits',
-      circuitsRepoUrl: 'https://github.com/example/circuits',
       redisUrl: 'redis://localhost:6379',
       baseRpcUrl: 'https://base.example.com',
       easGraphqlEndpoint: 'https://eas.example.com',

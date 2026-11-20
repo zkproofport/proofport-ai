@@ -73,6 +73,13 @@ warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 
 BASE_URL="${E2E_BASE_URL:-http://localhost:4002}"
 
+# The bb the circuit artifacts were built with (circuits/toolchain.env).
+PINNED_BB_VERSION="$(sed -n 's/^BB_VERSION=//p' ../circuits/toolchain.env 2>/dev/null)"
+if [ -z "$PINNED_BB_VERSION" ]; then
+  echo "No BB_VERSION in ../circuits/toolchain.env -- is the circuits repo next to this one?"
+  exit 1
+fi
+
 if [ -z "$WANT_PAYMENT" ]; then
   WANT_PAYMENT=$REMOTE
 fi
@@ -181,6 +188,10 @@ wait_for_mode() {
 check_prover() {
   local out
   if out=$(docker exec proofport-ai /usr/local/bin/bb-wrapper --version 2>&1); then
+    if [ "$out" != "$PINNED_BB_VERSION" ]; then
+      err "The container's bb is $out; ../circuits/toolchain.env pins $PINNED_BB_VERSION. Rebuild the image (--build)."
+      return 1
+    fi
     ok "Prover runs here: bb ${out}"
     return 0
   fi
@@ -203,32 +214,37 @@ ensure_published_packages() {
     ok "Published package entries taken from the environment"
     return 0
   fi
-  local ver dir
+  # Each package at ITS OWN version. Until 2026-11-17 the SDK was asked for
+  # at the MCP's version (sdk@0.4.9 next to mcp@0.4.9), which does not exist
+  # since the two diverged, so the install always failed and the published
+  # step-flow suite never ran locally.
+  local ver sdk_ver dir
   ver="$(node -p "require('./packages/mcp/package.json').version")"
-  dir="${TMPDIR:-/tmp}/proofport-published-$ver"
+  sdk_ver="$(node -p "require('./packages/sdk/package.json').version")"
+  dir="${TMPDIR:-/tmp}/proofport-published-mcp$ver-sdk$sdk_ver"
   if [ ! -f "$dir/node_modules/@zkproofport-ai/mcp/dist/index.js" ]; then
-    log "Installing @zkproofport-ai/mcp@$ver and sdk@$ver from the registry into $dir"
+    log "Installing @zkproofport-ai/mcp@$ver and sdk@$sdk_ver from the registry into $dir"
     mkdir -p "$dir"
     # The optional wallet peers come too. The SDK leaves CDP support to the
     # consumer so nobody pulls Coinbase's SDK to pay with a private key -- and
     # a fixture without them fails as "Could not load the CDP wallet support",
     # which reads like a broken published package.
     if ! (cd "$dir" && npm init -y >/dev/null 2>&1 && npm install --silent \
-      "@zkproofport-ai/mcp@$ver" "@zkproofport-ai/sdk@$ver" \
+      "@zkproofport-ai/mcp@$ver" "@zkproofport-ai/sdk@$sdk_ver" \
       "@coinbase/cdp-sdk@>=1.55.0" "@x402/extensions@>=2.25.0" \
       "@x402/core@>=2.25.0" "@x402/evm@>=2.25.0" "@x402/svm@>=2.25.0" >/dev/null 2>&1); then
       if [ "$REMOTE" = true ]; then
-        err "Could not install $ver from the registry. A deployment is only tested with the published packages; publish $ver first."
+        err "Could not install mcp@$ver / sdk@$sdk_ver from the registry. A deployment is only tested with the published packages; publish them first."
         exit 1
       fi
-      warn "Could not install version $ver from the registry — is it published yet?"
+      warn "Could not install mcp@$ver / sdk@$sdk_ver from the registry — are they published yet?"
       warn "The published MCP step-flow suite will refuse to run, which is the honest outcome."
       return 0
     fi
   fi
   export E2E_MCP_ENTRY="$dir/node_modules/@zkproofport-ai/mcp/dist/index.js"
   export E2E_PUBLISHED_SDK_ENTRY="$dir/node_modules/@zkproofport-ai/sdk/dist/index.js"
-  ok "Published packages $ver from the registry: $dir"
+  ok "Published packages mcp@$ver, sdk@$sdk_ver from the registry: $dir"
 }
 
 run_suites() {
@@ -253,16 +269,27 @@ stop_mac_server() {
   [ -n "$MAC_SERVER_PID" ] && kill "$MAC_SERVER_PID" 2>/dev/null
   MAC_SERVER_PID=""
 }
-trap stop_mac_server EXIT
+# A run that dies on an error must not exit 0. On macOS bash 3.2 an EXIT trap
+# sees $? = 0 after a `set -u` abort, so the run ended with status 0 --
+# measured 2026-11-17, "unbound variable" followed by exit 0. Only the final
+# `exit $EXIT_CODE` sets FINISHED; any other way out with status 0 becomes 1.
+FINISHED=false
+trap 'rc=$?; stop_mac_server; [ "$FINISHED" = true ] || [ $rc -ne 0 ] || rc=1; exit $rc' EXIT
 
 start_mac_server() {
-  local bb="${BB_PATH:-$HOME/.bb/bb}"
+  # The pinned bb from its versioned folder, not ~/.bb/bb, which points at
+  # whichever set was installed as the default.
+  local bb="${BB_PATH:-$HOME/.bb/versions/$PINNED_BB_VERSION/bb}"
   if [ ! -x "$bb" ]; then
-    err "No prover at $bb. Build it: ../scripts/build-bb-native.sh"
+    err "No prover at $bb. Install the pinned pair: ../circuits/scripts/install-toolchain.sh"
     return 1
   fi
   local version
   version="$("$bb" --version 2>&1 | tail -1)"
+  if [ "$version" != "$PINNED_BB_VERSION" ]; then
+    err "$bb is bb $version; ../circuits/toolchain.env pins $PINNED_BB_VERSION"
+    return 1
+  fi
   ok "Prover: $bb — $version"
 
   # Redis, and nothing else, from the stack. It publishes 6380.
@@ -280,11 +307,13 @@ start_mac_server() {
   PAYMENT_MODE=disabled
   BB_PATH="$bb"
   CIRCUITS_DIR="$PWD/circuits"
+  # The artifacts scripts/ai-dev.sh copied and pinned, never main's over them.
+  CIRCUITS_AUTO_UPDATE=false
   REDIS_URL="${MAC_REDIS_URL:-redis://localhost:6380}"
   # docker-compose supplies these two; .env.development does not.
   A2A_BASE_URL="http://localhost:4002"
   SIGN_PAGE_URL="http://localhost:4002/sign"
-  export PAYMENT_PROOF_PRICE PAYMENT_MODE BB_PATH CIRCUITS_DIR REDIS_URL A2A_BASE_URL SIGN_PAGE_URL
+  export PAYMENT_PROOF_PRICE PAYMENT_MODE BB_PATH CIRCUITS_DIR CIRCUITS_AUTO_UPDATE REDIS_URL A2A_BASE_URL SIGN_PAGE_URL
 
   MAC_SERVER_LOG="${TMPDIR:-/tmp}/proofport-ai-mac-server.log"
   log "Starting the server on this Mac, log: $MAC_SERVER_LOG"
@@ -317,7 +346,10 @@ fi
 ensure_published_packages
 
 FREE_RESULT=0
-run_suites disabled "${FREE_SUITES[@]}" || FREE_RESULT=$?
+# ${a[@]+"${a[@]}"}: macOS bash 3.2 under `set -u` treats an empty array as
+# unbound. `--only` naming a paying suite left FREE_SUITES empty, and the
+# script died here -- and reported exit 0 (see the trap above).
+run_suites disabled ${FREE_SUITES[@]+"${FREE_SUITES[@]}"} || FREE_RESULT=$?
 [ $FREE_RESULT -eq 0 ] && ok "Free-tier suites passed" || err "Free-tier suites FAILED (exit $FREE_RESULT)"
 
 # ─── Phase 2: payment on ─────────────────────────────────────────────────
@@ -331,7 +363,7 @@ elif [ ${#PAID_SUITES[@]} -eq 0 ]; then
   warn "Skipping the paying suites (--only '$ONLY' matches none of them)"
 elif [ "$REMOTE" = true ]; then
   PAYMENT_RAN=true
-  run_suites "as the deployment has it" "${PAID_SUITES[@]}" || PAYMENT_RESULT=$?
+  run_suites "as the deployment has it" ${PAID_SUITES[@]+"${PAID_SUITES[@]}"} || PAYMENT_RESULT=$?
 elif [ "$CONTAINER" = false ]; then
   warn "Paying suite not run: the server on this Mac is started with payment off"
 else
@@ -339,7 +371,7 @@ else
   $COMPOSE_PAYMENT up -d ai 2>&1 | tail -3
   if wait_for_mode testnet; then
     PAYMENT_RAN=true
-    run_suites testnet "${PAID_SUITES[@]}" || PAYMENT_RESULT=$?
+    run_suites testnet ${PAID_SUITES[@]+"${PAID_SUITES[@]}"} || PAYMENT_RESULT=$?
   else
     PAYMENT_RESULT=1
   fi
@@ -369,4 +401,5 @@ echo "════════════════════════�
 EXIT_CODE=0
 [ $FREE_RESULT -ne 0 ] && EXIT_CODE=1
 [ $PAYMENT_RESULT -ne 0 ] && EXIT_CODE=1
+FINISHED=true
 exit $EXIT_CODE

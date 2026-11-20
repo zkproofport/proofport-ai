@@ -25,11 +25,27 @@
  * the statement exactly as the route does, but for the throwaway RSA key the
  * tokens here are signed with -- it skips only the live key-list check.
  *
+ * Optionally PROVE the accepted cases too:
+ *
+ *   npx tsx scripts/check-oidc-inputs.ts <circuit.json> --prove <bb> [--save <dir>]
+ *
+ * writes each solved witness and runs `<bb> prove` and `<bb> verify` with
+ * `-k <circuit dir>/vk/vk -t evm`, exactly as src/prover/bbProver.ts does, so
+ * a toolchain move can be checked from the server's own OIDC builder through
+ * to a verified proof without a human Google sign-in. --save keeps the first
+ * case's witness.gz, proof and public_inputs in <dir>: the proof for the
+ * circuits repo's scripts/verify-onchain.sh, the witness for
+ * scripts/check-image-prover.sh (WITNESS_DIR). The vk must be the one built
+ * with that bb.
+ *
  * Exits non-zero on any unexpected result. Needs `env -u NODE_OPTIONS` on a
  * shell whose NODE_OPTIONS preloads a file that no longer exists.
  */
-import { readFileSync } from 'fs';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, copyFileSync, rmSync, statSync } from 'fs';
 import { generateKeyPairSync, sign } from 'crypto';
+import { execFileSync } from 'child_process';
+import { tmpdir } from 'os';
+import { dirname, join } from 'path';
 import { Noir } from '@noir-lang/noir_js';
 import { ethers } from 'ethers';
 import { prepareOidcCircuitInputs, oidcStatementSubject, type OidcProvePayload } from '../src/prover/oidcProver.js';
@@ -39,7 +55,44 @@ import { formatOidcInputs, type OidcCircuitInputs } from '../src/prover/inputFor
 
 const circuitPath = process.argv[2];
 if (!circuitPath) {
-  throw new Error('Usage: npx tsx scripts/check-oidc-inputs.ts <path to oidc_domain_attestation.json>');
+  throw new Error('Usage: npx tsx scripts/check-oidc-inputs.ts <path to oidc_domain_attestation.json> [--prove <bb> [--save <dir>]]');
+}
+const flags = process.argv.slice(3);
+function flagValue(name: string): string | undefined {
+  const at = flags.indexOf(name);
+  if (at === -1) return undefined;
+  const value = flags[at + 1];
+  if (!value || value.startsWith('--')) throw new Error(`${name} needs a value`);
+  return value;
+}
+const unknownFlags = flags.filter((f, i) => f.startsWith('--') && !['--prove', '--save'].includes(f) && flags[i - 1] !== '--prove' && flags[i - 1] !== '--save');
+if (unknownFlags.length) throw new Error(`Unknown option(s): ${unknownFlags.join(', ')}. Known: --prove <bb>, --save <dir>`);
+const proveBb = flagValue('--prove');
+const saveDir = flagValue('--save');
+if (saveDir && !proveBb) throw new Error('--save needs --prove <bb>');
+const vkPath = join(dirname(circuitPath), 'vk', 'vk');
+if (proveBb) statSync(vkPath);
+let proved = 0;
+let saved = false;
+function proveAndVerify(witness: Uint8Array): number {
+  const work = mkdtempSync(join(tmpdir(), 'check-oidc-prove-'));
+  try {
+    const witnessPath = join(work, 'witness.gz');
+    writeFileSync(witnessPath, witness);
+    const out = join(work, 'proof');
+    execFileSync(proveBb!, ['prove', '-b', circuitPath, '-w', witnessPath, '-k', vkPath, '-o', out, '-t', 'evm'], { stdio: 'pipe' });
+    execFileSync(proveBb!, ['verify', '-p', join(out, 'proof'), '-i', join(out, 'public_inputs'), '-k', vkPath, '-t', 'evm'], { stdio: 'pipe' });
+    if (saveDir && !saved) {
+      mkdirSync(saveDir, { recursive: true });
+      copyFileSync(join(out, 'proof'), join(saveDir, 'proof'));
+      copyFileSync(join(out, 'public_inputs'), join(saveDir, 'public_inputs'));
+      copyFileSync(witnessPath, join(saveDir, 'witness.gz'));
+      saved = true;
+    }
+    return statSync(join(out, 'proof')).size;
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
 }
 const circuit = JSON.parse(readFileSync(circuitPath, 'utf8'));
 const params = circuit.abi?.parameters as Array<{ name: string; visibility: string }> | undefined;
@@ -137,17 +190,30 @@ for (const c of cases) {
   c.tamper?.(built);
   let solved = true;
   let reason = '';
+  let witness: Uint8Array | undefined;
   try {
-    await noir.execute(formatOidcInputs(built) as never);
+    witness = (await noir.execute(formatOidcInputs(built) as never)).witness;
   } catch (error) {
     solved = false;
     reason = error instanceof Error ? error.message : String(error);
   }
   const wanted = !c.tamper;
-  const ok = solved === wanted;
+  let ok = solved === wanted;
+  let proofNote = '';
+  if (ok && solved && proveBb) {
+    try {
+      proofNote = `; proved and verified, ${proveAndVerify(witness!)} B proof`;
+      proved++;
+    } catch (error) {
+      ok = false;
+      const e = error as { stderr?: Buffer; message?: string };
+      proofNote = `; bb FAILED: ${e.stderr?.toString() || e.message}`;
+    }
+  }
   if (!ok) failures++;
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${c.name}: witness ${solved ? 'solved' : `refused (${reason})`}` +
-    ` [partial_data ${built.partial_data.len} B, decode offset ${built.base64_decode_offset}]`);
+    ` [partial_data ${built.partial_data.len} B, decode offset ${built.base64_decode_offset}]${proofNote}`);
 }
-console.log(`${cases.length - failures}/${cases.length} as expected against ${circuitPath}`);
+console.log(`${cases.length - failures}/${cases.length} as expected against ${circuitPath}` +
+  (proveBb ? `; ${proved} proved and verified with ${proveBb}${saved ? `, first proof saved in ${saveDir}` : ''}` : ''));
 process.exit(failures === 0 ? 0 : 1);

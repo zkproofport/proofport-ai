@@ -553,7 +553,8 @@ Read guides with HTTPS GET; get_guide is a remote service tool, not a local SDK 
 For a single attestation + exact-action authorization proof, select \`generate_proof\` with:
 - circuit: \`giwa_attestation\`
 - action: the application's complete EIP-712 typed action (optional; omit for an identity-only proof)
-- scope: the application's scope, e.g. \`myapp:membership\`
+- scope (required, no default): the application's scope, e.g. \`myapp:membership\`
+- oprf_domain (required for wallet circuits, never filled in): the service the proof is for, e.g. \`myapp.example.com\`
 - pay_with: \`key\` or \`cdp\` for an existing funded payment wallet
 - pay_on: one of the live offered networks below
 
@@ -579,7 +580,7 @@ transfer transaction.
 
 Choose any canonical circuit above and its guide; omit --action for an identity-only proof. With the existing signer environment loaded and an offered payment network:
 
-\`PROOFPORT_URL=${config.a2aBaseUrl} zkproofport-prove giwa_attestation --action action.json --scope myapp:membership --pay-with key --pay-on <offered network> --max-payment 0.001 --silent\`
+\`PROOFPORT_URL=${config.a2aBaseUrl} zkproofport-prove giwa_attestation --action action.json --scope myapp:membership --oprf-domain myapp.example.com --pay-with key --pay-on <offered network> --max-payment 0.001 --silent\`
 
 This CLI calls the local MCP generate_proof tool. An agent already connected to the local MCP
 server can call that tool directly without spawning the prove CLI.

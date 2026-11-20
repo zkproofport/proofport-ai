@@ -41,6 +41,9 @@ import {
   type HumanPassportReader,
 } from '../input/humanPassport.js';
 import type { HumanPassportParams } from '../prover/inputFormatter.js';
+import { OprfInputRefusal, OPRF_REFUSAL_STATUS, readOprfInputs, type OprfCircuitInputs } from '../input/oprfInputs.js';
+import { getPinnedOprfKeyHash, isOprfCircuitId } from '../config/oprfKeyHashes.js';
+import { ALL_CIRCUIT_IDS } from '../config/circuitIds.js';
 import type {
   ProveRequest,
   ProveResponse,
@@ -124,9 +127,24 @@ function countryFieldsError(inputs: unknown): string | null {
   return null;
 }
 
+/**
+ * The environment checks of readOprfInputs alone, for an encrypted payload
+ * whose values this server cannot read: OPRF_ENVIRONMENT set, and a key
+ * registered for it (production has none) and this circuit.
+ */
+function assertOprfAvailable(environment: Config['oprfEnvironment'], circuitId: CircuitId): void {
+  if (environment === undefined) {
+    throw new OprfInputRefusal('OPRF_NOT_CONFIGURED', `OPRF_ENVIRONMENT is not set on this server, so it cannot accept ${circuitId} proofs.`);
+  }
+  try {
+    getPinnedOprfKeyHash(environment, circuitId, ALL_CIRCUIT_IDS as readonly string[]);
+  } catch (e) {
+    throw new OprfInputRefusal('OPRF_UNAVAILABLE', (e as Error).message);
+  }
+}
+
 const STATEMENT_REFUSAL_STATUS: Record<string, number> = {
   INVALID_REQUEST: 400,
-  NULLIFIER_RULE: 400,
   NO_COINBASE_ATTESTATION: 403,
   COINBASE_ATTESTATION_REVOKED: 403,
   COINBASE_ATTESTATION_EXPIRED: 403,
@@ -159,6 +177,8 @@ interface ProveContext {
   oidcStatement?: OidcProviderKeyStatement;
   /** human_passport_score: the issuance found and checked before payment was taken. */
   humanPassport?: HumanPassportPrepared;
+  /** Every wallet circuit: the OPRF nullifier inputs, checked before payment (readOprfInputs). */
+  oprf?: OprfCircuitInputs;
 }
 
 /**
@@ -259,6 +279,9 @@ async function generateProofFromInputs(
   if (isOidc !== Boolean(ctx.oidcStatement)) {
     throw new Error(`${circuitId}: the provider-key statement is ${ctx.oidcStatement ? 'present for a circuit that takes none' : 'missing'}`);
   }
+  if (isOprfCircuitId(circuitId) !== Boolean(ctx.oprf)) {
+    throw new Error(`${circuitId}: the OPRF inputs are ${ctx.oprf ? 'present for a circuit that takes none' : 'missing'}`);
+  }
   const isPassport = circuitId === CIRCUIT_IDS.HUMAN_PASSPORT_SCORE;
   if (isPassport !== Boolean(ctx.humanPassport)) {
     throw new Error(`${circuitId}: the Human Passport issuance is ${ctx.humanPassport ? 'present for a circuit that takes none' : 'missing'}`);
@@ -270,8 +293,7 @@ async function generateProofFromInputs(
     const prepared = ctx.humanPassport!;
     proverInputs = {
       signalHash: ethers.getBytes(hp.signal_hash),
-      scopeBytes: ethers.getBytes(hp.scope_bytes),
-      nullifierBytes: ethers.getBytes(hp.nullifier),
+      oprf: ctx.oprf!,
       userAddress: hp.user_address,
       userSignature: hp.signature,
       userPubkeyX: hp.user_pubkey_x,
@@ -295,8 +317,8 @@ async function generateProofFromInputs(
   } else {
     // Coinbase: validate and convert to CircuitParams — TEE/bbProver calls toProverToml()
     const cb = inputs as import('./types.js').CoinbaseProveInputs;
-    if (!cb.signal_hash || !cb.nullifier || !cb.scope_bytes || !cb.merkle_root || !cb.user_address) {
-      res.status(400).json({ error: 'INVALID_REQUEST', message: 'Missing required derived fields: signal_hash, nullifier, scope_bytes, merkle_root, user_address' });
+    if (!cb.signal_hash || !cb.merkle_root || !cb.user_address) {
+      res.status(400).json({ error: 'INVALID_REQUEST', message: 'Missing required derived fields: signal_hash, merkle_root, user_address' });
       return;
     }
 
@@ -313,8 +335,7 @@ async function generateProofFromInputs(
     proverInputs = {
       signalHash: ethers.getBytes(cb.signal_hash),
       merkleRoot: cb.merkle_root,
-      scopeBytes: ethers.getBytes(cb.scope_bytes),
-      nullifierBytes: ethers.getBytes(cb.nullifier),
+      oprf: ctx.oprf!,
       userAddress: cb.user_address,
       userSignature: cb.signature,
       userPubkeyX: cb.user_pubkey_x,
@@ -658,9 +679,33 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
         return;
       }
 
+      // Every wallet circuit carries the OPRF nullifier. Checked BEFORE payment:
+      // an unset OPRF_ENVIRONMENT, an environment with no OPRF key
+      // (production today), a malformed value or an answer under a key other
+      // than the pinned one is refused for free -- every verifier would refuse
+      // the proof. An encrypted payload cannot be read here, so only the
+      // environment is checked for it; the enclave checks the values' shape.
+      let oprf: OprfCircuitInputs | undefined;
+      if (isOprfCircuitId(circuitId)) {
+        try {
+          if (body.encrypted_payload) {
+            assertOprfAvailable(config.oprfEnvironment, circuitId);
+          } else {
+            oprf = readOprfInputs(config.oprfEnvironment, circuitId, body.inputs);
+          }
+        } catch (e) {
+          if (e instanceof OprfInputRefusal) {
+            log.warn({ action: 'prove.oprf.refused', circuit: circuitId, code: e.code }, 'OPRF inputs refused');
+            res.status(OPRF_REFUSAL_STATUS[e.code]).json({ error: e.code, message: e.message });
+            return;
+          }
+          throw e;
+        }
+      }
+
       // Coinbase v2 (KYC and Country): read the attestation on chain and sign
       // the revocation statement BEFORE any payment is taken, so a revoked or
-      // unattested wallet, an SDK still deriving v1's nullifier, or (Country)
+      // unattested wallet, or (Country)
       // a transaction whose country the current attestation does not name, is
       // refused for free. The statement is bound to this request's digest and
       // scope.
@@ -679,8 +724,8 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
           return;
         }
         const cb = body.inputs as import('./types.js').CoinbaseProveInputs;
-        if (!cb.signal_hash || !cb.nullifier || !cb.scope_bytes || !cb.user_address) {
-          res.status(400).json({ error: 'INVALID_REQUEST', message: 'Missing required derived fields: signal_hash, nullifier, scope_bytes, user_address' });
+        if (!cb.signal_hash || !cb.user_address) {
+          res.status(400).json({ error: 'INVALID_REQUEST', message: 'Missing required derived fields: signal_hash, user_address' });
           return;
         }
         if (circuitId === CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION) {
@@ -691,7 +736,7 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
           }
         }
         const HASH32 = /^0x[0-9a-fA-F]{64}$/;
-        const badField = (['signal_hash', 'nullifier', 'scope_bytes'] as const).find(k => typeof cb[k] !== 'string' || !HASH32.test(cb[k]));
+        const badField = (['signal_hash'] as const).find(k => typeof cb[k] !== 'string' || !HASH32.test(cb[k]));
         if (badField || typeof cb.user_address !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(cb.user_address)) {
           res.status(400).json({
             error: 'INVALID_REQUEST',
@@ -708,8 +753,7 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
               circuitId,
               userAddress: cb.user_address,
               signalHash: ethers.getBytes(cb.signal_hash),
-              scopeBytes: ethers.getBytes(cb.scope_bytes),
-              nullifierBytes: ethers.getBytes(cb.nullifier),
+              scopeField: oprf!.scope,
               domainSeparator: cb.domain_separator,
               actionHash: cb.action_hash,
               ...(circuitId === CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION && {
@@ -1041,6 +1085,7 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
           statement,
           oidcStatement,
           humanPassport,
+          oprf,
         },
         deps,
         config,
@@ -1058,6 +1103,24 @@ export function createProofRoutes(deps: ProofRoutesDeps): Router {
   });
 
   // GET /guide/:circuit -- Comprehensive guide for client AI agents
+  /**
+   * GET /api/v1/oprf -- which OPRF environment this deployment proves wallet
+   * credentials for. The client SDK reads it to choose the OPRF network and
+   * the key hash pinned for that environment (its own table, never a value
+   * from this response), so a customer configures nothing. 503 when
+   * OPRF_ENVIRONMENT is unset: wallet credential proofs are refused then too.
+   */
+  router.get('/oprf', (_req: Request, res: Response) => {
+    if (config.oprfEnvironment === undefined) {
+      res.status(503).json({
+        error: 'OPRF_NOT_CONFIGURED',
+        message: 'OPRF_ENVIRONMENT is not set on this server, so it does not prove wallet credentials (coinbase_kyc, coinbase_country, giwa, human_passport).',
+      });
+      return;
+    }
+    res.json({ environment: config.oprfEnvironment });
+  });
+
   router.get('/guide/:circuit', (req: Request, res: Response) => {
     const circuit = req.params.circuit;
     const circuitId = CIRCUIT_MAP[circuit];

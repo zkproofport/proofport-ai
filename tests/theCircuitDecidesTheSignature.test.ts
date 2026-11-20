@@ -17,11 +17,13 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import { ethers } from 'ethers';
 import { CIRCUIT_IDS } from '../packages/sdk/src/circuits.js';
+import { STUB_OPRF_INPUTS } from './helpers/oprfStub.js';
 
 vi.mock('../packages/sdk/src/inputs.js', async (original) => ({
   ...await original<typeof import('../packages/sdk/src/inputs.js')>(),
   prepareInputs: vi.fn(async () => ({ signal_hash: '0xprepared' })),
 }));
+vi.mock('../packages/sdk/src/oprf/index.js', async orig => (await import('./helpers/oprfStub.js')).stubOprf(await orig()));
 vi.mock('../packages/sdk/src/session.js', () => ({
   requestChallenge: vi.fn(async () => ({ nonce: 'test-nonce', requiresPayment: false })),
 }));
@@ -61,7 +63,12 @@ async function runFlow(params: Record<string, unknown>, signer: ReturnType<typeo
   return generateProof(
     { baseUrl: 'http://localhost:4002' } as never,
     { attestation: signer } as never,
-    params as never,
+    // Wallet circuits need the OPRF domain (stubbed OPRF step, tests/helpers/oprfStub.ts).
+    // Scope is required (no default); these tests are about the signature, so give one when absent.
+    (() => {
+      const p = 'scope' in params ? params : { ...params, scope: 'test' };
+      return (p.circuit === 'oidc_domain' || 'oprfDomain' in p ? p : { ...p, oprfDomain: 'app.example.com' });
+    })() as never,
   );
 }
 
@@ -70,7 +77,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 /** Simulate the HTTP result of a separate human wallet approval. */
 async function runApprovedFlow(params: Record<string, unknown>, signer: ReturnType<typeof watchfulSigner>, onStatus?: () => void) {
-  const frozen = structuredClone({ circuit: params.circuit, scope: params.scope || 'proofport', action: params.action as typeof ACTION });
+  const frozen = structuredClone({ circuit: params.circuit, scope: (params.scope as string | undefined) ?? 'test', action: params.action as typeof ACTION });
   const approval = { approvalId: 'human-fixture', requesterToken: 'requester-capability',
     approvalUrl: 'https://ai.example.test/approve/human-fixture#browser-capability', expiresAt: '2099-01-01T00:00:00.000Z' };
   const signature = await humanWallet.signTypedData(frozen.action.domain, frozen.action.types, frozen.action.message);
@@ -81,7 +88,7 @@ async function runApprovedFlow(params: Record<string, unknown>, signer: ReturnTy
     return Response.json({ ...frozen, approvalId: approval.approvalId, expiresAt: approval.expiresAt,
       status: 'approved', address: humanWallet.address });
   }));
-  return runFlow({ ...params, actionApproval: approval }, signer);
+  return runFlow({ ...params, scope: frozen.scope, actionApproval: approval }, signer);
 }
 
 describe('the circuit decides the signature', () => {
@@ -285,8 +292,7 @@ describe('what the prover hands to noir_js', () => {
     return {
       signalHash: new Uint8Array(32).fill(0xab),
       merkleRoot: '0x' + 'cd'.repeat(32),
-      scopeBytes: new Uint8Array(32).fill(0xef),
-      nullifierBytes: new Uint8Array(32).fill(0x12),
+      oprf: { ...STUB_OPRF_INPUTS },
       userAddress: '0x' + '34'.repeat(20),
       userSignature: '0x' + '56'.repeat(32) + '78'.repeat(32) + '1b',
       userPubkeyX: '0x' + '9a'.repeat(32),
@@ -311,6 +317,13 @@ describe('what the prover hands to noir_js', () => {
     domainSeparator: '0x' + 'aa'.repeat(32),
     actionHash: '0x' + 'bb'.repeat(32),
   };
+
+  it('sends the eleven OPRF inputs under the circuit\'s parameter names, and no byte-array scope or nullifier', async () => {
+    const inputs = await format(CIRCUIT_IDS.GIWA_ATTESTATION);
+    for (const [k, v] of Object.entries(STUB_OPRF_INPUTS)) expect(inputs[k]).toBe(v);
+    expect(Array.isArray(inputs.scope)).toBe(false);
+    expect(Array.isArray(inputs.nullifier)).toBe(false);
+  });
 
   for (const circuitId of [CIRCUIT_IDS.GIWA_ATTESTATION]) {
     it(`sends ${circuitId} an empty action pair when no action was bound`, async () => {

@@ -141,8 +141,17 @@ export function buildSwaggerSpec(baseUrl: string, agentName = 'ZKProofport prove
                         circuit: 'coinbase_kyc',
                         inputs: {
                           signal_hash: '0x...',
+                          oprf_key_hash: '0x...',
+                          domain: '0x...',
+                          scope: '0x...',
                           nullifier: '0x...',
-                          scope_bytes: '0x...',
+                          oprf_public_key_x: '0x...',
+                          oprf_public_key_y: '0x...',
+                          oprf_beta: '0x...',
+                          oprf_dlog_e: '0x...',
+                          oprf_dlog_s: '0x...',
+                          oprf_response_x: '0x...',
+                          oprf_response_y: '0x...',
                           merkle_root: '0x...',
                           user_address: '0x...',
                           signature: '0x...',
@@ -600,11 +609,20 @@ export function buildSwaggerSpec(baseUrl: string, agentName = 'ZKProofport prove
                   inputs: {
                     type: 'object',
                     description: 'Circuit inputs for proof generation',
-                    required: ['signal_hash', 'nullifier', 'scope_bytes', 'merkle_root', 'user_address', 'signature', 'user_pubkey_x', 'user_pubkey_y', 'raw_transaction', 'tx_length', 'coinbase_attester_pubkey_x', 'coinbase_attester_pubkey_y', 'merkle_proof', 'leaf_index', 'depth'],
+                    required: ['signal_hash', 'oprf_key_hash', 'domain', 'scope', 'nullifier', 'oprf_public_key_x', 'oprf_public_key_y', 'oprf_beta', 'oprf_dlog_e', 'oprf_dlog_s', 'oprf_response_x', 'oprf_response_y', 'merkle_root', 'user_address', 'signature', 'user_pubkey_x', 'user_pubkey_y', 'raw_transaction', 'tx_length', 'coinbase_attester_pubkey_x', 'coinbase_attester_pubkey_y', 'merkle_proof', 'leaf_index', 'depth'],
                     properties: {
                       signal_hash: { type: 'string', description: '0x-prefixed 32-byte signal hash' },
-                      nullifier: { type: 'string', description: '0x-prefixed 32-byte nullifier' },
-                      scope_bytes: { type: 'string', description: '0x-prefixed 32-byte keccak256 of scope string' },
+                      oprf_key_hash: { type: 'string', description: 'Public. Hash of the OPRF network key that answered. Must equal the key hash pinned for this deployment\'s environment (GET /api/v1/oprf) and the circuit, or the request is refused before payment (OPRF_KEY_HASH_MISMATCH). 0x + exactly 64 hex, below the BN254 field modulus p; never reduced. Computed by the SDK OPRF step (@zkproofport-ai/sdk generateProof / the MCP prepare step), which asks the OPRF network for this wallet in (domain, scope) and verifies its answer.' },
+                      domain: { type: 'string', description: 'Public. The nullifier domain: keccak256(UTF-8 domain name) mod p, where the domain name (1-256 UTF-8 bytes, no control or format characters) names the service the proof is for. 0x + exactly 64 hex, below the BN254 field modulus p; never reduced. Computed by the SDK OPRF step (@zkproofport-ai/sdk generateProof / the MCP prepare step), which asks the OPRF network for this wallet in (domain, scope) and verifies its answer.' },
+                      scope: { type: 'string', description: 'Public. The nullifier scope: keccak256(UTF-8 scope name) mod p. The Coinbase statement binds these 32 bytes big-endian. 0x + exactly 64 hex, below the BN254 field modulus p; never reduced. Computed by the SDK OPRF step (@zkproofport-ai/sdk generateProof / the MCP prepare step), which asks the OPRF network for this wallet in (domain, scope) and verifies its answer.' },
+                      nullifier: { type: 'string', description: 'Public. One value per wallet per (domain, scope) under the pinned key; nobody without the OPRF key can compute it from an address. 0x + exactly 64 hex, below the BN254 field modulus p; never reduced. Computed by the SDK OPRF step (@zkproofport-ai/sdk generateProof / the MCP prepare step), which asks the OPRF network for this wallet in (domain, scope) and verifies its answer.' },
+                      oprf_public_key_x: { type: 'string', description: 'Private. OPRF network public key, x. 0x + exactly 64 hex, below the BN254 field modulus p; never reduced. Computed by the SDK OPRF step (@zkproofport-ai/sdk generateProof / the MCP prepare step), which asks the OPRF network for this wallet in (domain, scope) and verifies its answer.' },
+                      oprf_public_key_y: { type: 'string', description: 'Private. OPRF network public key, y. 0x + exactly 64 hex, below the BN254 field modulus p; never reduced. Computed by the SDK OPRF step (@zkproofport-ai/sdk generateProof / the MCP prepare step), which asks the OPRF network for this wallet in (domain, scope) and verifies its answer.' },
+                      oprf_beta: { type: 'string', description: 'Private. The blinding factor the SDK drew from a secure random source: 0x + 64 hex, non-zero, below the BabyJubJub subgroup order r.' },
+                      oprf_dlog_e: { type: 'string', description: 'Private. Challenge of the OPRF network\'s DLog-equality proof. 0x + exactly 64 hex, below the BN254 field modulus p; never reduced. Computed by the SDK OPRF step (@zkproofport-ai/sdk generateProof / the MCP prepare step), which asks the OPRF network for this wallet in (domain, scope) and verifies its answer.' },
+                      oprf_dlog_s: { type: 'string', description: 'Private. Response of the OPRF network\'s DLog-equality proof: 0x + 64 hex, below the subgroup order r.' },
+                      oprf_response_x: { type: 'string', description: 'Private. The unblinded OPRF answer, x. 0x + exactly 64 hex, below the BN254 field modulus p; never reduced. Computed by the SDK OPRF step (@zkproofport-ai/sdk generateProof / the MCP prepare step), which asks the OPRF network for this wallet in (domain, scope) and verifies its answer.' },
+                      oprf_response_y: { type: 'string', description: 'Private. The unblinded OPRF answer, y. 0x + exactly 64 hex, below the BN254 field modulus p; never reduced. Computed by the SDK OPRF step (@zkproofport-ai/sdk generateProof / the MCP prepare step), which asks the OPRF network for this wallet in (domain, scope) and verifies its answer.' },
                       merkle_root: { type: 'string', description: '0x-prefixed 32-byte Merkle root' },
                       user_address: { type: 'string', description: '0x-prefixed 20-byte wallet address' },
                       signature: { type: 'string', description: 'Wallet signature over signal_hash' },
@@ -632,7 +650,7 @@ export function buildSwaggerSpec(baseUrl: string, agentName = 'ZKProofport prove
                       },
                       min_score: {
                         type: 'number',
-                        description: 'human_passport only: the Human Passport score threshold in points (e.g. 20; above 0, at most four decimals). For human_passport send only signal_hash, nullifier, scope_bytes, user_address, signature, user_pubkey_x, user_pubkey_y, min_score, chain (and optionally domain_separator + action_hash); the server finds the wallet\'s score on that chain itself. See GET /api/v1/guide/human_passport.',
+                        description: 'human_passport only: the Human Passport score threshold in points (e.g. 20; above 0, at most four decimals). For human_passport send only signal_hash, the eleven OPRF values (oprf_key_hash, domain, scope, nullifier, oprf_*), user_address, signature, user_pubkey_x, user_pubkey_y, min_score, chain (and optionally domain_separator + action_hash); the server finds the wallet\'s score on that chain itself. See GET /api/v1/guide/human_passport.',
                       },
                       chain: {
                         type: 'number',
@@ -695,6 +713,43 @@ export function buildSwaggerSpec(baseUrl: string, agentName = 'ZKProofport prove
           },
           '402': { description: 'Payment invalid (transaction not found, wrong amount, or wrong recipient)' },
           '404': { description: 'Session not found or expired' },
+        },
+      },
+    },
+    '/api/v1/oprf': {
+      get: {
+        operationId: 'getOprfEnvironment',
+        summary: 'Which OPRF environment wallet credential proofs use here',
+        description:
+          'Wallet credential proofs (coinbase_kyc, coinbase_country, giwa_attestation, human_passport) carry a nullifier from an OPRF network: ' +
+          'one per wallet per (domain, scope), which nobody can compute from an address. The client SDK reads this endpoint to choose that ' +
+          'network and the key hash pinned for the environment from its OWN table, so a caller configures nothing; an agent using the SDK or ' +
+          'the MCP tools never calls it directly. No payment, no authentication. `production` has no OPRF key registered yet, and the SDK and ' +
+          'this server refuse wallet credential proofs there by name; OIDC proofs are unaffected.',
+        tags: ['Proof Generation'],
+        responses: {
+          '200': {
+            description: 'The OPRF environment of this deployment',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['environment'],
+                  properties: {
+                    environment: {
+                      type: 'string',
+                      enum: ['production', 'staging', 'local'],
+                      description: 'Selects the OPRF network and the pinned oprf_key_hash in the SDK. Every wallet credential prove request must carry that key hash.',
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '503': {
+            description: 'OPRF_NOT_CONFIGURED: this deployment does not prove wallet credentials (OPRF_ENVIRONMENT unset).',
+            content: { 'application/json': { schema: { type: 'object', properties: { error: { type: 'string' }, message: { type: 'string' } } } } },
+          },
         },
       },
     },

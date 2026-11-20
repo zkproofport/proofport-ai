@@ -14,7 +14,6 @@ describe('A2A Agent Card', () => {
       proverUrl: 'http://localhost:4003',
       bbPath: 'bb',
       circuitsDir: '/app/circuits',
-      circuitsRepoUrl: 'https://raw.githubusercontent.com/zkproofport/circuits/main',
       redisUrl: 'redis://localhost:6379',
       baseRpcUrl: 'https://mainnet.base.org',
       easGraphqlEndpoint: 'https://base.easscan.org/graphql',

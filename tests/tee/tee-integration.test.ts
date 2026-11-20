@@ -64,7 +64,6 @@ function makeTestConfig(overrides: Partial<Config> = {}): Config {
     bbPath: 'bb',
     nargoPath: 'nargo',
     circuitsDir: './circuits',
-    circuitsRepoUrl: '',
     redisUrl: 'redis://localhost:6379',
     baseRpcUrl: 'https://mainnet.base.org',
     easGraphqlEndpoint: 'https://base.easscan.org/graphql',

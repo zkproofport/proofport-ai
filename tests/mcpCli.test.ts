@@ -32,32 +32,45 @@ afterEach(async()=>{await rm(directory,{recursive:true,force:true});process.argv
 async function run(args:string[]){process.argv=['node','zkproofport-prove',...args];return import('../packages/mcp/src/prove.ts');}
 
 describe('published proof CLI payment controls and privacy',()=>{
+ it.each([
+  ['no --scope',['coinbase_kyc','--oprf-domain','app.example.com'],/--scope is required/],
+  ['no --scope on OIDC',['oidc_domain','--jwt','a.b.c'],/--scope is required/],
+  ['no --oprf-domain on a wallet circuit',['giwa_attestation','--scope','app'],/--oprf-domain is required for giwa_attestation/],
+ ])('%s: refused before starting MCP, nothing filled in',async(_l,args,re)=>{
+  await expect(run(args as string[])).rejects.toThrow('CLI_EXIT:1');
+  expect(transport).not.toHaveBeenCalled();expect(client.callTool).not.toHaveBeenCalled();
+  expect(stderr.mock.calls.flat().join(' ')).toMatch(re as RegExp);
+ });
+ it('OIDC needs no --oprf-domain',async()=>{
+  await run(['oidc_domain','--scope','app','--jwt','a.b.c']);
+  expect(client.callTool.mock.calls[0][0].arguments).not.toHaveProperty('oprf_domain');
+ });
  it('forwards the decimal cap and explicit payer with a four-minute proof timeout',async()=>{
-  await run(['coinbase_kyc','--pay-with','key','--pay-on','ethereum-sepolia','--max-payment','0.001']);
-  expect(client.callTool).toHaveBeenCalledExactlyOnceWith({name:'generate_proof',arguments:{circuit:'coinbase_kyc',scope:'proofport',pay_with:'key',pay_on:'ethereum-sepolia',max_payment:'0.001'}},undefined,expect.objectContaining({timeout:240000}));
+  await run(['coinbase_kyc','--scope','app','--oprf-domain','app.example.com','--pay-with','key','--pay-on','ethereum-sepolia','--max-payment','0.001']);
+  expect(client.callTool).toHaveBeenCalledExactlyOnceWith({name:'generate_proof',arguments:{circuit:'coinbase_kyc',scope:'app',oprf_domain:'app.example.com',pay_with:'key',pay_on:'ethereum-sepolia',max_payment:'0.001'}},undefined,expect.objectContaining({timeout:240000}));
   expect(client.close).toHaveBeenCalledOnce();expect(stdout).toHaveBeenCalledWith('{"proof":"0x1234"}');
  });
  it.each([[],['-1'],['NaN'],['1e3'],['0.0000001'],['--silent']].map(value=>({value})))('rejects an invalid or missing maximum $value before starting MCP',async({value})=>{
-  await expect(run(['coinbase_kyc','--max-payment',...value])).rejects.toThrow('CLI_EXIT:1');
+  await expect(run(['coinbase_kyc','--scope','app','--oprf-domain','app.example.com','--max-payment',...value])).rejects.toThrow('CLI_EXIT:1');
   expect(transport).not.toHaveBeenCalled();expect(client.callTool).not.toHaveBeenCalled();
   expect(stderr.mock.calls.flat().join(' ')).toMatch(/max-payment/);
  });
  it('does not expose the credential holder or private key from tool diagnostics',async()=>{
   client.callTool.mockResolvedValue({content:[{type:'text',text:JSON.stringify({proof:'0x1234',diagnostic:`${KEY} ${ADDRESS.toLowerCase()}`})}]});
-  await run(['coinbase_kyc','--pay-with','arc']);
+  await run(['coinbase_kyc','--scope','app','--oprf-domain','app.example.com','--pay-with','arc']);
   const output=[...stdout.mock.calls,...stderr.mock.calls].flat().join(' ');
   expect(output).not.toContain(KEY);expect(output.toLowerCase()).not.toContain(ADDRESS.toLowerCase());expect(output).toContain('****');
   expect(transport.mock.calls[0][0]).toMatchObject({stderr:'ignore'});
  });
  it('never logs an OIDC token while passing it to the requested proof tool',async()=>{
-  const jwt='private.jwt.credential';await run(['oidc_domain','--jwt',jwt]);
+  const jwt='private.jwt.credential';await run(['oidc_domain','--scope','app','--jwt',jwt]);
   expect(client.callTool.mock.calls[0][0].arguments.jwt).toBe(jwt);
   expect(stderr.mock.calls.flat().join(' ')).not.toContain(jwt);
  });
  it('without a local credential key waits for human approval and resumes the exact action',async()=>{
   vi.stubEnv('ATTESTATION_KEY','');
   client.callTool.mockResolvedValueOnce(reply(pending)).mockResolvedValueOnce(reply({status:'approved'})).mockResolvedValueOnce(reply({proof:'0xcomplete'}));
-  await run(['giwa_attestation','--action',actionFile,'--scope','forum','--max-payment','0.10','--silent']);
+  await run(['giwa_attestation','--action',actionFile,'--scope','forum','--oprf-domain','forum.example.com','--max-payment','0.10','--silent']);
   expect(client.callTool.mock.calls.map(call=>call[0].name)).toEqual(['generate_proof','get_action_approval','generate_proof']);
   expect(client.callTool.mock.calls[2][0].arguments).toEqual({...client.callTool.mock.calls[0][0].arguments,approval_id:pending.approval_id});
   expect(stderr.mock.calls.flat().join(' ')).toContain(pending.approval_url);
@@ -66,21 +79,21 @@ describe('published proof CLI payment controls and privacy',()=>{
  });
  it('a rejected human approval never resumes generation',async()=>{
   client.callTool.mockResolvedValueOnce(reply(pending)).mockResolvedValueOnce(reply({status:'rejected'}));
-  await run(['giwa_attestation','--action',actionFile]);
+  await run(['giwa_attestation','--scope','app','--oprf-domain','app.example.com','--action',actionFile]);
   expect(client.callTool).toHaveBeenCalledTimes(2);expect(stdout).not.toHaveBeenCalled();
   expect(process.exitCode).toBe(1);expect(client.close).toHaveBeenCalledOnce();
  });
  it('Ctrl+C during approval prevents resume and closes the client',async()=>{
   const listeners=process.listenerCount('SIGINT');
   client.callTool.mockResolvedValueOnce(reply(pending)).mockImplementationOnce(async()=>{process.emit('SIGINT');return reply({status:'approved'});});
-  await run(['giwa_attestation','--action',actionFile]);
+  await run(['giwa_attestation','--scope','app','--oprf-domain','app.example.com','--action',actionFile]);
   expect(client.callTool).toHaveBeenCalledTimes(2);expect(stdout).not.toHaveBeenCalled();
   expect(process.exitCode).toBe(130);expect(client.close).toHaveBeenCalledOnce();
   expect(process.listenerCount('SIGINT')).toBe(listeners);
  });
  it('keeps silent-mode errors machine readable and redacts provider diagnostics',async()=>{
   client.callTool.mockRejectedValue(Error(`unavailable for ${ADDRESS}`));
-  await run(['coinbase_kyc','--silent']);
+  await run(['coinbase_kyc','--scope','app','--oprf-domain','app.example.com','--silent']);
   expect(process.exitCode).toBe(1);expect(client.close).toHaveBeenCalledOnce();
   expect(stdout).not.toHaveBeenCalled();expect(JSON.parse(String(stderr.mock.calls[0][0])).error).toBe('unavailable for ****');
  });

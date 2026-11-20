@@ -81,8 +81,23 @@ export interface ProveInputs {
   domain_separator?: string;
   /** EIP-712 hashStruct of the action. Present only when `action` was supplied. */
   action_hash?: string;
+  /**
+   * The OPRF nullifier's values (oprf/index.ts evaluateOprf), each 0x + 64 hex:
+   * public oprf_key_hash, domain, scope, nullifier; private the network's
+   * public key, the blinding factor, the combined DLog proof and the unblinded
+   * answer. The circuit checks all of them.
+   */
+  oprf_key_hash: string;
+  domain: string;
+  scope: string;
   nullifier: string;
-  scope_bytes: string;
+  oprf_public_key_x: string;
+  oprf_public_key_y: string;
+  oprf_beta: string;
+  oprf_dlog_e: string;
+  oprf_dlog_s: string;
+  oprf_response_x: string;
+  oprf_response_y: string;
   merkle_root: string;
   user_address: string;
   signature: string;
@@ -107,8 +122,23 @@ export interface HumanPassportProveInputs {
   signal_hash: string;
   domain_separator?: string;
   action_hash?: string;
+  /**
+   * The OPRF nullifier's values (oprf/index.ts evaluateOprf), each 0x + 64 hex:
+   * public oprf_key_hash, domain, scope, nullifier; private the network's
+   * public key, the blinding factor, the combined DLog proof and the unblinded
+   * answer. The circuit checks all of them.
+   */
+  oprf_key_hash: string;
+  domain: string;
+  scope: string;
   nullifier: string;
-  scope_bytes: string;
+  oprf_public_key_x: string;
+  oprf_public_key_y: string;
+  oprf_beta: string;
+  oprf_dlog_e: string;
+  oprf_dlog_s: string;
+  oprf_response_x: string;
+  oprf_response_y: string;
   user_address: string;
   signature: string;
   user_pubkey_x: string;
@@ -238,8 +268,24 @@ export interface ProofParams {
   payOn?: string;
   approvedPayment?: ApprovedPayment;
   maxPayment?: string;
-  /** Scope string for the proof (defaults to "proofport") */
+  /**
+   * Required: what the proof is for within the service (e.g. "myapp:membership").
+   * Wallet circuits: 1 to 256 UTF-8 bytes, no control or format characters;
+   * the nullifier is one per wallet per (oprfDomain, scope). No default.
+   */
   scope?: string;
+  /**
+   * Required for every wallet circuit (coinbase_kyc, coinbase_country,
+   * giwa_attestation, human_passport): the name of the service the proof is
+   * for, usually its host (e.g. "app.example.com"). The nullifier is one per
+   * wallet per (oprfDomain, scope), so each service has its own namespace and
+   * two services cannot link one wallet's proofs. 1 to 256 UTF-8 bytes, no
+   * control or format characters, used exactly as given (no trimming).
+   * Omitted: in a browser on an http(s) page, the page's hostname
+   * (lowercased); anywhere else (a server, Node) the proof is refused. Give
+   * it, with the scope, to whoever verifies the proof. Not used by oidc_domain.
+   */
+  oprfDomain?: string;
   /** Country codes for the country circuit (e.g. ["US", "KR"]) */
   countryList?: string[];
   /** Whether the country list is an inclusion or exclusion list */
@@ -274,6 +320,15 @@ export interface ProofParams {
   action?: TypedAction;
   /** Private handle returned by ActionApprovalRequiredError; resume the same action with it. */
   actionApproval?: ActionApproval;
+  /**
+   * The id of the request this proof answers, when the relying party issued
+   * one (ASCII letters, digits and '-', at most 128 characters). Without an
+   * action the wallet signs signal_hash = keccak256(scope ++ circuitId ++
+   * requestId), so the relying party can recompute it and refuse a proof made
+   * for another request. Omitted: a fresh lowercase UUID v4 is minted for this
+   * proof and returned as {@link ProofResult.requestId}.
+   */
+  requestId?: string;
 }
 
 export interface ProofResult {
@@ -285,6 +340,16 @@ export interface ProofResult {
   attestation: ProveResponse['attestation'];
   timing: ProveResponse['timing'];
   verification: ProveResponse['verification'];
+  /**
+   * The request this proof answers and its scope. Hand both to the verifier
+   * (`verifyProof(result, { request: { scope, requestId } })`): a proof
+   * without an action carries keccak256(scope ++ circuitId ++ requestId).
+   * Absent for OIDC, which binds no wallet signature.
+   */
+  requestId?: string;
+  scope?: string;
+  /** The OPRF domain the nullifier is under; present for wallet circuits. Hand it to the verifier with the scope. */
+  oprfDomain?: string;
 }
 
 // ─── Step results for step-by-step execution ────────────────────────────

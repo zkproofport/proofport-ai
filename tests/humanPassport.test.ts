@@ -15,7 +15,8 @@
  *   threshold      minScore 0, -1, NaN, Infinity, '20', 5 decimals, null,
  *                  undefined refused before any lookup; equal to the score
  *                  accepted, one unit above refused
- *   wallet         nullifier from signal_hash refused (NULLIFIER_RULE);
+ *   wallet         (the OPRF nullifier inputs are checked in the route:
+ *                  serverOprfInputs.test.ts);
  *                  signature by another wallet, wrong pubkey, half an action,
  *                  malformed hex all INVALID_REQUEST, before any lookup
  *   lookup         no score (null) NO_HUMAN_PASSPORT_SCORE; index down / chain
@@ -26,6 +27,7 @@
  *   formatter      noir_js-shaped inputs: every main() name, sizes, zero action
  *                  pair without an action, zero signal with one
  */
+import { oprfParams, NETWORK } from './helpers/oprfInputs.js';
 import { describe, expect, it, vi } from 'vitest';
 import { ethers } from 'ethers';
 import {
@@ -278,14 +280,6 @@ describe('prepareHumanPassport', () => {
     expect((reader.latest as ReturnType<typeof vi.fn>).mock.calls[0][0]).toMatchObject({ chainId: 8453 });
   });
 
-  it('refuses a nullifier made by another rule before any lookup', async () => {
-    const reader = fakeReader(buildIssuance());
-    const inputs = await requestInputs();
-    inputs.nullifier = ethers.keccak256(ethers.concat([ethers.keccak256(ethers.concat([TEST_WALLET.address, inputs.signal_hash])), inputs.scope_bytes]));
-    await asyncRefusal(prepareHumanPassport(inputs, { reader, now: NOW }), 'NULLIFIER_RULE');
-    expect(reader.latest).not.toHaveBeenCalled();
-  });
-
   it('refuses a signature by another wallet, a wrong public key, half an action and malformed hex', async () => {
     const reader = fakeReader(buildIssuance());
     const other = await requestInputs({ wallet: OTHER_WALLET });
@@ -294,7 +288,7 @@ describe('prepareHumanPassport', () => {
     await asyncRefusal(prepareHumanPassport({ ...mine, user_pubkey_x: other.user_pubkey_x }, { reader, now: NOW }), 'INVALID_REQUEST');
     await asyncRefusal(prepareHumanPassport({ ...mine, domain_separator: '0x' + '11'.repeat(32) }, { reader, now: NOW }), 'INVALID_REQUEST');
     await asyncRefusal(prepareHumanPassport({ ...mine, user_address: '0x1234' }, { reader, now: NOW }), 'INVALID_REQUEST');
-    await asyncRefusal(prepareHumanPassport({ ...mine, scope_bytes: '0xzz' }, { reader, now: NOW }), 'INVALID_REQUEST');
+    await asyncRefusal(prepareHumanPassport({ ...mine, signal_hash: '0xzz' }, { reader, now: NOW }), 'INVALID_REQUEST');
     expect(reader.latest).not.toHaveBeenCalled();
   });
 
@@ -350,10 +344,11 @@ describe('prepareHumanPassport', () => {
 });
 
 describe('formatHumanPassportInputs', () => {
-  const NAMES = ['signal_hash', 'domain_separator', 'action_hash', 'signer_list_merkle_root', 'scope', 'nullifier', 'min_score', 'scorer_id', 'now',
+  const NAMES = ['signal_hash', 'domain_separator', 'action_hash', 'signer_list_merkle_root', 'oprf_key_hash', 'domain', 'scope', 'nullifier', 'min_score', 'scorer_id', 'now',
     'user_address', 'user_signature', 'user_pubkey_x', 'user_pubkey_y', 'passport_domain_separator', 'schema_uid', 'expiration_time', 'revocable',
     'ref_uid', 'attestation_value', 'request_nonce', 'request_fee', 'score_data', 'score_data_len', 'issuer_signature', 'issuer_pubkey_x',
-    'issuer_pubkey_y', 'issuer_merkle_proof', 'issuer_leaf_index', 'issuer_merkle_depth'];
+    'issuer_pubkey_y', 'issuer_merkle_proof', 'issuer_leaf_index', 'issuer_merkle_depth',
+    'oprf_public_key_x', 'oprf_public_key_y', 'oprf_beta', 'oprf_dlog_e', 'oprf_dlog_s', 'oprf_response_x', 'oprf_response_y'];
 
   async function prepared() {
     const b = buildIssuance();
@@ -365,7 +360,7 @@ describe('formatHumanPassportInputs', () => {
   it('names exactly main()\'s parameters with the circuit\'s sizes', async () => {
     const { inputs, p } = await prepared();
     const out = formatHumanPassportInputs({
-      signalHash: ethers.getBytes(inputs.signal_hash), scopeBytes: ethers.getBytes(inputs.scope_bytes), nullifierBytes: ethers.getBytes(inputs.nullifier),
+      signalHash: ethers.getBytes(inputs.signal_hash), oprf: oprfParams(),
       userAddress: inputs.user_address, userSignature: inputs.signature, userPubkeyX: inputs.user_pubkey_x, userPubkeyY: inputs.user_pubkey_y,
       minScoreUnits: p.minScoreUnits, now: p.now, issuance: p.issuance,
     });
@@ -376,12 +371,16 @@ describe('formatHumanPassportInputs', () => {
     expect((out.domain_separator as string[]).every(x => x === '0x00')).toBe(true);
     expect(out.min_score).toBe('200000');
     expect(out.scorer_id).toBe('335');
+    // The OPRF values are Fields: one hex string each, exactly as sent.
+    expect(out.scope).toBe(NETWORK.scope);
+    expect(out.nullifier).toBe(NETWORK.nullifier);
+    expect(out.oprf_beta).toBe(NETWORK.beta);
   });
 
   it('zeroes signal_hash in action mode, refuses half an action, a zero threshold and now at expiry', async () => {
     const { inputs, p } = await prepared();
     const base = {
-      signalHash: ethers.getBytes(inputs.signal_hash), scopeBytes: ethers.getBytes(inputs.scope_bytes), nullifierBytes: ethers.getBytes(inputs.nullifier),
+      signalHash: ethers.getBytes(inputs.signal_hash), oprf: oprfParams(),
       userAddress: inputs.user_address, userSignature: inputs.signature, userPubkeyX: inputs.user_pubkey_x, userPubkeyY: inputs.user_pubkey_y,
       minScoreUnits: p.minScoreUnits, now: p.now, issuance: p.issuance,
     };

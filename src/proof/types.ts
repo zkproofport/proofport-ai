@@ -25,8 +25,18 @@ export interface PaymentInfo {
 // Coinbase circuit inputs (coinbase_attestation, coinbase_country_attestation)
 export interface CoinbaseProveInputs {
   signal_hash: string;         // "0x..." 32 bytes
-  nullifier: string;           // "0x..." 32 bytes
-  scope_bytes: string;         // "0x..." 32 bytes
+  // The OPRF nullifier values (src/input/oprfInputs.ts checks them), each 0x + 64 hex.
+  oprf_key_hash: string;
+  domain: string;
+  scope: string;
+  nullifier: string;
+  oprf_public_key_x: string;
+  oprf_public_key_y: string;
+  oprf_beta: string;
+  oprf_dlog_e: string;
+  oprf_dlog_s: string;
+  oprf_response_x: string;
+  oprf_response_y: string;
   merkle_root: string;         // "0x..." 32 bytes
   user_address: string;        // "0x..." 20 bytes
   signature: string;           // "0x..." 65 bytes

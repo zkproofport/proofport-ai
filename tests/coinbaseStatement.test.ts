@@ -60,13 +60,19 @@ import {
   type AttestationReader,
   type StatementSigner,
 } from '../src/input/coinbaseStatement.js';
-import { computeWalletNullifier } from '../src/input/inputBuilder.js';
 import { COINBASE_ATTESTER_CONTRACT } from '../src/config/contracts.js';
 
 const N = BigInt('0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551');
 const WALLET = '0xD6C714247037E5201B7e3dEC97a3ab59a9d2F739';
 const UID = '0x' + '5a'.repeat(32);
 const SCOPE = ethers.getBytes(ethers.keccak256(ethers.toUtf8Bytes('proofport')));
+// The OPRF scope FIELD the statement binds: keccak256(name) mod p. For
+// "zkproofport.app" the keccak is above p, so the two differ
+// (proofport-oprf/REQUEST-VERIFIER.md test vector).
+const P = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
+const SCOPE_NAME = 'zkproofport.app';
+const SCOPE_KECCAK = ethers.keccak256(ethers.toUtf8Bytes(SCOPE_NAME));
+const SCOPE_FIELD = '0x' + (BigInt(SCOPE_KECCAK) % P).toString(16).padStart(64, '0');
 const SIGNAL = ethers.getBytes(ethers.keccak256(ethers.toUtf8Bytes('signal')));
 const NOW_MS = 1_800_000_000_000;
 const KEY_VERSION = 'projects/p/locations/us-central1/keyRings/r/cryptoKeys/k/cryptoKeyVersions/1';
@@ -241,8 +247,7 @@ describe('prepareServerStatement', () => {
     circuitId: 'coinbase_attestation' as const,
     userAddress: WALLET.toLowerCase(),
     signalHash: SIGNAL,
-    scopeBytes: SCOPE,
-    nullifierBytes: computeWalletNullifier(WALLET, 'coinbase_attestation', SCOPE),
+    scopeField: SCOPE_FIELD,
   });
 
   it('reads on chain, signs SHA256(client_data) and returns a low-s signature that verifies', async () => {
@@ -278,19 +283,26 @@ describe('prepareServerStatement', () => {
     await expect(prepareServerStatement(input(), { reader: reader(), signer, now: () => NOW_MS })).rejects.toThrow(/does not verify/);
   });
 
-  it('refuses a v1 (signal-hash) nullifier before reading anything or signing', async () => {
-    const r = reader();
-    const signer = localSigner();
-    const v1 = ethers.getBytes(ethers.keccak256(ethers.concat([ethers.keccak256(ethers.concat([WALLET, SIGNAL])), SCOPE])));
-    await expect(prepareServerStatement({ ...input(), nullifierBytes: v1 }, { reader: r, signer }))
-      .rejects.toMatchObject({ code: 'NULLIFIER_RULE' });
-    expect(r.latestUid).not.toHaveBeenCalled();
-    expect(signer.signDigest).not.toHaveBeenCalled();
+  it('binds the OPRF scope field big-endian, not the unreduced keccak (they differ for this name)', async () => {
+    expect(SCOPE_FIELD).toBe('0x18710bf90bfc93f0c5e493223ae90dd38acb94ecce696da5005658255fed19cc');
+    expect(SCOPE_FIELD).not.toBe(SCOPE_KECCAK);
+    const st = await prepareServerStatement(input(), { reader: reader(), signer: localSigner(), now: () => NOW_MS });
+    expect(ethers.hexlify(st.clientData.slice(193, 225))).toBe(SCOPE_FIELD);
   });
 
-  it('refuses a scope that is not 32 bytes', async () => {
-    await expect(prepareServerStatement({ ...input(), scopeBytes: new Uint8Array(31) }, { reader: reader(), signer: localSigner() }))
+  it.each([
+    ['31 bytes', '0x' + '11'.repeat(31)],
+    ['not hex', '0x' + 'zz'.repeat(32)],
+    ['exactly p', '0x' + P.toString(16).padStart(64, '0')],
+    ['the unreduced keccak (above p)', SCOPE_KECCAK],
+    ['empty', ''],
+  ])('refuses a scope field that is %s before reading anything or signing', async (_n, scopeField) => {
+    const r = reader();
+    const signer = localSigner();
+    await expect(prepareServerStatement({ ...input(), scopeField }, { reader: r, signer }))
       .rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+    expect(r.latestUid).not.toHaveBeenCalled();
+    expect(signer.signDigest).not.toHaveBeenCalled();
   });
 
   it('does not sign for a revoked attestation', async () => {
@@ -468,8 +480,7 @@ describe('prepareServerStatement for coinbase_country_attestation', () => {
       circuitId: COUNTRY_ID,
       userAddress: WALLET.toLowerCase(),
       signalHash: SIGNAL,
-      scopeBytes: SCOPE,
-      nullifierBytes: computeWalletNullifier(WALLET, COUNTRY_ID, SCOPE),
+      scopeField: SCOPE_FIELD,
       rawTransaction: tx.raw,
       txLength: tx.length,
     };
@@ -512,14 +523,9 @@ describe('prepareServerStatement for coinbase_country_attestation', () => {
     expect(signer.signDigest).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ['v1 (signal-hash)', () => ethers.getBytes(ethers.keccak256(ethers.concat([ethers.keccak256(ethers.concat([WALLET, SIGNAL])), SCOPE])))],
-    ["KYC's tag", () => computeWalletNullifier(WALLET, 'coinbase_attestation', SCOPE)],
-  ])('refuses a %s nullifier before reading anything', async (_name, nullifier) => {
-    const r = countryReader();
-    await expect(prepareServerStatement({ ...(await input()), nullifierBytes: nullifier() }, { reader: r, signer: localSigner() }))
-      .rejects.toMatchObject({ code: 'NULLIFIER_RULE' });
-    expect(r.latestUid).not.toHaveBeenCalled();
+  it('binds the OPRF scope field big-endian in the 227-byte statement', async () => {
+    const st = await prepareServerStatement(await input(), { reader: countryReader('KR'), signer: localSigner(), now: () => NOW_MS });
+    expect(ethers.hexlify(st.clientData.slice(193, 225))).toBe(SCOPE_FIELD);
   });
 
   it('refuses a missing or malformed transaction before reading anything', async () => {

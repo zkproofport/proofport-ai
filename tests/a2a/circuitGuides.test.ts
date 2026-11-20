@@ -37,7 +37,8 @@ describe('every generated guide matches its circuit and deployment', () => {
     expect(guide.action.required).toBe(false);
     expect(guide.formulas.identity_signature).toContain('personal_sign');
     expect(guide.formulas.signing_digest).toContain('0x1901');
-    expect(guide.formulas.nullifier).toContain('circuitId');
+    expect(guide.formulas.nullifier).toContain('address, domain, scope');
+    expect(guide.formulas.oprf_nullifier.public.oprf_key_hash).toContain('GET /api/v1/oprf');
     expect(guide.formulas.nullifier).not.toContain('signal_hash');
     expect(guide.sdk.identity_only).not.toContain('--action');
     expect(guide.sdk.action_bound).toContain('--action');

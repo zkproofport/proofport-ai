@@ -13,7 +13,8 @@ import {
   type HumanPassportAnchors,
   type PassportRequest,
 } from '../../src/input/humanPassport.js';
-import { computeSignalHash, computeScope, computeWalletNullifier } from '../../src/input/inputBuilder.js';
+import { oprfWireInputs } from './oprfInputs.js';
+import { computeSignalHash } from '../../packages/sdk/src/signalHash.js';
 import { HUMAN_PASSPORT_CHAINS } from '@zkproofport-app/core/circuits';
 
 /** Base's scoreV2 schema (the real data below is a Base issuance). */
@@ -106,19 +107,21 @@ export function withDecoy(calldata: string): string {
 }
 
 /** The client fields a request for TEST_WALLET carries (personal_sign over signal_hash). */
-export async function requestInputs(opts: { wallet?: ethers.Wallet; scope?: string; minScore?: unknown; chain?: unknown } = {}) {
+export async function requestInputs(opts: { wallet?: ethers.Wallet; scope?: string; minScore?: unknown; chain?: unknown; requestId?: string } = {}) {
   const wallet = opts.wallet ?? TEST_WALLET;
   const scope = opts.scope ?? 'human-passport-test-scope';
-  const signalHash = computeSignalHash(wallet.address, scope, 'human_passport_score');
+  // keccak256(scope ++ circuitId ++ requestId): no wallet address.
+  const signalHash = computeSignalHash({ scope, circuitId: 'human_passport_score', requestId: opts.requestId ?? '3f2b8c1e-9d4a-4f6b-8e2c-1a7d5b9c0e4f' });
   const signature = await wallet.signMessage(signalHash);
   const pub = ethers.getBytes(wallet.signingKey.publicKey);
-  const scopeBytes = computeScope(scope);
   return {
     user_address: wallet.address,
     signature,
     signal_hash: ethers.hexlify(signalHash),
-    scope_bytes: ethers.hexlify(scopeBytes),
-    nullifier: ethers.hexlify(computeWalletNullifier(wallet.address, 'human_passport_score', scopeBytes)),
+    // The OPRF values of the recorded network answer (staging/local key hash).
+    // The server checks their shape and pinned key hash; the circuit checks
+    // that they belong to this wallet and scope.
+    ...oprfWireInputs(),
     user_pubkey_x: ethers.hexlify(pub.slice(1, 33)),
     user_pubkey_y: ethers.hexlify(pub.slice(33, 65)),
     min_score: 'minScore' in opts ? opts.minScore : 20,

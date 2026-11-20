@@ -11,6 +11,9 @@ import {
   submitProof,
   verifyProof,
   computeSignalHash,
+  resolveRequestId,
+  prepareOprf,
+  assertOprfName,
   hashTypedAction,
   CIRCUIT_IDS,
   CIRCUITS,
@@ -38,6 +41,51 @@ import { ApprovalStore } from './approvalStore.js';
 const CIRCUIT_NAMES = Object.keys(CIRCUIT_NAME_MAP) as [CircuitName, ...CircuitName[]];
 const circuitParam = () => z.enum(CIRCUIT_NAMES).describe('Which circuit to use');
 
+/**
+ * The relying party's request id. Without an action the wallet signs
+ * signal_hash = keccak256(scope ++ circuitId ++ requestId) -- no wallet address --
+ * so the verifier can recompute it and refuse a proof made for another request.
+ */
+const requestIdParam = () => z
+  .string()
+  .optional()
+  .describe(
+    'The id of the request this proof answers, when the party that will verify it issued one ' +
+    '(ASCII letters, digits and "-", at most 128 characters). Without an action the wallet signs ' +
+    'signal_hash = keccak256(scope ++ circuitId ++ request_id), which contains no wallet address, so the verifier ' +
+    'can recompute it. Omit it and a fresh UUID is minted; it is returned as request_id / requestId -- hand it, ' +
+    'with the scope, to whoever verifies the proof. Not used by oidc_domain.',
+  );
+
+/**
+ * The OPRF domain: which service the proof is for. The nullifier is one per
+ * wallet per (domain, scope), so each service gets its own namespace.
+ */
+const oprfDomainParam = () => z
+  .string()
+  .optional()
+  .describe(
+    'Required for every wallet circuit (coinbase_kyc, coinbase_country, giwa_attestation, human_passport): ' +
+    'the name of the service the proof is for, usually its host (e.g. "app.example.com"). The nullifier is one per ' +
+    'wallet per (oprf_domain, scope), so two services cannot link one wallet\'s proofs. 1 to 256 UTF-8 bytes, no ' +
+    'control or format characters, used exactly as given. Required here: this server never fills it in. Ask the user or the verifying service. ' +
+    'Hand it, with the scope, to whoever verifies the proof. Not used by oidc_domain.',
+  );
+
+/**
+ * The scope and OPRF domain a tool call must carry. Checked in the handler as
+ * well as the schema, so a caller that bypasses the schema still gets an
+ * error naming the argument. MCP runs on a server: oprf_domain is never
+ * filled in (the SDK's browser-hostname fill does not apply here).
+ */
+function missingNameArgument(params: { scope?: unknown; oprf_domain?: unknown }, isOidc: boolean): string | null {
+  if (params.scope === undefined || params.scope === null) return 'scope is required: name what the proof is for within the service. There is no default.';
+  if (!isOidc && (params.oprf_domain === undefined || params.oprf_domain === null)) {
+    return 'oprf_domain is required for wallet circuits: name the service the proof is for (usually its host). It is never filled in.';
+  }
+  return null;
+}
+
 function errorResult(message: string) {
   return {
     content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }],
@@ -54,6 +102,7 @@ function jsonResult(data: unknown) {
 // Provider diagnostics and arbitrary extension fields are never model-facing
 // when a response was produced with a privately stored human signature.
 const publicProofSchema = z.object({
+  requestId: z.string().optional(), scope: z.string().optional(),
   circuit: z.string().optional(), proofType: z.string().optional(),
   proof: z.string(), publicInputs: z.string().optional(), proofWithInputs: z.string().optional(),
   attestation: z.object({
@@ -138,14 +187,19 @@ CIRCUITS:
 
 WITH ACTION: Returns awaiting_approval with an approval URL for the HUMAN to review and sign in their wallet. Keep the request parameters unchanged, query get_action_approval, then repeat with approval_id when approved. ATTESTATION_KEY cannot authorize an action on the human's behalf. Ordinary proofs without action retain automatic signing.
 
-RETURNS: awaiting_approval or the full ProofResult with proof bytes, public inputs, and timing information. Use verify_proof separately to verify on-chain.`,
+SIGNAL HASH: without an action the wallet signs signal_hash = keccak256(scope ++ circuitId ++ request_id). It contains no wallet address. Pass request_id when the verifier issued one; otherwise a fresh one is minted and returned as requestId.
+
+NULLIFIER: wallet circuits require oprf_domain (the service the proof is for). The nullifier is one per wallet per (oprf_domain, scope), computed with the OPRF network before the wallet signs; a service whose environment has no OPRF network refuses before anything is signed or paid.
+
+RETURNS: awaiting_approval or the full ProofResult with proof bytes, public inputs, timing information, and the requestId, scope and oprfDomain the proof answers. Use verify_proof separately to verify on-chain.`,
     {
       circuit: circuitParam(),
       approval_id: approvalIdParam(),
+      request_id: requestIdParam(),
+      oprf_domain: oprfDomainParam(),
       scope: z
         .string()
-        .optional()
-        .describe('Scope string for nullifier derivation. Defaults to "proofport" if omitted. For oidc_domain circuit, this is the domain scope string.'),
+        .describe('Required: what the proof is for within the service, e.g. "myapp:membership". There is no default. Wallet circuits: 1 to 256 UTF-8 bytes, no control or format characters; the nullifier is one per wallet per (oprf_domain, scope). For oidc_domain, the domain scope string.'),
       action: z
         .object({
           domain: z.object({
@@ -216,6 +270,8 @@ RETURNS: awaiting_approval or the full ProofResult with proof bytes, public inpu
       params = structuredClone(params);
       const request = originalRequest(params);
       try {
+        const missing = missingNameArgument(params, params.circuit === 'oidc_domain');
+        if (missing) return errorResult(missing);
         const action = params.action ? structuredClone(params.action) : params.action;
         if (params.approval_id && !action) return errorResult('approval_id requires the original action');
         const actionApproval = params.approval_id
@@ -233,6 +289,8 @@ RETURNS: awaiting_approval or the full ProofResult with proof bytes, public inpu
             circuit: params.circuit,
             ...(action ? { action } : {}),
             ...(actionApproval ? { actionApproval } : {}),
+            ...(params.request_id !== undefined && { requestId: params.request_id }),
+            ...(params.oprf_domain !== undefined && { oprfDomain: params.oprf_domain }),
             scope: params.scope,
             countryList: params.country_list,
             isIncluded: params.is_included,
@@ -304,14 +362,15 @@ RETURNS: awaiting_approval or the full ProofResult with proof bytes, public inpu
   // ─── prepare_inputs ─────────────────────────────────────────────────
   server.tool(
     'prepare_inputs',
-    `Step 1 of the step-by-step flow. WITH ACTION: human wallet approval is required; returns awaiting_approval until resumed with approval_id. Approved action witnesses stay in private local storage; pass the returned prepared_inputs_id to submit_proof. WITHOUT ACTION: retains the existing credential-key signature and private witness result. Handle private witness inputs only in trusted local code, never expose them to the dApp, model or logs. Call this BEFORE request_challenge. For oidc_domain provide jwt and scope.`,
+    `Step 1 of the step-by-step flow. WITH ACTION: human wallet approval is required; returns awaiting_approval until resumed with approval_id. Approved action witnesses stay in private local storage; pass the returned prepared_inputs_id to submit_proof. The action hash is public: an action whose proof is shown off-chain should not contain the wallet's address. WITHOUT ACTION: the credential key signs signal_hash = keccak256(scope ++ circuitId ++ request_id), no wallet address; the first result block is the inputs for submit_proof, the second names request_id and scope for the verifier. Handle private witness inputs only in trusted local code, never expose them to the dApp, model or logs. Call this BEFORE request_challenge. For oidc_domain provide jwt and scope.`,
     {
       circuit: circuitParam(),
       approval_id: approvalIdParam(),
+      request_id: requestIdParam(),
+      oprf_domain: oprfDomainParam(),
       scope: z
         .string()
-        .optional()
-        .describe('Scope string for nullifier derivation. Defaults to "proofport" if omitted. For oidc_domain circuit, this is the domain scope string.'),
+        .describe('Required: what the proof is for within the service, e.g. "myapp:membership". There is no default. Wallet circuits: 1 to 256 UTF-8 bytes, no control or format characters; the nullifier is one per wallet per (oprf_domain, scope). For oidc_domain, the domain scope string.'),
       action: z
         .object({
           domain: z.object({
@@ -364,8 +423,10 @@ RETURNS: awaiting_approval or the full ProofResult with proof bytes, public inpu
           return errorResult(`Unknown circuit '${String(params.circuit)}'. Known: ${CIRCUIT_NAMES.join(', ')}.`);
         }
         const circuitId = CIRCUIT_NAME_MAP[params.circuit];
-        const scope = params.scope || 'proofport';
         const isOidc = params.circuit === 'oidc_domain';
+        const missing = missingNameArgument(params, isOidc);
+        if (missing) return errorResult(missing);
+        const scope = params.scope;
 
         const supportsAction = circuitBindsAction(circuitId);
         if (action && !supportsAction) {
@@ -375,6 +436,13 @@ RETURNS: awaiting_approval or the full ProofResult with proof bytes, public inpu
         try { actionHashes = action ? hashTypedAction(action) : undefined; }
         catch (validationError) { return errorResult(validationError instanceof Error ? validationError.message : 'Invalid action'); }
         if (params.approval_id && !action) return errorResult('approval_id requires the original action');
+        // Checked before anything is signed; OIDC binds no wallet signature.
+        const requestId = isOidc ? undefined : resolveRequestId(params.request_id);
+        if (isOidc && params.oprf_domain !== undefined) {
+          return errorResult(`oprf_domain applies to wallet circuits; '${circuitId}' has no OPRF nullifier.`);
+        }
+        const oprfDomain = isOidc ? undefined : assertOprfName(params.oprf_domain, 'domain');
+        if (!isOidc) assertOprfName(scope, 'scope');
 
         if (isOidc) {
           // OIDC path: prepare inputs locally from JWT (no EAS attestation needed)
@@ -393,18 +461,17 @@ RETURNS: awaiting_approval or the full ProofResult with proof bytes, public inpu
           ? await resolveActionApproval(config, { circuit: params.circuit, scope, action }, actionApproval)
           : undefined;
         const userAddress = authorization ? authorization.address : await signer.getAddress();
-        const signalHash = computeSignalHash(
-          userAddress,
-          scope,
-          circuitId,
-        );
-
+        // The OPRF nullifier, before the wallet signs: a service or network
+        // that cannot answer costs no signature.
+        const oprf = await prepareOprf(config, { circuitId, address: userAddress, oprfDomain, scope });
+        // Without an action the wallet signs keccak256(scope ++ circuitId ++
+        // requestId): no wallet address in it.
         const userSignature = authorization
           ? authorization.signature
-          : await signer.signMessage(signalHash);
+          : await signer.signMessage(computeSignalHash({ scope, circuitId, requestId: requestId! }));
 
         const inputs = circuitId === CIRCUIT_IDS.HUMAN_PASSPORT_SCORE
-          ? prepareHumanPassportInputs({ userAddress, userSignature, scope, minScore: params.min_score, chain: params.chain, ...actionHashes })
+          ? prepareHumanPassportInputs({ userAddress, userSignature, scope, minScore: params.min_score, chain: params.chain, requestId, oprf, ...actionHashes })
           : await prepareInputs(config, {
           circuitId,
           userAddress,
@@ -412,6 +479,8 @@ RETURNS: awaiting_approval or the full ProofResult with proof bytes, public inpu
           scope,
           countryList: params.country_list,
           isIncluded: params.is_included,
+          requestId,
+          oprf,
           ...actionHashes,
         });
 
@@ -419,9 +488,16 @@ RETURNS: awaiting_approval or the full ProofResult with proof bytes, public inpu
           const id = await approvals.saveInputs(config, params.circuit, {
             ...inputs, domain_separator: actionHashes.domainSeparator, action_hash: actionHashes.actionHash,
           });
-          return jsonResult({ prepared_inputs_id: id, circuit: params.circuit, domain_separator: actionHashes.domainSeparator, action_hash: actionHashes.actionHash });
+          return jsonResult({ prepared_inputs_id: id, circuit: params.circuit, domain_separator: actionHashes.domainSeparator, action_hash: actionHashes.actionHash, request_id: requestId, scope, oprf_domain: oprfDomain });
         }
-        return jsonResult(inputs);
+        // The inputs go to submit_proof unchanged, so the request id travels in
+        // a second block rather than as a field the server would receive.
+        return {
+          content: [
+            ...jsonResult(inputs).content,
+            ...jsonResult({ request_id: requestId, scope, oprf_domain: oprfDomain, note: 'Give request_id, scope and oprf_domain to whoever verifies this proof. Do not add them to inputs.' }).content,
+          ],
+        };
       } catch (error) {
         try { return await operationError(error, 'prepare_inputs', request); }
         catch (storageError) { return errorResult(storageError instanceof Error ? storageError.message : String(storageError)); }

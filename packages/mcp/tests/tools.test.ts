@@ -43,6 +43,8 @@ vi.mock('@zkproofport-ai/sdk', async () => ({
   submitProof: mockSubmitProof,
   verifyProof: mockVerifyProof,
   computeSignalHash: mockComputeSignalHash,
+  // The real request-id check: a bad id must be refused before any signing.
+  resolveRequestId: (await import('../../sdk/src/signalHash.js')).resolveRequestId,
   CIRCUITS: {
     coinbase_attestation: { displayName: 'Coinbase KYC', easSchemaId: '0xschema1', functionSelector: '0xfunc1' },
     coinbase_country_attestation: { displayName: 'Coinbase Country', easSchemaId: '0xschema2', functionSelector: '0xfunc2' },
@@ -425,34 +427,49 @@ describe('request_challenge', () => {
 });
 
 describe('prepare_inputs', () => {
-  it('computes signal hash with circuitId not circuit name', async () => {
+  // signal_hash = keccak256(scope ++ circuitId ++ requestId): no address argument (2026-11-17).
+  it('computes signal hash with circuitId not circuit name, and the caller\'s request id', async () => {
     mockPrepareInputs.mockResolvedValue({ inputs: 'prepared' });
 
-    await callTool('prepare_inputs', {
+    const result = await callTool('prepare_inputs', {
       circuit: 'coinbase_kyc',
       scope: 'my-scope',
+      request_id: 'req-from-verifier-1',
     });
 
-    // computeSignalHash should receive the mapped circuitId, not the friendly name
-    expect(mockComputeSignalHash).toHaveBeenCalledWith(
-      '0xMockAttestationAddress',
-      'my-scope',
-      'coinbase_attestation',
-    );
+    expect(mockComputeSignalHash).toHaveBeenCalledWith({ scope: 'my-scope', circuitId: 'coinbase_attestation', requestId: 'req-from-verifier-1' });
+    expect(mockPrepareInputs.mock.calls[0][1]).toMatchObject({ requestId: 'req-from-verifier-1' });
+    // Block 1 is the inputs, unchanged for submit_proof; block 2 names the request.
+    expect(parseToolResult(result)).toEqual({ inputs: 'prepared' });
+    expect(JSON.parse(result.content[1].text)).toMatchObject({ request_id: 'req-from-verifier-1', scope: 'my-scope' });
   });
 
-  it('defaults scope to proofport', async () => {
+  it('defaults scope to proofport and mints a fresh UUID request id per call', async () => {
     mockPrepareInputs.mockResolvedValue({ inputs: 'prepared' });
 
-    await callTool('prepare_inputs', {
-      circuit: 'coinbase_kyc',
-    });
+    const a = await callTool('prepare_inputs', { circuit: 'coinbase_kyc' });
+    const b = await callTool('prepare_inputs', { circuit: 'coinbase_kyc' });
 
-    expect(mockComputeSignalHash).toHaveBeenCalledWith(
-      '0xMockAttestationAddress',
-      'proofport',
-      'coinbase_attestation',
-    );
+    const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+    const ida = JSON.parse(a.content[1].text).request_id;
+    const idb = JSON.parse(b.content[1].text).request_id;
+    expect(ida).toMatch(UUID);
+    expect(idb).toMatch(UUID);
+    expect(ida).not.toBe(idb);
+    expect(mockComputeSignalHash).toHaveBeenNthCalledWith(1, { scope: 'proofport', circuitId: 'coinbase_attestation', requestId: ida });
+  });
+
+  it.each([
+    ['empty', '', /requestId is empty/],
+    ['an underscore', 'req_1', /only ASCII letters, digits and '-'/],
+    ['non-ASCII', '요청', /only ASCII/],
+    ['129 characters', 'x'.repeat(129), /limit is 128/],
+  ])('refuses a request_id that is %s before signing', async (_n, request_id, error) => {
+    const result = await callTool('prepare_inputs', { circuit: 'coinbase_kyc', request_id });
+    expect(result.isError).toBe(true);
+    expect(parseToolResult(result).error).toMatch(error);
+    expect(mockSigner.signMessage).not.toHaveBeenCalled();
+    expect(mockPrepareInputs).not.toHaveBeenCalled();
   });
 
   it('signs the signal hash and calls prepareInputs', async () => {
@@ -478,6 +495,7 @@ describe('prepare_inputs', () => {
       scope: 'test',
       countryList: ['US'],
       isIncluded: false,
+      requestId: expect.stringMatching(/^[0-9a-f-]{36}$/),
     });
   });
 
@@ -703,7 +721,7 @@ describe('prepare_inputs action authorization', () => {
     const params = schema.parse({ circuit, scope: 'optional-action-scope' });
     const result = await callTool('prepare_inputs', params);
     expect(result.isError).toBeUndefined();
-    expect(mockComputeSignalHash).toHaveBeenCalledWith('0xMockAttestationAddress', 'optional-action-scope', circuit);
+    expect(mockComputeSignalHash).toHaveBeenCalledWith({ scope: 'optional-action-scope', circuitId: circuit, requestId: expect.any(String) });
     expect(mockSigner.signMessage).toHaveBeenCalledWith('0xsignalhash');
     expect(mockSigner.signTypedData).not.toHaveBeenCalled();
     expect(mockPrepareInputs).toHaveBeenCalledWith(testConfig, expect.objectContaining({ circuitId: circuit, userSignature: '0xmocksignature' }));

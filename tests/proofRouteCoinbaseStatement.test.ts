@@ -9,7 +9,7 @@
  *   order      statement before settlement; a refusal settles nothing
  *   hostile    malformed / oversize / non-hex fields refused with 400 before any read
  *   empty      missing fields; routes built without a signer answer 500, never prove
- *   authz      revoked / missing attestation -> 403, v1 nullifier -> 400
+ *   authz      revoked / missing attestation -> 403, OPRF key hash not the pinned one -> 400
  *   E2E-encrypted payload refused for coinbase_attestation
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -26,7 +26,7 @@ const verifyPayment = vi.hoisted(() => vi.fn(async () => ({ valid: true })));
 vi.mock('../src/proof/paymentVerifier.js', () => ({ verifyPaymentOnChain: verifyPayment }));
 
 import { createProofRoutes } from '../src/proof/proofRoutes.js';
-import { computeWalletNullifier } from '../src/input/inputBuilder.js';
+import { oprfWireInputs, NETWORK } from './helpers/oprfInputs.js';
 import { COINBASE_KYC_SCHEMA, type AttestationReader, type StatementSigner } from '../src/input/coinbaseStatement.js';
 import { COINBASE_ATTESTER_CONTRACT } from '../src/config/contracts.js';
 import type { Config } from '../src/config/index.js';
@@ -35,7 +35,6 @@ import { createPublicKey } from 'node:crypto';
 
 const WALLET = '0xD6C714247037E5201B7e3dEC97a3ab59a9d2F739';
 const UID = '0x' + '5a'.repeat(32);
-const SCOPE = ethers.keccak256(ethers.toUtf8Bytes('proofport'));
 
 const priv = nobleP256.utils.randomPrivateKey();
 const pub = nobleP256.getPublicKey(priv, false);
@@ -59,13 +58,13 @@ function deps(revocationTime = 0n) {
 const baseConfig = {
   paymentMode: 'disabled', paymentNetworks: 'base-sepolia', paymentProofPrice: '$0.10', paymentPayTo: '0x' + '11'.repeat(20),
   teeMode: 'local', chainRpcUrl: 'https://sepolia.base.org', a2aBaseUrl: 'https://proof.example.com',
+  oprfEnvironment: 'staging',
 } as Config;
 
 function inputs(extra: Record<string, unknown> = {}) {
   return {
     signal_hash: '0x' + '11'.repeat(32),
-    nullifier: ethers.hexlify(computeWalletNullifier(WALLET, 'coinbase_attestation', ethers.getBytes(SCOPE))),
-    scope_bytes: SCOPE,
+    ...oprfWireInputs(),
     merkle_root: '0x' + '44'.repeat(32), user_address: WALLET, raw_transaction: '0x00', tx_length: 1,
     signature: '0x' + '66'.repeat(65), user_pubkey_x: '0x' + '77'.repeat(32), user_pubkey_y: '0x' + '88'.repeat(32),
     coinbase_attester_pubkey_x: '0x' + '99'.repeat(32), coinbase_attester_pubkey_y: '0x' + 'aa'.repeat(32),
@@ -113,24 +112,35 @@ describe('coinbase_attestation v2 statement in the proof route', () => {
     expect(prove).not.toHaveBeenCalled();
   });
 
-  it('settles nothing for a v1 nullifier and says to update the SDK', async () => {
+  it('settles nothing for an OPRF answer under another key hash, and signs nothing', async () => {
     const d = deps();
-    const v1 = ethers.keccak256(ethers.concat([ethers.keccak256(ethers.concat([WALLET, '0x' + '11'.repeat(32)])), SCOPE]));
+    const other = '0x' + (BigInt(NETWORK.keyHash) + 1n).toString(16).padStart(64, '0');
     const res = await paid(request(app({ ...baseConfig, paymentMode: 'testnet' }, d)).post('/api/v1/prove'))
-      .send({ circuit: 'coinbase_attestation', inputs: inputs({ nullifier: v1 }) });
+      .send({ circuit: 'coinbase_attestation', inputs: inputs({ oprf_key_hash: other }) });
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe('NULLIFIER_RULE');
-    expect(res.body.message).toMatch(/update the SDK/);
+    expect(res.body.error).toBe('OPRF_KEY_HASH_MISMATCH');
     expect(d.signer.signDigest).not.toHaveBeenCalled();
     expect(settle).not.toHaveBeenCalled();
+  });
+
+  it('binds the OPRF scope field the request carries into the statement', async () => {
+    const d = deps();
+    const res = await request(app(baseConfig, d)).post('/api/v1/prove').set('X-Payment-Nonce', 'n')
+      .send({ circuit: 'coinbase_attestation', inputs: inputs() });
+    expect(res.status).toBe(200);
+    const params = prove.mock.calls[0][1] as { statement: { clientData: Uint8Array }; oprf: Record<string, string> };
+    expect(ethers.hexlify(params.statement.clientData.slice(193, 225))).toBe(NETWORK.scope);
+    expect(params.oprf.scope).toBe(NETWORK.scope);
+    expect(params.oprf.nullifier).toBe(NETWORK.nullifier);
   });
 
   it.each([
     ['signal_hash', '0x1234'],
     ['signal_hash', 'not hex'],
-    ['scope_bytes', '0x' + 'zz'.repeat(32)],
+    ['scope', '0x' + 'zz'.repeat(32)],
     ['nullifier', '0x' + '00'.repeat(33)],
     ['nullifier', '<script>'],
+    ['oprf_beta', '0x' + '00'.repeat(32)],
     ['signal_hash', '한글'],
     ['user_address', '0x' + '12'.repeat(19)],
     ['user_address', 12345],
@@ -143,7 +153,7 @@ describe('coinbase_attestation v2 statement in the proof route', () => {
     expect(settle).not.toHaveBeenCalled();
   });
 
-  it.each(['signal_hash', 'nullifier', 'scope_bytes', 'user_address'])('refuses a missing %s', async (field) => {
+  it.each(['signal_hash', 'nullifier', 'scope', 'domain', 'oprf_key_hash', 'oprf_response_y', 'user_address'])('refuses a missing %s', async (field) => {
     const d = deps();
     const body = inputs();
     delete (body as Record<string, unknown>)[field];
@@ -171,7 +181,7 @@ describe('coinbase_attestation v2 statement in the proof route', () => {
   it('does not touch the reader or signer for another circuit', async () => {
     const d = deps();
     const res = await request(app(baseConfig, d, 'giwa_attestation')).post('/api/v1/prove').set('X-Payment-Nonce', 'n')
-      .send({ circuit: 'giwa_attestation', inputs: inputs({ nullifier: '0x' + '22'.repeat(32) }) });
+      .send({ circuit: 'giwa_attestation', inputs: inputs() });
     expect(res.status).toBe(200);
     expect(d.reader.latestUid).not.toHaveBeenCalled();
     expect(d.signer.signDigest).not.toHaveBeenCalled();

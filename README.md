@@ -58,7 +58,8 @@ proofport-ai/
 │   │   ├── multiProvider.ts      # Multi-provider routing
 │   │   └── openaiClient.ts       # OpenAI API client
 │   ├── circuit/
-│   │   └── artifactManager.ts    # Circuit artifact download/cache
+│   │   ├── artifactManager.ts    # Baked circuit artifact checks
+│   │   └── circuitsSource.ts     # Pinned circuits commit and toolchain checks at boot
 │   ├── config/
 │   │   ├── index.ts              # Environment config
 │   │   ├── circuits.ts           # Circuit metadata
@@ -375,8 +376,7 @@ The agent auto-registers on-chain at startup via the ERC-8004 Identity contract.
 | `APPROVAL_TRUST_PROXY_HOPS` | Unset (proxy trust disabled) | Integer `1`–`16` for the verified ingress proxy count; scoped to approval creation rate limits |
 | `NODE_ENV` | `development` | Node environment |
 | `BB_PATH` | `bb` | Barretenberg CLI path |
-| `CIRCUITS_DIR` | `/app/circuits` | Circuit artifacts directory |
-| `CIRCUITS_REPO_URL` | (GitHub raw URL) | Circuit artifacts download URL |
+| `CIRCUITS_DIR` | `/app/circuits` | Circuit artifacts directory (baked into the image from the circuits commit pinned in `src/config/circuitsPin.ts`) |
 | `TEE_MODE` | `disabled` | `disabled` / `local` / `nitro`; GCP uses `local` without hardware attestation |
 | `ENCLAVE_CID` | — | Nitro Enclave CID (required when `TEE_MODE=nitro`) |
 | `ENCLAVE_PORT` | `5000` | Nitro Enclave port |

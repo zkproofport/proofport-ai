@@ -32,7 +32,14 @@ services:
       REDIS_URL: redis://redis:6379
       BB_PATH: /usr/local/bin/bb-wrapper
       CIRCUITS_DIR: /app/circuits
+      # The server proves with exactly the artifacts scripts/ai-dev.sh baked
+      # (scripts/bake-circuits.sh: artifacts-meta.json + circuits-source.json)
+      # and never downloads circuits; `true` is refused at boot.
+      CIRCUITS_AUTO_UPDATE: "false"
       A2A_BASE_URL: http://${HOST_IP:-localhost}:4002
+      # Wallet credential proofs use the test OPRF network's pinned key here
+      # (src/config/oprfKeyHashes.ts). Unset, those requests are refused.
+      OPRF_ENVIRONMENT: local
     depends_on:
       redis:
         condition: service_healthy

@@ -442,7 +442,10 @@ export async function prepareOidcInputs(params: PrepareOidcParams): Promise<Oidc
   const signatureBigInt = bytesToBigInt(signatureBytes);
   const modulusBytes = base64urlToBytes(jwk.n);
   const modulusBigInt = bytesToBigInt(modulusBytes);
-  const redcParam = (1n << (2n * 2048n + 4n)) / modulusBigInt;
+  // Barrett parameter floor(2^(2*2048+6) / n): noir-bignum >= 0.9 (PR #241) adds 6
+  // overflow bits where 0.8 added 4. It belongs to the circuit build this code proves
+  // for (circuits deps/MANIFEST.json) and moves only together with it.
+  const redcParam = (1n << (2n * 2048n + 6n)) / modulusBigInt;
 
   const pubkeyLimbs = splitBigIntToChunks(modulusBigInt, 120, 18).map(v => v.toString());
   const redcLimbs = splitBigIntToChunks(redcParam, 120, 18).map(v => v.toString());

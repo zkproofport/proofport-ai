@@ -76,10 +76,45 @@ export type { VerifyOptions } from './verify.js';
 export {
   prepareInputs,
   prepareHumanPassportInputs,
-  computeSignalHash,
-  computeScope,
-  computeNullifier,
 } from './inputs.js';
+
+// The OPRF nullifier: one per wallet per (oprfDomain, scope). Mirrors
+// @zkproofport-app/core's client until a core release ships it.
+export {
+  prepareOprf,
+  checkPreparedOprf,
+  evaluateOprf,
+  fetchOprfEnvironment,
+  assertOprfAvailable,
+  assertOprfName,
+  resolveOprfDomain,
+  requireOprfScope,
+  browserOprfDomain,
+  signOprfRequest,
+  oprfNameError,
+  reduceOprfName,
+  getPinnedOprfKeyHash,
+  getOprfNetwork,
+  OPRF_ENVIRONMENTS,
+  OPRF_CIRCUIT_IDS,
+  OPRF_INPUT_KEYS,
+  OPRF_MAX_NAME_BYTES,
+  OprfEvaluationError,
+  OprfNodeError,
+} from './oprf/index.js';
+export type { PreparedOprf, OprfCircuitInputs, OprfEnvironment, WebSocketFactory, WebSocketLike } from './oprf/index.js';
+
+// signal_hash = keccak256(scope ++ circuitId ++ requestId), no wallet.
+export {
+  computeSignalHash,
+  signalHashScopeError,
+  signalHashRequestIdError,
+  newRequestId,
+  resolveRequestId,
+  SIGNAL_HASH_CIRCUIT_IDS,
+  SIGNAL_HASH_MAX_SCOPE_BYTES,
+  SIGNAL_HASH_MAX_REQUEST_ID_LENGTH,
+} from './signalHash.js';
 
 // OIDC: SDK fetches JWKS, TEE validates JWT + builds circuit inputs
 export { prepareOidcInputs, prepareOidcPayload } from './oidc-inputs.js';
@@ -102,6 +137,8 @@ export {
   extractDomainFromPublicInputs,
   extractScopeFromPublicInputs,
   extractNullifierFromPublicInputs,
+  extractOprfDomainFromPublicInputs,
+  extractOprfKeyHashFromPublicInputs,
 } from './extract.js';
 
 // Attestation (customer-facing helpers)

@@ -4,8 +4,9 @@
  * The three things most likely to be wrong when giwa_attestation is wired up,
  * and none of them need a container:
  *   - the attestation lookup (a Blockscout read, not an EAS query)
- *   - the flat input vector's length
- *   - the nullifier, which must equal what the circuit recomputes
+ *   - the user key recovered from the message actually signed, in both modes
+ *     (the nullifier is the OPRF one: the SDK computes it and the circuit
+ *     checks it; nothing here can recompute it without the OPRF network)
  *
  * A full E2E takes a Docker build; this takes seconds, so a mistake in the
  * lookup does not hide behind a ten-minute image build.
@@ -20,7 +21,8 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { ethers } from 'ethers';
 import { findGiwaAttestation } from '../src/input/giwaAttestation.js';
-import { buildCircuitInputs, computeSignalHash } from '../src/input/inputBuilder.js';
+import { computeCircuitParams } from '../src/input/inputBuilder.js';
+import { computeSignalHash, newRequestId } from '../packages/sdk/src/signalHash.js';
 import { CIRCUIT_IDS } from '../src/config/circuitIds.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -48,39 +50,22 @@ console.log('attestation tx   ', found.txHash);
 console.log('raw tx bytes     ', (found.rawTransaction.length - 2) / 2);
 
 const scope = process.env.GIWA_CHECK_SCOPE || 'check:giwa-inputs';
-const signalHash = computeSignalHash(wallet.address, scope, CIRCUIT_IDS.GIWA_ATTESTATION);
+// keccak256(scope ++ circuitId ++ requestId), no wallet; a fresh request id per run.
+const signalHash = computeSignalHash({ scope, circuitId: CIRCUIT_IDS.GIWA_ATTESTATION, requestId: newRequestId() });
 const signature = await wallet.signMessage(signalHash);
 
-const built = await buildCircuitInputs(
-  { address: wallet.address, signature, scope, circuitId: CIRCUIT_IDS.GIWA_ATTESTATION },
+const built = await computeCircuitParams(
+  { address: wallet.address, signature, circuitId: CIRCUIT_IDS.GIWA_ATTESTATION, signalHash: ethers.hexlify(signalHash) },
   process.env.EAS_GRAPHQL_ENDPOINT ?? '',
   [process.env.BASE_RPC_URL ?? ''],
 );
-console.log('input vector     ', built.inputs.length, 'entries');
-console.log('nullifier        ', built.nullifier);
+const keyOf = (x: string, y: string) => ethers.computeAddress('0x04' + x.slice(2) + y.slice(2));
+const plainOk = keyOf(built.userPubkeyX, built.userPubkeyY) === wallet.address;
+console.log('attestation tx   ', built.txLength, 'bytes; attester leaf', built.merkleLeafIndex);
+console.log(plainOk ? 'KEY MATCH (signal_hash)' : 'KEY MISMATCH -- the circuit would refuse "User pubkey does not match address"');
+if (!plainOk) process.exit(1);
 
-// The circuit's own formula, recomputed here rather than trusted.
-const tag = ethers.keccak256(ethers.toUtf8Bytes(CIRCUIT_IDS.GIWA_ATTESTATION));
-const secret = ethers.keccak256(
-  ethers.concat([ethers.getBytes(wallet.address), ethers.getBytes(tag)]),
-);
-const expected = ethers.keccak256(
-  ethers.concat([
-    ethers.getBytes(secret),
-    ethers.getBytes(ethers.keccak256(ethers.toUtf8Bytes(scope))),
-  ]),
-);
-const matches = expected.toLowerCase() === built.nullifier.toLowerCase();
-console.log('circuit formula  ', expected);
-console.log(matches ? 'MATCH' : 'MISMATCH -- the proof would fail with "Nullifier mismatch"');
-if (!matches) process.exit(1);
-
-// ── The action mode, and the property that made the nullifier change ──────
-//
-// Same wallet, same scope, an EIP-712 action instead of the signal hash. The
-// nullifier must come out IDENTICAL: it no longer derives from signal_hash,
-// which is zero here, and if it did this wallet would have two identities in
-// one scope.
+// ── The action mode: the key must be recovered from the EIP-712 digest ─────
 const action = {
   domain: {
     name: 'GIWA input check',
@@ -93,37 +78,21 @@ const action = {
   message: { amount: 1_000_000n },
 };
 const domainSeparator = ethers.TypedDataEncoder.hashDomain(action.domain);
-const actionHash = ethers.TypedDataEncoder.hashStruct(
-  action.primaryType,
-  action.types,
-  action.message,
-);
+const actionHash = ethers.TypedDataEncoder.hashStruct(action.primaryType, action.types, action.message);
 const typedSignature = await wallet.signTypedData(action.domain, action.types, action.message);
 
-const bound = await buildCircuitInputs(
+const bound = await computeCircuitParams(
   {
     address: wallet.address,
     signature: typedSignature,
-    scope,
     circuitId: CIRCUIT_IDS.GIWA_ATTESTATION,
+    signalHash: ethers.ZeroHash,
     domainSeparator,
     actionHash,
   },
   process.env.EAS_GRAPHQL_ENDPOINT ?? '',
   [process.env.BASE_RPC_URL ?? ''],
 );
-console.log('');
-console.log('with an action   ', bound.inputs.length, 'entries');
-console.log('nullifier        ', bound.nullifier);
-
-// The first 32 entries are signal_hash, which must be empty in action mode.
-const signalIsEmpty = bound.inputs.slice(0, 32).every((v) => v === '0');
-console.log('signal_hash zero ', signalIsEmpty);
-
-const sameNullifier = bound.nullifier.toLowerCase() === built.nullifier.toLowerCase();
-console.log(
-  sameNullifier && signalIsEmpty
-    ? 'BOTH MODES AGREE -- one wallet, one scope, one nullifier'
-    : 'MISMATCH between the two modes',
-);
-if (!sameNullifier || !signalIsEmpty) process.exit(1);
+const actionOk = keyOf(bound.userPubkeyX, bound.userPubkeyY) === wallet.address;
+console.log(actionOk ? 'KEY MATCH (EIP-712 action)' : 'KEY MISMATCH in action mode');
+if (!actionOk) process.exit(1);

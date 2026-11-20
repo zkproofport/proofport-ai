@@ -1,29 +1,31 @@
 /**
  * Runtime deployment fetcher.
  *
- * Fetches Foundry broadcast JSON from GitHub to get the latest
- * deployed verifier contract addresses. Uses in-memory cache
- * with fallback to hardcoded addresses.
+ * Fetches Foundry broadcast JSON from GitHub to get the deployed verifier
+ * contract addresses. Uses in-memory cache with fallback to hardcoded
+ * addresses.
  *
- * Resolution strategy:
- *   - testnet (staging): fetch from the same circuits ref the artifacts come
- *     from (CIRCUITS_REPO_URL). It was hardcoded to main, so a server proving
- *     with artifacts from another branch verified against main's verifiers --
- *     on 2026-10-22 every beta.19 proof reverted with ProofLengthWrong().
- *   - mainnet (production): fetch from latest GitHub Release tag (verified only)
+ * Every chain, staging and production, reads the broadcast records of the
+ * pinned circuits commit (src/config/circuitsPin.ts) -- the same commit the
+ * baked artifacts come from, so a proof and the verifier it names always
+ * belong to one circuit set.
+ *
+ * Until 2026-11-17 staging read CIRCUITS_REPO_URL (default circuits `main`)
+ * and production asked the GitHub API for `releases/latest`, so merging to
+ * circuits `main` or marking a release Latest changed the verifiers a server
+ * named on its next start, with no deploy. (Earlier still, staging's records
+ * were hardcoded to main while its artifacts came from another branch: on
+ * 2026-10-22 every beta.19 proof reverted with ProofLengthWrong().)
  */
 
 import { PINNED_VERIFIERS, sameAddress } from '@zkproofport-app/core';
 import { createLogger } from '../logger.js';
 import { FALLBACK_VERIFIERS } from './contracts.js';
 import { CIRCUIT_IDS, PROVABLE_CIRCUIT_IDS } from './circuitIds.js';
+import { pinnedCircuitsRawBase } from './circuitsPin.js';
 import type { CircuitId } from './circuitIds.js';
 
 const log = createLogger('Deployments');
-
-const GITHUB_REPO = 'zkproofport/circuits';
-const GITHUB_RAW = (ref: string) =>
-  `https://raw.githubusercontent.com/${GITHUB_REPO}/${ref}`;
 
 const BROADCAST_PATHS: Record<CircuitId, (chainId: number) => string> = {
   // v2 (circuits coinbase-attestation-v2). v1's DeployCoinbaseAttestation
@@ -48,10 +50,6 @@ const BROADCAST_PATHS: Record<CircuitId, (chainId: number) => string> = {
 const verifierAddresses: Record<string, Record<string, string>> = JSON.parse(
   JSON.stringify(FALLBACK_VERIFIERS),
 );
-
-// Release tag cache (module-level, resets on server restart)
-let cachedReleaseTag: { tag: string; fetchedAt: number } | null = null;
-const RELEASE_TAG_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 // ── Sync getters (no async needed by consumers) ─────────────────────────
 
@@ -108,64 +106,11 @@ interface BroadcastJson {
   transactions: BroadcastTransaction[];
 }
 
-/**
- * Resolve the latest GitHub Release tag for production.
- * Caches the tag in memory for 1 hour.
- */
-async function resolveReleaseTag(): Promise<string | null> {
-  if (
-    cachedReleaseTag &&
-    Date.now() - cachedReleaseTag.fetchedAt < RELEASE_TAG_TTL_MS
-  ) {
-    return cachedReleaseTag.tag;
-  }
-
-  try {
-    const response = await fetch(
-      `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`,
-      { headers: { Accept: 'application/vnd.github.v3+json' } },
-    );
-    if (!response.ok) {
-      log.warn(
-        { status: response.status },
-        'Failed to fetch latest release tag',
-      );
-      return null;
-    }
-
-    const release = (await response.json()) as { tag_name?: string };
-    const tag = release.tag_name;
-    if (!tag) return null;
-
-    cachedReleaseTag = { tag, fetchedAt: Date.now() };
-    log.info({ tag }, 'Resolved latest release tag');
-    return tag;
-  } catch (err) {
-    log.warn({ err }, 'Error resolving release tag');
-    return null;
-  }
-}
-
-/**
- * Build the broadcast JSON URL based on environment.
- */
-async function resolveBroadcastUrl(
-  circuitId: CircuitId,
-  chainId: number,
-  isProduction: boolean,
-  testnetRepoUrl: string,
-): Promise<string | null> {
+/** The pinned commit's broadcast JSON URL for one circuit on one chain. */
+function broadcastUrl(circuitId: CircuitId, chainId: number): string {
   const pathFn = BROADCAST_PATHS[circuitId];
-  if (!pathFn) return null;
-
-  if (!isProduction) {
-    return `${testnetRepoUrl}/${pathFn(chainId)}`;
-  }
-
-  // Production: resolve latest release tag first
-  const tag = await resolveReleaseTag();
-  if (!tag) return null;
-  return `${GITHUB_RAW(tag)}/${pathFn(chainId)}`;
+  if (!pathFn) throw new Error(`No broadcast path for circuit ${circuitId}. Known: ${Object.keys(BROADCAST_PATHS).join(', ')}`);
+  return `${pinnedCircuitsRawBase()}/${pathFn(chainId)}`;
 }
 
 /**
@@ -199,26 +144,24 @@ async function fetchVerifierFromBroadcast(
 /**
  * Sync verifier addresses for a single chain from GitHub broadcast JSON.
  */
-async function syncChain(chainId: number, isProduction: boolean, testnetRepoUrl: string): Promise<boolean> {
+async function syncChain(chainId: number, isProduction: boolean): Promise<boolean> {
   const chainIdStr = String(chainId);
   let updated = false;
 
   await Promise.all(
     PROVABLE_CIRCUIT_IDS.map(async (circuitId) => {
-      const url = await resolveBroadcastUrl(circuitId, chainId, isProduction, testnetRepoUrl);
-      if (!url) return;
-
-      const address = await fetchVerifierFromBroadcast(url);
+      const address = await fetchVerifierFromBroadcast(broadcastUrl(circuitId, chainId));
       if (!address) return;
 
       const current = verifierAddresses[chainIdStr]?.[circuitId];
       const unpinned = unpinnedVerifierReason(circuitId, chainId, address);
-      // Production reads the circuits release marked Latest, which is held
-      // back on purpose (installed apps read it), so it can name verifiers
-      // older than the ones core pins -- v1.3.0 names OIDC v1 on Base and
-      // Ethereum, which reverts every proof this server makes. A pinned
-      // address is never replaced by an unpinned one there. Staging keeps
-      // following its circuits ref, whose redeploys core has not pinned yet.
+      // A pinned commit can still name a mainnet verifier core does not pin
+      // (a redeploy recorded before core's release). Production never
+      // replaces a core-pinned address with an unpinned one: published
+      // clients would refuse every proof. Until 2026-11-17 production read
+      // `releases/latest` (held at v1.3.0, whose OIDC v1 verifiers revert
+      // every proof this server makes), which is how this guard began.
+      // Staging takes the pinned commit's records as they are.
       if (unpinned && isProduction && current && !unpinnedVerifierReason(circuitId, chainId, current)) {
         log.error(
           { action: 'deployment.unpinned_ignored', circuitId, chainId, address, kept: current },
@@ -233,7 +176,7 @@ async function syncChain(chainId: number, isProduction: boolean, testnetRepoUrl:
         );
       }
 
-      if (address !== current) {
+      if (!current || !sameAddress(address, current)) {
         if (!verifierAddresses[chainIdStr]) {
           verifierAddresses[chainIdStr] = {};
         }
@@ -261,25 +204,23 @@ async function syncChain(chainId: number, isProduction: boolean, testnetRepoUrl:
  *
  * Syncs: Ethereum mainnet (1), Base mainnet (8453), and Base Sepolia (84532) for testnet.
  *
+ * Records are read from the pinned circuits commit (src/config/circuitsPin.ts).
+ *
  * @param paymentMode - 'testnet' | 'mainnet' | 'disabled'
- * @param testnetRepoUrl - raw base URL of the circuits ref the artifacts come
- *   from (config.circuitsRepoUrl); testnet broadcasts are read from the same ref
  * @returns true if any address was updated
  */
 export async function syncDeployments(
   paymentMode: string,
   chainRpcUrl: string | undefined,
-  testnetRepoUrl: string,
 ): Promise<boolean> {
-  if (!testnetRepoUrl) throw new Error('syncDeployments needs the circuits repo URL the artifacts come from');
   const isTestnetRpc = chainRpcUrl?.includes('sepolia') ?? false;
   const isProduction = paymentMode === 'mainnet' || (paymentMode === 'disabled' && !isTestnetRpc);
 
   if (isProduction) {
     // Sync both Ethereum mainnet and Base mainnet
     const [ethUpdated, baseUpdated] = await Promise.all([
-      syncChain(1, true, testnetRepoUrl),
-      syncChain(8453, true, testnetRepoUrl),
+      syncChain(1, true),
+      syncChain(8453, true),
     ]);
     return ethUpdated || baseUpdated;
   } else {
@@ -287,9 +228,9 @@ export async function syncDeployments(
     // chain giwa_attestation is deployed on, which was never synced and so
     // stayed on its fallback address after every redeploy.
     const results = await Promise.all([
-      syncChain(11155111, false, testnetRepoUrl),
-      syncChain(84532, false, testnetRepoUrl),
-      syncChain(91342, false, testnetRepoUrl),
+      syncChain(11155111, false),
+      syncChain(84532, false),
+      syncChain(91342, false),
     ]);
     return results.some(Boolean);
   }

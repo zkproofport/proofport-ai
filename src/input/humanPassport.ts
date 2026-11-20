@@ -39,7 +39,6 @@ import {
   type HumanPassportChain,
 } from '@zkproofport-app/core/circuits';
 import { StatementRefusal } from './statementSigner.js';
-import { computeWalletNullifier } from './inputBuilder.js';
 import { createLogger } from '../logger.js';
 
 const log = createLogger('HumanPassport');
@@ -490,7 +489,7 @@ const HASH32 = /^0x[0-9a-fA-F]{64}$/;
 
 /**
  * Everything checked before payment for a human_passport_score request:
- * the request's shape, the nullifier rule, that the signature recovers to the
+ * the request's shape (the OPRF inputs are checked by src/input/oprfInputs.ts), that the signature recovers to the
  * wallet it names, the threshold, and the issuance (found, signed by the
  * issuer, for this wallet, unexpired, unrevoked, scorer 335, within the data
  * cap, scored at or above the threshold).
@@ -500,8 +499,6 @@ export async function prepareHumanPassport(
     user_address?: unknown;
     signature?: unknown;
     signal_hash?: unknown;
-    scope_bytes?: unknown;
-    nullifier?: unknown;
     user_pubkey_x?: unknown;
     user_pubkey_y?: unknown;
     min_score?: unknown;
@@ -518,7 +515,7 @@ export async function prepareHumanPassport(
   // chain its owner recorded it on, and guessing one reads as "no score".
   const chain = anchorChain(anchors, inputs.chain);
   if (typeof inputs.user_address !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(inputs.user_address)) throw bad('user_address must be a 0x-prefixed 20-byte hex address.');
-  for (const k of ['signal_hash', 'scope_bytes', 'nullifier', 'user_pubkey_x', 'user_pubkey_y'] as const) {
+  for (const k of ['signal_hash', 'user_pubkey_x', 'user_pubkey_y'] as const) {
     if (typeof inputs[k] !== 'string' || !HASH32.test(inputs[k] as string)) throw bad(`${k} must be a 0x-prefixed 32-byte hex string.`);
   }
   if (typeof inputs.signature !== 'string' || !/^0x[0-9a-fA-F]{130}$/.test(inputs.signature)) throw bad('signature must be a 0x-prefixed 65-byte hex signature.');
@@ -529,15 +526,6 @@ export async function prepareHumanPassport(
     throw bad(`min_score: ${(e as Error).message}`);
   }
   const wallet = ethers.getAddress(inputs.user_address);
-  const scope = ethers.getBytes(inputs.scope_bytes as string);
-  const expected = ethers.hexlify(computeWalletNullifier(wallet, HUMAN_PASSPORT_CIRCUIT_ID, scope));
-  if (expected !== (inputs.nullifier as string).toLowerCase()) {
-    throw new StatementRefusal(
-      'NULLIFIER_RULE',
-      `${HUMAN_PASSPORT_CIRCUIT_ID} derives the nullifier from the wallet and the circuit tag: ` +
-      `keccak256(keccak256(address ++ keccak256("${HUMAN_PASSPORT_CIRCUIT_ID}")) ++ scope). The request carries a different one.`,
-    );
-  }
   // The circuit checks the wallet's signature over exactly one message: the
   // EIP-712 action when one is bound, else signal_hash under personal_sign.
   const hasDomain = inputs.domain_separator !== undefined;

@@ -1,0 +1,84 @@
+{
+  "rule": "signal_hash = keccak256(abi.encodePacked(string scope, string circuitId, string requestId)); no wallet address",
+  "oracle": "ethers v6 solidityPackedKeccak256, independent of every helper that reads this file",
+  "canonical": "proofport-app-sdk packages/core/src/signalHash.ts; copies must stay byte-identical (scripts/check-signal-hash-vectors.sh in the parent repository)",
+  "vectors": [
+    {
+      "note": "relay request id (lowercase UUID)",
+      "scope": "myapp.com",
+      "circuitId": "coinbase_attestation",
+      "requestId": "3f2b8c1e-9d4a-4f6b-8e2c-1a7d5b9c0e4f",
+      "signalHash": "0x7aa3ee4687e5523096baf300c167d43f9d287c3913e5fb83c254a14e62c33ce1"
+    },
+    {
+      "note": "same scope and request, another circuit",
+      "scope": "myapp.com",
+      "circuitId": "coinbase_country_attestation",
+      "requestId": "3f2b8c1e-9d4a-4f6b-8e2c-1a7d5b9c0e4f",
+      "signalHash": "0xb4364dc65499ee6f2ff9d7d041adab743b3c541ae1b23b9865530d54aa61c953"
+    },
+    {
+      "note": "same scope and circuit, another request",
+      "scope": "myapp.com",
+      "circuitId": "coinbase_attestation",
+      "requestId": "9a1c7e3b-2f5d-4c8a-b6e1-0d4f2a8c6b19",
+      "signalHash": "0x2f9f000e3f50e488d13a61e2f440bba84e091a8bcaa918be78b442ead30941dd"
+    },
+    {
+      "note": "GIWA",
+      "scope": "giwa:demo",
+      "circuitId": "giwa_attestation",
+      "requestId": "3f2b8c1e-9d4a-4f6b-8e2c-1a7d5b9c0e4f",
+      "signalHash": "0xf5006aed4a4670b77f474d3e3efabafe68dc76142a32e7c63c23e323cd8d11f9"
+    },
+    {
+      "note": "Dojang Playground",
+      "scope": "dojang:playground",
+      "circuitId": "dojang_playground",
+      "requestId": "3f2b8c1e-9d4a-4f6b-8e2c-1a7d5b9c0e4f",
+      "signalHash": "0x623d68113bf478c2cd3081eaf34c280d8959874f9aef001e13b4ba40079f5b68"
+    },
+    {
+      "note": "Human Passport",
+      "scope": "myapp.com",
+      "circuitId": "human_passport_score",
+      "requestId": "3f2b8c1e-9d4a-4f6b-8e2c-1a7d5b9c0e4f",
+      "signalHash": "0xe0e09536300a343778e2f99c60c5aa4893c7920f33390b0d6b009a3b6d9911eb"
+    },
+    {
+      "note": "SDK deep-link request id",
+      "scope": "myapp.com",
+      "circuitId": "coinbase_attestation",
+      "requestId": "req-mabc123x-k3j9x0qz",
+      "signalHash": "0x5a83abc73ebb90753d81b3a9d73f0a83f39ccdd38eb6ead9ae6cc9c6b33196a1"
+    },
+    {
+      "note": "Korean, emoji, newline and tab in the scope",
+      "scope": "프루프포트 🔐\nscope\t1",
+      "circuitId": "coinbase_attestation",
+      "requestId": "3f2b8c1e-9d4a-4f6b-8e2c-1a7d5b9c0e4f",
+      "signalHash": "0xa0d52f59b854d9a7e15fa541cb49aa2268426ce6c263565e285e34a72b77c928"
+    },
+    {
+      "note": "hostile text in the scope",
+      "scope": "%_\\' OR 1=1; <script>x</script>",
+      "circuitId": "coinbase_attestation",
+      "requestId": "A-Z-0-9",
+      "signalHash": "0x1646cf9dea053156179d3dca665d5387b0b4cf4c16d93330cf69d4b3a06454a9"
+    },
+    {
+      "note": "scope at the 4096-byte cap",
+      "scope": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "circuitId": "coinbase_attestation",
+      "requestId": "3f2b8c1e-9d4a-4f6b-8e2c-1a7d5b9c0e4f",
+      "signalHash": "0xa6156864790ab0990fa9db5e8c379101982d127699e14d40976570e7edfc71b7"
+    },
+    {
+      "note": "request id at the 128-character cap",
+      "scope": "myapp.com",
+      "circuitId": "coinbase_attestation",
+      "requestId": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "signalHash": "0x1aaae9f22cf216f080bb5ba8a0e4f3e8ea672dd8e7c23da45ce79d01ea528e72"
+    }
+  ]
+}

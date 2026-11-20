@@ -100,7 +100,9 @@ Use **SDK 0.2.14 or later** and **MCP 0.2.15 or later** for both GIWA signature 
 
 **For the circuits that can bind an action** (`coinbase_kyc`, `coinbase_country`, `giwa_attestation`): the attestation above. What differs is what the wallet signs, and the action is **optional** — see below.
 
-**One wallet has a different nullifier per circuit, and for `coinbase_kyc`, `coinbase_country` and `giwa_attestation` it does not depend on what you signed.** They derive it from your address, the circuit's own identifier and the scope, so the same wallet in the same scope gives the same nullifier whether or not you bind an action. Nothing to configure — the SDK picks the rule the circuit expects, and refuses a circuit it has no rule for rather than guessing one. Requires **0.2.14 or later**; earlier versions sent the Coinbase rule for every circuit, which a GIWA proof rejects as a nullifier mismatch.
+**The nullifier is one per wallet per service and scope, and nobody can compute it from an address.** Every wallet circuit (`coinbase_kyc`, `coinbase_country`, `giwa_attestation`, `human_passport`) takes `oprfDomain`: the name of the service the proof is for, usually its host. The SDK asks an OPRF network for the wallet's value in (`oprfDomain`, `scope`) before the wallet signs anything, checks the network's proof and its pinned key, and sends the result with the other inputs. The same wallet gets the same nullifier for one service and scope, whether or not it binds an action; another service or scope gives another, unlinkable nullifier. `oprfDomain` and `scope` are each 1 to 256 UTF-8 bytes without control or format characters, used exactly as given. `scope` is always required; nothing is filled in. `oprfDomain` is required too, except in a browser on an http(s) page, where an omitted one is that page's hostname, lowercased (never an IP address); on a server or in Node an omitted one is an error.
+
+**Requires Node.js 22 or later** (`engines.node` `>=22.0.0`): the OPRF step uses the platform's global WebSocket. On an older runtime it fails with an error naming this requirement; there is no fallback transport.
 
 ## Quick Start
 
@@ -113,7 +115,7 @@ const attestationSigner = fromPrivateKey(process.env.ATTESTATION_KEY);
 const result = await generateProof(
   config,
   { attestation: attestationSigner },
-  { circuit: 'coinbase_kyc', scope: 'my-app' }
+  { circuit: 'coinbase_kyc', oprfDomain: 'my-app.example.com', scope: 'my-app' }
 );
 
 const verification = await verifyProof(result);
@@ -131,13 +133,13 @@ console.log('Valid:', verification.valid);
 >
 > Public-input layouts and deployments may change; do not put it in front of real funds. Generally available: `coinbase_kyc`, `coinbase_country`, `oidc_domain`.
 >
-> **The action is optional.** Send one and the SDK pauses for a human to connect a wallet and sign the exact typed data. Send none and the supplied credential signer signs the request's signal hash as before. Supplying `ATTESTATION_KEY` does not bypass action approval.
+> **The action is optional.** Send one and the SDK pauses for a human to connect a wallet and sign the exact typed data. Send none and the supplied credential signer signs the request's signal hash, `keccak256(abi.encodePacked(scope, circuitId, requestId))` — no wallet address in it. Every value in the action is public. Supplying `ATTESTATION_KEY` does not bypass action approval.
 
 ### The problem it solves
 
-The Coinbase KYC and country circuits have the wallet sign `signal_hash`, which is
-`keccak256(address, scope, circuitId)`. That value is the same for a given
-wallet and scope no matter what the proof is later used for, so:
+Without an action, the wallet signs `signal_hash`, which is
+`keccak256(abi.encodePacked(scope, circuitId, requestId))`. It names a request
+and nothing the proof is later used for, so:
 
 - **It commits to no action.** A proof produced to deposit into one vault
   verifies just as well at a different vault, for a different amount, from a
@@ -163,6 +165,7 @@ import {
 
 const params: ProofParams = {
     circuit: 'giwa_attestation',
+    oprfDomain: 'my-app.example.com',
     scope: 'my-app',
     action: {
       domain: {
@@ -260,22 +263,32 @@ require(publicInputs.domainSeparator == domainSeparator, "wrong contract");
 require(publicInputs.actionHash == actionHash, "wrong action");
 ```
 
-Public inputs arrive in this order — read off the compiled ABI, 192 fields of
-one byte each:
+Public inputs arrive in this order — read off the compiled ABI, 132 fields:
 
-| Field | Byte range |
+| Field | Index |
 |---|---|
-| `signal_hash` | 0–31 |
+| `signal_hash` | 0–31 (one byte each) |
 | `domain_separator` | 32–63 |
 | `action_hash` | 64–95 |
 | `signer_list_merkle_root` | 96–127 |
-| `scope` | 128–159 |
-| `nullifier` | 160–191 |
+| `oprf_key_hash` | 128 (one field) |
+| `domain` | 129 (keccak256(oprfDomain) mod p) |
+| `scope` | 130 (keccak256(scope) mod p) |
+| `nullifier` | 131 |
 
-`signal_hash` is zero when an action is bound. The nullifier derives from the
-wallet, the circuit id and the scope, not from the signed action: deriving it
-from the action would give a different nullifier per action and destroy the
-one-per-person property it exists for.
+`signal_hash` is zero when an action is bound. Without one it is
+`keccak256(abi.encodePacked(scope, circuitId, requestId))`: no wallet address,
+fresh per request. Pass `requestId` (the id the verifier issued) to
+`generateProof`; without one a fresh UUID is minted. Either way the result
+carries `requestId`, `scope` and `oprfDomain` -- give them to whoever verifies
+the proof. The nullifier comes from the wallet, `oprfDomain` and `scope`, not
+from the signed action: deriving it from the action would give a different
+nullifier per action and destroy the one-per-person property it exists for.
+`extractOprfDomainFromPublicInputs` and `extractOprfKeyHashFromPublicInputs`
+read the other two values.
+
+**Every value in the action is public.** The domain separator and action hash
+are public inputs, so put nothing in the action that should stay private.
 
 ### Omitting `action`
 
@@ -345,6 +358,7 @@ const result = await generateProof(
   { attestation: attestationSigner },
   {
     circuit: 'coinbase_kyc',
+    oprfDomain: 'my-application.example.com',
     scope: 'my-application',
     // Optional: for country circuit
     // countryList: ['US', 'KR'],
@@ -369,7 +383,7 @@ if (result.attestation) {
 ```
 
 **Proof generation flow:**
-1. Sign signal hash with attestation signer
+1. Sign signal hash (`keccak256(scope ++ circuitId ++ requestId)`, no wallet address) with attestation signer
 2. Fetch Coinbase KYC attestation from EAS
 3. Build circuit inputs (Merkle tree, hashes)
 4. **Auto-detect E2E encryption** — if `teePublicKey` is present in server response, encrypt inputs with X25519 ECDH + AES-256-GCM
@@ -413,7 +427,7 @@ the signer list is the official one. Any failed check returns
 
 ## Step-by-Step API
 
-For GIWA actions, obtain human approval before preparing inputs. `prepareInputs` needs the camelCase hashes to recover A's public key from the approved EIP-712 digest; it does not add those hashes to its returned object. Attach the snake_case fields for submission. `signal_hash` is still computed internally for nullifier derivation and is not the action signing message. Low-level witness APIs accept signatures but cannot establish who operated the signing wallet.
+For GIWA actions, obtain human approval before preparing inputs. `prepareInputs` needs the camelCase hashes to recover A's public key from the approved EIP-712 digest; it does not add those hashes to its returned object. Attach the snake_case fields for submission. With an action, `signal_hash` is all zeros; the wallet signs only the EIP-712 digest. Low-level witness APIs accept signatures but cannot establish who operated the signing wallet.
 
 Prepared inputs are **private witness data**: they include A's public key, signature and attestation data. Keep them inside trusted local code and send them only to the chosen prover (encrypted when a supported TEE key is provided). Do not forward them to the dApp, model, UI or logs. The `generateProof` public result is the boundary for sharing a proof; step callbacks and `proofport://config` can contain sensitive signer data and must not be forwarded wholesale.
 
@@ -471,7 +485,7 @@ const result = challenge.teePublicKey
 // that relies on the proof needs its own approval.
 ```
 
-`hashTypedAction(action)` returns `{domainSeparator: string, actionHash: string}` as 32-byte `0x` hashes. For Coinbase KYC/country, sign `computeSignalHash(address, scope, circuitId)` with `signMessage`, call `prepareInputs` without action hashes, then use the same challenge/payment/submission sequence. OIDC uses `prepareOidcPayload` and no attestation-wallet signature. The all-in-one `generateProof` already handles these distinctions.
+`hashTypedAction(action)` returns `{domainSeparator: string, actionHash: string}` as 32-byte `0x` hashes. For Coinbase KYC/country, sign `computeSignalHash({ scope, circuitId, requestId })` with `signMessage`, call `prepareInputs` with the same `requestId` and without action hashes, then use the same challenge/payment/submission sequence. OIDC uses `prepareOidcPayload` and no attestation-wallet signature. The all-in-one `generateProof` already handles these distinctions.
 
 ## Circuits
 
@@ -482,7 +496,8 @@ Proves wallet holder passed Coinbase Know-Your-Customer verification.
 ```typescript
 const result = await generateProof(config, signers, {
   circuit: 'coinbase_kyc',
-  scope: 'my-app', // any string; used to prevent proof replay
+  oprfDomain: 'my-app.example.com', // the service the proof is for
+  scope: 'my-app', // 1-256 UTF-8 bytes; one nullifier per wallet per (oprfDomain, scope)
 });
 ```
 
@@ -495,6 +510,7 @@ const result = await generateProof(config, signers, {
   circuit: 'coinbase_country',
   countryList: ['US', 'KR'],
   isIncluded: true, // true = prove in list, false = prove not in list
+  oprfDomain: 'my-app.example.com',
   scope: 'my-app',
 });
 ```
@@ -591,7 +607,8 @@ Only id_tokens from the ZKProofport device sign-in (`zkproofport-prove --login-g
 **Functions:**
 
 - `extractDomainFromPublicInputs(publicInputs: string, circuit: CircuitId): string | null` — Extracts the email domain (e.g., "google.com") from public inputs. Returns null if extraction fails.
-- `extractNullifierFromPublicInputs(publicInputs: string, circuit: CircuitId): string | null` — Extracts the 32-byte nullifier as a 0x-prefixed hex string. Returns null if extraction fails.
+- `extractNullifierFromPublicInputs(publicInputs: string, circuit: CircuitId): string | null` — Extracts the nullifier as a 0x-prefixed 32-byte hex string (one field for wallet circuits, 32 bytes for OIDC). Returns null if extraction fails or the vector does not have the circuit's field count.
+- `extractOprfDomainFromPublicInputs` / `extractOprfKeyHashFromPublicInputs(publicInputs, circuit)` — A wallet circuit's OPRF domain field and key hash; null for OIDC.
 
 ## Types Reference
 
@@ -637,7 +654,7 @@ interface ProofParams {
   payOn?: string;
   maxPayment?: string; // decimal USDC
   approvedPayment?: ApprovedPayment;
-  scope?: string; // defaults to 'proofport'
+  scope?: string; // required: what the proof is for within the service (no default)
   countryList?: string[]; // for coinbase_country only
   isIncluded?: boolean; // for coinbase_country only
   jwt?: string; // JWT id_token for OIDC circuits (required for oidc_domain)

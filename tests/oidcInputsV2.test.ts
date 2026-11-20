@@ -295,6 +295,19 @@ describe('noir_js formatting', () => {
   });
 });
 
+describe('RSA Barrett parameter', () => {
+  // noir-bignum >= 0.9 (circuits deps/MANIFEST.json) expects floor(2^(2*2048+6) / n);
+  // the +4 of noir-bignum 0.8 makes honest proving fail on the rebuilt circuits.
+  const limbs = (v: bigint) => Array.from({ length: 18 }, (_, i) => ((v >> BigInt(120 * i)) & ((1n << 120n) - 1n)).toString());
+  const n = BigInt('0x' + Buffer.from(jwk.n as string, 'base64url').toString('hex'));
+
+  it('is floor(2^(2*2048+6) / n) in 18 limbs of 120 bits, not the old +4 value', () => {
+    const out = serverBuild(signJwt(google()));
+    expect(out.redc_params_limbs).toEqual(limbs((1n << (2n * 2048n + 6n)) / n));
+    expect(out.redc_params_limbs).not.toEqual(limbs((1n << (2n * 2048n + 4n)) / n));
+  });
+});
+
 describe('client SDK', () => {
   const serveJwks = () => {
     global.fetch = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ keys: [jwk] }) })) as never;

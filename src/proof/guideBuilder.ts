@@ -107,36 +107,28 @@ function buildConstants(config: Config, circuitId: CircuitId) {
 }
 
 /**
- * Each wallet circuit's nullifier rule, as a table: both Coinbase circuits'
- * v2 moved to the wallet + circuit-tag rule (v1 nullifiers do not carry
- * over). Must agree with nullifierForCircuit in src/input/inputBuilder.ts.
+ * The OPRF nullifier inputs every wallet circuit takes, as the guide states
+ * them. One text for every wallet circuit: the construction does not vary by
+ * circuit (the pinned key hash may, see GET /api/v1/oprf).
  */
-const NULLIFIER_GUIDES: Partial<Record<CircuitId, { description: string; formula: string; ethers_v6_code: string }>> = {
-  [CIRCUIT_IDS.COINBASE_ATTESTATION]: {
-    description: 'Deterministic from the wallet, the circuit id and scope_bytes; signal_hash does not enter it, so it is the same with or without an action.',
-    formula: 'nullifier = keccak256(keccak256(address_bytes || keccak256(UTF8("coinbase_attestation"))) || scope_bytes)',
-    ethers_v6_code: [
-      `const tag = ethers.keccak256(ethers.toUtf8Bytes('coinbase_attestation'));`,
-      `const userSecret = ethers.keccak256(ethers.concat([ethers.getBytes(userAddress), ethers.getBytes(tag)]));`,
-      `const nullifier = ethers.keccak256(ethers.concat([ethers.getBytes(userSecret), ethers.getBytes(scope_bytes)]));`,
-    ].join('\n'),
+export const OPRF_GUIDE = Object.freeze({
+  description:
+    'The nullifier comes from an OPRF network: one value per wallet per (domain, scope), which nobody without the network key can ' +
+    'compute from an address. The SDK (@zkproofport-ai/sdk generateProof, or the local MCP) computes all eleven values: it reduces the ' +
+    'domain and scope names, blinds the query with a fresh random factor, asks the OPRF network, verifies the network\'s DLog-equality ' +
+    'proof and unblinds the answer. Do not compute them by hand. Names: 1-256 UTF-8 bytes, no control or format characters, never trimmed ' +
+    'or normalized. domain names the service the proof is for and is required; there is no default.',
+  public: {
+    oprf_key_hash: 'Poseidon2 hash of the OPRF public key; must equal the key hash pinned for this deployment\'s environment (GET /api/v1/oprf) or the request is refused before payment (OPRF_KEY_HASH_MISMATCH)',
+    domain: 'keccak256(UTF8(domain name)) mod p',
+    scope: 'keccak256(UTF8(scope name)) mod p',
+    nullifier: 'Poseidon2(DS_out, query, P.x, P.y), P the unblinded OPRF answer for query = Poseidon2(DS_query, address, domain, scope)',
   },
-  [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: {
-    description: 'Deterministic from the wallet, the circuit id and scope_bytes; signal_hash does not enter it, so it is the same with or without an action.',
-    formula: 'nullifier = keccak256(keccak256(address_bytes || keccak256(UTF8("coinbase_country_attestation"))) || scope_bytes)',
-    ethers_v6_code: [
-      `const tag = ethers.keccak256(ethers.toUtf8Bytes('coinbase_country_attestation'));`,
-      `const userSecret = ethers.keccak256(ethers.concat([ethers.getBytes(userAddress), ethers.getBytes(tag)]));`,
-      `const nullifier = ethers.keccak256(ethers.concat([ethers.getBytes(userSecret), ethers.getBytes(scope_bytes)]));`,
-    ].join('\n'),
-  },
-};
+  private: ['oprf_public_key_x', 'oprf_public_key_y', 'oprf_beta', 'oprf_dlog_e', 'oprf_dlog_s', 'oprf_response_x', 'oprf_response_y'],
+  wire_format: '0x + exactly 64 hex each; below the BN254 field modulus p (oprf_beta and oprf_dlog_s below the BabyJubJub subgroup order r, oprf_beta non-zero); never reduced',
+});
 
-function nullifierGuide(circuitId: CircuitId) {
-  const row = NULLIFIER_GUIDES[circuitId];
-  if (!row) throw new Error(`No nullifier guide for '${circuitId}'. Known: ${Object.keys(NULLIFIER_GUIDES).join(', ')}.`);
-  return row;
-}
+const OPRF_WIRE_FIELDS = ['oprf_key_hash', 'domain', 'scope', 'nullifier', ...OPRF_GUIDE.private] as const;
 
 function buildFormulas(circuitId: CircuitId) {
   if (circuitId === CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION) {
@@ -178,26 +170,22 @@ function buildFormulas(circuitId: CircuitId) {
   return {
     signal_hash: {
       description:
-        'Binds the proof to a specific user address, scope string, and circuit. Used as the message the user signs.',
-      formula: 'signal_hash = keccak256(abi.encodePacked(userAddress, scope, circuitId))',
-      ethers_v6_code: `ethers.keccak256(ethers.solidityPacked(['address', 'string', 'string'], [userAddress, scope, '${circuitId}']))`,
+        'Binds the proof to one request: the scope, the circuit and the request id the verifier issued (or a fresh one ' +
+        'the SDK mints and returns). Contains NO wallet address -- it is a public input. The message the user signs ' +
+        'when no action is bound; all zeros when one is. requestId: ASCII letters, digits and "-", at most 128 characters.',
+      formula: 'signal_hash = keccak256(abi.encodePacked(scope, circuitId, requestId))',
+      ethers_v6_code: `ethers.solidityPackedKeccak256(['string', 'string', 'string'], [scope, '${circuitId}', requestId])`,
     },
-    scope_bytes: {
-      description:
-        'The keccak256 hash of the scope string. Scopes partition nullifiers so the same user can prove once per scope.',
-      formula: 'scope_bytes = keccak256(toUtf8Bytes(scope))',
-      ethers_v6_code: `ethers.keccak256(ethers.toUtf8Bytes(scope))`,
-    },
-    nullifier: nullifierGuide(circuitId),
+    oprf_nullifier: OPRF_GUIDE,
     ...(circuitId === CIRCUIT_IDS.COINBASE_ATTESTATION && {
       revocation_statement: {
         description:
           'coinbase_attestation v2: before any payment is taken the server reads the wallet\'s Coinbase KYC attestation ' +
           'on EAS (Base) and refuses unless it is Coinbase\'s, for this wallet, unrevoked and unexpired; it then signs a ' +
-          '225-byte statement (wallet, time, attestation uid, this request\'s signed digest, scope) with its statement key, ' +
+          '225-byte statement (wallet, time, attestation uid, this request\'s signed digest, the OPRF scope field as 32 bytes big-endian) with its statement key, ' +
           'which the circuit pins. Clients send nothing extra. The proof carries the statement time as public input ' +
-          '`attested_at` (the last of 193 public inputs); verifiers should require it to be recent (e.g. 15 minutes).',
-        refusals: 'NO_COINBASE_ATTESTATION / COINBASE_ATTESTATION_REVOKED / COINBASE_ATTESTATION_EXPIRED (403), NULLIFIER_RULE (400) -- all before payment.',
+          '`attested_at` (the last of 133 public inputs); verifiers should require it to be recent (e.g. 15 minutes).',
+        refusals: 'NO_COINBASE_ATTESTATION / COINBASE_ATTESTATION_REVOKED / COINBASE_ATTESTATION_EXPIRED (403), OPRF_KEY_HASH_MISMATCH / INVALID_REQUEST (400), OPRF_NOT_CONFIGURED / OPRF_UNAVAILABLE (503) -- all before payment.',
       },
     }),
     ...(circuitId === CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION && {
@@ -206,10 +194,10 @@ function buildFormulas(circuitId: CircuitId) {
           'coinbase_country_attestation v2: before any payment is taken the server reads the wallet\'s Coinbase Verified ' +
           'Country attestation on EAS (Base) and refuses unless it is Coinbase\'s, for this wallet, unrevoked and unexpired, ' +
           'and names the same country as the attestCountry transaction in raw_transaction; it then signs a 227-byte ' +
-          'statement (wallet, time, attestation uid, this request\'s signed digest, scope, country) with its statement key, ' +
+          'statement (wallet, time, attestation uid, this request\'s signed digest, the OPRF scope field as 32 bytes big-endian, country) with its statement key, ' +
           'which the circuit pins. Clients send nothing extra. The proof carries the statement time as public input ' +
-          '`attested_at` (the last of 215 public inputs); verifiers should require it to be recent (e.g. 15 minutes).',
-        refusals: 'NO_COINBASE_ATTESTATION / COINBASE_ATTESTATION_REVOKED / COINBASE_ATTESTATION_EXPIRED / COINBASE_COUNTRY_MISMATCH / COINBASE_COUNTRY_UNREADABLE (403), NULLIFIER_RULE / INVALID_REQUEST (400) -- all before payment.',
+          '`attested_at` (the last of 155 public inputs); verifiers should require it to be recent (e.g. 15 minutes).',
+        refusals: 'NO_COINBASE_ATTESTATION / COINBASE_ATTESTATION_REVOKED / COINBASE_ATTESTATION_EXPIRED / COINBASE_COUNTRY_MISMATCH / COINBASE_COUNTRY_UNREADABLE (403), OPRF_KEY_HASH_MISMATCH / INVALID_REQUEST (400), OPRF_NOT_CONFIGURED / OPRF_UNAVAILABLE (503) -- all before payment.',
       },
     }),
     merkle_leaf: {
@@ -237,7 +225,7 @@ function buildInputSchema(circuitId: CircuitId) {
       client_fields: [
         { name: 'jwt', type: 'string', description: 'RS256 id_token from Google or Microsoft containing the required email claims.' },
         { name: 'jwks', type: 'object', description: 'Issuer JWKS fetched by prepareOidcPayload.' },
-        { name: 'scope', type: 'string', description: 'Application scope string for nullifier partitioning.' },
+        { name: 'scope', type: 'string', description: 'Required, no default: what the proof is for within the service (1 to 256 UTF-8 bytes, no control or format characters). The nullifier is one per wallet per (oprf_domain, scope).' },
         { name: 'provider', type: 'google | microsoft', description: 'Optional. Read off the JWT iss; when given it must agree with it.' },
       ],
       accepted_tokens: 'RS256 id_token from the ZKProofport device sign-in only: aud must be the Google device client or the Microsoft client of @zkproofport-ai/mcp, iss Google or a Microsoft v2.0 tenant, and the token unexpired.',
@@ -275,23 +263,18 @@ function buildInputSchema(circuitId: CircuitId) {
       name: 'signal_hash',
       type: 'hex string',
       bytes: 32,
-      description: 'keccak256(abi.encodePacked(userAddress, scope, circuitId)) -- binds proof to user + scope + circuit',
-      how_to_obtain: 'Computed from user address, scope, and circuit ID',
+      description: 'keccak256(abi.encodePacked(scope, circuitId, requestId)) -- binds the proof to one request; no wallet address; zeros with an action',
+      how_to_obtain: 'computeSignalHash({ scope, circuitId, requestId }) from @zkproofport-ai/sdk; requestId is the verifier\'s request id or a fresh UUID',
     },
-    {
-      name: 'nullifier',
+    ...OPRF_WIRE_FIELDS.map((name) => ({
+      name,
       type: 'hex string',
       bytes: 32,
-      description: `Double-proof prevention hash: ${nullifierGuide(circuitId).formula}`,
-      how_to_obtain: nullifierGuide(circuitId).description,
-    },
-    {
-      name: 'scope_bytes',
-      type: 'hex string',
-      bytes: 32,
-      description: 'keccak256(toUtf8Bytes(scope)) -- hashed scope string',
-      how_to_obtain: 'Computed from user address, signal_hash, and scope',
-    },
+      description: name in OPRF_GUIDE.public
+        ? `OPRF public input: ${OPRF_GUIDE.public[name as keyof typeof OPRF_GUIDE.public]}`
+        : 'OPRF private input',
+      how_to_obtain: `Computed by the SDK OPRF step. ${OPRF_GUIDE.wire_format}.`,
+    })),
     {
       name: 'merkle_root',
       type: 'hex string',
@@ -450,9 +433,9 @@ function buildActionGuide(circuitId: CircuitId, config: Config) {
       recommended: true, npm_package: '@zkproofport-ai/mcp', version: mcpPkgVersion,
       install: 'npm install -g @zkproofport-ai/mcp@latest', command: 'zkproofport-mcp', transport: 'stdio',
       discovery: 'Connect, call tools/list, and follow generate_proof inputSchema. Keys stay in the local signer process.',
-      required_arguments: ['circuit'], optional_arguments: ['scope', 'action', 'pay_with', 'pay_on', 'max_payment'],
-      generate_proof: { circuit: circuitId, scope: 'myapp:membership' },
-      action_bound_example: { circuit: circuitId, scope: 'myapp:membership', action: '<complete EIP-712 typed action supplied by the trusted application>' },
+      required_arguments: ['circuit', 'scope', 'oprf_domain'], optional_arguments: ['action', 'pay_with', 'pay_on', 'max_payment'],
+      generate_proof: { circuit: circuitId, oprf_domain: 'myapp.example.com', scope: 'myapp:membership' },
+      action_bound_example: { circuit: circuitId, oprf_domain: 'myapp.example.com', scope: 'myapp:membership', action: '<complete EIP-712 typed action supplied by the trusted application>' },
       verification: `Call verify_proof with the returned result. Check the proof on ${target.name}; action authorization additionally requires application policy checks.`,
       credentials: `ATTESTATION_KEY stays local.${isGiwa ? ' The SDK uses its built-in GIWA Sepolia RPC and explorer for witness preparation; server GIWA_RPC_URL/GIWA_EXPLORER_URL configure the server-side path.' : ''} PAYMENT_PRIVATE_KEY is a separate key-based payment option, not a fallback to the attestation signer.`,
     },
@@ -463,7 +446,7 @@ function buildActionGuide(circuitId: CircuitId, config: Config) {
 const result = await generateProof(
   createConfig({ baseUrl: '${config.a2aBaseUrl}' }),
   { attestation: existingAttestationSigner, payment },
-  { circuit: '${circuitId}', scope: 'myapp:membership', action },
+  { circuit: '${circuitId}', oprfDomain: 'myapp.example.com', scope: 'myapp:membership', action },
 );
 // Omit action above for an identity-only proof.`,
       cli: `${cliBase} --action action.json --silent`,
@@ -480,26 +463,27 @@ const result = await generateProof(
       payment: { required: config.paymentMode !== 'disabled', recipient: config.paymentPayTo, price: config.paymentProofPrice, source: 'Use the live 402 accepts list.' },
       x402: paymentGuide(config, networks),
       verification: { verifier_address: verifier, chain_id: target.chainId, chain_name: target.name, rpc_url: target.rpc,
-        function_signature: 'verify(bytes proof, bytes32[] publicInputs) external view returns (bool)', public_input_count: 192,
-        input_format: '192 bytes32 field words encoding six [u8;32] values. Keep proof and publicInputs separate.',
+        function_signature: 'verify(bytes proof, bytes32[] publicInputs) external view returns (bool)', public_input_count: 132,
+        input_format: '132 bytes32 words: signal_hash 0-31, domain_separator 32-63, action_hash 64-95, signer_list_merkle_root 96-127 (one byte per word), oprf_key_hash 128, domain 129, scope 130, nullifier 131 (one Field per word). Keep proof and publicInputs separate.',
       },
     },
     action: {
       required: false, type: 'EIP-712 TypedData', required_fields_when_present: ['domain', 'types', 'primaryType', 'message'],
       domain: 'Bind name, version, chainId and verifyingContract to the intended application.',
       message: 'Use the complete application-provided typed action. The schema is application-defined; do not replace it with a fixed deposit or delegation example.',
-      security: 'The application must compare domain, action hash, trusted attester root, scope and its replay/expiry policy. An identity-only proof does not authorize an action.',
+      security: 'The application must compare domain, action hash, trusted attester root, scope and its replay/expiry policy. An identity-only proof does not authorize an action. The domain and action hash are public: an action whose proof is shown off-chain should not contain the user\'s wallet address in any field.',
     },
     formulas: {
-      identity_signature: 'Without action, personal_sign(signal_hash). Circuit action_hash and domain_separator are zero.',
+      identity_signature: 'Without action, personal_sign(signal_hash), signal_hash = keccak256(abi.encodePacked(scope, circuitId, requestId)) (no wallet address). Circuit action_hash and domain_separator are zero.',
       signing_digest: 'With action, keccak256(0x1901 || domain_separator || action_hash); signal_hash is zero in the circuit witness.',
-      domain_separator: 'EIP-712 domain hash', action_hash: 'EIP-712 hashStruct(primaryType, message)', scope: 'keccak256(UTF8(scope))',
-      nullifier: 'keccak256(keccak256(address_bytes || keccak256(UTF8(circuitId))) || scope_bytes)',
-      nullifier_note: 'Same wallet, circuit and scope produce the same nullifier with or without action.',
+      domain_separator: 'EIP-712 domain hash', action_hash: 'EIP-712 hashStruct(primaryType, message)', scope: 'keccak256(UTF8(scope name)) mod p (computed by the SDK)',
+      nullifier: OPRF_GUIDE.public.nullifier,
+      nullifier_note: 'Same wallet, domain and scope produce the same nullifier with or without an action. See oprf_nullifier.',
+      oprf_nullifier: OPRF_GUIDE,
     },
     input_schema: {
       preparation: 'Use generate_proof locally. On the REST wire omit both domain_separator and action_hash for identity-only mode; for action mode provide both 32-byte hashes.',
-      public_fields: ['signal_hash', 'domain_separator', 'action_hash', 'signer_list_merkle_root', 'scope', 'nullifier'],
+      public_fields: ['signal_hash', 'domain_separator', 'action_hash', 'signer_list_merkle_root', 'oprf_key_hash', 'domain', 'scope', 'nullifier'],
       private_inputs: 'Wallet public key and signature, signed attestation transaction and attester membership proof. Never expose these through an LLM.',
     },
     endpoints: buildEndpoints(config, circuitId),
@@ -527,8 +511,8 @@ export function buildGuide(circuitId: CircuitId, config: Config): object {
     local_mcp_server: {
       recommended: true, npm_package: '@zkproofport-ai/mcp', version: mcpPkgVersion,
       install: 'npm install -g @zkproofport-ai/mcp@latest', readme: 'https://www.npmjs.com/package/@zkproofport-ai/mcp',
-      required_arguments: ['circuit', ...(country ? ['country_list', 'is_included'] : []), ...(oidc ? ['jwt'] : [])],
-      generate_proof: { circuit: circuitAlias(circuitId), scope: 'myapp:membership', ...(country && { country_list: ['KR'], is_included: true }), ...(oidc && { jwt: '<existing id_token>', provider: 'google' }) },
+      required_arguments: ['circuit', 'scope', ...(oidc ? [] : ['oprf_domain']), ...(country ? ['country_list', 'is_included'] : []), ...(oidc ? ['jwt'] : [])],
+      generate_proof: { circuit: circuitAlias(circuitId), ...(!oidc && { oprf_domain: 'myapp.example.com' }), scope: 'myapp:membership', ...(country && { country_list: ['KR'], is_included: true }), ...(oidc && { jwt: '<existing id_token>', provider: 'google' }) },
     },
     sdk: {
       package: '@zkproofport-ai/sdk', repository: 'https://github.com/zkproofport/proofport-ai', install: 'npm install @zkproofport-ai/sdk@latest ethers',
@@ -538,7 +522,7 @@ export function buildGuide(circuitId: CircuitId, config: Config): object {
 const result = await generateProof(
   createConfig({ baseUrl: '${config.a2aBaseUrl}' }),
   { attestation: existingAttestationSigner, payment: existingPaymentWallet },
-  { circuit: '${circuitAlias(circuitId)}', scope: 'myapp:membership'${params}${oidcParams} },
+  { circuit: '${circuitAlias(circuitId)}'${oidc ? '' : ", oprfDomain: 'myapp.example.com'"}, scope: 'myapp:membership'${params}${oidcParams} },
 );`,
       cli: oidc
         ? 'Use local MCP generate_proof with jwt and provider, or the SDK example. Keep JWTs out of shell history.'
@@ -576,8 +560,8 @@ function buildHumanPassportGuide(config: Config) {
     local_mcp_server: {
       recommended: true, npm_package: '@zkproofport-ai/mcp', version: mcpPkgVersion,
       install: 'npm install -g @zkproofport-ai/mcp@latest', command: 'zkproofport-mcp', transport: 'stdio',
-      required_arguments: ['circuit', 'min_score', 'chain'], optional_arguments: ['scope', 'action', 'pay_with', 'pay_on', 'max_payment'],
-      generate_proof: { circuit: 'human_passport', scope: 'myapp:membership', min_score: 20, chain: 8453 },
+      required_arguments: ['circuit', 'scope', 'oprf_domain', 'min_score', 'chain'], optional_arguments: ['action', 'pay_with', 'pay_on', 'max_payment'],
+      generate_proof: { circuit: 'human_passport', oprf_domain: 'myapp.example.com', scope: 'myapp:membership', min_score: 20, chain: 8453 },
     },
     sdk: {
       package: '@zkproofport-ai/sdk',
@@ -585,7 +569,7 @@ function buildHumanPassportGuide(config: Config) {
 const result = await generateProof(
   createConfig({ baseUrl: '${config.a2aBaseUrl}' }),
   { attestation: existingAttestationSigner, payment },
-  { circuit: 'human_passport', scope: 'myapp:membership', minScore: 20, chain: 8453 },
+  { circuit: 'human_passport', oprfDomain: 'myapp.example.com', scope: 'myapp:membership', minScore: 20, chain: 8453 },
 );`,
       cli: `${cliBase} --silent`,
     },
@@ -601,29 +585,30 @@ const result = await generateProof(
       x402: paymentGuide(config, networks),
       verification: {
         verifier_address: verifier, chain_id: chainId, rpc_url: config.chainRpcUrl,
-        function_signature: 'verify(bytes proof, bytes32[] publicInputs) external view returns (bool)', public_input_count: 195,
-        public_inputs: 'signal_hash 0-31, domain_separator 32-63, action_hash 64-95, signer_list_merkle_root 96-127, scope 128-159, nullifier 160-191, min_score 192 (score x 10^4), scorer_id 193, now 194',
+        function_signature: 'verify(bytes proof, bytes32[] publicInputs) external view returns (bool)', public_input_count: 135,
+        public_inputs: 'signal_hash 0-31, domain_separator 32-63, action_hash 64-95, signer_list_merkle_root 96-127, oprf_key_hash 128, domain 129, scope 130, nullifier 131, min_score 132 (score x 10^4), scorer_id 133, now 134',
         verifier_policy: 'The contract checks the proof only. Also require signer_list_merkle_root = the issuer root above, scorer_id one of the score_chains scorers, min_score = the threshold you asked for, and now within 15 minutes of your clock (@zkproofport-app/core checkHumanPassportProof does all four).',
       },
     },
     formulas: {
-      signal_hash: 'keccak256(abi.encodePacked(userAddress, scope, "human_passport_score")); personal_sign it when no action is bound',
+      signal_hash: 'keccak256(abi.encodePacked(scope, "human_passport_score", requestId)) -- no wallet address; personal_sign it when no action is bound',
       signing_digest: 'With an action, keccak256(0x1901 || domain_separator || action_hash); signal_hash is zero in the circuit witness.',
-      scope_bytes: 'keccak256(UTF8(scope))',
-      nullifier: 'keccak256(keccak256(address_bytes || keccak256(UTF8("human_passport_score"))) || scope_bytes)',
+      scope: 'keccak256(UTF8(scope name)) mod p (computed by the SDK)',
+      nullifier: OPRF_GUIDE.public.nullifier,
+      oprf_nullifier: OPRF_GUIDE,
       min_score: 'threshold in Passport points x 10^4 (20 -> 200000); sent as a number of points, at most four decimals',
       now: 'server clock when the proof is made; the attestation must be unexpired then',
     },
     input_schema: {
       client_fields: [
-        { name: 'signal_hash', bytes: 32 }, { name: 'nullifier', bytes: 32 }, { name: 'scope_bytes', bytes: 32 },
+        { name: 'signal_hash', bytes: 32 }, ...OPRF_WIRE_FIELDS.map((name) => ({ name, bytes: 32 })),
         { name: 'user_address', bytes: 20 }, { name: 'signature', bytes: 65 },
         { name: 'user_pubkey_x', bytes: 32 }, { name: 'user_pubkey_y', bytes: 32 },
         { name: 'min_score', type: 'number', description: 'Threshold in Passport points (e.g. 20), above 0, at most four decimals' },
         { name: 'chain', type: 'number', description: 'Chain id the score is recorded on (one of score_chains). Required; an unknown or missing chain is INVALID_REQUEST.' },
         { name: 'domain_separator', bytes: 32, optional: true }, { name: 'action_hash', bytes: 32, optional: true },
       ],
-      refusals: 'NO_HUMAN_PASSPORT_SCORE / HUMAN_PASSPORT_SCORE_EXPIRED / HUMAN_PASSPORT_SCORE_BELOW_THRESHOLD / HUMAN_PASSPORT_DATA_TOO_LARGE / HUMAN_PASSPORT_ISSUANCE_UNREADABLE (403), HUMAN_PASSPORT_LOOKUP_FAILED (503), NULLIFIER_RULE / INVALID_REQUEST (400) -- all before payment.',
+      refusals: 'NO_HUMAN_PASSPORT_SCORE / HUMAN_PASSPORT_SCORE_EXPIRED / HUMAN_PASSPORT_SCORE_BELOW_THRESHOLD / HUMAN_PASSPORT_DATA_TOO_LARGE / HUMAN_PASSPORT_ISSUANCE_UNREADABLE (403), HUMAN_PASSPORT_LOOKUP_FAILED (503), OPRF_KEY_HASH_MISMATCH / INVALID_REQUEST (400), OPRF_NOT_CONFIGURED / OPRF_UNAVAILABLE (503) -- all before payment.',
     },
     endpoints: buildEndpoints(config, circuitId),
   };

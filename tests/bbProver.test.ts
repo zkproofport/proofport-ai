@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { oprfParams } from './helpers/oprfInputs.js';
 import * as path from 'node:path';
 import * as childProcess from 'node:child_process';
 import { BbProver, type BbProveResult } from '../src/prover/bbProver.js';
@@ -54,8 +55,7 @@ describe('BbProver', () => {
   const mockCircuitParams: CircuitParams = {
     signalHash: new Uint8Array(32).fill(1),
     merkleRoot: '0x' + '22'.repeat(32),
-    scopeBytes: new Uint8Array(32).fill(3),
-    nullifierBytes: new Uint8Array(32).fill(4),
+    oprf: oprfParams(),
     userAddress: '0x' + '55'.repeat(20),
     userSignature: '0x' + '66'.repeat(65),
     userPubkeyX: '0x' + '77'.repeat(32),

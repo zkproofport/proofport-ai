@@ -114,59 +114,28 @@ echo ""
 echo "[OK] A2A_BASE_URL=http://${HOST_IP}:4002"
 echo "[OK] NEXT_PUBLIC_API_BASE_URL=http://${HOST_IP}:4002"
 
-# Copy compiled circuit artifacts from parent repo
+# Copy compiled circuit artifacts from the parent repo's circuits checkout,
+# with their hashes and the stamp naming the circuits commit and toolchain
+# (scripts/bake-circuits.sh). The server checks both at boot and never
+# downloads circuits.
 #
-# The circuit list comes from src/config/circuitIds.ts, not from a list written
-# here. It WAS written here -- three directory names, hardcoded -- and on
-# 2026-09-09 that made the container crash-loop: a fourth circuit had been added
-# to the server's own map and not to this script, so three circuits were copied,
-# four were needed, and the server tried to download the fourth from a branch it
-# had not been pushed to. A hardcoded list of circuits fails every time a
-# circuit is added.
+# `local`: a checkout that is exactly the pinned commit
+# (src/config/circuitsPin.ts) is stamped as such; anything else -- uncommitted
+# artifacts during a toolchain move, another commit -- is stamped as a working
+# tree, which the server accepts only off mainnet. The image's bb is read from
+# the same stamp (Dockerfile), so it always matches the artifacts.
 echo ""
 echo "[*] Copying circuit artifacts from parent repo..."
 PARENT_CIRCUITS="$(dirname "$AI_DIR")/circuits"
-if [ -d "$PARENT_CIRCUITS" ]; then
-  CIRCUIT_LIST=$(cd "$AI_DIR" && npx tsx scripts/print-circuit-dirs.ts 2>/dev/null)
-  if [ -z "$CIRCUIT_LIST" ]; then
-    echo "  [ERROR] Could not read the circuit list from src/config/circuitIds.ts."
-    echo "          Not falling back to a hardcoded list: that is what broke this before."
-    exit 1
-  fi
-
-  MISSING=0
-  while read -r circuit package _circuit_id; do
-    [ -z "$circuit" ] && continue
-    TARGET="$AI_DIR/circuits/${circuit}/target"
-    VK_TARGET="$TARGET/vk"
-    SRC="$PARENT_CIRCUITS/${circuit}/target"
-    if [ -d "$SRC" ] && [ -f "$SRC/${package}.json" ]; then
-      mkdir -p "$VK_TARGET"
-      cp "$SRC/${package}.json" "$TARGET/" && echo "  [OK] ${circuit}: ${package}.json"
-      if [ -f "$SRC/vk/vk" ]; then
-        cp "$SRC/vk/vk" "$VK_TARGET/" && echo "  [OK] ${circuit}: vk"
-      else
-        echo "  [!] ${circuit}: no vk at $SRC/vk/vk"
-        MISSING=1
-      fi
-    else
-      echo "  [!] ${circuit}: ${package}.json not built at $SRC"
-      echo "      Build it:  cd ../circuits && ./scripts/build.sh ${circuit}"
-      MISSING=1
-    fi
-  done <<< "$CIRCUIT_LIST"
-
-  if [ "$MISSING" = "1" ]; then
-    echo ""
-    echo "  [ERROR] Some circuits have no local artifacts."
-    echo ""
-    echo "  The server downloads what it cannot find locally, from the circuits repo's"
-    echo "  main branch -- so a circuit that exists only in your working tree makes it"
-    echo "  crash on boot with a 404. Build the missing ones, or push the circuit."
-    exit 1
-  fi
-else
-  echo "  [!] Parent circuits repo not found at $PARENT_CIRCUITS (skipping artifact copy)"
+if [ ! -d "$PARENT_CIRCUITS" ]; then
+  echo "  [ERROR] No circuits checkout at $PARENT_CIRCUITS. The server has no other source of circuits."
+  exit 1
+fi
+if ! "$AI_DIR/scripts/bake-circuits.sh" "$PARENT_CIRCUITS" local; then
+  echo ""
+  echo "  [ERROR] Could not bake the circuit artifacts. Build a missing circuit with:"
+  echo "          cd ../circuits && ./scripts/build.sh <circuit-dir>"
+  exit 1
 fi
 
 # Build and start

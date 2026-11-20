@@ -14,6 +14,7 @@ import {
   submitProof,
   verifyOnChain,
   computeSignalHash,
+  newRequestId,
   CIRCUIT_NAME_MAP,
   USDC_ADDRESSES,
   EthersWalletSigner,
@@ -51,7 +52,10 @@ async function main() {
 
   // -- Step 1: Sign Signal Hash --
   console.log('[Step 1] Signing signal hash...');
-  const signalHash = computeSignalHash(attestationWallet.address, scope, circuitId);
+  // keccak256(scope ++ circuitId ++ requestId): no wallet address. Use the
+  // verifier's request id when it issued one; hand it to the verifier either way.
+  const requestId = newRequestId();
+  const signalHash = computeSignalHash({ scope, circuitId, requestId });
   const signalHashHex = ethers.hexlify(signalHash);
   const signature = await attestationWallet.signMessage(ethers.getBytes(signalHashHex));
   console.log(`  Signal hash: ${signalHashHex}`);
@@ -65,6 +69,7 @@ async function main() {
     userAddress: attestationWallet.address,
     userSignature: signature,
     scope,
+    requestId,
   });
   console.log(`  Signal hash:  ${inputs.signal_hash}`);
   console.log(`  Nullifier:    ${inputs.nullifier}`);

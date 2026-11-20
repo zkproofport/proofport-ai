@@ -1,0 +1,712 @@
+{
+  "construction": "circuits/oprf-nullifier-libs/README.md: query = Poseidon2_t4(DS_query, address, domain, scope)[1]; A = beta * encode_to_curve(query); P = B / beta; nullifier = Poseidon2_t4(DS_out, query, P.x, P.y)[1]; key hash = Poseidon2_t3(DS_key, D.x, D.y)[1]; domain/scope = keccak256(utf8) mod p",
+  "oracles": {
+    "evaluations": "circuits/scripts/oprf-nullifier oprf-fixture values (taceo-oprf-core 0.6.3, taceo-poseidon2 0.3.1)",
+    "names": "proofport-oprf oprf reduce (src/auth.rs check_name + reduce_name); reductions also ethers keccak256 mod p",
+    "digests": "proofport-oprf oprf digest (src/auth.rs request_digest), equal to ethers TypedDataEncoder.hash",
+    "kats": "TaceoLabs/oprf-nr v2.0.0, vendored at circuits/deps/oprf-nr (MIT); each value copied from the named #[test]",
+    "network": "TACEO public test network, recorded"
+  },
+  "canonical": "proofport-app-sdk packages/core/src/oprf/; copies of this file must stay byte-identical",
+  "constants": {
+    "p": "0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001",
+    "r": "0x060c89ce5c263405370a08b6d0302b0bab3eedb83920ee0a677297dc392126f1",
+    "maxNameBytes": 256,
+    "maxValiditySeconds": 600
+  },
+  "names": [
+    {
+      "note": "the fixture domain",
+      "name": "zkproofport.app",
+      "verdict": null,
+      "reduced": "0x18710bf90bfc93f0c5e493223ae90dd38acb94ecce696da5005658255fed19cc"
+    },
+    {
+      "note": "a scope",
+      "name": "community-vote-2026",
+      "verdict": null,
+      "reduced": "0x26c706ba726a00a988447290f19dbbdf23461a1e45dae8272218904f1ff549c5"
+    },
+    {
+      "note": "one byte",
+      "name": "a",
+      "verdict": null,
+      "reduced": "0x0a5dd6a3acc3a1e8ea0bd64b7bb46662c20ca7924929ad4c2b9eaf2809a5f1ca"
+    },
+    {
+      "note": "a single space (not Cc / Cf: accepted)",
+      "name": " ",
+      "verdict": null,
+      "reduced": "0x07525d924ab499d5af92974770d14156576e5094a6db8bc75c400a7a86ff7198"
+    },
+    {
+      "note": "spaces around (no trimming)",
+      "name": "  zkproofport.app  ",
+      "verdict": null,
+      "reduced": "0x2c5e9f7263d38ff5e902dae5bd5332dde29b4a927fd906c3282825dbcd839f8c"
+    },
+    {
+      "note": "empty",
+      "name": "",
+      "verdict": "empty",
+      "reduced": null
+    },
+    {
+      "note": "256 ASCII bytes",
+      "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "verdict": null,
+      "reduced": "0x1daa7034adab66d9ec9e03e2c89201b83a7497e85dc5b971aa9dae2ccbb7a208"
+    },
+    {
+      "note": "257 ASCII bytes",
+      "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "verdict": "too-long",
+      "reduced": null
+    },
+    {
+      "note": "85 Hangul syllables = 255 bytes",
+      "name": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가",
+      "verdict": null,
+      "reduced": "0x079031ef6ebc66fdb2201d6e13ddcb8c4ea2a7d4f79cb466789b98a1419b736a"
+    },
+    {
+      "note": "86 Hangul syllables = 258 bytes",
+      "name": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가",
+      "verdict": "too-long",
+      "reduced": null
+    },
+    {
+      "note": "64 four-byte emoji = 256 bytes",
+      "name": "🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐",
+      "verdict": null,
+      "reduced": "0x2003c0243890ba235f06a26ef1073ccf3055636ebedef8bd80941f9c37f2c72e"
+    },
+    {
+      "note": "65 four-byte emoji = 260 bytes",
+      "name": "🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐",
+      "verdict": "too-long",
+      "reduced": null
+    },
+    {
+      "note": "Korean and emoji",
+      "name": "한국어 도메인",
+      "verdict": null,
+      "reduced": "0x03ef713cd3c4eca584b879bc6889e925996c9d5bc730f2564466fa3c5bb58e4b"
+    },
+    {
+      "note": "regional-indicator flag",
+      "name": "🇰🇷",
+      "verdict": null,
+      "reduced": "0x0ade3251aae9e444520ebb3751ab62ccbe5dc595052114bb31096337ce3a4792"
+    },
+    {
+      "note": "variation selector",
+      "name": "❤️",
+      "verdict": null,
+      "reduced": "0x2512b0944fea28b9dd8e1e78c53cbf5ea72f9c60f29cf475a583a2e117698b2b"
+    },
+    {
+      "note": "zero-width joiner emoji (Cf)",
+      "name": "👩‍💻",
+      "verdict": "format-character",
+      "reduced": null
+    },
+    {
+      "note": "tab (Cc)",
+      "name": "a\tb",
+      "verdict": "control-character",
+      "reduced": null
+    },
+    {
+      "note": "newline (Cc)",
+      "name": "a\nb",
+      "verdict": "control-character",
+      "reduced": null
+    },
+    {
+      "note": "DEL (Cc)",
+      "name": "ab",
+      "verdict": "control-character",
+      "reduced": null
+    },
+    {
+      "note": "C1 control U+0085 (Cc)",
+      "name": "ab",
+      "verdict": "control-character",
+      "reduced": null
+    },
+    {
+      "note": "U+009F (Cc, last C1)",
+      "name": "ab",
+      "verdict": "control-character",
+      "reduced": null
+    },
+    {
+      "note": "U+00A0 no-break space (Zs: accepted)",
+      "name": "a b",
+      "verdict": null,
+      "reduced": "0x11e593e17c864a08ace85d6a421ec41ff2744f8eb6a2f2db73fe7b96fde2ed21"
+    },
+    {
+      "note": "soft hyphen (Cf)",
+      "name": "a­b",
+      "verdict": "format-character",
+      "reduced": null
+    },
+    {
+      "note": "right-to-left override (Cf)",
+      "name": "a‮b",
+      "verdict": "format-character",
+      "reduced": null
+    },
+    {
+      "note": "zero-width space (Cf)",
+      "name": "a​b",
+      "verdict": "format-character",
+      "reduced": null
+    },
+    {
+      "note": "BOM (Cf)",
+      "name": "﻿a",
+      "verdict": "format-character",
+      "reduced": null
+    },
+    {
+      "note": "tag character (Cf)",
+      "name": "a󠁁",
+      "verdict": "format-character",
+      "reduced": null
+    },
+    {
+      "note": "SQL / wildcard / markup text",
+      "name": "%_\\' OR 1=1; <script>x</script>",
+      "verdict": null,
+      "reduced": "0x0779a667b61f15ced2ac252d1e82c8cb870d772baca9b245cfc4a54ff29a22a2"
+    },
+    {
+      "note": "NFC e-acute",
+      "name": "é",
+      "verdict": null,
+      "reduced": "0x27763158a439eb961ae2613034b279c29f227eed5803e4807f7075820911836e"
+    },
+    {
+      "note": "NFD e + combining acute (another name)",
+      "name": "é",
+      "verdict": null,
+      "reduced": "0x0f41b3fbe41eca310c780e64e48e9f314ef6e9743e11eb8f1f5a96ab4680f12f"
+    }
+  ],
+  "jsOnlyNames": [
+    {
+      "note": "NUL (Cc; argv cannot carry it)",
+      "name": "a\u0000b",
+      "verdict": "control-character"
+    },
+    {
+      "note": "lone high surrogate (no UTF-8 form)",
+      "name": "a\ud800b",
+      "verdict": "not-utf8"
+    },
+    {
+      "note": "lone low surrogate (no UTF-8 form)",
+      "name": "\udc00",
+      "verdict": "not-utf8"
+    }
+  ],
+  "digests": [
+    {
+      "domainName": "zkproofport.app",
+      "scopeName": "e2e-scope",
+      "deadline": 2000000000,
+      "digest": "0x91cf9f764efd834900180e9e893f086af4539a44b1506082ec6b7165539918a9"
+    },
+    {
+      "domainName": "한국어 도메인",
+      "scopeName": "🔐 scope 🦀",
+      "deadline": 0,
+      "digest": "0x5cd214510235f73085b36ca64e8bddcd96b84042d87a7e4d94630e0b11fa7d6e"
+    },
+    {
+      "domainName": "zkproofport.app",
+      "scopeName": "community-vote-2026",
+      "deadline": 1794912700,
+      "digest": "0xa24294034f66bac1b71a262363a7f0daf65bc990fdb0e04377643150a41dbf73"
+    },
+    {
+      "domainName": "a",
+      "scopeName": "b",
+      "deadline": 1,
+      "digest": "0xc2b73abbe00462976d91af68f7bcfb07afe3ef9fd84b3ccac89b33c3f91d75bd"
+    },
+    {
+      "domainName": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scopeName": "🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐🔐",
+      "deadline": 4102444800,
+      "digest": "0xb19b3cfb0233b85528a3a8c30ff58a1f27089cf486ff059eae4d34036a04a127"
+    }
+  ],
+  "evaluations": [
+    {
+      "note": "circuits fixture (constants.sh): anvil account 0, TACEO test key and beta, zkproofport.app / oprf-fixture",
+      "address": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+      "domain": "0x18710bf90bfc93f0c5e493223ae90dd38acb94ecce696da5005658255fed19cc",
+      "scope": "0x0db311189e81402907f17f48d1fac1f27ec7bc88df607c71d9ad1611b842ead2",
+      "secretKey": "0x001234567890abcdef1234567890abcdef1234567890abcdef1234567890abcd",
+      "beta": "0x035044ac4038fff4d560471e5cd5049343d293faa73d618140bb8630f2e37d23",
+      "query": "0x15d22d0df4588c77cadd91e6304b215ce266805d7ae8192a7fc95525a062a246",
+      "publicKey": {
+        "x": "0x0f4583e516f077314fb7c7b8a87fae07166068e3dddb4200fff32bf399b2349d",
+        "y": "0x1a289edfe55dabcc66eb07a2e53d7683afe0d6dcb27ac72dfbdd76bba9b949a8"
+      },
+      "keyHash": "0x013f6250e42223259e528bc5a1bafb66543e5606ad1edefa3596327238427def",
+      "blindedQuery": {
+        "x": "0x2846523b361f32a1af673b928c53907d2080e804985d915606be0ceac7829a3f",
+        "y": "0x0711b1a467b4e08aadf82bfbf49b7bdb2620b86909a4926c9627ebc2bb48c60b"
+      },
+      "blindedResponse": {
+        "x": "0x0ac4b7611151c69c1fa8a0519a088e78050e48823670fa691d34d3605ecf4658",
+        "y": "0x10b2afed75f56a247ff03c7ef3bf6d171a445dd248f57c824a637246e2197c71"
+      },
+      "dlogE": "0x0106f5956ddd95c780f9cc45da09e6f6e557b8784610d35de43502cfb05c3974",
+      "dlogS": "0x05ef3c141da4cbf6c00d6a5bbaf0936c03e4a9c378121db82245ca21f9c5028f",
+      "response": {
+        "x": "0x088c2bba15d183691bdb30934e72fb137d2dd2cbbb15efa63c2ceee1efe61049",
+        "y": "0x00f6f0f58fc3120ed7042853c997c7238c3c6b881854c4951ecb5c50320cd04d"
+      },
+      "nullifier": "0x15badbab3c5cf2c114f5801e253d7a9c18c3d3eac3bfb12eab6bb1d00cd63655"
+    },
+    {
+      "note": "same wallet, domain and scope under the second test key",
+      "address": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+      "domain": "0x18710bf90bfc93f0c5e493223ae90dd38acb94ecce696da5005658255fed19cc",
+      "scope": "0x0db311189e81402907f17f48d1fac1f27ec7bc88df607c71d9ad1611b842ead2",
+      "secretKey": "0x00fedcba0987654321fedcba0987654321fedcba0987654321fedcba09876543",
+      "beta": "0x035044ac4038fff4d560471e5cd5049343d293faa73d618140bb8630f2e37d23",
+      "query": "0x15d22d0df4588c77cadd91e6304b215ce266805d7ae8192a7fc95525a062a246",
+      "publicKey": {
+        "x": "0x11b3c6610f2e42d57e3bf52f499aebd25a6050b9b0b0211a85b4c72ff1930106",
+        "y": "0x0d8315b8448ee5308a33e50036e286cdd6e33540b60d008711051764b89bf4f7"
+      },
+      "keyHash": "0x05db0f4f3fa23e1620fc39b4e4b96108cec373cc2164ae7bc6633f3b0459df03",
+      "blindedQuery": {
+        "x": "0x2846523b361f32a1af673b928c53907d2080e804985d915606be0ceac7829a3f",
+        "y": "0x0711b1a467b4e08aadf82bfbf49b7bdb2620b86909a4926c9627ebc2bb48c60b"
+      },
+      "blindedResponse": {
+        "x": "0x0ba393414449e22573916a5f36971107400ac1d710730fa378efd791e457eed7",
+        "y": "0x252c4437875e24f9af38ac4690cc775615d366db541505cbffa88601609b7f9d"
+      },
+      "dlogE": "0x2f979ffd96af20c014368f69a573579f6b9b117aaff353ad26d6522bb233748a",
+      "dlogS": "0x02081b8029d6dba9f10a60d5bf656620d02640d088e75e3c2f628348b5011dea",
+      "response": {
+        "x": "0x075ea1bede118c006bce45a996c02dfc115f6704e2d77d80cc35418c9022dbc2",
+        "y": "0x052900834d48e50174c60c0ff32b12f4b6e995745c8ecdccc943d07a099d3531"
+      },
+      "nullifier": "0x291827626d7394a7db3bd96d9d0d332c583113e70b6b32440e1c0177dc42c6c8"
+    },
+    {
+      "note": "domain and scope swapped",
+      "address": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+      "domain": "0x0db311189e81402907f17f48d1fac1f27ec7bc88df607c71d9ad1611b842ead2",
+      "scope": "0x18710bf90bfc93f0c5e493223ae90dd38acb94ecce696da5005658255fed19cc",
+      "secretKey": "0x001234567890abcdef1234567890abcdef1234567890abcdef1234567890abcd",
+      "beta": "0x035044ac4038fff4d560471e5cd5049343d293faa73d618140bb8630f2e37d23",
+      "query": "0x1307e4bd3bbcd042f842a7ef3648af91adec9f1f1ebf8e436904f6f3d9b539ec",
+      "publicKey": {
+        "x": "0x0f4583e516f077314fb7c7b8a87fae07166068e3dddb4200fff32bf399b2349d",
+        "y": "0x1a289edfe55dabcc66eb07a2e53d7683afe0d6dcb27ac72dfbdd76bba9b949a8"
+      },
+      "keyHash": "0x013f6250e42223259e528bc5a1bafb66543e5606ad1edefa3596327238427def",
+      "blindedQuery": {
+        "x": "0x17ac964629c782ad7c22ec57157d9fb22e21a7af1628655df37849062d0af790",
+        "y": "0x068c21ba8ee033afc364c97cf1e3307a47e7a925520623a2ca1dc5896d88f62f"
+      },
+      "blindedResponse": {
+        "x": "0x1a5d25a654039eac37bc2cef82ea59fae802246bd7a66a8f8d5a4dc73a1ee48a",
+        "y": "0x0d775bd609fd93c3a58e6ca90c5ae1bcff8de36eb96775061cc5fb2f0887d0a0"
+      },
+      "dlogE": "0x2ff8b042bd69394d8caec24ef91acb4f67a1b88956ecd63588e9a90e1968846a",
+      "dlogS": "0x0037e2f65c3f07fd75c6d91ad8e00f07efb22e1b1a72c36f0f994eaf89e3cad4",
+      "response": {
+        "x": "0x1566328e58476026d22fa278d4614401e68e814a56bc9ef75e09449eb9087328",
+        "y": "0x250829b542ef393ab4bc29639b52f25edf82e785e56943b9c7f4db26263dffcf"
+      },
+      "nullifier": "0x2e4070d67d60208f56936213712b4aeaebb11d4b453be8737ecf754b5c1a32e4"
+    },
+    {
+      "note": "another blinding (beta = 1): same nullifier as the first",
+      "address": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+      "domain": "0x18710bf90bfc93f0c5e493223ae90dd38acb94ecce696da5005658255fed19cc",
+      "scope": "0x0db311189e81402907f17f48d1fac1f27ec7bc88df607c71d9ad1611b842ead2",
+      "secretKey": "0x001234567890abcdef1234567890abcdef1234567890abcdef1234567890abcd",
+      "beta": "0x0000000000000000000000000000000000000000000000000000000000000001",
+      "query": "0x15d22d0df4588c77cadd91e6304b215ce266805d7ae8192a7fc95525a062a246",
+      "publicKey": {
+        "x": "0x0f4583e516f077314fb7c7b8a87fae07166068e3dddb4200fff32bf399b2349d",
+        "y": "0x1a289edfe55dabcc66eb07a2e53d7683afe0d6dcb27ac72dfbdd76bba9b949a8"
+      },
+      "keyHash": "0x013f6250e42223259e528bc5a1bafb66543e5606ad1edefa3596327238427def",
+      "blindedQuery": {
+        "x": "0x16026811dafcf8197081eb6674dea6fcb9759e256582825118846c63d7581514",
+        "y": "0x0de040af2f5f3b9ccac2f9e6e7331124ccbc3ae02b99cc7648567bdd8c556907"
+      },
+      "blindedResponse": {
+        "x": "0x088c2bba15d183691bdb30934e72fb137d2dd2cbbb15efa63c2ceee1efe61049",
+        "y": "0x00f6f0f58fc3120ed7042853c997c7238c3c6b881854c4951ecb5c50320cd04d"
+      },
+      "dlogE": "0x025b3e2588b94e9e402cf0cfa7927bc6f46483684035f9a85bfb32c17495af1c",
+      "dlogS": "0x048f1ba863749ddac99136ab336a06bf1863ab73846b5482053ca8c74a22637d",
+      "response": {
+        "x": "0x088c2bba15d183691bdb30934e72fb137d2dd2cbbb15efa63c2ceee1efe61049",
+        "y": "0x00f6f0f58fc3120ed7042853c997c7238c3c6b881854c4951ecb5c50320cd04d"
+      },
+      "nullifier": "0x15badbab3c5cf2c114f5801e253d7a9c18c3d3eac3bfb12eab6bb1d00cd63655"
+    },
+    {
+      "note": "beta = r - 1",
+      "address": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+      "domain": "0x18710bf90bfc93f0c5e493223ae90dd38acb94ecce696da5005658255fed19cc",
+      "scope": "0x0db311189e81402907f17f48d1fac1f27ec7bc88df607c71d9ad1611b842ead2",
+      "secretKey": "0x001234567890abcdef1234567890abcdef1234567890abcdef1234567890abcd",
+      "beta": "0x060c89ce5c263405370a08b6d0302b0bab3eedb83920ee0a677297dc392126f0",
+      "query": "0x15d22d0df4588c77cadd91e6304b215ce266805d7ae8192a7fc95525a062a246",
+      "publicKey": {
+        "x": "0x0f4583e516f077314fb7c7b8a87fae07166068e3dddb4200fff32bf399b2349d",
+        "y": "0x1a289edfe55dabcc66eb07a2e53d7683afe0d6dcb27ac72dfbdd76bba9b949a8"
+      },
+      "keyHash": "0x013f6250e42223259e528bc5a1bafb66543e5606ad1edefa3596327238427def",
+      "blindedQuery": {
+        "x": "0x1a61e6610634a81047ce5a500ca2b1606ebe4a231436ee402b5d893018a7eaed",
+        "y": "0x0de040af2f5f3b9ccac2f9e6e7331124ccbc3ae02b99cc7648567bdd8c556907"
+      },
+      "blindedResponse": {
+        "x": "0x27d822b8cb601cc09c751523330e5d49ab06157cbea380eb07b506b20019efb8",
+        "y": "0x00f6f0f58fc3120ed7042853c997c7238c3c6b881854c4951ecb5c50320cd04d"
+      },
+      "dlogE": "0x26920cb460c0df9e6f5e28a31219c69f22c7bcf8735385e04bb908c87e8aafca",
+      "dlogS": "0x05a559d161fcd3e88f161cd10858445cdb0c267826664e913b61961c6a61a47f",
+      "response": {
+        "x": "0x088c2bba15d183691bdb30934e72fb137d2dd2cbbb15efa63c2ceee1efe61049",
+        "y": "0x00f6f0f58fc3120ed7042853c997c7238c3c6b881854c4951ecb5c50320cd04d"
+      },
+      "nullifier": "0x15badbab3c5cf2c114f5801e253d7a9c18c3d3eac3bfb12eab6bb1d00cd63655"
+    },
+    {
+      "note": "zero address, domain 0, scope p - 1",
+      "address": "0x0000000000000000000000000000000000000000",
+      "domain": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "scope": "0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+      "secretKey": "0x001234567890abcdef1234567890abcdef1234567890abcdef1234567890abcd",
+      "beta": "0x035044ac4038fff4d560471e5cd5049343d293faa73d618140bb8630f2e37d23",
+      "query": "0x249940e3b6fb9ee1c604b3551757a42ee520dbf837c20d197b83da0e8d00ecd5",
+      "publicKey": {
+        "x": "0x0f4583e516f077314fb7c7b8a87fae07166068e3dddb4200fff32bf399b2349d",
+        "y": "0x1a289edfe55dabcc66eb07a2e53d7683afe0d6dcb27ac72dfbdd76bba9b949a8"
+      },
+      "keyHash": "0x013f6250e42223259e528bc5a1bafb66543e5606ad1edefa3596327238427def",
+      "blindedQuery": {
+        "x": "0x18a7705dbf72740d1f860db983270efa1de602021c106ab84477af8f31b8722c",
+        "y": "0x2cf857f67e721cb5a4e03c6c3984c0939eff0ca66f63106c39d85b6a0a24089b"
+      },
+      "blindedResponse": {
+        "x": "0x17254dbdfe8c5e7ee1171f02edf682a075272f7d5363f49a103f7b9142b81472",
+        "y": "0x0b883450e6a6f42d212bba8899d86bb7dd7bf8c9501e4151cd9f35b8bdd1bce9"
+      },
+      "dlogE": "0x1f1d1961faefb7a38a8958cc2d578a7ea6199a27d5d76b96ad6a709f082a6462",
+      "dlogS": "0x02c47643ab272293dd41dbfada1614b4b182fc73fe01c41796f45f2c59a345ab",
+      "response": {
+        "x": "0x2be2271273cea51593b7cc8827ca37409742ce8c7b8cc8f9a45020f6b7ecbf7c",
+        "y": "0x26eddc3c390771007b7d4073bdfd7d92d290c759d4906ad778c76169e1cdf893"
+      },
+      "nullifier": "0x267b1e6eeb48d445865842946e98aa7bb7f4e52457df371ce8281fd69a3919e1"
+    },
+    {
+      "note": "all-ones address, domain p - 1, scope 0",
+      "address": "0xffffffffffffffffffffffffffffffffffffffff",
+      "domain": "0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+      "scope": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "secretKey": "0x001234567890abcdef1234567890abcdef1234567890abcdef1234567890abcd",
+      "beta": "0x035044ac4038fff4d560471e5cd5049343d293faa73d618140bb8630f2e37d23",
+      "query": "0x2eb835f0a65663b82ca7d4e171c8443b1a88b417ce8cfba149c42b17cc933669",
+      "publicKey": {
+        "x": "0x0f4583e516f077314fb7c7b8a87fae07166068e3dddb4200fff32bf399b2349d",
+        "y": "0x1a289edfe55dabcc66eb07a2e53d7683afe0d6dcb27ac72dfbdd76bba9b949a8"
+      },
+      "keyHash": "0x013f6250e42223259e528bc5a1bafb66543e5606ad1edefa3596327238427def",
+      "blindedQuery": {
+        "x": "0x1b22ddfc5314749557972ea408c21bf6c18d13f08199871e7941e924d99f5bd8",
+        "y": "0x2b67addf56ffb83b4d5b4800ab9f1590f88979d0131e1dfad4d47b02830e21c2"
+      },
+      "blindedResponse": {
+        "x": "0x056770f3f5eb60411049567e664c325a4a109e812db289ac506f57525a46e1b0",
+        "y": "0x185f616a06718609b15d8702d974fea4c59b70904b3407abf1c23fd53781ea8a"
+      },
+      "dlogE": "0x00e2c7cc93da28149c4e78e23aaa0d1571f9d3cb512af468d1ebea88a5504867",
+      "dlogS": "0x04d66ddb560c53b6dbde77f8ca47a3f5ee3a9a43eb47b7369a6fe4979ffefc7a",
+      "response": {
+        "x": "0x23b3e903b91950ada5a883524ac57784b49bbca8c930a00680847c8bd9b77644",
+        "y": "0x1b9dc7adad340456159183faa5807524a49f03548ef238de43ea47b671d071d9"
+      },
+      "nullifier": "0x138605282a630ba56933bb4083aef8ee4f9171ae94c06c12eb0ef0eec92a5ec4"
+    },
+    {
+      "note": "Korean and emoji scope name, key r - 1",
+      "address": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+      "domain": "0x18710bf90bfc93f0c5e493223ae90dd38acb94ecce696da5005658255fed19cc",
+      "scope": "0x1e29a52647020ebc9a87fa4530902e2adebdbf521bbc8b8900f7eac6d3b07fef",
+      "secretKey": "0x060c89ce5c263405370a08b6d0302b0bab3eedb83920ee0a677297dc392126f0",
+      "beta": "0x035044ac4038fff4d560471e5cd5049343d293faa73d618140bb8630f2e37d23",
+      "query": "0x15efb0da4a7797b2fb3ba234c3e0bf013fb60b29ca6706353591397069fed46d",
+      "publicKey": {
+        "x": "0x24acd4080af32c8e69a392d5e41ee09bfd7b104774848fdb1b4e019d346a8fb0",
+        "y": "0x25797203f7a0b24925572e1cd16bf9edfce0051fb9e133774b3c257a872d7d8b"
+      },
+      "keyHash": "0x19fb3a382b4bc8f688716d9cf68352cc9a4a093b7e761a376a4e984796f13aab",
+      "blindedQuery": {
+        "x": "0x2f442b4be8f62da67c150c706feb783d7a7c9847215899cc0be7daa2f936f2ec",
+        "y": "0x1267450f3f6e697421a715407f774e89cc142cf4188a9903708b841a3c26a0da"
+      },
+      "blindedResponse": {
+        "x": "0x01202326f83b72833c3b39461195e01fadb750015860d6c537fa1af0f6c90d15",
+        "y": "0x1267450f3f6e697421a715407f774e89cc142cf4188a9903708b841a3c26a0da"
+      },
+      "dlogE": "0x144ece7c81739611f684234eed512381c62a82adca081c0addbfe3de9ad775f6",
+      "dlogS": "0x058554c2cf3cdfb3bc9927d842de48a05e2a73d12fa3c7366b26b30ffc1c42e4",
+      "response": {
+        "x": "0x18cde8b40b9f16ebaa735ce10167e275ac57f13153d94e4d28319c2fc43eaef0",
+        "y": "0x191242baa2c8937f5015c23a666804ce5a0ba3d0e620a8fa5fff096d1aef1aa2"
+      },
+      "nullifier": "0x1f155b47a05d3894ffba82a7299cd3e7d2ce5ebe87d7e568bf39d201441d24ba"
+    },
+    {
+      "note": "circuits fixture key for coinbase_attestation (oprf.js fixtureKey)",
+      "address": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+      "domain": "0x18710bf90bfc93f0c5e493223ae90dd38acb94ecce696da5005658255fed19cc",
+      "scope": "0x0db311189e81402907f17f48d1fac1f27ec7bc88df607c71d9ad1611b842ead2",
+      "secretKey": "0x01b9c44bef147fbd8438e0b3f4e8322da74d5760d7895ba9203770a6a8ed8223",
+      "beta": "0x035044ac4038fff4d560471e5cd5049343d293faa73d618140bb8630f2e37d23",
+      "query": "0x15d22d0df4588c77cadd91e6304b215ce266805d7ae8192a7fc95525a062a246",
+      "publicKey": {
+        "x": "0x2b29429ab4bd35ff8c1ed538c0e3edebde1feae7a79c39b556975c7a6e0cc1c1",
+        "y": "0x2ea239a53cf170a205b443a4522edc458c4a932ca93884ee0bc46f0146b74012"
+      },
+      "keyHash": "0x08bf330811b80bda4f5b14dda30d2c4e9889c44034939aa24d887dd32234122e",
+      "blindedQuery": {
+        "x": "0x2846523b361f32a1af673b928c53907d2080e804985d915606be0ceac7829a3f",
+        "y": "0x0711b1a467b4e08aadf82bfbf49b7bdb2620b86909a4926c9627ebc2bb48c60b"
+      },
+      "blindedResponse": {
+        "x": "0x172879d474ee628a2462fc8100509be6ac02d6e6dd7260fff1d6a0a7b86ad470",
+        "y": "0x15d574ee3e99c34ecbd9fd32e47c3866873d3811a778c42bd8df30c9bb0f6f75"
+      },
+      "dlogE": "0x01a68644b6f74f41f5d002b01ff52e294940d9d15202d34ce3c720095eb360b5",
+      "dlogS": "0x00145ae6729be9541e9223d7c4e838308c0acc1a450b3c0d5e9f4da49a38f24c",
+      "response": {
+        "x": "0x13a887ed2d099daf59e3cbaa772cd5d2124928dd0b95daf0190312fb224f9fea",
+        "y": "0x0be2e98e2961aecc686ebbc1e5a3f2f7e302d331d9e1189ecda6d6708700987f"
+      },
+      "nullifier": "0x1a8e86a6fc524a011da885ffb4c5d79a0a4880bc716410eb34e0dbfb1b55a540"
+    },
+    {
+      "note": "circuits fixture key for coinbase_country_attestation (oprf.js fixtureKey)",
+      "address": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+      "domain": "0x18710bf90bfc93f0c5e493223ae90dd38acb94ecce696da5005658255fed19cc",
+      "scope": "0x0db311189e81402907f17f48d1fac1f27ec7bc88df607c71d9ad1611b842ead2",
+      "secretKey": "0x043d65240717c29e725eb92d87a98e18209685801f8b67b6fa0f655b173b1750",
+      "beta": "0x035044ac4038fff4d560471e5cd5049343d293faa73d618140bb8630f2e37d23",
+      "query": "0x15d22d0df4588c77cadd91e6304b215ce266805d7ae8192a7fc95525a062a246",
+      "publicKey": {
+        "x": "0x12f1ac1db55b6735f2d2634e258d775ffba0c12a9f40472866b9f2933cc8da26",
+        "y": "0x11a0ff64613b62338796e63226285620bb2a9af0cf654ee35ffe1be5e12e95dc"
+      },
+      "keyHash": "0x05d60a8148e5a2807a83ee8f0e0df03214d38077adadd16733a9090e1e19f8ef",
+      "blindedQuery": {
+        "x": "0x2846523b361f32a1af673b928c53907d2080e804985d915606be0ceac7829a3f",
+        "y": "0x0711b1a467b4e08aadf82bfbf49b7bdb2620b86909a4926c9627ebc2bb48c60b"
+      },
+      "blindedResponse": {
+        "x": "0x2e33cfd64714427170eac85334d3e984bea990b32b38a6b644207f1e0f4bbca5",
+        "y": "0x24a93ffe9cade5a0c58a31cbfbd8009a0e17cfaa7951b629ba799fe760fb4916"
+      },
+      "dlogE": "0x13ac0ee6f7f4d9e220c0b925e70b3c8ed732332b08d667819e43f4f734a5f028",
+      "dlogS": "0x00ff87fa83d31a9a9fa7a74ad4cba26d23f2abf7dd53012362820c9bf8eb3e66",
+      "response": {
+        "x": "0x2086d257a77118f1a2098f8be67d59063b404ad8e2dfff6943e65ea5717b4fb0",
+        "y": "0x235981b535f69ba49f4fad4bdf05c6b9d3f391e7a97e5666ee8fe4b94512fb1d"
+      },
+      "nullifier": "0x0122b16d0feae69f9ae694fcc1c75e82da38923aafe55e08062e68d60736cb96"
+    },
+    {
+      "note": "circuits fixture key for giwa_attestation (oprf.js fixtureKey)",
+      "address": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+      "domain": "0x18710bf90bfc93f0c5e493223ae90dd38acb94ecce696da5005658255fed19cc",
+      "scope": "0x0db311189e81402907f17f48d1fac1f27ec7bc88df607c71d9ad1611b842ead2",
+      "secretKey": "0x0154a018604905514477f2092d3c133073f2b9963408e61db3a4df05d1194434",
+      "beta": "0x035044ac4038fff4d560471e5cd5049343d293faa73d618140bb8630f2e37d23",
+      "query": "0x15d22d0df4588c77cadd91e6304b215ce266805d7ae8192a7fc95525a062a246",
+      "publicKey": {
+        "x": "0x2256cbbc0384a797084d8b0485162978873d869c08a4699880a4f159ed6c437f",
+        "y": "0x07e8bcf7eff7e991359663137e89f74423e573914a6b14918e2682ceb907fa09"
+      },
+      "keyHash": "0x18106fa59dd6b58adc7e20e71cde9975ea516b2a7b60fd787595b2d198d21eb8",
+      "blindedQuery": {
+        "x": "0x2846523b361f32a1af673b928c53907d2080e804985d915606be0ceac7829a3f",
+        "y": "0x0711b1a467b4e08aadf82bfbf49b7bdb2620b86909a4926c9627ebc2bb48c60b"
+      },
+      "blindedResponse": {
+        "x": "0x19c01f6cc5dae3258823bb41f495d196cb3f53d790a242e61d714b5a6abaf56e",
+        "y": "0x15997fde5c17dc9e27a99d2053cd4d1117c1753ce7f87ff9ee6a628543f266c0"
+      },
+      "dlogE": "0x302a3dee44490cd0c0f9ead9305e713673a6374a2c0825e89fd105dbd9d06b77",
+      "dlogS": "0x00b86987eceba99cd8a92f0fc430cdbb919ccb99783a554cdb6a0bb4eb51f1e9",
+      "response": {
+        "x": "0x19786888712de6c79b4eea2f9c3dbbee0dcf913bc25d199288c98adeb57657a7",
+        "y": "0x12a4213888fbca20a9150b1e472133f839f9af87581484400fedbdd78103d160"
+      },
+      "nullifier": "0x01f28779eec2a17cbf18460a7a28827f203c08e745d7c00e494a022c2868de6b"
+    },
+    {
+      "note": "circuits fixture key for dojang_playground (oprf.js fixtureKey)",
+      "address": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+      "domain": "0x18710bf90bfc93f0c5e493223ae90dd38acb94ecce696da5005658255fed19cc",
+      "scope": "0x0db311189e81402907f17f48d1fac1f27ec7bc88df607c71d9ad1611b842ead2",
+      "secretKey": "0x02ba8d20665fc6103ab8f2068a8d850aec142efe296ae049b027ed1c5eb5c214",
+      "beta": "0x035044ac4038fff4d560471e5cd5049343d293faa73d618140bb8630f2e37d23",
+      "query": "0x15d22d0df4588c77cadd91e6304b215ce266805d7ae8192a7fc95525a062a246",
+      "publicKey": {
+        "x": "0x1d6805fd35287b7437231f2fcf6f2c6e1504771d05ee79378d37689cb9aa3813",
+        "y": "0x07e4ef7f31eae2f8b9b829b0305145447ee86b18804287c2942b6e8e629aeda8"
+      },
+      "keyHash": "0x270cf856338ae6940b351ef536703772fa919562f4742a28d20316ef7f4a6fae",
+      "blindedQuery": {
+        "x": "0x2846523b361f32a1af673b928c53907d2080e804985d915606be0ceac7829a3f",
+        "y": "0x0711b1a467b4e08aadf82bfbf49b7bdb2620b86909a4926c9627ebc2bb48c60b"
+      },
+      "blindedResponse": {
+        "x": "0x1e132a224e6fca163ba5256111c2b509ef9192d4e2344c1894d87398ecbf69d9",
+        "y": "0x2b2eade872e6c602a93c9581489c708f9312e65dc4c4e71f0a29873dcad8ffee"
+      },
+      "dlogE": "0x209674324b8a8b4f4c63d0d93a05becfede7ca2d6b74b8e2b1c9b0ad6357959f",
+      "dlogS": "0x01f2d80a59c181a057b4231c782fb27df39700ae735311b668a600ba34451111",
+      "response": {
+        "x": "0x280dfa5cf32b80f1dd89affbf873032677fc94ab410524c30aefc99f17fb48a4",
+        "y": "0x0e9dbfe15740ba97c7bf8458e51b872e4fe3fa81479e8f9ff758991812bf896f"
+      },
+      "nullifier": "0x19e3a6be5b172b3149a2a844abb26f3de3044c94ee516ae69216c398199d8529"
+    },
+    {
+      "note": "circuits fixture key for human_passport_score (oprf.js fixtureKey)",
+      "address": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+      "domain": "0x18710bf90bfc93f0c5e493223ae90dd38acb94ecce696da5005658255fed19cc",
+      "scope": "0x0db311189e81402907f17f48d1fac1f27ec7bc88df607c71d9ad1611b842ead2",
+      "secretKey": "0x05ce2d9809877a596dc3dd0f1c45e863bf419561eb328456ec755e2756419275",
+      "beta": "0x035044ac4038fff4d560471e5cd5049343d293faa73d618140bb8630f2e37d23",
+      "query": "0x15d22d0df4588c77cadd91e6304b215ce266805d7ae8192a7fc95525a062a246",
+      "publicKey": {
+        "x": "0x1a5746967df2f87101bdeaf1a8847ac40975be136d1824a82d10cb2f779a19f1",
+        "y": "0x1e8e17f772b516183397ce04a68c696dadf9094cb7fc243f8130a54fb35a5967"
+      },
+      "keyHash": "0x2c1e40e54dd6ea3737951c5fc3517b8d0250c7675a70395421911f5bbcdc2604",
+      "blindedQuery": {
+        "x": "0x2846523b361f32a1af673b928c53907d2080e804985d915606be0ceac7829a3f",
+        "y": "0x0711b1a467b4e08aadf82bfbf49b7bdb2620b86909a4926c9627ebc2bb48c60b"
+      },
+      "blindedResponse": {
+        "x": "0x078809517475f31474de80233dff063a894044fd4f5afb432fe2e013b1f8b938",
+        "y": "0x05b31ed43adc7657ab3dd796b440d95ee78966245b8bc5198ac19e4b3c658292"
+      },
+      "dlogE": "0x1bc29d6647f72d256cedb5a89a5c371da5d7f16c319b35be488813edd922ebfc",
+      "dlogS": "0x0002b276516b7807da77f6667ba055ad0fc97b1487b314a324737d53da93f7cf",
+      "response": {
+        "x": "0x1ce6a3512059719f5865067d48fb960c662619529fa0ec5cc7b73adfac24896e",
+        "y": "0x109bf6daab6cfca28cd2226fdc95f4bd6d3735e72f488f62b1f5f41634542704"
+      },
+      "nullifier": "0x2fbec7e37d04d2fcb1d4704e2a8007f6ffa70e706d4855d04f80bd3ad52aa24d"
+    }
+  ],
+  "kats": {
+    "source": "TaceoLabs/oprf-nr v2.0.0, vendored at circuits/deps/oprf-nr (MIT); each value copied from the named #[test]",
+    "encodeToCurve": [
+      {
+        "test": "babyjubjub/src/hash_to_curve.nr test_encode_to_curve_kat0",
+        "input": "0x03e4070110668921a99c37627dedddb5ab65fae33c19e24d9ee19d7065fdeca8",
+        "x": "10317659717708787122683977912952208883341451354299498236440964928299898571531",
+        "y": "2771878628977713302835201233169750856073682825638128695522023521672351725258"
+      },
+      {
+        "test": "babyjubjub/src/hash_to_curve.nr test_encode_to_curve_kat1",
+        "input": "0x42",
+        "x": "16453178030699411958341692808730701741568100876455568813278163225032347056514",
+        "y": "5447922750205248208490261749483809853022174346498064122782172531486866662376"
+      },
+      {
+        "test": "babyjubjub/src/hash_to_curve.nr test_encode_to_curve_kat2",
+        "input": "0x0",
+        "x": "16605852874433019712683889710166313607515083375138125349412270828059484170936",
+        "y": "12075050546928691602283582412953179086742727007172364313655633055645374686589"
+      }
+    ],
+    "blindedQuery": {
+      "test": "oprf/src/blinded_query.nr oprf_query_kat_test",
+      "beta": "1219447978145766874721695300216900264892278162307712369438981445355514609028",
+      "query": "387242419257851558984914892096106188402994395767663340643461644969954908901",
+      "x": "9674018812144873985515234638873635008708834681175738612597888298086191498827",
+      "y": "18818965079786157878748649151755578492493325229415754584538271947197071123195"
+    },
+    "dlog": {
+      "test": "oprf/src/dlog.nr test_verify_dlog_equality",
+      "e": "5609293693019386176508931649877337091590878173635241438306548223920379307458",
+      "s": "1167493435914595771361530871033173621661932035514996719837354510862251986174",
+      "publicKey": {
+        "x": "16048296497646113681290127133582586009660277510307938775951186660467382774945",
+        "y": "13451097916688865791218925679662796109386737920791997438101375513111619197164"
+      },
+      "blindedQuery": {
+        "x": "0x2003f27260a0b5ee81b84f66f8bf2761ea9557262a4bcd16db5ca7abdeee1885",
+        "y": "0x1eb45d38c97f7e65ac1b76d234db3237d2860f2b25c43e020693ef92b5a5f793"
+      },
+      "blindedResponse": {
+        "x": "6882462243439192795495492197995100450516328082301652413647059141168822449465",
+        "y": "11410248488379662098266045802345135482683496756414401793793460258484335221028"
+      }
+    },
+    "verifiedOprf": {
+      "test": "oprf/src/oprf_output.nr verified_oprf_kat_test",
+      "beta": "2387462819376525223098422965806766751285565755980265072594901385662518965922",
+      "query": "16778459034791831994680912315190773394547154204120376000937183272785502542361",
+      "response": {
+        "x": "11771927497930831763844779626723106344742708040976110136703486119568919340013",
+        "y": "19299702061490581533153169629464406607119112637706400365988657399831357218309"
+      },
+      "dsOut": "1773399373884719043551596035141478",
+      "output": "21342856517406476000190785734870568200315738457615815351702849709270076362125"
+    }
+  },
+  "network": {
+    "note": "One answer from TACEO's public test network (node{0,1,2}.eu.test.oprf.taceo.network, `basic` module, threshold 2), recorded with proofport-oprf/target/release/taceo_testnet for a random address. Its public key is the test network's key; core pins its hash for staging and local.",
+    "recordedAt": "2026-11-18",
+    "addressField": "0x000000000000000000000000fb2f52667724f3a190c02895aa09ff53e7433164",
+    "domainName": "zkproofport.app",
+    "scopeName": "sdk-vector 한국어 🔐",
+    "domain": "0x18710bf90bfc93f0c5e493223ae90dd38acb94ecce696da5005658255fed19cc",
+    "scope": "0x1a749767436a9d3298082ea8c2bcfcd5f66de62406ddec7574995ad49b0353b2",
+    "query": "0x121b84d1c782f65e2b30eb55f9529dba84be52c8fdc03810e133cfa28c4abbcd",
+    "beta": "0x03548eadd624a6cf6a7e0bf83bfc48e2a81e2d3578285b2fbf63e65c1404b548",
+    "publicKey": {
+      "x": "0x162fc76f99b6baa49ae260bbfac6c3a5657738bdd46f387dfa820beee7ab789e",
+      "y": "0x0f3d63eee4a861343e2397cfe40f21dbd95a4c780bc538c82ececa1e1549558e"
+    },
+    "keyHash": "0x039ecd4ea1875bb5c7f7a1bfae692cab271e3f3f25df4e5ab691fcb17586e6d1",
+    "dlogE": "0x21055588e54f7677d40963a1286f4e8420bb99689ebf2cec80c03b6cfad57919",
+    "dlogS": "0x04b6497f465d896e3972a3ff07d62546b5b69c9adbda1b8690528f6bde53634b",
+    "blindedResponse": {
+      "x": "0x16dbea0b4a3dd2551d77725f17ef5cf79734e6fbaa05385bbf3fccf82b68023b",
+      "y": "0x02a68613c76789fee04689fb8b9a8621bfbb95c4cbc7be406947a0fe0181f031"
+    },
+    "response": {
+      "x": "0x2fb4479ea95ba35c5588bb53cb8cceb36c04ce8183a27b202833b406f8544fa8",
+      "y": "0x282685956b11f7b742446edfaef1ffedf123a9b82309076e91c8f491646b2f8b"
+    },
+    "nullifier": "0x0200b41e2a1c6654fd6913a256163f28fd54035f6b97b8cb812847460ccab3fa"
+  }
+}

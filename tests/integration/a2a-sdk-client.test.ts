@@ -12,6 +12,7 @@
  * for the A2A protocol layer itself.
  */
 
+import { oprfParams } from '../helpers/oprfInputs.js';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { randomUUID } from 'crypto';
 import type { Server } from 'http';
@@ -90,8 +91,7 @@ vi.mock('../../src/input/inputBuilder.js', () => ({
   computeCircuitParams: vi.fn().mockResolvedValue({
     signalHash: new Uint8Array(32).fill(1),
     merkleRoot: '0x' + '22'.repeat(32),
-    scopeBytes: new Uint8Array(32).fill(3),
-    nullifierBytes: new Uint8Array(32).fill(4),
+    oprf: oprfParams(),
     userAddress: '0x' + '55'.repeat(20),
     userSignature: '0x' + '66'.repeat(65),
     userPubkeyX: '0x' + '77'.repeat(32),
@@ -180,7 +180,6 @@ function makeTestConfig(overrides?: Partial<Config>): Config {
     proverUrl: '',
     bbPath: '/usr/local/bin/bb',
     circuitsDir: '/circuits',
-    circuitsRepoUrl: 'https://example.com/circuits',
     redisUrl: 'redis://localhost:6379',
     baseRpcUrl: 'https://base-rpc.example.com',
     easGraphqlEndpoint: 'https://eas.example.com',

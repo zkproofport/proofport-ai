@@ -1,5 +1,6 @@
 import { ethers } from 'ethers';
 import { CIRCUITS, type CircuitId } from '../config/circuits.js';
+import type { OprfCircuitInputs } from './oprfInputs.js';
 import { CIRCUIT_IDS } from '../config/circuitIds.js';
 import { AUTHORIZED_SIGNERS, ATTESTATION_SOURCES } from '../config/contracts.js';
 import { findGiwaAttestation } from './giwaAttestation.js';
@@ -17,12 +18,6 @@ const RAW_TX_PADDED_LENGTH = 300;
 const MERKLE_PROOF_MAX_DEPTH = 8;
 const COUNTRY_LIST_MAX_LENGTH = 10;
 const COUNTRY_CODE_BYTES = 2;
-
-// Expected flat input vector lengths
-const COINBASE_ATTESTATION_INPUT_LENGTH = 899;
-const COINBASE_COUNTRY_ATTESTATION_INPUT_LENGTH = 921;
-// The KYC vector plus the two 32-byte EIP-712 hashes.
-const ACTION_CAPABLE_INPUT_LENGTH = 899 + 64;
 
 // ─── Utility functions ───────────────────────────────────────────────────
 
@@ -78,23 +73,14 @@ export function extractPubkeyCoordinates(pubkey: string): { x: string; y: string
   return { x, y };
 }
 
-// ─── Step 1: Compute signal_hash ─────────────────────────────────────────
+// ─── Step 1: signal_hash ─────────────────────────────────────────────────
+//
+// Not computed here. signal_hash = keccak256(scope ++ circuitId ++ requestId),
+// no wallet address, and its one implementation in this repository is
+// `computeSignalHash` in packages/sdk/src/signalHash.ts (this tree's rootDir
+// cannot import it). Callers pass the value in `BuildInputsRequest.signalHash`.
 
-/**
- * Compute the deterministic signal hash.
- * signalHash = keccak256(solidityPacked(address, scopeString, circuitName))
- */
-export function computeSignalHash(
-  userAddress: string,
-  scopeString: string,
-  circuitName: string,
-): Uint8Array {
-  const signalPreimage = ethers.solidityPacked(
-    ['address', 'string', 'string'],
-    [userAddress, scopeString, circuitName],
-  );
-  return ethers.getBytes(ethers.keccak256(signalPreimage));
-}
+const SIGNAL_HASH_HEX = /^0x[0-9a-fA-F]{64}$/;
 
 // ─── Step 2: Recover user public key ─────────────────────────────────────
 
@@ -196,96 +182,6 @@ export function findSignerIndex(
   return index;
 }
 
-// ─── Step 6: Compute scope and nullifier ─────────────────────────────────
-
-/**
- * Compute scope bytes from a scope string.
- * scope = keccak256(toUtf8Bytes(scopeString))
- */
-export function computeScope(scopeString: string): Uint8Array {
-  return ethers.getBytes(ethers.keccak256(ethers.toUtf8Bytes(scopeString)));
-}
-
-/**
- * Compute nullifier = keccak256(keccak256(address + signalHash) + scope)
- */
-/**
- * The nullifier for a circuit whose secret material is the WALLET and a
- * constant compiled into that circuit -- not `signal_hash`.
- *
- * `giwa_attestation` derives it this way. It had to: it branches on whether an
- * action was supplied, and `signal_hash` is zero in action mode, so a
- * nullifier taken from it would differ between the two modes for one wallet in
- * one scope. Nothing in that circuit constrains `signal_hash`, and in action
- * mode nobody signs it, so a prover could otherwise mint identities by varying
- * bytes.
- *
- * MUST match `verify_wallet_nullifier` in coinbase-libs/src/nullifier.nr. If
- * the two disagree the proof fails with "Nullifier mismatch" and nothing
- * points here.
- */
-export function computeWalletNullifier(
-  userAddress: string,
-  circuitId: string,
-  scopeBytes: Uint8Array,
-): Uint8Array {
-  const circuitTag = ethers.getBytes(
-    ethers.keccak256(ethers.toUtf8Bytes(circuitId)),
-  );
-  const userSecret = ethers.getBytes(
-    ethers.keccak256(ethers.concat([ethers.getBytes(userAddress), circuitTag])),
-  );
-  return ethers.getBytes(
-    ethers.keccak256(ethers.concat([userSecret, scopeBytes])),
-  );
-}
-
-/**
- * Which nullifier formula a circuit uses. A table, because the answer differs
- * per circuit and the wrong one produces a proof that simply fails.
- */
-const NULLIFIER_FROM_WALLET_AND_TAG: Readonly<Record<string, boolean>> = Object.freeze({
-  // v2 (circuits coinbase-attestation-v2) moved to the wallet + tag rule, as
-  // decided 2026-10-23: v1 nullifiers do not carry over.
-  coinbase_attestation: true,
-  // v2 (circuits coinbase-country-attestation-v2), the same rule as KYC v2.
-  coinbase_country_attestation: true,
-  giwa_attestation: true,
-  human_passport_score: true,
-});
-
-/** The nullifier this circuit expects, by its own rule. */
-export function nullifierForCircuit(
-  circuitId: string,
-  userAddress: string,
-  signalHash: Uint8Array,
-  scopeBytes: Uint8Array,
-): Uint8Array {
-  const fromWallet = NULLIFIER_FROM_WALLET_AND_TAG[circuitId];
-  if (fromWallet === undefined) {
-    throw new Error(
-      `No nullifier rule for circuit '${circuitId}'. Add it to NULLIFIER_FROM_WALLET_AND_TAG.`
-    );
-  }
-  return fromWallet
-    ? computeWalletNullifier(userAddress, circuitId, scopeBytes)
-    : computeNullifier(userAddress, signalHash, scopeBytes);
-}
-
-export function computeNullifier(
-  userAddress: string,
-  signalHash: Uint8Array,
-  scopeBytes: Uint8Array,
-): Uint8Array {
-  const userAddressBytes = ethers.getBytes(userAddress);
-  const userSecret = ethers.getBytes(
-    ethers.keccak256(ethers.concat([userAddressBytes, signalHash])),
-  );
-  return ethers.getBytes(
-    ethers.keccak256(ethers.concat([userSecret, scopeBytes])),
-  );
-}
-
 // ─── Step 7: Assemble inputs ─────────────────────────────────────────────
 
 /**
@@ -334,199 +230,18 @@ export function buildPaddedMerkleProof(proof: string[], depth: number): string[]
   return result;
 }
 
-/**
- * Assemble the flat input vector for coinbase_attestation (879 entries).
- *
- * Order:
- *   signal_hash[32] ++ signer_list_merkle_root[32] ++ scope[32] ++ nullifier[32] ++
- *   user_address[20] ++ user_signature[64] ++ user_pubkey_x[32] ++ user_pubkey_y[32] ++
- *   raw_transaction[300] ++ tx_length[1] ++
- *   coinbase_attester_pubkey_x[32] ++ coinbase_attester_pubkey_y[32] ++
- *   coinbase_signer_merkle_proof[256] ++ coinbase_signer_leaf_index[1] ++ merkle_proof_depth[1]
- */
-export function assembleKycInputs(params: {
-  signalHash: Uint8Array;
-  merkleRoot: string;
-  scopeBytes: Uint8Array;
-  nullifierBytes: Uint8Array;
-  userAddress: string;
-  userSignature: string;
-  userPubkeyX: string;
-  userPubkeyY: string;
-  rawTxBytes: number[];
-  txLength: number;
-  attesterPubkeyX: string;
-  attesterPubkeyY: string;
-  merkleProof: string[];
-  merkleLeafIndex: number;
-  merkleDepth: number;
-}): string[] {
-  const inputs: string[] = [];
-
-  // signal_hash[32]
-  inputs.push(...uint8ArrayToDecimalStrings(params.signalHash));
-  // signer_list_merkle_root[32]
-  inputs.push(...bytesToDecimalStrings(hexToBytes(params.merkleRoot)));
-  // scope[32]
-  inputs.push(...uint8ArrayToDecimalStrings(params.scopeBytes));
-  // nullifier[32]
-  inputs.push(...uint8ArrayToDecimalStrings(params.nullifierBytes));
-  // user_address[20]
-  inputs.push(...bytesToDecimalStrings(hexToBytes(params.userAddress)));
-  // user_signature[64] (r + s, no v)
-  inputs.push(...bytesToDecimalStrings(splitSignatureToBytes(params.userSignature)));
-  // user_pubkey_x[32]
-  inputs.push(...bytesToDecimalStrings(hexToBytes(params.userPubkeyX)));
-  // user_pubkey_y[32]
-  inputs.push(...bytesToDecimalStrings(hexToBytes(params.userPubkeyY)));
-  // raw_transaction[300] (padded)
-  inputs.push(...bytesToDecimalStrings(padBytes(params.rawTxBytes, RAW_TX_PADDED_LENGTH)));
-  // tx_length[1]
-  inputs.push(params.txLength.toString());
-  // coinbase_attester_pubkey_x[32]
-  inputs.push(...bytesToDecimalStrings(hexToBytes(params.attesterPubkeyX)));
-  // coinbase_attester_pubkey_y[32]
-  inputs.push(...bytesToDecimalStrings(hexToBytes(params.attesterPubkeyY)));
-  // coinbase_signer_merkle_proof[256] (8 * 32 bytes, padded)
-  inputs.push(...buildPaddedMerkleProof(params.merkleProof, params.merkleDepth));
-  // coinbase_signer_leaf_index[1]
-  inputs.push(params.merkleLeafIndex.toString());
-  // merkle_proof_depth[1]
-  inputs.push(params.merkleDepth.toString());
-
-  return inputs;
-}
-
-/**
- * Assemble the flat input vector for coinbase_country_attestation (901 entries).
- *
- * Order:
- *   signal_hash[32] ++ signer_list_merkle_root[32] ++
- *   country_list[20] ++ country_list_length[1] ++ is_included[1] ++  <-- BETWEEN merkle_root and scope
- *   scope[32] ++ nullifier[32] ++
- *   user_address[20] ++ user_signature[64] ++ user_pubkey_x[32] ++ user_pubkey_y[32] ++
- *   raw_transaction[300] ++ tx_length[1] ++
- *   coinbase_attester_pubkey_x[32] ++ coinbase_attester_pubkey_y[32] ++
- *   coinbase_signer_merkle_proof[256] ++ coinbase_signer_leaf_index[1] ++ merkle_proof_depth[1]
- */
-/**
- * The flat vector of the action-capable circuit (`giwa_attestation`).
- *
- * Identical to the KYC one except that `domain_separator` and `action_hash`
- * sit between `signal_hash` and `signer_list_merkle_root`, which is the
- * parameter order in giwa-attestation/src/main.nr. bb reads this list
- * positionally, so a field in the wrong place makes a proof that fails to
- * verify with nothing naming the cause.
- */
-const EMPTY_32 = new Array(32).fill(0);
-
-export function assembleActionInputs(params: CircuitParams): string[] {
-  /*
-   * An action is OPTIONAL for the circuit that uses this vector. It branches:
-   * with an action the wallet signs the typed data and `signal_hash` must be
-   * empty; without one it personal_signs `signal_hash` and the pair must be
-   * empty. The circuit refuses a vector that fills both.
-   */
-  const bound = Boolean(params.domainSeparator) && Boolean(params.actionHash);
-  if (Boolean(params.domainSeparator) !== Boolean(params.actionHash)) {
-    throw new Error(
-      'Half an action: send both domainSeparator and actionHash, or neither. ' +
-      `Got domainSeparator=${Boolean(params.domainSeparator)}, actionHash=${Boolean(params.actionHash)}.`
-    );
-  }
-  const inputs: string[] = [];
-  inputs.push(...(bound ? EMPTY_32.map(String) : uint8ArrayToDecimalStrings(params.signalHash)));
-  inputs.push(...(bound ? bytesToDecimalStrings(hexToBytes(params.domainSeparator!)) : EMPTY_32.map(String)));
-  inputs.push(...(bound ? bytesToDecimalStrings(hexToBytes(params.actionHash!)) : EMPTY_32.map(String)));
-  inputs.push(...bytesToDecimalStrings(hexToBytes(params.merkleRoot)));
-  inputs.push(...uint8ArrayToDecimalStrings(params.scopeBytes));
-  inputs.push(...uint8ArrayToDecimalStrings(params.nullifierBytes));
-  inputs.push(...bytesToDecimalStrings(hexToBytes(params.userAddress)));
-  inputs.push(...bytesToDecimalStrings(splitSignatureToBytes(params.userSignature)));
-  inputs.push(...bytesToDecimalStrings(hexToBytes(params.userPubkeyX)));
-  inputs.push(...bytesToDecimalStrings(hexToBytes(params.userPubkeyY)));
-  inputs.push(...bytesToDecimalStrings(padBytes(params.rawTxBytes, 300)));
-  inputs.push(params.txLength.toString());
-  inputs.push(...bytesToDecimalStrings(hexToBytes(params.attesterPubkeyX)));
-  inputs.push(...bytesToDecimalStrings(hexToBytes(params.attesterPubkeyY)));
-  inputs.push(...buildPaddedMerkleProof(params.merkleProof, params.merkleDepth));
-  inputs.push(params.merkleLeafIndex.toString());
-  inputs.push(params.merkleDepth.toString());
-  return inputs;
-}
-
-export function assembleCountryInputs(params: {
-  signalHash: Uint8Array;
-  merkleRoot: string;
-  countryList: string[];
-  countryListLength: number;
-  isIncluded: boolean;
-  scopeBytes: Uint8Array;
-  nullifierBytes: Uint8Array;
-  userAddress: string;
-  userSignature: string;
-  userPubkeyX: string;
-  userPubkeyY: string;
-  rawTxBytes: number[];
-  txLength: number;
-  attesterPubkeyX: string;
-  attesterPubkeyY: string;
-  merkleProof: string[];
-  merkleLeafIndex: number;
-  merkleDepth: number;
-}): string[] {
-  const inputs: string[] = [];
-
-  // signal_hash[32]
-  inputs.push(...uint8ArrayToDecimalStrings(params.signalHash));
-  // signer_list_merkle_root[32]
-  inputs.push(...bytesToDecimalStrings(hexToBytes(params.merkleRoot)));
-
-  // --- Country fields BETWEEN merkle_root and scope ---
-  // country_list[20] ([[u8; 2]; 10] padded)
-  inputs.push(...encodeCountryList(params.countryList));
-  // country_list_length[1]
-  inputs.push(params.countryListLength.toString());
-  // is_included[1]
-  inputs.push(params.isIncluded ? '1' : '0');
-
-  // scope[32]
-  inputs.push(...uint8ArrayToDecimalStrings(params.scopeBytes));
-  // nullifier[32]
-  inputs.push(...uint8ArrayToDecimalStrings(params.nullifierBytes));
-  // user_address[20]
-  inputs.push(...bytesToDecimalStrings(hexToBytes(params.userAddress)));
-  // user_signature[64] (r + s, no v)
-  inputs.push(...bytesToDecimalStrings(splitSignatureToBytes(params.userSignature)));
-  // user_pubkey_x[32]
-  inputs.push(...bytesToDecimalStrings(hexToBytes(params.userPubkeyX)));
-  // user_pubkey_y[32]
-  inputs.push(...bytesToDecimalStrings(hexToBytes(params.userPubkeyY)));
-  // raw_transaction[300] (padded)
-  inputs.push(...bytesToDecimalStrings(padBytes(params.rawTxBytes, RAW_TX_PADDED_LENGTH)));
-  // tx_length[1]
-  inputs.push(params.txLength.toString());
-  // coinbase_attester_pubkey_x[32]
-  inputs.push(...bytesToDecimalStrings(hexToBytes(params.attesterPubkeyX)));
-  // coinbase_attester_pubkey_y[32]
-  inputs.push(...bytesToDecimalStrings(hexToBytes(params.attesterPubkeyY)));
-  // coinbase_signer_merkle_proof[256] (8 * 32 bytes, padded)
-  inputs.push(...buildPaddedMerkleProof(params.merkleProof, params.merkleDepth));
-  // coinbase_signer_leaf_index[1]
-  inputs.push(params.merkleLeafIndex.toString());
-  // merkle_proof_depth[1]
-  inputs.push(params.merkleDepth.toString());
-
-  return inputs;
-}
-
 // ─── Main pipeline ───────────────────────────────────────────────────────
 
 export interface BuildInputsRequest {
   address: string;
   signature: string;
-  scope: string;
   circuitId: CircuitId;
+  /**
+   * The request's signal_hash, 0x + 64 hex: all zeros with an action, else
+   * `computeSignalHash({ scope, circuitId, requestId })` from
+   * packages/sdk/src/signalHash.ts. The wallet signed it (without an action).
+   */
+  signalHash: string;
   countryList?: string[];
   isIncluded?: boolean;
   /**
@@ -542,12 +257,6 @@ export interface BuildInputsRequest {
   actionHash?: string;
 }
 
-export interface BuildInputsResult {
-  inputs: string[];
-  nullifier: string;
-  signalHash: string;
-}
-
 /**
  * Intermediate structured circuit parameters before flattening to decimal array.
  * Contains all computed values needed for proof generation.
@@ -555,8 +264,12 @@ export interface BuildInputsResult {
 export interface CircuitParams {
   signalHash: Uint8Array;
   merkleRoot: string;
-  scopeBytes: Uint8Array;
-  nullifierBytes: Uint8Array;
+  /**
+   * The OPRF nullifier inputs, as the SDK sent them and readOprfInputs
+   * (./oprfInputs.ts) checked them before payment: oprf_key_hash, domain,
+   * scope, nullifier (public) and the seven private values.
+   */
+  oprf: OprfCircuitInputs;
   userAddress: string;
   userSignature: string;
   userPubkeyX: string;
@@ -586,24 +299,33 @@ export interface CircuitParams {
 }
 
 /**
- * Compute all circuit parameters without flattening to decimal array.
- * Returns structured data that can be used for Prover.toml generation or flat input assembly.
+ * Everything in {@link CircuitParams} that comes from the attestation and the
+ * wallet's signature; the OPRF values come from the SDK and are added by the
+ * caller.
+ */
+export type AttestationParams = Omit<CircuitParams, 'oprf'>;
+
+/**
+ * Compute the attestation part of the circuit parameters.
+ * Used by the repository's scripts (gen-prover-toml, check-*-inputs); the
+ * prove route builds CircuitParams from the SDK's inputs instead.
  *
  * Steps performed:
  * 1. Validate circuit and country fields
- * 2. Compute signal hash
+ * 2. Read the caller's signal hash
  * 3. Recover user public key
  * 4. Fetch attestation data from Base chain
  * 5. Recover attester public key and build Merkle tree
- * 6. Compute scope and nullifier
+ * 6. (The OPRF nullifier inputs are not built here: the SDK computes them
+ *    and the caller adds them as `oprf`.)
  * 7. Convert raw TX to bytes
  */
 export async function computeCircuitParams(
   request: BuildInputsRequest,
   easGraphqlEndpoint: string,
   rpcUrls: string[],
-): Promise<CircuitParams> {
-  const { address, signature, scope, circuitId } = request;
+): Promise<AttestationParams> {
+  const { address, signature, circuitId } = request;
 
   // Validate circuit
   if (!(circuitId in CIRCUITS)) {
@@ -620,8 +342,11 @@ export async function computeCircuitParams(
     }
   }
 
-  // Step 1: Compute signal hash
-  const signalHash = computeSignalHash(address, scope, circuitId);
+  // Step 1: the caller's signal hash (see BuildInputsRequest.signalHash)
+  if (typeof request.signalHash !== 'string' || !SIGNAL_HASH_HEX.test(request.signalHash)) {
+    throw new Error('signalHash must be 0x followed by 64 hex characters (computeSignalHash in packages/sdk/src/signalHash.ts).');
+  }
+  const signalHash = ethers.getBytes(request.signalHash);
 
   // Step 2: Recover user public key.
   //
@@ -686,9 +411,6 @@ export async function computeCircuitParams(
   const signerIndex = findSignerIndex(attesterAddress, source.signers);
   const merkleData = buildSignerMerkleTree(signerIndex, source.signers);
 
-  // Step 6: Compute scope and nullifier
-  const scopeBytes = computeScope(scope);
-  const nullifierBytes = nullifierForCircuit(circuitId, address, signalHash, scopeBytes);
 
   // Step 7: Convert raw TX to byte array
   const rawTxHex = rawTransaction;
@@ -698,8 +420,6 @@ export async function computeCircuitParams(
   return {
     signalHash,
     merkleRoot: merkleData.root,
-    scopeBytes,
-    nullifierBytes,
     userAddress: address,
     userSignature: signature,
     userPubkeyX,
@@ -716,73 +436,5 @@ export async function computeCircuitParams(
     isIncluded: request.isIncluded,
     domainSeparator: request.domainSeparator,
     actionHash: request.actionHash,
-  };
-}
-
-/**
- * Build the complete input vector for a circuit proof.
- *
- * Given only (address, signature, scope, circuitId), fetches all remaining
- * data from Base chain and constructs the full flat Vec<String> in DECIMAL format.
- */
-export async function buildCircuitInputs(
-  request: BuildInputsRequest,
-  easGraphqlEndpoint: string,
-  rpcUrls: string[],
-): Promise<BuildInputsResult> {
-  const { circuitId } = request;
-
-  // Compute all circuit parameters
-  const params = await computeCircuitParams(request, easGraphqlEndpoint, rpcUrls);
-
-  // Assemble flat input vector
-  let inputs: string[];
-
-  if (circuitId === CIRCUIT_IDS.COINBASE_ATTESTATION) {
-    inputs = assembleKycInputs(params);
-
-    if (inputs.length !== COINBASE_ATTESTATION_INPUT_LENGTH) {
-      throw new Error(
-        `coinbase_attestation input vector has ${inputs.length} entries, expected ${COINBASE_ATTESTATION_INPUT_LENGTH}`
-      );
-    }
-  } else if (circuitId === CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION) {
-    inputs = assembleCountryInputs({
-      ...params,
-      countryList: params.countryList!,
-      countryListLength: params.countryListLength!,
-      isIncluded: params.isIncluded!,
-    });
-
-    if (inputs.length !== COINBASE_COUNTRY_ATTESTATION_INPUT_LENGTH) {
-      throw new Error(
-        `coinbase_country_attestation input vector has ${inputs.length} entries, expected ${COINBASE_COUNTRY_ATTESTATION_INPUT_LENGTH}`
-      );
-    }
-  } else if (circuitId === CIRCUIT_IDS.GIWA_ATTESTATION) {
-    inputs = assembleActionInputs(params);
-
-    if (inputs.length !== ACTION_CAPABLE_INPUT_LENGTH) {
-      throw new Error(
-        `${circuitId} input vector has ${inputs.length} entries, expected ${ACTION_CAPABLE_INPUT_LENGTH}`
-      );
-    }
-  } else {
-    throw new Error(`Unsupported circuit: ${circuitId}`);
-  }
-
-  // Verify all entries are decimal strings
-  for (let i = 0; i < inputs.length; i++) {
-    if (!/^\d+$/.test(inputs[i])) {
-      throw new Error(
-        `Input at index ${i} is not a valid decimal string: "${inputs[i]}"`
-      );
-    }
-  }
-
-  return {
-    inputs,
-    nullifier: ethers.hexlify(params.nullifierBytes),
-    signalHash: ethers.hexlify(params.signalHash),
   };
 }

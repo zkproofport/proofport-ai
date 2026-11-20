@@ -11,7 +11,9 @@ import {
   attestationSource,
 } from './constants.js';
 import { fetchAttestation, recoverAttesterPubkey, getSignerAddress } from './attestation.js';
+import { computeSignalHash } from './signalHash.js';
 import { findSignerIndex, buildSignerMerkleTree } from './merkle.js';
+import { checkPreparedOprf, type PreparedOprf } from './oprf/index.js';
 
 // ─── Utility functions ──────────────────────────────────────────────────
 
@@ -42,22 +44,6 @@ export function extractPubkeyCoordinates(pubkey: string): { x: string; y: string
 // ─── Core computation functions ─────────────────────────────────────────
 
 /**
- * Compute the deterministic signal hash.
- * signalHash = keccak256(solidityPacked(address, scopeString, circuitName))
- */
-export function computeSignalHash(
-  userAddress: string,
-  scopeString: string,
-  circuitName: string,
-): Uint8Array {
-  const signalPreimage = ethers.solidityPacked(
-    ['address', 'string', 'string'],
-    [userAddress, scopeString, circuitName],
-  );
-  return ethers.getBytes(ethers.keccak256(signalPreimage));
-}
-
-/**
  * Recover user's uncompressed public key from their signature over the signal hash.
  * Returns "0x04..." (130 hex chars).
  */
@@ -71,94 +57,32 @@ export function recoverUserPubkey(
   return pubkey;
 }
 
-/**
- * Compute scope bytes from a scope string.
- * scope = keccak256(toUtf8Bytes(scopeString))
+/*
+ * The nullifier is the OPRF's (./oprf/index.ts): one per wallet per
+ * (oprfDomain, scope) under the network's key. The keccak nullifiers that
+ * stood here (computeScope, computeNullifier, computeWalletNullifier,
+ * nullifierForCircuit) are gone with the circuits that used them.
  */
-export function computeScope(scopeString: string): Uint8Array {
-  return ethers.getBytes(ethers.keccak256(ethers.toUtf8Bytes(scopeString)));
-}
 
 /**
- * Compute nullifier = keccak256(keccak256(address + signalHash) + scope)
+ * The signal_hash a request carries: all zeros when an EIP-712 action is bound
+ * (the wallet signs the action, and the circuit refuses both), otherwise
+ * {@link computeSignalHash} of the request id, which is then required.
  */
-export function computeNullifier(
-  userAddress: string,
-  signalHash: Uint8Array,
-  scopeBytes: Uint8Array,
-): Uint8Array {
-  const userAddressBytes = ethers.getBytes(userAddress);
-  const userSecret = ethers.getBytes(
-    ethers.keccak256(ethers.concat([userAddressBytes, signalHash])),
-  );
-  return ethers.getBytes(
-    ethers.keccak256(ethers.concat([userSecret, scopeBytes])),
-  );
-}
-
-/**
- * Compute nullifier = keccak256(keccak256(address + keccak256(circuitId)) + scope)
- *
- * The wallet and a constant compiled into the circuit, and NOT `signal_hash`.
- * The circuits that can bind an action derive it this way because they must:
- * `signal_hash` is empty in action mode, so a nullifier taken from it would
- * give one wallet two identities in one scope depending on how it asked. It
- * was already wrong before those circuits branched — nothing constrains
- * `signal_hash` there, so varying bytes minted identities.
- *
- * MUST match `verify_wallet_nullifier` in the circuit library and
- * `computeWalletNullifier` in the server's input builder. When they disagree
- * the proof fails with "Nullifier mismatch" and nothing names this function.
- */
-export function computeWalletNullifier(
-  userAddress: string,
-  circuitId: string,
-  scopeBytes: Uint8Array,
-): Uint8Array {
-  const circuitTag = ethers.getBytes(ethers.keccak256(ethers.toUtf8Bytes(circuitId)));
-  const userSecret = ethers.getBytes(
-    ethers.keccak256(ethers.concat([ethers.getBytes(userAddress), circuitTag])),
-  );
-  return ethers.getBytes(ethers.keccak256(ethers.concat([userSecret, scopeBytes])));
-}
-
-/**
- * Which nullifier each circuit expects. A table rather than a test on the id,
- * so a circuit nobody thought about is an error instead of whichever formula
- * the last branch held.
- */
-const NULLIFIER_RULE: Record<CircuitId, 'wallet-and-circuit-tag' | 'wallet-and-signal-hash' | 'built-from-the-token'> = {
-  // coinbase_attestation v2 (circuits coinbase-attestation-v2): the wallet +
-  // circuit-tag rule, decided 2026-10-23; v1 nullifiers do not carry over.
-  [CIRCUIT_IDS.COINBASE_ATTESTATION]: 'wallet-and-circuit-tag',
-  // v2 (circuits coinbase-country-attestation-v2): the same rule as KYC v2.
-  [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: 'wallet-and-circuit-tag',
-  [CIRCUIT_IDS.GIWA_ATTESTATION]: 'wallet-and-circuit-tag',
-  [CIRCUIT_IDS.HUMAN_PASSPORT_SCORE]: 'wallet-and-circuit-tag',
-  // OIDC's nullifier is derived inside the OIDC payload builder, from the
-  // identity token; this function is never asked for it.
-  [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: 'built-from-the-token',
-};
-
-/** The nullifier this circuit expects, by its own rule. */
-export function nullifierForCircuit(
+export function requestSignalHash(
   circuitId: CircuitId,
-  userAddress: string,
-  signalHash: Uint8Array,
-  scopeBytes: Uint8Array,
+  scope: string,
+  requestId: string | undefined,
+  isAction: boolean,
 ): Uint8Array {
-  const rule = NULLIFIER_RULE[circuitId];
-  if (!rule) {
+  if (isAction) return new Uint8Array(32);
+  if (requestId === undefined) {
     throw new Error(
-      `No nullifier rule for circuit '${circuitId}'. Known: ${Object.keys(NULLIFIER_RULE).join(', ')}.`,
+      `requestId is required for a ${circuitId} proof without an action: the wallet signs ` +
+      'keccak256(scope ++ circuitId ++ requestId).',
     );
   }
-  if (rule === 'built-from-the-token') {
-    throw new Error(`'${circuitId}' builds its nullifier from the identity token, not from a wallet signature.`);
-  }
-  return rule === 'wallet-and-circuit-tag'
-    ? computeWalletNullifier(userAddress, circuitId, scopeBytes)
-    : computeNullifier(userAddress, signalHash, scopeBytes);
+  return computeSignalHash({ scope, circuitId, requestId });
 }
 
 // ─── Internal helpers for input assembly ────────────────────────────────
@@ -239,12 +163,12 @@ function buildPaddedMerkleProof(proof: string[]): string[] {
  * Prepare all inputs for POST /prove.
  *
  * Steps:
- * 1. Compute signal hash
+ * 1. Compute signal hash (zeros with an action; else from scope, circuit and requestId)
  * 2. Recover user public key from signature
  * 3. Fetch EAS attestation + raw transaction from Base chain
  * 4. Recover Coinbase attester public key from tx signature
  * 5. Build authorized signer Merkle tree + proof
- * 6. Compute scope bytes and nullifier
+ * 6. Check the OPRF nullifier inputs (prepareOprf) for this circuit, wallet and scope
  * 7. Assemble the ProveInputs object
  *
  * All hex string fields use "0x..." format. The server converts to decimal internally.
@@ -269,6 +193,13 @@ export async function prepareInputs(config: ClientConfig, params: {
    */
   domainSeparator?: string;
   actionHash?: string;
+  /**
+   * The id of the request this proof answers; required without an action.
+   * signal_hash = keccak256(scope ++ circuitId ++ requestId) -- no wallet.
+   */
+  requestId?: string;
+  /** The OPRF evaluation for this circuit, wallet and scope (prepareOprf). Required. */
+  oprf: PreparedOprf;
 }): Promise<ProveInputs> {
   const { circuitId, userAddress, userSignature, scope } = params;
 
@@ -296,10 +227,6 @@ export async function prepareInputs(config: ClientConfig, params: {
     }
   }
 
-  // Step 1: Compute signal hash
-  const signalHash = computeSignalHash(userAddress, scope, circuitId);
-
-  // Step 2: Recover the user's public key from the digest they actually signed.
   /*
    * Whether this circuit can carry an action: core's table, the one every
    * layer reads (giwa_attestation and both Coinbase v2 circuits, optionally).
@@ -320,6 +247,10 @@ export async function prepareInputs(config: ClientConfig, params: {
       'recovered against the wrong digest belongs to nobody.',
     );
   }
+  // Step 1: the request's signal_hash (zeros with an action).
+  const signalHash = requestSignalHash(circuitId, scope, params.requestId, isAction);
+
+  // Step 2: Recover the user's public key from the digest they actually signed.
   const userPubkey = isAction
     ? ethers.SigningKey.recoverPublicKey(
         ethers.keccak256(ethers.concat(['0x1901', params.domainSeparator!, params.actionHash!])),
@@ -341,9 +272,8 @@ export async function prepareInputs(config: ClientConfig, params: {
   const signerIndex = findSignerIndex(attesterAddress, signers);
   const merkleData = buildSignerMerkleTree(signerIndex, signers);
 
-  // Step 6: Compute scope and the nullifier THIS circuit expects
-  const scopeBytes = computeScope(scope);
-  const nullifierBytes = nullifierForCircuit(circuitId, userAddress, signalHash, scopeBytes);
+  // Step 6: the OPRF nullifier inputs, re-verified for this circuit, wallet and scope
+  const oprf = checkPreparedOprf(params.oprf, { circuitId, address: userAddress, scope });
 
   // Step 7: Convert raw TX to byte array
   const rawTxBytes = hexToBytes(attestationData.rawTransaction);
@@ -352,8 +282,7 @@ export async function prepareInputs(config: ClientConfig, params: {
   // Assemble ProveInputs -- all values as hex strings (0x...)
   const inputs: ProveInputs = {
     signal_hash: ethers.hexlify(signalHash),
-    nullifier: ethers.hexlify(nullifierBytes),
-    scope_bytes: ethers.hexlify(scopeBytes),
+    ...oprf,
     merkle_root: merkleData.root,
     user_address: userAddress,
     signature: userSignature,
@@ -394,6 +323,10 @@ export function prepareHumanPassportInputs(params: {
   chain: unknown;
   domainSeparator?: string;
   actionHash?: string;
+  /** The id of the request this proof answers; required without an action. */
+  requestId?: string;
+  /** The OPRF evaluation for human_passport_score, this wallet and scope (prepareOprf). Required. */
+  oprf: PreparedOprf;
 }): HumanPassportProveInputs {
   const circuitId = CIRCUIT_IDS.HUMAN_PASSPORT_SCORE;
   try {
@@ -411,7 +344,7 @@ export function prepareHumanPassportInputs(params: {
   }
   const isAction = Boolean(params.domainSeparator) && Boolean(params.actionHash);
   const userAddress = ethers.getAddress(params.userAddress);
-  const signalHash = computeSignalHash(userAddress, params.scope, circuitId);
+  const signalHash = requestSignalHash(circuitId, params.scope, params.requestId, isAction);
   const userPubkey = isAction
     ? ethers.SigningKey.recoverPublicKey(
         ethers.keccak256(ethers.concat(['0x1901', params.domainSeparator!, params.actionHash!])),
@@ -422,13 +355,11 @@ export function prepareHumanPassportInputs(params: {
     throw new Error(`The signature was not made by ${userAddress}; the circuit would refuse the proof.`);
   }
   const { x, y } = extractPubkeyCoordinates(userPubkey);
-  const scopeBytes = computeScope(params.scope);
-  const nullifier = nullifierForCircuit(circuitId, userAddress, signalHash, scopeBytes);
+  const oprf = checkPreparedOprf(params.oprf, { circuitId, address: userAddress, scope: params.scope });
   return {
     signal_hash: ethers.hexlify(signalHash),
     ...(isAction ? { domain_separator: params.domainSeparator, action_hash: params.actionHash } : {}),
-    nullifier: ethers.hexlify(nullifier),
-    scope_bytes: ethers.hexlify(scopeBytes),
+    ...oprf,
     user_address: userAddress,
     signature: params.userSignature,
     user_pubkey_x: x,
