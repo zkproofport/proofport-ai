@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.6.8](https://github.com/zkproofport/proofport-ai/compare/server-v0.6.7...server-v0.6.8) (2026-11-11)
+
+
+### Bug Fixes
+
+* **sdk:** declare @x402/svm, which the CDP wallet adapter loads ([4374b0c](https://github.com/zkproofport/proofport-ai/commit/4374b0cf8585a0e4defcb35f1eaa7b50b96a7df3))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @zkproofport-ai/mcp bumped from ^0.4.9 to ^0.4.10
+    * @zkproofport-ai/sdk bumped from ^0.5.7 to ^0.5.8
+
 ## [0.6.7](https://github.com/zkproofport/proofport-ai/compare/server-v0.6.6...server-v0.6.7) (2026-11-11)
 
 
