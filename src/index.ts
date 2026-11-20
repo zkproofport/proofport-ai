@@ -28,6 +28,7 @@ import { DefaultRequestHandler } from '@a2a-js/sdk/server';
 import { jsonRpcHandler, UserBuilder } from '@a2a-js/sdk/server/express';
 import { buildAgentCard } from './a2a/agentCard.js';
 import { RedisTaskStore } from './a2a/redisTaskStore.js';
+import { createGuardedRequestHandler } from './a2a/taskStoreGuard.js';
 import { ProofportExecutor } from './a2a/proofportExecutor.js';
 import { validatePaymentConfig, getPaymentModeConfig } from './payment/freeTier.js';
 import { validateSettlementConfig } from './payment/settlementAccount.js';
@@ -210,7 +211,13 @@ function createApp(config: Config) {
   // A2A SDK setup
   const executor = new ProofportExecutor({ taskStore, config, teeProvider, llmProvider });
   const agentCard = buildAgentCard(config);
-  const requestHandler = new DefaultRequestHandler(agentCard, taskStore, executor);
+  // The SDK gets the guarded store, and the transport the handler that reports
+  // its failures: a task-store error must never reach the SDK's event loop,
+  // where it becomes an unhandled rejection (src/a2a/taskStoreGuard.ts).
+  const { handler: requestHandler } = createGuardedRequestHandler(
+    taskStore,
+    (guardedStore) => new DefaultRequestHandler(agentCard, guardedStore, executor),
+  );
 
   // Single POST /a2a handles all A2A v0.3 JSON-RPC methods
   // Payment is handled inside skillHandler via request_payment flow (no HTTP-level x402 gate)
