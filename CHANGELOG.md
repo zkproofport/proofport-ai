@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.7.0](https://github.com/zkproofport/proofport-ai/compare/server-v0.6.8...server-v0.7.0) (2026-11-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* verifyProof takes the client config first, verifyProof(config, result, options), and checks a wallet proof against the OPRF environment of the service that config names.
+
+### Features
+
+* noir_js 1.0.0 / bb 6.0.0, OPRF nullifier, pinned circuits ([e349afb](https://github.com/zkproofport/proofport-ai/commit/e349afb95a1fb3fb734202e2ddedeee7a170b9db))
+* OPRF circuits on core 0.4.0-beta.9 and circuits v3.0.0-rc.1 ([ccb3ba8](https://github.com/zkproofport/proofport-ai/commit/ccb3ba807c3450faecd05137fd83ea96ec93cd04))
+
+
+### Bug Fixes
+
+* keep the server running when the task store fails ([10028c4](https://github.com/zkproofport/proofport-ai/commit/10028c4dbf760a50342b0e4b4865d7390991279d))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * devDependencies
+    * @zkproofport-ai/mcp bumped from ^0.4.10 to ^0.5.0
+    * @zkproofport-ai/sdk bumped from ^0.5.8 to ^0.6.0
+
 ## [0.6.8](https://github.com/zkproofport/proofport-ai/compare/server-v0.6.7...server-v0.6.8) (2026-11-11)
 
 

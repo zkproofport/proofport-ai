@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.0](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.5.8...sdk-v0.6.0) (2026-11-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* verifyProof takes the client config first, verifyProof(config, result, options), and checks a wallet proof against the OPRF environment of the service that config names.
+
+### Features
+
+* noir_js 1.0.0 / bb 6.0.0, OPRF nullifier, pinned circuits ([e349afb](https://github.com/zkproofport/proofport-ai/commit/e349afb95a1fb3fb734202e2ddedeee7a170b9db))
+* OPRF circuits on core 0.4.0-beta.9 and circuits v3.0.0-rc.1 ([ccb3ba8](https://github.com/zkproofport/proofport-ai/commit/ccb3ba807c3450faecd05137fd83ea96ec93cd04))
+
 ## [0.5.8](https://github.com/zkproofport/proofport-ai/compare/sdk-v0.5.7...sdk-v0.5.8) (2026-11-11)
 
 
