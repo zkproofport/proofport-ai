@@ -171,4 +171,23 @@ describe('Node 22+: a global WebSocket, no fallback transport', () => {
       expect(lock.packages[`packages/${pkg}`].engines).toEqual({ node: '>=22.0.0' });
     }
   });
+  it('the server package and its lockfile entry require Node >= 22.0.0', () => {
+    expect(req('../package.json').engines).toEqual({ node: '>=22.0.0' });
+    expect(req('../package-lock.json').packages[''].engines).toEqual({ node: '>=22.0.0' });
+  });
+  it('CI, the emergency deploy, the server image and the enclave image run Node 22, never 20', () => {
+    const read = (f: string) => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8');
+    for (const f of ['.github/workflows/ci.yml', '.github/workflows/emergency-deploy.yml']) {
+      const versions = [...read(f).matchAll(/node-version:\s*'(\d+)'/g)].map(m => m[1]);
+      expect(versions.length, f).toBeGreaterThan(0);
+      for (const v of versions) expect(v, f).toBe('22');
+    }
+    const server = read('Dockerfile');
+    expect(server).toMatch(/^FROM node:22-slim AS builder$/m);
+    expect(server).toContain('deb.nodesource.com/setup_22.x');
+    expect(read('aws/Dockerfile.enclave')).toContain('deb.nodesource.com/setup_22.x');
+    for (const f of ['Dockerfile', 'aws/Dockerfile.enclave']) {
+      expect(read(f), f).not.toMatch(/setup_20\.x|node:20/);
+    }
+  });
 });

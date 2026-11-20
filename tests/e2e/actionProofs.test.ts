@@ -11,7 +11,9 @@ import * as sdk from '@zkproofport-ai/sdk';
 import { createConfig, fromPrivateKey, verifyProof, extractNullifierFromPublicInputs, type ProofResult } from '@zkproofport-ai/sdk';
 import { planPayment } from './payer.js';
 import { callToolWithSimulatedApproval, generateProofWithSimulatedApproval } from './simulatedHumanApproval.js';
-import { TypedDataEncoder, keccak256, toUtf8Bytes } from 'ethers';
+import { TypedDataEncoder } from 'ethers';
+import { GIWA_ATTESTATION_PUBLIC_INPUT_LAYOUT } from '@zkproofport-app/core';
+import { E2E_OPRF_DOMAIN, expectOprfPublicInputs, publicInputFields } from './oprf.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -19,7 +21,7 @@ import { join } from 'node:path';
 const baseUrl = process.env.E2E_BASE_URL || 'http://localhost:4002';
 const payerKey = process.env.E2E_PAYER_WALLET_KEY;
 const rows = [
-  { circuit: 'giwa_attestation' as const, key: process.env.GIWA_ATTESTATION_KEY, keyName: 'GIWA_ATTESTATION_KEY', chainId: 91342 },
+  { circuit: 'giwa_attestation' as const, key: process.env.GIWA_ATTESTATION_KEY, keyName: 'GIWA_ATTESTATION_KEY', chainId: 91342, layout: GIWA_ATTESTATION_PUBLIC_INPUT_LAYOUT },
 ];
 for (const row of rows) if (!row.key) console.warn(`SKIP ${row.circuit}: missing ${row.keyName}`);
 
@@ -34,19 +36,23 @@ for (const protocol of ['sdk', 'mcp'] as const) {
         expect(guideResponse.ok).toBe(true);
         const guide = await guideResponse.json();
         const fields = guide.input_schema.public_fields as string[];
-        expect(fields).toEqual(['signal_hash', 'domain_separator', 'action_hash', 'signer_list_merkle_root', 'scope', 'nullifier']);
+        expect(fields).toEqual(['signal_hash', 'domain_separator', 'action_hash', 'signer_list_merkle_root', 'oprf_key_hash', 'domain', 'scope', 'nullifier']);
         const wordCount = guide.constants.verification.public_input_count as number;
-        expect(wordCount).toBe(fields.length * 32);
+        const L = row.layout;
+        // Four byte-per-field 32-byte inputs, then the OPRF four (one field each): core's count.
+        expect(wordCount).toBe(L.NULLIFIER + 1);
+        const byteStarts = { signal_hash: L.SIGNAL_HASH_START, domain_separator: L.DOMAIN_SEPARATOR_START, action_hash: L.ACTION_HASH_START, signer_list_merkle_root: L.MERKLE_ROOT_START };
         const decode = (proof: ProofResult): Record<string, string> => {
-          expect(proof.publicInputs).toMatch(/^0x[0-9a-f]+$/i);
-          const words = proof.publicInputs.slice(2).match(/.{64}/g)!;
-          expect(proof.publicInputs.length).toBe(2 + wordCount * 64);
+          const words = publicInputFields(proof.publicInputs);
           expect(words).toHaveLength(wordCount);
-          const bytes = words.map(word => {
-            expect(BigInt(`0x${word}`)).toBeLessThanOrEqual(255n);
-            return Number(BigInt(`0x${word}`)).toString(16).padStart(2, '0');
-          });
-          return Object.fromEntries(fields.map((name, index) => [name, '0x' + bytes.slice(index * 32, (index + 1) * 32).join('')]));
+          const out: Record<string, string> = {};
+          for (const [name, start] of Object.entries(byteStarts)) {
+            out[name] = '0x' + words.slice(start, start + 32).map(word => {
+              expect(BigInt(word)).toBeLessThanOrEqual(255n);
+              return Number(BigInt(word)).toString(16).padStart(2, '0');
+            }).join('');
+          }
+          return out;
         };
         const config = createConfig({ baseUrl });
         const plan = await planPayment(config, row.circuit, payerKey);
@@ -73,10 +79,10 @@ for (const protocol of ['sdk', 'mcp'] as const) {
           }
           const prove = async (bound: boolean): Promise<ProofResult> => {
             if (protocol === 'sdk') return generateProofWithSimulatedApproval(sdk, config, { attestation: fromPrivateKey(row.key!), payment: plan.wallet }, {
-              circuit: row.circuit, scope, payOn: plan.payOn, ...(bound ? { action } : {}),
+              circuit: row.circuit, scope, oprfDomain: E2E_OPRF_DOMAIN, payOn: plan.payOn, ...(bound ? { action } : {}),
             });
             const result = await callToolWithSimulatedApproval(client!, config, fromPrivateKey(row.key!), 'generate_proof', {
-              circuit: row.circuit, scope, pay_with: 'key', pay_on: plan.payOn, ...(bound ? { action } : {}),
+              circuit: row.circuit, scope, oprf_domain: E2E_OPRF_DOMAIN, pay_with: 'key', pay_on: plan.payOn, ...(bound ? { action } : {}),
             }, 180_000) as { content: Array<{ text?: string }>; isError?: boolean };
             const text = (result.content as Array<{ text?: string }>)[0]?.text ?? '';
             expect(result.isError, text).toBeFalsy();
@@ -88,7 +94,7 @@ for (const protocol of ['sdk', 'mcp'] as const) {
             expect(proof.proof).toMatch(/^0x[0-9a-f]+$/i);
             expect(proof.verification?.chainId).toBe(row.chainId);
             expect(proof.verification?.verifierAddress.toLowerCase()).toBe(guide.constants.verification.verifier_address.toLowerCase());
-            const verified = await verifyProof(proof);
+            const verified = await verifyProof(config, proof);
             expect(verified.valid, verified.error).toBe(true);
           }
           const identityInputs = decode(plain);
@@ -100,7 +106,10 @@ for (const protocol of ['sdk', 'mcp'] as const) {
           expect(actionInputs.signal_hash).toBe(zero);
           expect(actionInputs.domain_separator).toBe(TypedDataEncoder.hashDomain(action.domain).toLowerCase());
           expect(actionInputs.action_hash).toBe(TypedDataEncoder.from(action.types).hash(action.message).toLowerCase());
-          for (const inputs of [identityInputs, actionInputs]) expect(inputs.scope).toBe(keccak256(toUtf8Bytes(scope)));
+          const environment = await sdk.fetchOprfEnvironment(config);
+          const nullifiers = [plain, bound].map(proof =>
+            expectOprfPublicInputs(publicInputFields(proof.publicInputs), row.circuit, { scope, oprfDomain: E2E_OPRF_DOMAIN, environment }));
+          expect(nullifiers[1]).toBe(nullifiers[0]);
           expect(actionInputs.signer_list_merkle_root).toBe(identityInputs.signer_list_merkle_root);
           expect(actionInputs.signer_list_merkle_root).not.toBe(zero);
           expect(bound.publicInputs).not.toBe(plain.publicInputs);

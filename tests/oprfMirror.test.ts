@@ -1,8 +1,10 @@
 /**
- * The SDK's mirror of core's OPRF client (packages/sdk/src/oprf/core, written
- * by scripts/sync-oprf-mirror.mjs) and its key-hash / network tables, held to
- * the shared vectors (tests/fixtures/oprf-vectors.json, byte-identical to
- * core's). Every oracle in that file is independent of this code: the
+ * The OPRF client the SDK imports from @zkproofport-app/core (installed from
+ * the registry), the key-hash table it reads through packages/sdk/src/oprf/
+ * keyHashes.ts, the network table, and the two arithmetic files still
+ * mirrored from core (packages/sdk/src/oprf/core, scripts/sync-oprf-mirror.mjs),
+ * held to the shared vectors (tests/fixtures/oprf-vectors.json, byte-identical
+ * to core's). Every oracle in that file is independent of this code: the
  * circuits' Rust fixture tool, proofport-oprf's Rust node side, ethers, and
  * one real answer from the public test network.
  */
@@ -23,21 +25,19 @@ import {
   reduceOprfName,
   unblindOprfResponse,
   verifyOprfDlogEquality,
-} from '../packages/sdk/src/oprf/core/client.js';
+} from '@zkproofport-app/core/oprf';
 import {
-  OPRF_CIRCUIT_IDS,
-  OPRF_KEY_HASHES,
-  TESTNET_OPRF_KEY_HASH,
-  TESTNET_OPRF_PUBLIC_KEY,
-  getPinnedOprfKeyHash,
-} from '../packages/sdk/src/oprf/keyHashes.js';
+  TACEO_TESTNET_OPRF_KEY_HASH as TESTNET_OPRF_KEY_HASH,
+  TACEO_TESTNET_OPRF_PUBLIC_KEY as TESTNET_OPRF_PUBLIC_KEY,
+} from '@zkproofport-app/core';
+import { OPRF_CIRCUIT_IDS, OPRF_KEY_HASHES, getPinnedOprfKeyHash } from '../packages/sdk/src/oprf/keyHashes.js';
 import { OPRF_NETWORKS, getOprfNetwork } from '../packages/sdk/src/oprf/networks.js';
 
 const V = createRequire(import.meta.url)('./fixtures/oprf-vectors.json');
 const ROOT = join(import.meta.dirname, '..');
 const SIBLING_CORE = join(ROOT, '..', 'proofport-app-sdk', 'packages', 'core', 'src', 'oprf');
 
-describe('mirror of core\'s OPRF client agrees with the shared vectors', () => {
+describe('core\'s OPRF client agrees with the shared vectors', () => {
   it.each(V.names.map((n: { name: string; verdict: string | null; reduced: string | null; note?: string }) => [n.note ?? n.name, n]))(
     'name rule and reduction: %s',
     (_label, n: { name: string; verdict: string | null; reduced: string | null }) => {
@@ -95,14 +95,14 @@ describe('mirror of core\'s OPRF client agrees with the shared vectors', () => {
   });
 
   it.skipIf(!existsSync(SIBLING_CORE))(
-    'the mirror files equal core\'s source (scripts/sync-oprf-mirror.mjs --check; needs the monorepo checkout)',
+    'the two mirrored arithmetic files equal core\'s source (scripts/sync-oprf-mirror.mjs --check; needs the monorepo checkout)',
     () => {
       expect(() => execFileSync('node', [join(ROOT, 'scripts/sync-oprf-mirror.mjs'), '--check'], { cwd: ROOT, stdio: 'pipe' })).not.toThrow();
     },
   );
 });
 
-describe('pinned OPRF key hash table (mirror of core OPRF_KEY_HASHES)', () => {
+describe('pinned OPRF key hash table (core OPRF_KEY_HASHES, through the SDK module)', () => {
   const network = V.network;
 
   it('the test network hash is Poseidon2 of the test network key, and equals the recorded answer\'s', () => {

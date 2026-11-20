@@ -155,17 +155,20 @@ async function syncChain(chainId: number, isProduction: boolean): Promise<boolea
 
       const current = verifierAddresses[chainIdStr]?.[circuitId];
       const unpinned = unpinnedVerifierReason(circuitId, chainId, address);
-      // A pinned commit can still name a mainnet verifier core does not pin
-      // (a redeploy recorded before core's release). Production never
-      // replaces a core-pinned address with an unpinned one: published
-      // clients would refuse every proof. Until 2026-11-17 production read
-      // `releases/latest` (held at v1.3.0, whose OIDC v1 verifiers revert
-      // every proof this server makes), which is how this guard began.
-      // Staging takes the pinned commit's records as they are.
-      if (unpinned && isProduction && current && !unpinnedVerifierReason(circuitId, chainId, current)) {
+      // A pinned commit can still name a mainnet verifier core does not pin:
+      // a redeploy recorded before core's release, or (core 0.4.0-beta.9) the
+      // bb 4.2 verifiers core lists in AWAITING_REDEPLOY, which refuse every
+      // bb 6.0.0 proof. Production never adopts an unpinned address: published
+      // clients would refuse every proof naming it. It keeps the pinned
+      // address, or no target at all when core pins none there (the fallback
+      // row is null). Until 2026-11-17 production read `releases/latest`
+      // (held at v1.3.0, whose OIDC v1 verifiers revert every proof this
+      // server makes), which is how this guard began. Staging takes the
+      // pinned commit's records as they are.
+      if (unpinned && isProduction) {
         log.error(
-          { action: 'deployment.unpinned_ignored', circuitId, chainId, address, kept: current },
-          `${unpinned}; keeping the pinned ${current}`,
+          { action: 'deployment.unpinned_ignored', circuitId, chainId, address, kept: current ?? 'none' },
+          current ? `${unpinned}; keeping the pinned ${current}` : `${unpinned}; leaving ${circuitId} without a verifier on chain ${chainId}`,
         );
         return;
       }

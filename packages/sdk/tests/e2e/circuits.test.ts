@@ -111,7 +111,7 @@ describe('SDK E2E — All Circuits (local source)', () => {
     expect(nullifier!.startsWith('0x')).toBe(true);
 
     // Verify on-chain
-    const verified = await verifyProof(result);
+    const verified = await verifyProof(config, result);
     expect(verified.valid).toBe(true);
   }, 180_000);
 
@@ -140,7 +140,7 @@ describe('SDK E2E — All Circuits (local source)', () => {
     expect(nullifier).toBeTruthy();
 
     // Verify on-chain
-    const verified = await verifyProof(result);
+    const verified = await verifyProof(config, result);
     expect(verified.valid).toBe(true);
   }, 180_000);
 
@@ -174,7 +174,7 @@ describe('SDK E2E — All Circuits (local source)', () => {
     console.log(`[E2E] OIDC domain extracted: ${domain}`);
 
     // Verify on-chain
-    const verified = await verifyProof(result);
+    const verified = await verifyProof(config, result);
     expect(verified.valid).toBe(true);
   }, 180_000);
 });

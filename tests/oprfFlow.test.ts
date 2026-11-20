@@ -22,7 +22,7 @@ vi.mock('../packages/sdk/src/oprf/networks.js', async importOriginal => {
 });
 vi.mock('../packages/sdk/src/oprf/keyHashes.js', async importOriginal => {
   const real = await importOriginal<typeof import('../packages/sdk/src/oprf/keyHashes.js')>();
-  const { oprfKeyHash } = await import('../packages/sdk/src/oprf/core/client.js');
+  const { oprfKeyHash } = await import('@zkproofport-app/core/oprf');
   const simHash = oprfKeyHash(sim.publicKey);
   return {
     ...real,

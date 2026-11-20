@@ -63,6 +63,12 @@ describe('the verification block never mixes one chain with another chain rpc', 
     for (const circuit of CIRCUITS) {
       it(`${env.name} — ${circuit}: the rpc serves the chain that is named`, () => {
         const target = chooseVerificationTarget(configWith(env.chain, env.eth), circuit, env.testnet);
+        if (!env.testnet) {
+          // Mainnet verifiers await the bb 6.0.0 redeploy (core AWAITING_REDEPLOY):
+          // no target rather than a bb 4.2 verifier that refuses the proof.
+          expect(target).toBeNull();
+          return;
+        }
         expect(target).not.toBeNull();
         expect(CHAIN_OF_RPC[target!.rpcUrl]).toBe(target!.chainId);
       });
@@ -93,35 +99,18 @@ describe('which chain gets chosen', () => {
     expect(target!.rpcUrl).toBe(BASE_SEPOLIA);
   });
 
-  it('uses mainnet chain ids when not on testnet', () => {
-    expect(
-      chooseVerificationTarget(configWith(BASE_MAINNET, ETHEREUM_MAINNET), CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION, false)!
-        .chainId,
-    ).toBe(1);
-    expect(
-      chooseVerificationTarget(configWith(BASE_MAINNET, ''), CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION, false)!.chainId,
-    ).toBe(8453);
+  it('gives production no target for any circuit while the mainnet verifiers await the bb 6.0.0 redeploy', () => {
+    for (const circuit of [...CIRCUITS, CIRCUIT_IDS.HUMAN_PASSPORT_SCORE]) {
+      expect(chooseVerificationTarget(configWith(BASE_MAINNET, ETHEREUM_MAINNET), circuit, false), circuit).toBeNull();
+      expect(chooseVerificationTarget(configWith(BASE_MAINNET, ''), circuit, false), circuit).toBeNull();
+    }
   });
 
-  it('sends coinbase_attestation v2 to its Base Sepolia verifier even when an Ethereum rpc is configured', () => {
-    // Ethereum Sepolia has no v2 verifier; naming v1's there would make every
-    // v2 proof revert on its length.
-    const target = chooseVerificationTarget(configWith(BASE_SEPOLIA, ETHEREUM_SEPOLIA), CIRCUIT_IDS.COINBASE_ATTESTATION, true);
-    expect(target).toEqual({ chainId: 84532, rpcUrl: BASE_SEPOLIA, verifierAddress: '0x1885aA2283DB21ad0fc63A2Df98efe92F31908E6' });
-  });
-
-  it('gives production a coinbase_attestation v2 target on Ethereum, or on Base without an Ethereum rpc', () => {
-    expect(chooseVerificationTarget(configWith(BASE_MAINNET, ETHEREUM_MAINNET), CIRCUIT_IDS.COINBASE_ATTESTATION, false))
-      .toEqual({ chainId: 1, rpcUrl: ETHEREUM_MAINNET, verifierAddress: '0x0e458610BD79893a0855C8F90CEDed70cF7553b6' });
-    expect(chooseVerificationTarget(configWith(BASE_MAINNET, ''), CIRCUIT_IDS.COINBASE_ATTESTATION, false))
-      .toEqual({ chainId: 8453, rpcUrl: BASE_MAINNET, verifierAddress: '0x6FC22d3576FB70457d1529B3F70f711A3cBA7A7F' });
-  });
-
-  it('gives production the provider-key statement OIDC verifier', () => {
-    expect(chooseVerificationTarget(configWith(BASE_MAINNET, ETHEREUM_MAINNET), CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION, false))
-      .toEqual({ chainId: 1, rpcUrl: ETHEREUM_MAINNET, verifierAddress: '0xb07e18566Db63bb0b4cb72896699E94Faa078fcd' });
-    expect(chooseVerificationTarget(configWith(BASE_MAINNET, ''), CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION, false))
-      .toEqual({ chainId: 8453, rpcUrl: BASE_MAINNET, verifierAddress: '0xF1AA88aD844bFd1dc552526a67f5980aAd4E7f35' });
+  it('sends coinbase_attestation v2 to the pinned bb 6.0.0 verifier on Ethereum Sepolia, or Base Sepolia without an Ethereum rpc', () => {
+    expect(chooseVerificationTarget(configWith(BASE_SEPOLIA, ETHEREUM_SEPOLIA), CIRCUIT_IDS.COINBASE_ATTESTATION, true))
+      .toEqual({ chainId: 11155111, rpcUrl: ETHEREUM_SEPOLIA, verifierAddress: FALLBACK_VERIFIERS['11155111'].coinbase_attestation });
+    expect(chooseVerificationTarget(configWith(BASE_SEPOLIA, ''), CIRCUIT_IDS.COINBASE_ATTESTATION, true))
+      .toEqual({ chainId: 84532, rpcUrl: BASE_SEPOLIA, verifierAddress: FALLBACK_VERIFIERS['84532'].coinbase_attestation });
   });
 
   it('returns a verifier address that is a real address, not an empty string', () => {

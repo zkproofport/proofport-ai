@@ -18,8 +18,7 @@
  */
 import { GENERATOR, add, isIdentity, isInSubgroup, isOnCurve, scalarMul, A as CURVE_A, D as CURVE_D, type Point } from './core/babyjubjub.js';
 import { P, R, invMod, mod, sqrtMod, legendre } from './core/field.js';
-import { poseidon2T16 } from './core/poseidon2.js';
-import { OPRF_DS_DLOG } from './core/client.js';
+import { OPRF_DS_DLOG, poseidon2T16 } from '@zkproofport-app/core/oprf';
 import { blake3 } from './blake3.js';
 
 const HALF_P = (P - 1n) / 2n;

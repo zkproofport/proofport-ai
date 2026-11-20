@@ -43,7 +43,6 @@ import {
 import type { HumanPassportParams } from '../prover/inputFormatter.js';
 import { OprfInputRefusal, OPRF_REFUSAL_STATUS, readOprfInputs, type OprfCircuitInputs } from '../input/oprfInputs.js';
 import { getPinnedOprfKeyHash, isOprfCircuitId } from '../config/oprfKeyHashes.js';
-import { ALL_CIRCUIT_IDS } from '../config/circuitIds.js';
 import type {
   ProveRequest,
   ProveResponse,
@@ -137,7 +136,7 @@ function assertOprfAvailable(environment: Config['oprfEnvironment'], circuitId: 
     throw new OprfInputRefusal('OPRF_NOT_CONFIGURED', `OPRF_ENVIRONMENT is not set on this server, so it cannot accept ${circuitId} proofs.`);
   }
   try {
-    getPinnedOprfKeyHash(environment, circuitId, ALL_CIRCUIT_IDS as readonly string[]);
+    getPinnedOprfKeyHash(environment, circuitId);
   } catch (e) {
     throw new OprfInputRefusal('OPRF_UNAVAILABLE', (e as Error).message);
   }

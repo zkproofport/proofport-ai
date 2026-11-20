@@ -17,16 +17,14 @@ os.chdir(ROOT)
 
 TESTS = ['tests/serverOprfInputs.test.ts', 'tests/serverOprfKeyHashes.test.ts', 'tests/proofRouteOprf.test.ts']
 
+# The key-hash table and its production refusal are @zkproofport-app/core's
+# (src/config/oprfKeyHashes.ts re-exports them since core 0.4.0-beta.9), so
+# they are mutated in core's repository; serverOprfKeyHashes.test.ts still
+# holds the installed core's rows and refusals.
 MUTATIONS = [
     ('key-hash comparison removed', 'src/input/oprfInputs.ts',
      'if (out.oprf_key_hash !== pinned.toLowerCase()) {',
      'if (false && out.oprf_key_hash !== pinned.toLowerCase()) {'),
-    ('production row given the test key', 'src/config/oprfKeyHashes.ts',
-     '  production: null,\n',
-     '  production: testnet(),\n'),
-    ('production refusal removed from the lookup', 'src/config/oprfKeyHashes.ts',
-     '  if (rows === null) {\n',
-     '  if (rows === null && false) {\n'),
     ('below-modulus check made <=', 'src/input/oprfInputs.ts',
      '    if (v >= modulus) {',
      '    if (v > modulus) {'),

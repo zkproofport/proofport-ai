@@ -8,19 +8,20 @@
  *     require the request's attestCountry transaction to name the same
  *     country, sign the 227-byte revocation statement with the key the
  *     circuit pins, and prove with it (signer kind = server);
- *   - the proof carries 215 public inputs: signal_hash 0-31,
- *     domain_separator 32-63, action_hash 64-95, signer root 96-127, country
- *     list 128-147, list length 148, is_included 149, scope 150-181,
- *     nullifier 182-213 (wallet + circuit-tag rule, the same with or without
- *     an action), attested_at 214 (fresh);
+ *   - the proof carries core's COINBASE_COUNTRY_PUBLIC_INPUT_LAYOUT:
+ *     signal_hash, domain_separator, action_hash, signer root, the country
+ *     list, its length, is_included, then the OPRF key hash, domain, scope
+ *     and nullifier (one field each; the nullifier the same with or without
+ *     an action), then attested_at (fresh);
  *   - every proof verifies through the SDK's verifyProof (core's pinned
  *     verifier, on chain), and directly on the pinned Base Sepolia verifier;
  *     the same proof with attested_at changed does not;
- *   - refusals before payment: the KYC tag's nullifier, another wallet's
- *     attestCountry transaction, a country list the circuit cannot take.
+ *   - refusals before payment: a pre-OPRF request (no OPRF values), another
+ *     wallet's attestCountry transaction, a country list the circuit cannot
+ *     take.
  *
  * Needs ATTESTATION_KEY (the Coinbase-attested E2E wallet; its Country
- * attestation is KR) and, when the server charges, E2E_PAYER_WALLET_KEY.
+ * attestation is KR), the server's OPRF network reachable, and, when the server charges, E2E_PAYER_WALLET_KEY.
  * scripts/run-published-e2e.mjs runs it with the registry SDK and MCP.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
@@ -29,12 +30,13 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import * as sdk from '@zkproofport-ai/sdk';
 import { createConfig, fromPrivateKey, verifyProof, type ClientConfig, type ProofResult } from '@zkproofport-ai/sdk';
-import { PINNED_VERIFIERS } from '@zkproofport-app/core';
+import { PINNED_VERIFIERS, COINBASE_COUNTRY_PUBLIC_INPUT_LAYOUT as LAYOUT } from '@zkproofport-app/core';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { planPayment, type PayerPlan } from './payer.js';
 import { callToolWithSimulatedApproval, generateProofWithSimulatedApproval } from './simulatedHumanApproval.js';
+import { E2E_OPRF_DOMAIN, expectOprfPublicInputs, publicInputFields } from './oprf.js';
 
 const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:4002';
 const ATTESTATION_KEY = process.env.ATTESTATION_KEY;
@@ -44,12 +46,6 @@ const BASE_SEPOLIA_RPC = process.env.E2E_BASE_SEPOLIA_RPC_URL || 'https://base-s
 const VERIFIER_ABI = ['function verify(bytes calldata _proof, bytes32[] calldata _publicInputs) view returns (bool)'];
 const COUNTRY_LIST = ['US', 'KR'];
 
-function fields(publicInputsHex: string): string[] {
-  const hex = publicInputsHex.slice(2);
-  const out: string[] = [];
-  for (let i = 0; i < hex.length; i += 64) out.push('0x' + hex.slice(i, i + 64));
-  return out;
-}
 const bytesAt = (f: string[], start: number, n = 32) => ethers.hexlify(new Uint8Array(f.slice(start, start + n).map(x => Number(BigInt(x)))));
 
 describe('coinbase_country_attestation v2 (server statement)', () => {
@@ -57,6 +53,7 @@ describe('coinbase_country_attestation v2 (server statement)', () => {
   let wallet: string;
   let plan: PayerPlan | undefined;
   let verifierAddress: string;
+  let environment: sdk.OprfEnvironment;
 
   beforeAll(async () => {
     if (!ATTESTATION_KEY) throw new Error('ATTESTATION_KEY required (the Coinbase-attested E2E wallet)');
@@ -65,6 +62,7 @@ describe('coinbase_country_attestation v2 (server statement)', () => {
     const pinned = PINNED_VERIFIERS[ID]?.[84532];
     if (!pinned) throw new Error(`core pins no ${ID} verifier on Base Sepolia (84532)`);
     verifierAddress = pinned.address;
+    environment = await sdk.fetchOprfEnvironment(config);
     const challenge = await sdk.requestChallenge(config, 'coinbase_country');
     if (challenge.requiresPayment !== false) {
       if (!PAYER_KEY) throw new Error(`${BASE_URL} charges; E2E_PAYER_WALLET_KEY is required`);
@@ -81,37 +79,35 @@ describe('coinbase_country_attestation v2 (server statement)', () => {
   /** Checks every proof must pass; returns the nullifier. */
   async function judge(result: ProofResult, scope: string, before: number, bound: boolean): Promise<string> {
     const after = Math.floor(Date.now() / 1000);
-    const f = fields(result.publicInputs);
-    expect(f.length).toBe(215);
+    const f = publicInputFields(result.publicInputs);
+    expect(result.scope).toBe(scope);
+    expect(result.oprfDomain).toBe(E2E_OPRF_DOMAIN);
+    expect(result.oprfEnvironment).toBe(environment);
+    const nullifier = expectOprfPublicInputs(f, ID, { scope, oprfDomain: E2E_OPRF_DOMAIN, environment });
     const zero = ethers.ZeroHash;
     if (bound) {
-      expect(bytesAt(f, 0)).toBe(zero);
-      expect(bytesAt(f, 32)).toBe(TypedDataEncoder.hashDomain(action.domain).toLowerCase());
-      expect(bytesAt(f, 64)).toBe(TypedDataEncoder.from(action.types).hash(action.message).toLowerCase());
+      expect(bytesAt(f, LAYOUT.SIGNAL_HASH_START)).toBe(zero);
+      expect(bytesAt(f, LAYOUT.DOMAIN_SEPARATOR_START)).toBe(TypedDataEncoder.hashDomain(action.domain).toLowerCase());
+      expect(bytesAt(f, LAYOUT.ACTION_HASH_START)).toBe(TypedDataEncoder.from(action.types).hash(action.message).toLowerCase());
     } else {
-      expect(bytesAt(f, 0)).not.toBe(zero);
-      expect(bytesAt(f, 32)).toBe(zero);
-      expect(bytesAt(f, 64)).toBe(zero);
+      expect(bytesAt(f, LAYOUT.SIGNAL_HASH_START)).not.toBe(zero);
+      expect(bytesAt(f, LAYOUT.DOMAIN_SEPARATOR_START)).toBe(zero);
+      expect(bytesAt(f, LAYOUT.ACTION_HASH_START)).toBe(zero);
     }
-    expect(bytesAt(f, 128, 4)).toBe(ethers.hexlify(ethers.toUtf8Bytes(COUNTRY_LIST.join(''))));
-    expect(Number(BigInt(f[148]))).toBe(COUNTRY_LIST.length);
-    expect(BigInt(f[149])).toBe(1n);
-    const scopeBytes = ethers.keccak256(ethers.toUtf8Bytes(scope));
-    expect(bytesAt(f, 150)).toBe(scopeBytes);
-    const tag = ethers.keccak256(ethers.toUtf8Bytes(ID));
-    const nullifier = ethers.keccak256(ethers.concat([ethers.keccak256(ethers.concat([wallet, tag])), scopeBytes]));
-    expect(bytesAt(f, 182)).toBe(nullifier);
-    const attestedAt = Number(BigInt(f[214]));
+    expect(bytesAt(f, LAYOUT.COUNTRY_LIST_START, 2 * COUNTRY_LIST.length)).toBe(ethers.hexlify(ethers.toUtf8Bytes(COUNTRY_LIST.join(''))));
+    expect(Number(BigInt(f[LAYOUT.COUNTRY_LIST_LENGTH]))).toBe(COUNTRY_LIST.length);
+    expect(BigInt(f[LAYOUT.IS_INCLUDED])).toBe(1n);
+    const attestedAt = Number(BigInt(f[LAYOUT.ATTESTED_AT]));
     expect(attestedAt).toBeGreaterThanOrEqual(before - 5);
     expect(attestedAt).toBeLessThanOrEqual(after + 5);
 
-    const verified = await verifyProof(result);
+    const verified = await verifyProof(config, result, { request: { scope, requestId: result.requestId!, oprfDomain: E2E_OPRF_DOMAIN } });
     expect(verified.valid, verified.error).toBe(true);
 
     const verifier = new ethers.Contract(verifierAddress, VERIFIER_ABI, new ethers.JsonRpcProvider(BASE_SEPOLIA_RPC, 84532, { staticNetwork: true }));
     expect(await verifier.verify(result.proof, f)).toBe(true);
     const tampered = [...f];
-    tampered[214] = ethers.toBeHex(BigInt(f[214]) + 1n, 32);
+    tampered[LAYOUT.ATTESTED_AT] = ethers.toBeHex(BigInt(f[LAYOUT.ATTESTED_AT]) + 1n, 32);
     expect(await verifier.verify(result.proof, tampered).catch(() => false)).toBe(false);
     return nullifier;
   }
@@ -120,9 +116,9 @@ describe('coinbase_country_attestation v2 (server statement)', () => {
     const scope = `e2e:country-v2:sdk:${Date.now()}`;
     const signers = { attestation: fromPrivateKey(ATTESTATION_KEY!), ...(plan && { payment: plan.wallet }) };
     const before = Math.floor(Date.now() / 1000);
-    const plain = await sdk.generateProof(config, signers, { circuit: 'coinbase_country', scope, payOn: plan?.payOn, countryList: COUNTRY_LIST, isIncluded: true });
+    const plain = await sdk.generateProof(config, signers, { circuit: 'coinbase_country', scope, oprfDomain: E2E_OPRF_DOMAIN, payOn: plan?.payOn, countryList: COUNTRY_LIST, isIncluded: true });
     const bound = await generateProofWithSimulatedApproval(sdk, config, signers, {
-      circuit: 'coinbase_country', scope, payOn: plan?.payOn, countryList: COUNTRY_LIST, isIncluded: true, action,
+      circuit: 'coinbase_country', scope, oprfDomain: E2E_OPRF_DOMAIN, payOn: plan?.payOn, countryList: COUNTRY_LIST, isIncluded: true, action,
     } as never);
     const n1 = await judge(plain, scope, before, false);
     const n2 = await judge(bound, scope, before, true);
@@ -148,7 +144,7 @@ describe('coinbase_country_attestation v2 (server statement)', () => {
       // also carries a CDP credential, and with two configured the MCP refuses
       // to guess (as it should). Until 2026-11-11 this named it only when the
       // server charged, so every free local run failed here.
-      const args = { circuit: 'coinbase_country', scope, country_list: COUNTRY_LIST, is_included: true,
+      const args = { circuit: 'coinbase_country', scope, oprf_domain: E2E_OPRF_DOMAIN, country_list: COUNTRY_LIST, is_included: true,
         ...(PAYER_KEY && { pay_with: 'key' }), ...(plan && { pay_on: plan.payOn }) };
       const before = Math.floor(Date.now() / 1000);
       const call = async (bound: boolean): Promise<ProofResult> => {
@@ -180,26 +176,32 @@ describe('coinbase_country_attestation v2 (server statement)', () => {
       body: JSON.stringify({ circuit: 'coinbase_country', inputs }),
     });
   }
-  const scopeBytes = ethers.keccak256(ethers.toUtf8Bytes('e2e:country-v2:refusal'));
-  const nullifierFor = (who: string, id: string) =>
-    ethers.keccak256(ethers.concat([ethers.keccak256(ethers.concat([who, ethers.keccak256(ethers.toUtf8Bytes(id))])), scopeBytes]));
+  const REFUSAL_SCOPE = 'e2e:country-v2:refusal';
+  /** One real OPRF evaluation for the E2E wallet, shared by the refusal cases (the server checks shape and key hash). */
+  let refusalOprf: sdk.PreparedOprf | undefined;
+  const oprfForRefusals = async () => (refusalOprf ??= await sdk.prepareOprf(config, { circuitId: ID, address: wallet, oprfDomain: E2E_OPRF_DOMAIN, scope: REFUSAL_SCOPE }));
 
-  it("refuses the KYC tag's nullifier before payment", async () => {
-    const res = await proveWith({ signal_hash: ethers.ZeroHash.replace(/0$/, '1'), nullifier: nullifierFor(wallet, 'coinbase_attestation'), scope_bytes: scopeBytes, user_address: wallet, merkle_root: ethers.ZeroHash, country_list: COUNTRY_LIST, is_included: true });
+  it('refuses a pre-OPRF request (keccak nullifier, scope_bytes, no OPRF values) before payment', async () => {
+    const scopeBytes = ethers.keccak256(ethers.toUtf8Bytes(REFUSAL_SCOPE));
+    const keccakNullifier = ethers.keccak256(ethers.concat([ethers.keccak256(ethers.concat([wallet, ethers.keccak256(ethers.toUtf8Bytes(ID))])), scopeBytes]));
+    const res = await proveWith({ signal_hash: ethers.ZeroHash.replace(/0$/, '1'), nullifier: keccakNullifier, scope_bytes: scopeBytes, user_address: wallet, merkle_root: ethers.ZeroHash, country_list: COUNTRY_LIST, is_included: true });
     expect(res.status).toBe(400);
-    expect((await res.json()).error).toBe('NULLIFIER_RULE');
+    const body = await res.json();
+    expect(body.error).toBe('INVALID_REQUEST');
+    expect(body.message).toMatch(/^oprf_key_hash must be 0x/);
   });
 
   it("refuses another wallet's attestCountry transaction before payment", async () => {
     const stranger = ethers.Wallet.createRandom().address;
     const requestId = sdk.newRequestId();
+    const oprf = await oprfForRefusals();
     const prepared = await sdk.prepareInputs(config, {
-      circuitId: ID, userAddress: wallet, userSignature: await fromPrivateKey(ATTESTATION_KEY!).signMessage(sdk.computeSignalHash({ scope: 'e2e:country-v2:refusal', circuitId: ID, requestId })),
-      scope: 'e2e:country-v2:refusal', countryList: COUNTRY_LIST, isIncluded: true, requestId,
+      circuitId: ID, userAddress: wallet, userSignature: await fromPrivateKey(ATTESTATION_KEY!).signMessage(sdk.computeSignalHash({ scope: REFUSAL_SCOPE, circuitId: ID, requestId })),
+      scope: REFUSAL_SCOPE, countryList: COUNTRY_LIST, isIncluded: true, requestId, oprf,
     }) as Record<string, unknown>;
-    // The E2E wallet's real transaction, claimed for a stranger with the
-    // stranger's own (rule-correct) nullifier: refused on the calldata wallet.
-    const res = await proveWith({ ...prepared, user_address: stranger, nullifier: nullifierFor(stranger, ID) });
+    // The E2E wallet's real transaction (and its valid OPRF values), claimed
+    // for a stranger: refused on the calldata wallet.
+    const res = await proveWith({ ...prepared, user_address: stranger });
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).toBe('INVALID_REQUEST');
@@ -207,7 +209,8 @@ describe('coinbase_country_attestation v2 (server statement)', () => {
   });
 
   it.each([['lowercase', ['kr']], ['11 codes', Array(11).fill('US')]])('refuses a country list with %s before payment', async (_name, list) => {
-    const res = await proveWith({ signal_hash: ethers.ZeroHash.replace(/0$/, '1'), nullifier: nullifierFor(wallet, ID), scope_bytes: scopeBytes, user_address: wallet, merkle_root: ethers.ZeroHash, country_list: list, is_included: true });
+    const oprf = await oprfForRefusals();
+    const res = await proveWith({ signal_hash: ethers.ZeroHash.replace(/0$/, '1'), user_address: wallet, merkle_root: ethers.ZeroHash, ...oprf.inputs, country_list: list, is_included: true });
     expect(res.status).toBe(400);
     expect((await res.json()).error).toBe('INVALID_REQUEST');
   });

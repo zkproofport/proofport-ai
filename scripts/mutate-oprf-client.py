@@ -29,14 +29,14 @@ T_NAMES = 'tests/oprfNamesAreTheCallers.test.ts'
 T_MCP = 'tests/mcpOptionalActions.test.ts'
 T_CLI = 'tests/mcpCli.test.ts'
 
-# Mutations of the mirror (packages/sdk/src/oprf/core) are NOT judged by
-# oprfMirror.test.ts: its drift check against core's source would fail on any
-# change, which says nothing about whether a behavioural test bites.
+# The OPRF client itself (finalizeOprf's pinned-hash comparison, the DLog
+# check, the name rules) and the key-hash table are imported from
+# @zkproofport-app/core since 0.4.0-beta.9, so their guards are mutated in
+# core's repository, not here. Mutations of the two files still mirrored
+# (packages/sdk/src/oprf/core) would NOT be judged by oprfMirror.test.ts: its
+# drift check against core's source fails on any change, which says nothing
+# about whether a behavioural test bites.
 MUTATIONS = [
-    ('key hash: pinned-hash comparison removed (finalizeOprf)',
-     'packages/sdk/src/oprf/core/client.ts',
-     "if (args.expectedKeyHash !== undefined && toHex32(parseField(args.expectedKeyHash, 'expectedKeyHash')) !== keyHash) {",
-     'if (false) {', [T_TRANSPORT, T_FLOW]),
     ('key hash: evaluateOprf stops passing the pinned hash',
      'packages/sdk/src/oprf/index.ts',
      '    dlogS: toHex32(exchange.dlogS),\n    expectedKeyHash,\n',
@@ -45,9 +45,6 @@ MUTATIONS = [
      'packages/sdk/src/oprf/index.ts',
      "    if (again[k] !== i[k]) throw new Error(`OPRF input ${k} does not match what the evaluation gives.`);",
      '    void again; void k;', [T_CLIENT]),
-    ('DLog: verifyOprfDlogEquality accepts any proof',
-     'packages/sdk/src/oprf/core/client.ts',
-     '  return challenge === e;', '  return challenge === challenge;', [T_TRANSPORT]),
     ('DLog: Lagrange weights dropped from the combined answer',
      'packages/sdk/src/oprf/shamir.ts',
      '(acc, comm, i) => add(acc, scalarMul(comm.c, lagrangeAtZero(parties[i], parties))),',
@@ -55,19 +52,10 @@ MUTATIONS = [
     ('DLog: BLAKE3 nonce combiner reads 32 bytes instead of 64',
      'packages/sdk/src/oprf/shamir.ts',
      'blake3(input, 64)', 'blake3(input, 32)', [T_TRANSPORT]),
-    ('names: format (Cf) characters allowed',
-     'packages/sdk/src/oprf/core/client.ts',
-     "  if (codePoints.some(isFormat)) return 'format-character';\n", '', [T_CLIENT]),
-    ('names: 257 bytes allowed',
-     'packages/sdk/src/oprf/core/client.ts',
-     'if (bytes.length > OPRF_MAX_NAME_BYTES) return', 'if (bytes.length > OPRF_MAX_NAME_BYTES + 1) return', [T_CLIENT]),
     ('names: generateProof stops checking oprfDomain',
      'packages/sdk/src/flow.ts',
      "  const oprfDomain = isOidc ? undefined : resolveOprfDomain(params.oprfDomain);",
      '  const oprfDomain = isOidc ? undefined : (params.oprfDomain as string);', [T_FLOW]),
-    ('production: key-hash row filled with the test key',
-     'packages/sdk/src/oprf/keyHashes.ts',
-     '  production: null,\n  staging: testnet(),', '  production: testnet(),\n  staging: testnet(),', [T_MIRROR, T_CLIENT]),
     ('production: network row filled with the test network',
      'packages/sdk/src/oprf/networks.ts',
      '  production: null,\n  staging: TEST_NETWORK,', '  production: TEST_NETWORK,\n  staging: TEST_NETWORK,', [T_MIRROR, T_CLIENT, T_FLOW]),

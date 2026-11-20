@@ -110,6 +110,41 @@ MUTATIONS = [
         'tests': ['tests/oidcV2Verify.test.ts'],
         'expect': "google device client is accepted by core",
     },
+    {
+        # The defect this guard was written for: a result made by someone else
+        # claims 'staging' and is checked against the public test-network key.
+        'name': 'sdk-takes-oprf-environment-from-result',
+        'file': VERIFY,
+        'old': "  let oprfEnvironment = options.oprfEnvironment;\n",
+        'new': "  let oprfEnvironment = options.oprfEnvironment ?? result.oprfEnvironment;\n",
+        'tests': ['tests/sdkVerifyUsesPinnedVerifier.test.ts'],
+        'expect': "refuses a result claiming 'staging' when the verifier's service is production",
+    },
+    {
+        'name': 'sdk-drops-oprf-environment-mismatch-refusal',
+        'file': VERIFY,
+        'old': "  if (claimed !== undefined && claimed !== oprfEnvironment) {",
+        'new': "  if (false) {",
+        'tests': ['tests/sdkVerifyUsesPinnedVerifier.test.ts'],
+        'expect': "refuses a result claiming 'staging' when the verifier's service is local",
+    },
+    {
+        'name': 'sdk-swallows-missing-service-environment',
+        'file': VERIFY,
+        'old': "      oprfEnvironment = await fetchOprfEnvironment(config);",
+        'new': "      oprfEnvironment = await fetchOprfEnvironment(config).catch(() => undefined);",
+        'tests': ['tests/sdkVerifyUsesPinnedVerifier.test.ts'],
+        'expect': 'refuses by name when the service answers without an environment',
+    },
+    {
+        'name': 'mcp-passes-result-environment-as-option',
+        'file': 'packages/mcp/src/tools.ts',
+        'old': "        }, params.min_score !== undefined ? { minScore: params.min_score } : {});",
+        'new': "        }, { ...(params.min_score !== undefined && { minScore: params.min_score }), ...(params.result.oprfEnvironment !== undefined && { oprfEnvironment: params.result.oprfEnvironment }) });",
+        # Root test: it imports the MCP source, and the SDK through its dist.
+        'tests': ['tests/mcpVerifyProofUsesPinnedVerifier.test.ts'],
+        'expect': "refuses a result claiming 'staging' when its proving service is local",
+    },
 ]
 
 

@@ -24,7 +24,7 @@ import {
   OPRF_INPUT_KEYS,
   type PreparedOprf,
 } from '../packages/sdk/src/oprf/index.js';
-import { oprfNameError } from '../packages/sdk/src/oprf/core/client.js';
+import { oprfNameError } from '@zkproofport-app/core/oprf';
 import { fromPrivateKey } from '../packages/sdk/src/signer.js';
 
 const REC = createRequire(import.meta.url)('./fixtures/oprf-exchange.json');

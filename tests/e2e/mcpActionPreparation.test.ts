@@ -6,6 +6,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { fromPrivateKey, hashTypedAction } from '@zkproofport-ai/sdk';
 import { callToolWithSimulatedApproval } from './simulatedHumanApproval.js';
+import { E2E_OPRF_DOMAIN } from './oprf.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -32,7 +33,7 @@ describe.sequential('MCP step-by-step action preparation', () => {
           types: { Grant: [{ name: 'amount', type: 'uint256' }] }, primaryType: 'Grant', message: { amount: '1' },
         };
         const result = await callToolWithSimulatedApproval(client, { baseUrl: process.env.E2E_BASE_URL || 'http://localhost:4002' }, fromPrivateKey(row.key!), 'prepare_inputs', {
-          circuit: row.circuit, scope: 'e2e:mcp:prepare-action', ...(bound ? { action } : {}),
+          circuit: row.circuit, scope: 'e2e:mcp:prepare-action', oprf_domain: E2E_OPRF_DOMAIN, ...(bound ? { action } : {}),
         }, 90_000) as { content: Array<{ text?: string }>; isError?: boolean };
         const text = (result.content as Array<{ text?: string }>)[0]?.text ?? '';
         // Never put successful private witness inputs into test output.

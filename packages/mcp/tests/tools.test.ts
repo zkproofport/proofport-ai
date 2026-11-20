@@ -26,6 +26,11 @@ const mockPrepareOidcPayload = vi.fn();
 const mockSubmitProof = vi.fn();
 const mockVerifyProof = vi.fn();
 const mockComputeSignalHash = vi.fn().mockReturnValue('0xsignalhash');
+// The OPRF step talks to a network; here it answers at once. tests/oprfFlow.test.ts
+// and tests/mcpOptionalActions.test.ts (repository root) cover the real step.
+const mockPrepareOprf = vi.fn(async (_config: unknown, args: { circuitId: string; address: string; oprfDomain: string; scope: string }) => ({
+  environment: 'local', ...args, inputs: { oprf_key_hash: '0x' + '00'.repeat(32) },
+}));
 
 vi.mock('@zkproofport-ai/sdk', async () => ({
   ActionApprovalRequiredError: PendingApprovalError,
@@ -37,6 +42,9 @@ vi.mock('@zkproofport-ai/sdk', async () => ({
   // circuits bind an action is exactly what these tests check.
   circuitBindsAction: (await import('../../sdk/src/circuits.js')).circuitBindsAction,
   generateProof: mockGenerateProof,
+  prepareOprf: mockPrepareOprf,
+  // The real name rule: a bad oprf_domain or scope must be refused before any signing.
+  assertOprfName: (await import('../../sdk/src/oprf/index.js')).assertOprfName,
   requestChallenge: mockRequestChallenge,
   prepareInputs: mockPrepareInputs,
   prepareOidcPayload: mockPrepareOidcPayload,
@@ -82,10 +90,24 @@ const mockSigner = {
   sendTransaction: vi.fn().mockResolvedValue({ hash: '0xtxhash', wait: async () => ({ status: 1 }) }),
 };
 
+/**
+ * generate_proof and prepare_inputs require `scope`, and `oprf_domain` for
+ * wallet circuits (no defaults; refusals are tested in the repository root's
+ * tests/oprfNamesAreTheCallers.test.ts and mcpOptionalActions.test.ts). The
+ * cases here are about other things, so a call that names neither gets both;
+ * a call that names one keeps it.
+ */
+const NAMED_TOOLS = new Set(['generate_proof', 'prepare_inputs']);
 async function callTool(name: string, params: Record<string, unknown> = {}) {
   const entry = toolHandlers[name];
   if (!entry) throw new Error(`Tool '${name}' not registered`);
-  return entry.handler(params);
+  if (!NAMED_TOOLS.has(name)) return entry.handler(params);
+  const isOidc = params.circuit === 'oidc_domain';
+  return entry.handler({
+    ...(!('scope' in params) && { scope: 'tools-test' }),
+    ...(!isOidc && !('oprf_domain' in params) && { oprf_domain: 'tools.test.example' }),
+    ...params,
+  });
 }
 
 async function callResource(name: string) {
@@ -217,6 +239,13 @@ describe('human action approval orchestration', () => {
     const submitted = await callTool('submit_proof', { circuit: 'giwa_attestation', prepared_inputs_id: prepared.prepared_inputs_id, nonce: 'nonce' });
     expect(JSON.stringify(submitted)).not.toContain('private-signature-secret');
     expect(submitted.isError).toBeUndefined();
+  });
+
+  it('keeps the request fields a wallet proof is verified against in action responses', async () => {
+    const response = { proof: '0xproof', requestId: 'req-1', scope: 'scope', oprfDomain: 'tools.test.example', oprfEnvironment: 'local' };
+    mockGenerateProof.mockResolvedValueOnce(response);
+    const generated = await callTool('generate_proof', { circuit: 'giwa_attestation', scope: 'scope', oprf_domain: 'tools.test.example', action: CUSTOM_ACTION });
+    expect(parseToolResult(generated)).toEqual(response);
   });
 
   it('step-by-step action preparation also waits instead of using the private key', async () => {
@@ -444,7 +473,7 @@ describe('prepare_inputs', () => {
     expect(JSON.parse(result.content[1].text)).toMatchObject({ request_id: 'req-from-verifier-1', scope: 'my-scope' });
   });
 
-  it('defaults scope to proofport and mints a fresh UUID request id per call', async () => {
+  it('mints a fresh UUID request id per call, under the scope the caller named', async () => {
     mockPrepareInputs.mockResolvedValue({ inputs: 'prepared' });
 
     const a = await callTool('prepare_inputs', { circuit: 'coinbase_kyc' });
@@ -456,7 +485,7 @@ describe('prepare_inputs', () => {
     expect(ida).toMatch(UUID);
     expect(idb).toMatch(UUID);
     expect(ida).not.toBe(idb);
-    expect(mockComputeSignalHash).toHaveBeenNthCalledWith(1, { scope: 'proofport', circuitId: 'coinbase_attestation', requestId: ida });
+    expect(mockComputeSignalHash).toHaveBeenNthCalledWith(1, { scope: 'tools-test', circuitId: 'coinbase_attestation', requestId: ida });
   });
 
   it.each([
@@ -496,6 +525,8 @@ describe('prepare_inputs', () => {
       countryList: ['US'],
       isIncluded: false,
       requestId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      // The OPRF nullifier inputs, from the OPRF step that ran before signing.
+      oprf: expect.objectContaining({ circuitId: 'coinbase_country_attestation', oprfDomain: 'tools.test.example', scope: 'test' }),
     });
   });
 
@@ -626,7 +657,10 @@ describe('verify_proof', () => {
     await callTool('verify_proof', { result: proofResult });
 
     expect(mockVerifyProof).toHaveBeenCalledOnce();
-    const passedArg = mockVerifyProof.mock.calls[0][0];
+    // The server's own client config comes first: the OPRF environment is
+    // asked of the proving service it names, never read from the result.
+    expect(mockVerifyProof.mock.calls[0][0]).toBe(testConfig);
+    const passedArg = mockVerifyProof.mock.calls[0][1];
     expect(passedArg.circuit).toBe('coinbase_attestation');
     expect(passedArg.proofType).toBe('ultra_honk');
     expect(passedArg.verification.chainId).toBe(84532);
@@ -634,6 +668,23 @@ describe('verify_proof', () => {
     expect(passedArg.verification.rpcUrl).toBe('https://sepolia.base.org');
     expect(passedArg.proof).toBe('0xproofbytes');
     expect(passedArg.publicInputs).toBe('0xinputs');
+  });
+
+  it("hands the result's oprfEnvironment over only as the result's claim, never as the verifier's option", async () => {
+    mockVerifyProof.mockResolvedValue({ valid: false, error: 'refused' });
+
+    await callTool('verify_proof', { result: { ...proofResult, oprfEnvironment: 'staging' }, min_score: 3 });
+
+    const [config, passed, options] = mockVerifyProof.mock.calls[0];
+    expect(config).toBe(testConfig);
+    expect(passed.oprfEnvironment).toBe('staging');
+    expect(options).toEqual({ minScore: 3 });
+  });
+
+  it('passes no options when no threshold was given', async () => {
+    mockVerifyProof.mockResolvedValue({ valid: true });
+    await callTool('verify_proof', { result: { ...proofResult, oprfEnvironment: 'staging' } });
+    expect(mockVerifyProof.mock.calls[0][2]).toEqual({});
   });
 
   it('returns verification result', async () => {
@@ -695,7 +746,7 @@ describe('prepare_inputs action authorization', () => {
   it.each(Object.keys(ACTION_CIRCUITS))('%s uses the human signature and keeps the action witness behind a private handle', async (circuit) => {
     mockResolveApproval.mockResolvedValue({ address: '0xHumanAddress', signature: '0xHumanSignature' });
     mockPrepareInputs.mockResolvedValue({ field: 'prepared', user_signature: '0xHumanSignature' });
-    const params = { circuit, action: CUSTOM_ACTION };
+    const params = { circuit, action: CUSTOM_ACTION, scope: 'tools-test', oprf_domain: 'tools.test.example' };
     const schema = z.object(toolHandlers.prepare_inputs.schema as z.ZodRawShape);
     expect(schema.parse(params)).toEqual(params);
     const result = await callTool('prepare_inputs', schema.parse(params));

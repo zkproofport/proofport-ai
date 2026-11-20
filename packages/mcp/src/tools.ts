@@ -103,6 +103,9 @@ function jsonResult(data: unknown) {
 // when a response was produced with a privately stored human signature.
 const publicProofSchema = z.object({
   requestId: z.string().optional(), scope: z.string().optional(),
+  // A wallet proof is verified against its OPRF domain and environment; an
+  // action-bound result without them cannot be checked by verify_proof.
+  oprfDomain: z.string().optional(), oprfEnvironment: z.string().optional(),
   circuit: z.string().optional(), proofType: z.string().optional(),
   proof: z.string(), publicInputs: z.string().optional(), proofWithInputs: z.string().optional(),
   attestation: z.object({
@@ -567,6 +570,10 @@ You MUST pass the nonce returned by request_challenge. POST /api/v1/prove answer
             chainId: z.number().describe('Chain the result names; selects the pinned verifier for the circuit on that chain'),
             rpcUrl: z.string().optional().describe('Ignored: verification uses its own public RPC for the chain, never one a result names'),
           }),
+          oprfEnvironment: z
+            .string()
+            .optional()
+            .describe('Wallet circuits: the OPRF environment the result says it was made in. Only compared: the key is chosen by the proving service this server is configured for, and a result naming another is refused'),
         })
         .passthrough()
         .describe('Full result object from generate_proof — pass it directly without extracting fields'),
@@ -577,7 +584,10 @@ You MUST pass the nonce returned by request_challenge. POST /api/v1/prove answer
     },
     async (params) => {
       try {
-        const verification = await verifyProof({
+        // A wallet proof's OPRF key is decided by this server's configured
+        // proving service (config.baseUrl), never by the result: the SDK asks
+        // that service and refuses a result naming a different environment.
+        const verification = await verifyProof(config, {
           circuit: params.result.circuit,
           proofType: params.result.proofType,
           proof: params.result.proof,
@@ -586,6 +596,7 @@ You MUST pass the nonce returned by request_challenge. POST /api/v1/prove answer
           attestation: null,
           timing: { totalMs: 0 },
           verification: params.result.verification,
+          ...(params.result.oprfEnvironment !== undefined && { oprfEnvironment: params.result.oprfEnvironment }),
         }, params.min_score !== undefined ? { minScore: params.min_score } : {});
 
         return jsonResult(verification);

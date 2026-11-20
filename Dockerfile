@@ -44,7 +44,7 @@ RUN set -e; \
     [ "$got" = "$BB_VERSION" ] || { echo "bb reports '$got', expected $BB_VERSION" >&2; exit 1; }
 
 # Stage 2: TypeScript Build (native arch)
-FROM node:20-slim AS builder
+FROM node:22-slim AS builder
 
 WORKDIR /app
 
@@ -63,11 +63,11 @@ RUN npm run build
 # Stage 3: Production Runtime (native arch)
 FROM ubuntu:24.04
 
-# Install Node.js 20.x via NodeSource (git and nargo no longer needed — witness
+# Install Node.js 22.x via NodeSource (git and nargo no longer needed — witness
 # generation uses @noir-lang/noir_js with compiled circuit JSON instead of nargo CLI)
 RUN apt-get update && \
     apt-get install -y curl wget jq ca-certificates gnupg && \
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/*
 

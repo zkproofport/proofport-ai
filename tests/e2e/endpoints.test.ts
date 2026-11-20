@@ -26,6 +26,7 @@ import type { Task, Artifact, Part } from '@a2a-js/sdk';
 import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { E2E_OPRF_DOMAIN } from './oprf.js';
 
 const BASE_URL = (process.env.E2E_BASE_URL || 'http://localhost:4002').replace(/\/$/, '');
 // Expectations come from the selected deployment, never from the server's response.
@@ -1151,7 +1152,7 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
 
   // ─── Real Proof Generation via Local MCP (TEE_MODE=disabled, bb prove on host) ──
 
-  type GeneratedProof = { circuit?: string; proofType?: string; proof: string; publicInputs: string; verification?: { chainId: number; verifierAddress: string; rpcUrl: string } | null };
+  type GeneratedProof = { circuit: string; proofType: string; proof: string; publicInputs: string; verification?: { chainId: number; verifierAddress: string; rpcUrl: string } | null; oprfEnvironment?: string };
   let generatedProof: GeneratedProof | null = null;
   let generatedCountryProof: GeneratedProof | null = null;
   let generatedOidcProof: GeneratedProof | null = null;
@@ -1162,6 +1163,7 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
       arguments: {
         circuit: 'coinbase_kyc',
         scope: 'e2e-test',
+        oprf_domain: E2E_OPRF_DOMAIN,
       },
     });
     const textContent = result.content.find((c: any) => c.type === 'text');
@@ -1186,7 +1188,10 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
      */
     if (parsed.paymentTxHash) expect(parsed.paymentTxHash).toMatch(/^0x/);
 
-    generatedProof = { circuit: parsed.circuit, proofType: parsed.proofType, proof: parsed.proof, publicInputs: parsed.publicInputs, verification: parsed.verification };
+    expect(parsed.circuit).toBe('coinbase_attestation');
+    expect(typeof parsed.proofType).toBe('string');
+    expect(parsed.oprfEnvironment).toMatch(/^(local|staging|production)$/);
+    generatedProof = { circuit: parsed.circuit, proofType: parsed.proofType, proof: parsed.proof, publicInputs: parsed.publicInputs, verification: parsed.verification, oprfEnvironment: parsed.oprfEnvironment };
 
     // ─── Report: Proof Generation ───
     console.log('\n╔══════════════════════════════════════════════════════════════╗');
@@ -1236,8 +1241,9 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
       name: 'verify_proof',
       arguments: {
         result: {
-          circuit: generatedProof.circuit || 'coinbase_attestation',
-          proofType: generatedProof.proofType || 'kyc',
+          circuit: generatedProof.circuit,
+          proofType: generatedProof.proofType,
+          oprfEnvironment: generatedProof.oprfEnvironment,
           proof: generatedProof.proof,
           publicInputs: generatedProof.publicInputs,
           verification: generatedProof.verification,
@@ -1271,6 +1277,7 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
       arguments: {
         circuit: 'coinbase_country',
         scope: 'e2e-test-country',
+        oprf_domain: E2E_OPRF_DOMAIN,
         country_list: ['US', 'KR'],
         is_included: true,
       },
@@ -1294,7 +1301,10 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
      */
     if (parsed.paymentTxHash) expect(parsed.paymentTxHash).toMatch(/^0x/);
 
-    generatedCountryProof = { circuit: parsed.circuit, proofType: parsed.proofType, proof: parsed.proof, publicInputs: parsed.publicInputs, verification: parsed.verification };
+    expect(parsed.circuit).toBe('coinbase_country_attestation');
+    expect(typeof parsed.proofType).toBe('string');
+    expect(parsed.oprfEnvironment).toMatch(/^(local|staging|production)$/);
+    generatedCountryProof = { circuit: parsed.circuit, proofType: parsed.proofType, proof: parsed.proof, publicInputs: parsed.publicInputs, verification: parsed.verification, oprfEnvironment: parsed.oprfEnvironment };
 
     console.log('\n╔══════════════════════════════════════════════════════════════╗');
     console.log('║          ZK PROOF GENERATION REPORT (COUNTRY)              ║');
@@ -1338,8 +1348,9 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
       name: 'verify_proof',
       arguments: {
         result: {
-          circuit: generatedCountryProof.circuit || 'coinbase_country_attestation',
-          proofType: generatedCountryProof.proofType || 'country',
+          circuit: generatedCountryProof.circuit,
+          proofType: generatedCountryProof.proofType,
+          oprfEnvironment: generatedCountryProof.oprfEnvironment,
           proof: generatedCountryProof.proof,
           publicInputs: generatedCountryProof.publicInputs,
           verification: generatedCountryProof.verification,
@@ -1403,6 +1414,8 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
      */
     if (parsed.paymentTxHash) expect(parsed.paymentTxHash).toMatch(/^0x/);
 
+    expect(parsed.circuit).toBe('oidc_domain_attestation');
+    expect(typeof parsed.proofType).toBe('string');
     generatedOidcProof = { circuit: parsed.circuit, proofType: parsed.proofType, proof: parsed.proof, publicInputs: parsed.publicInputs, verification: parsed.verification };
 
     console.log('\n╔══════════════════════════════════════════════════════════════╗');
@@ -1446,8 +1459,8 @@ describe.skipIf(!hasAttestationKey)('Local MCP Server (stdio)', () => {
       name: 'verify_proof',
       arguments: {
         result: {
-          circuit: generatedOidcProof.circuit || 'oidc_domain_attestation',
-          proofType: generatedOidcProof.proofType || 'google_login',
+          circuit: generatedOidcProof.circuit,
+          proofType: generatedOidcProof.proofType,
           proof: generatedOidcProof.proof,
           publicInputs: generatedOidcProof.publicInputs,
           verification: generatedOidcProof.verification,

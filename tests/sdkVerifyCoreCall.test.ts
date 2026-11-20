@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // What the AI SDK hands core, and what it builds the provider from. Core's
 // verifyProofOnChain and ethers' provider are mocked; the refusals themselves
@@ -29,12 +29,21 @@ function response(verification: ProveResponse['verification']): ProveResponse {
   };
 }
 
-beforeEach(() => vi.clearAllMocks());
+/** The verifier's client config; its proving service names the OPRF environment. */
+const CONFIG = { baseUrl: 'https://prover.test' };
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
+    if (String(url) !== `${CONFIG.baseUrl}/api/v1/oprf`) throw new Error(`unexpected fetch ${String(url)}`);
+    return new Response(JSON.stringify({ environment: 'staging' }), { status: 200 });
+  }));
+});
+afterEach(() => vi.unstubAllGlobals());
 
 describe('AI SDK verifyProof -> core', () => {
   it('names the chain for the pinned verifier and passes the response address only as a claim', async () => {
     coreVerify.mockResolvedValue({ valid: true });
-    const result = await verifyProof(response({ chainId: 84532, verifierAddress: ADDRESS, rpcUrl: 'https://sepolia.base.org' }));
+    const result = await verifyProof(CONFIG, response({ chainId: 84532, verifierAddress: ADDRESS, rpcUrl: 'https://sepolia.base.org' }));
 
     expect(result).toEqual({ valid: true });
     expect(coreVerify).toHaveBeenCalledOnce();
@@ -44,18 +53,19 @@ describe('AI SDK verifyProof -> core', () => {
       { kind: 'provider', url: 'https://sepolia.base.org' },
       { chainId: 84532 },
       { verifierAddress: ADDRESS, chainId: 84532 },
+      { oprfEnvironment: 'staging' },
     );
   });
 
   it("never builds the provider from the response's rpcUrl", async () => {
     coreVerify.mockResolvedValue({ valid: true });
-    await verifyProof(response({ chainId: 11155111, verifierAddress: ADDRESS, rpcUrl: 'https://rpc.attacker.example' }));
+    await verifyProof(CONFIG, response({ chainId: 11155111, verifierAddress: ADDRESS, rpcUrl: 'https://rpc.attacker.example' }));
     expect(ethers.JsonRpcProvider).toHaveBeenCalledOnce();
     expect(ethers.JsonRpcProvider).toHaveBeenCalledWith('https://ethereum-sepolia-rpc.publicnode.com', 11155111, { staticNetwork: true });
   });
 
   it('does not reach core for a chain with no RPC', async () => {
-    const result = await verifyProof(response({ chainId: 5, verifierAddress: ADDRESS }));
+    const result = await verifyProof(CONFIG, response({ chainId: 5, verifierAddress: ADDRESS }));
     expect(result.valid).toBe(false);
     expect(coreVerify).not.toHaveBeenCalled();
     expect(ethers.JsonRpcProvider).not.toHaveBeenCalled();
@@ -63,23 +73,23 @@ describe('AI SDK verifyProof -> core', () => {
 
   it('reports core refusing (or a revert) as not valid, with the reason', async () => {
     coreVerify.mockResolvedValue({ valid: false, error: 'execution reverted' });
-    const result = await verifyProof(response({ chainId: 84532, verifierAddress: ADDRESS }));
+    const result = await verifyProof(CONFIG, response({ chainId: 84532, verifierAddress: ADDRESS }));
     expect(result).toEqual({ valid: false, error: 'Verification failed: execution reverted' });
   });
 
   it('reports a contract that answers false as not valid', async () => {
     coreVerify.mockResolvedValue({ valid: false });
-    expect(await verifyProof(response({ chainId: 84532, verifierAddress: ADDRESS }))).toEqual({ valid: false });
+    expect(await verifyProof(CONFIG, response({ chainId: 84532, verifierAddress: ADDRESS }))).toEqual({ valid: false });
   });
 });
 
 describe('AI SDK verifyProof passes a Human Passport threshold to core', () => {
-  it('hands core the minScore it was given, and nothing when none was given', async () => {
+  it('hands core the minScore it was given, and no threshold when none was given', async () => {
     coreVerify.mockResolvedValue({ valid: true });
     const hp = { ...response({ chainId: 84532, verifierAddress: ADDRESS }), circuit: 'human_passport_score' };
-    await verifyProof(hp, { minScore: 20 });
-    expect(coreVerify.mock.calls[0][5]).toEqual({ minScore: 20 });
-    await verifyProof(hp);
-    expect(coreVerify.mock.calls[1]).toHaveLength(5);
+    await verifyProof(CONFIG, hp, { minScore: 20 });
+    expect(coreVerify.mock.calls[0][5]).toEqual({ minScore: 20, oprfEnvironment: 'staging' });
+    await verifyProof(CONFIG, hp);
+    expect(coreVerify.mock.calls[1][5]).toEqual({ oprfEnvironment: 'staging' });
   });
 });

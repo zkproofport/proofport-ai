@@ -21,7 +21,9 @@ import {
   type PaymentWallet,
   type ProofParams,
 } from '@zkproofport-ai/sdk';
+import { oprfLayoutOf } from '@zkproofport-app/core';
 import { planPayment, unfundedReason } from './payer.js';
+import { E2E_OPRF_DOMAIN } from './oprf.js';
 import { generateProofWithSimulatedApproval } from './simulatedHumanApproval.js';
 
 // Current-source actions exercise the approval API with a simulated human
@@ -123,10 +125,10 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
       const result = await generateProof(
         config,
         { attestation: attestationSigner, payment: paymentWallet },
-        { circuit: 'coinbase_kyc', scope: 'e2e-test:npm-sdk-kyc', payOn },
+        { circuit: 'coinbase_kyc', scope: 'e2e-test:npm-sdk-kyc', oprfDomain: E2E_OPRF_DOMAIN, payOn },
       );
 
-      const verified = await verifyProof(result);
+      const verified = await verifyProof(config, result);
       expect(verified.valid, verified.error).toBe(true);
       expect(result.proof).toBeTruthy();
       expect(result.proof.startsWith('0x')).toBe(true);
@@ -144,25 +146,26 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
         {
           circuit: 'giwa_attestation',
           scope: 'e2e-test:npm-sdk-giwa',
+          oprfDomain: E2E_OPRF_DOMAIN,
           payOn,
         },
       );
 
-      const verified = await verifyProof(result);
+      const verified = await verifyProof(config, result);
       expect(verified.valid, verified.error).toBe(true);
       expect(result.proof).toBeTruthy();
       expect(result.proof.startsWith('0x')).toBe(true);
       expect(result.publicInputs).toBeTruthy();
       /*
-       * Six 32-byte public inputs -- signal_hash, domain_separator,
-       * action_hash, signer_list_merkle_root, scope, nullifier -- as ONE
-       * 0x-prefixed hex string of 192 field elements, each padded to 32 bytes.
-       * The count is asserted through the string's length rather than an array
-       * length, because the server returns a string and `'0x…'.length` would
-       * otherwise have been compared against 192 and passed for no reason.
+       * Four 32-byte inputs (signal_hash, domain_separator, action_hash,
+       * signer_list_merkle_root, one byte per field) and the four OPRF fields,
+       * as ONE 0x-prefixed hex string of core's count of field elements, each
+       * padded to 32 bytes. The count is asserted through the string's length
+       * rather than an array length, because the server returns a string and
+       * `'0x…'.length` would otherwise have been compared and passed for no reason.
        */
       expect(result.publicInputs.startsWith('0x')).toBe(true);
-      expect((result.publicInputs.length - 2) / 2).toBe(192 * 32);
+      expect((result.publicInputs.length - 2) / 2).toBe(oprfLayoutOf('giwa_attestation').count * 32);
       if (result.paymentTxHash) expect(result.paymentTxHash).toMatch(/^0x/);
     }, 180_000);
 
@@ -173,6 +176,7 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
         {
           circuit: 'giwa_attestation',
           scope: 'e2e-test:npm-sdk-giwa-action',
+          oprfDomain: E2E_OPRF_DOMAIN,
           payOn,
           action: {
             domain: {
@@ -195,10 +199,10 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
         },
       );
 
-      const verified = await verifyProof(result);
+      const verified = await verifyProof(config, result);
       expect(verified.valid, verified.error).toBe(true);
       expect(result.proof).toBeTruthy();
-      expect((result.publicInputs.length - 2) / 2).toBe(192 * 32);
+      expect((result.publicInputs.length - 2) / 2).toBe(oprfLayoutOf('giwa_attestation').count * 32);
     }, 180_000);
 
     it.skipIf(!GIWA_KEY)('giwa_attestation: the same wallet and scope give the same nullifier in both modes', async () => {
@@ -209,7 +213,7 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
       const plain = await generateProof(
         config,
         { attestation: giwaSigner!, payment: paymentWallet },
-        { circuit: 'giwa_attestation', scope, payOn },
+        { circuit: 'giwa_attestation', scope, oprfDomain: E2E_OPRF_DOMAIN, payOn },
       );
       const bound = await generateProof(
         config,
@@ -217,6 +221,7 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
         {
           circuit: 'giwa_attestation',
           scope,
+          oprfDomain: E2E_OPRF_DOMAIN,
           payOn,
           action: {
             domain: { name: 'GIWA E2E', version: '1', chainId: 91342, verifyingContract: '0x6646d970499BBeD728636823A5A7e551E811b414' },
@@ -227,7 +232,7 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
         },
       );
       for (const proof of [plain, bound]) {
-        const verified = await verifyProof(proof);
+        const verified = await verifyProof(config, proof);
         expect(verified.valid, verified.error).toBe(true);
       }
       // ProofResult carries no nullifier field, so it is read from the public
@@ -246,13 +251,14 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
         {
           circuit: 'coinbase_country',
           scope: 'e2e-test:npm-sdk-country',
+          oprfDomain: E2E_OPRF_DOMAIN,
           payOn,
           countryList: ['US', 'KR'],
           isIncluded: true,
         },
       );
 
-      const verified = await verifyProof(result);
+      const verified = await verifyProof(config, result);
       expect(verified.valid, verified.error).toBe(true);
       expect(result.proof).toBeTruthy();
       expect(result.publicInputs).toBeTruthy();
@@ -289,7 +295,7 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
         },
       );
 
-      const verified = await verifyProof(result);
+      const verified = await verifyProof(config, result);
       expect(verified.valid, verified.error).toBe(true);
       expect(result.proof).toBeTruthy();
       expect(result.proof.startsWith('0x')).toBe(true);
@@ -302,10 +308,10 @@ describe('SDK Client E2E — npm @zkproofport-ai/sdk', () => {
       const proofResult = await generateProof(
         config,
         { attestation: attestationSigner, payment: paymentWallet },
-        { circuit: 'coinbase_kyc', scope: 'e2e-test:npm-sdk-verify', payOn },
+        { circuit: 'coinbase_kyc', scope: 'e2e-test:npm-sdk-verify', oprfDomain: E2E_OPRF_DOMAIN, payOn },
       );
 
-      const verifyResult = await verifyProof(proofResult);
+      const verifyResult = await verifyProof(config, proofResult);
       expect(verifyResult.valid).toBe(true);
     }, 180_000);
   });

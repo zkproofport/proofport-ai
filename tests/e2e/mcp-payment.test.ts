@@ -9,6 +9,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { createPublicClient, erc20Abi, formatUnits, http } from 'viem';
 import { createConfig, paymentOffers, requestChallenge, verifyProof, walletFromPrivateKey } from '@zkproofport-ai/sdk';
+import { E2E_OPRF_DOMAIN } from './oprf.js';
 
 const baseUrl = process.env.E2E_BASE_URL || 'http://localhost:4002';
 const rows = [
@@ -65,7 +66,7 @@ describe.sequential('published MCP: each staging payment network', () => {
     try {
       await client.connect(new StdioClientTransport({ command: entry ? process.execPath : 'npx', args: entry ? [entry] : ['--no-install', 'zkproofport-mcp'], env }));
       const result = toolData(await client.callTool({ name: 'generate_proof', arguments: {
-        circuit: 'coinbase_kyc', scope: `e2e:mcp:payment:${row.network}`, pay_with: row.payWith,
+        circuit: 'coinbase_kyc', scope: `e2e:mcp:payment:${row.network}`, oprf_domain: E2E_OPRF_DOMAIN, pay_with: row.payWith,
         pay_on: row.network, max_payment: formatUnits(price, 6), approved_payment: approvedPayment,
       } }, undefined, { timeout: 180_000 }), 'generate_proof');
       expect(result.circuit).toBe('coinbase_attestation');
@@ -74,7 +75,7 @@ describe.sequential('published MCP: each staging payment network', () => {
       // and the published MCP verify_proof tool all have to agree.
       const after = await balance();
       expect(before - after, `Actual ${row.network} payer debit differs from its quoted fee`).toBe(price);
-      const verified = await verifyProof(result);
+      const verified = await verifyProof(createConfig({ baseUrl }), result);
       expect(verified.valid, verified.error).toBe(true);
       const mcpVerified = toolData(await client.callTool({ name: 'verify_proof', arguments: { result } }, undefined, { timeout: 60_000 }), 'verify_proof');
       expect(mcpVerified.valid, mcpVerified.error).toBe(true);

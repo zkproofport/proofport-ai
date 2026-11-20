@@ -14,7 +14,7 @@
 import { describe, it, expect } from 'vitest';
 import { createRequire } from 'node:module';
 import { runOprfExchange, OprfEvaluationError, type WebSocketLike } from '../packages/sdk/src/oprf/transport.js';
-import { finalizeOprf, oprfQuery, blindOprfQuery, reduceOprfName, oprfKeyHash } from '../packages/sdk/src/oprf/core/client.js';
+import { finalizeOprf, oprfQuery, blindOprfQuery, reduceOprfName, oprfKeyHash } from '@zkproofport-app/core/oprf';
 import { toHex32 } from '../packages/sdk/src/oprf/core/field.js';
 import { getPinnedOprfKeyHash, getOprfNetwork } from '../packages/sdk/src/oprf/index.js';
 import { simulatedNetwork, type NodeBehaviour } from './helpers/oprfSimulatedNetwork.js';

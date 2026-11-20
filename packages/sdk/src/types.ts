@@ -3,6 +3,7 @@
 import { CIRCUIT_IDS, PROVABLE_CIRCUIT_IDS } from './circuits.js';
 import type { ActionApproval } from './actionApproval.js';
 import type { TypedAction as CoreTypedAction } from '@zkproofport-app/core/typedAction';
+import type { OprfEnvironment } from './oprf/keyHashes.js';
 
 /** Client-friendly circuit aliases. */
 export type CircuitName =
@@ -342,7 +343,7 @@ export interface ProofResult {
   verification: ProveResponse['verification'];
   /**
    * The request this proof answers and its scope. Hand both to the verifier
-   * (`verifyProof(result, { request: { scope, requestId } })`): a proof
+   * (`verifyProof(config, result, { request: { scope, requestId } })`): a proof
    * without an action carries keccak256(scope ++ circuitId ++ requestId).
    * Absent for OIDC, which binds no wallet signature.
    */
@@ -350,6 +351,13 @@ export interface ProofResult {
   scope?: string;
   /** The OPRF domain the nullifier is under; present for wallet circuits. Hand it to the verifier with the scope. */
   oprfDomain?: string;
+  /**
+   * The OPRF environment the nullifier was evaluated in, as the proving
+   * service named it before the wallet signed; present for wallet circuits.
+   * The SDK refused an answer under any key but the one pinned for it, and
+   * `verifyProof` checks the proof's key hash against the same row.
+   */
+  oprfEnvironment?: OprfEnvironment;
 }
 
 // ─── Step results for step-by-step execution ────────────────────────────

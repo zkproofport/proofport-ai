@@ -37,7 +37,7 @@ import {
   randomOprfBeta,
   reduceOprfName,
   type OprfCircuitInputs,
-} from './core/client.js';
+} from '@zkproofport-app/core/oprf';
 import { getPinnedOprfKeyHash, isOprfEnvironment, OPRF_ENVIRONMENTS, type OprfEnvironment } from './keyHashes.js';
 import { getOprfNetwork } from './networks.js';
 import { runOprfExchange, type WebSocketFactory } from './transport.js';
@@ -50,7 +50,7 @@ function rescale(p: { x: bigint; y: bigint }, beta: string): { x: string; y: str
   return { x: toHex32(b.x), y: toHex32(b.y) };
 }
 
-export type { OprfCircuitInputs } from './core/client.js';
+export type { OprfCircuitInputs } from '@zkproofport-app/core/oprf';
 export {
   oprfNameError,
   reduceOprfName,
@@ -66,7 +66,7 @@ export {
   randomOprfBeta,
   OPRF_MAX_NAME_BYTES,
   OPRF_MAX_VALIDITY_SECONDS,
-} from './core/client.js';
+} from '@zkproofport-app/core/oprf';
 export {
   OPRF_ENVIRONMENTS,
   OPRF_CIRCUIT_IDS,

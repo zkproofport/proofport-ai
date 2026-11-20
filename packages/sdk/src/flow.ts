@@ -12,6 +12,7 @@ import { signPayment } from './payment.js';
 import { prepareInputs, prepareHumanPassportInputs, requestSignalHash } from './inputs.js';
 import { resolveRequestId } from './signalHash.js';
 import { prepareOprf, requireOprfScope, resolveOprfDomain } from './oprf/index.js';
+import type { OprfEnvironment } from './oprf/keyHashes.js';
 import { prepareOidcPayload } from './oidc-inputs.js';
 import type { OidcProvePayload } from './oidc-inputs.js';
 import { submitProof, submitEncryptedProof } from './prove.js';
@@ -142,6 +143,8 @@ export async function generateProof(
   }
   const oprfDomain = isOidc ? undefined : resolveOprfDomain(params.oprfDomain);
   if (!isOidc) requireOprfScope(scope);
+  // The OPRF environment the nullifier is evaluated in; recorded on the result for verifyProof.
+  let oprfEnvironment: OprfEnvironment | undefined;
 
   if (!isOidc) {
     const credentialSigner = signers.attestation;
@@ -166,6 +169,7 @@ export async function generateProof(
     const tOprf = Date.now();
     const oprf = await prepareOprf(config, { circuitId, address: attestationAddress, oprfDomain, scope });
     recordStep(0, 'OPRF Nullifier', { environment: oprf.environment, nullifier: oprf.inputs.nullifier }, tOprf);
+    oprfEnvironment = oprf.environment;
     const signalHash = requestSignalHash(circuitId, scope, requestId, Boolean(action));
     const signalHashHex = ethers.hexlify(signalHash);
 
@@ -314,5 +318,6 @@ export async function generateProof(
     verification: proveResponse.verification,
     ...(requestId !== undefined && { requestId, scope }),
     ...(oprfDomain !== undefined && { oprfDomain }),
+    ...(oprfEnvironment !== undefined && { oprfEnvironment }),
   };
 }

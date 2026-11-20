@@ -649,7 +649,7 @@ const result = await submitProof(config, {
 });
 
 // Step 5 (선택): 온체인 검증
-const verification = await verifyProof(result);
+const verification = await verifyProof(config, result);
 console.log(verification); // { valid: true }
 ```
 

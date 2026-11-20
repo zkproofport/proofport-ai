@@ -64,7 +64,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iproute2 \
     curl \
     && pip3 install --no-cache-dir --break-system-packages cbor2 \
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 

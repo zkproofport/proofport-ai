@@ -11,6 +11,7 @@ import { verifyProof } from '@zkproofport-ai/sdk';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { E2E_OPRF_DOMAIN } from './oprf.js';
 
 const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:4002';
 const ATTESTATION_KEY = process.env.ATTESTATION_KEY;
@@ -92,6 +93,7 @@ describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
           pay_with: 'key',
           pay_on: process.env.E2E_PAYMENT_NETWORK,
           scope: 'e2e-test:npm-mcp-kyc',
+          oprf_domain: E2E_OPRF_DOMAIN,
         },
       });
       const text = (result.content as any[])[0]?.text;
@@ -101,7 +103,7 @@ describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
       // payer's settlement failure behind a boolean for a whole staging run.
       expect(result.isError, `generate_proof failed: ${text}`).toBeFalsy();
       expect(data.proof).toBeTruthy();
-      const verified = await verifyProof(data);
+      const verified = await verifyProof({ baseUrl: BASE_URL }, data);
       expect(verified.valid, verified.error).toBe(true);
       expect(data.proof.startsWith('0x')).toBe(true);
       expect(data.publicInputs).toBeTruthy();
@@ -117,6 +119,7 @@ describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
           pay_with: 'key',
           pay_on: process.env.E2E_PAYMENT_NETWORK,
           scope: 'e2e-test:npm-mcp-country',
+          oprf_domain: E2E_OPRF_DOMAIN,
           country_list: ['US', 'KR'],
           is_included: true,
         },
@@ -128,7 +131,7 @@ describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
       // payer's settlement failure behind a boolean for a whole staging run.
       expect(result.isError, `generate_proof failed: ${text}`).toBeFalsy();
       expect(data.proof).toBeTruthy();
-      const verified = await verifyProof(data);
+      const verified = await verifyProof({ baseUrl: BASE_URL }, data);
       expect(verified.valid, verified.error).toBe(true);
     }, 120_000);
 
@@ -150,7 +153,7 @@ describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
       // payer's settlement failure behind a boolean for a whole staging run.
       expect(result.isError, `generate_proof failed: ${text}`).toBeFalsy();
       expect(data.proof).toBeTruthy();
-      const verified = await verifyProof(data);
+      const verified = await verifyProof({ baseUrl: BASE_URL }, data);
       expect(verified.valid, verified.error).toBe(true);
       expect(data.proof.startsWith('0x')).toBe(true);
     }, 120_000);
@@ -166,6 +169,7 @@ describe('MCP Client E2E — npm @zkproofport-ai/mcp', () => {
           pay_with: 'key',
           pay_on: process.env.E2E_PAYMENT_NETWORK,
           scope: 'e2e-test:npm-mcp-steps',
+          oprf_domain: E2E_OPRF_DOMAIN,
         },
       });
       const prepText = (prepResult.content as any[])[0]?.text;

@@ -579,11 +579,11 @@ docker compose -f docker-compose.yml -f docker-compose.test.yml up --build -d
 
 | Tool | Version |
 |------|---------|
-| bb (Barretenberg) | `v1.0.0-nightly.20250723` |
-| nargo | `1.0.0-beta.8` |
+| bb (Barretenberg) | `6.0.0` |
+| nargo | `1.0.0` |
 | ethers | `^6.13.0` |
 | @modelcontextprotocol/sdk | `^1.0.0` |
-| Node.js | 20 LTS |
+| Node.js | 22 or later |
 
 ## License
 

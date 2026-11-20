@@ -8,7 +8,7 @@
  * the cofactor cleared.
  */
 import { P, R, asciiField, invMod, legendre, mod, sqrtMod } from './field.js';
-import { poseidon2T3 } from './poseidon2.js';
+import { poseidon2T3 } from '@zkproofport-app/core/oprf';
 
 export interface Point {
   readonly x: bigint;

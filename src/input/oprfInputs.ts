@@ -15,28 +15,14 @@
  *            oprf_response_x, oprf_response_y                       (below p)
  *            oprf_beta (non-zero), oprf_dlog_s                       (below r)
  */
-import { ALL_CIRCUIT_IDS } from '../config/circuitIds.js';
+import { OPRF_FIELD_MODULUS, OPRF_SCALAR_ORDER, type OprfCircuitInputs } from '@zkproofport-app/core/oprf';
 import { getPinnedOprfKeyHash, type OprfEnvironment } from '../config/oprfKeyHashes.js';
 
-/** BN254 scalar field modulus: every Field input is below it. */
-export const OPRF_FIELD_MODULUS = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
-/** BabyJubJub prime-order subgroup order: oprf_beta and oprf_dlog_s are below it. */
-export const OPRF_SCALAR_ORDER = 2736030358979909402780800718157159386076813972158567259200215660948447373041n;
+/** BN254 scalar field modulus (every Field input is below it) and BabyJubJub's subgroup order (oprf_beta and oprf_dlog_s are below it): core's. */
+export { OPRF_FIELD_MODULUS, OPRF_SCALAR_ORDER };
 
-/** The eleven values, as the circuit names them (main() parameters). */
-export interface OprfCircuitInputs {
-  oprf_key_hash: string;
-  domain: string;
-  scope: string;
-  nullifier: string;
-  oprf_public_key_x: string;
-  oprf_public_key_y: string;
-  oprf_beta: string;
-  oprf_dlog_e: string;
-  oprf_dlog_s: string;
-  oprf_response_x: string;
-  oprf_response_y: string;
-}
+/** The eleven values, as the circuit names them (main() parameters): core's type. */
+export type { OprfCircuitInputs };
 
 const MODULUS_OF: Readonly<Record<keyof OprfCircuitInputs, 'p' | 'r'>> = Object.freeze({
   oprf_key_hash: 'p',
@@ -84,7 +70,7 @@ export function readOprfInputs(environment: OprfEnvironment | undefined, circuit
   // The pinned row first: a production request is refused by name whatever it carries.
   let pinned: string;
   try {
-    pinned = getPinnedOprfKeyHash(environment, circuitId, ALL_CIRCUIT_IDS as readonly string[]);
+    pinned = getPinnedOprfKeyHash(environment, circuitId);
   } catch (e) {
     throw new OprfInputRefusal('OPRF_UNAVAILABLE', (e as Error).message);
   }

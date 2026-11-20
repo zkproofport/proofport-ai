@@ -10,6 +10,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { createPublicClient, erc20Abi, formatUnits, http } from 'viem';
 import { paymentOffers, verifyProof } from '@zkproofport-ai/sdk';
+import { E2E_OPRF_DOMAIN } from './oprf.js';
 
 const baseUrl = process.env.E2E_BASE_URL || 'http://localhost:4002';
 function required(name: string) {
@@ -68,13 +69,13 @@ describe.sequential('published MCP CDP payment and step-flow boundary', () => {
       expect(before >= price, 'Existing CDP payer needs Base Sepolia USDC before this test').toBe(true);
       const terms = offer.raw.extra as Record<string, unknown>;
       const result = parseResult(await client.callTool({ name: 'generate_proof', arguments: {
-        circuit: 'coinbase_kyc', scope: 'e2e:mcp:cdp-paid', pay_with: 'cdp', pay_on: 'base-sepolia', max_payment: formatUnits(price, 6),
+        circuit: 'coinbase_kyc', scope: 'e2e:mcp:cdp-paid', oprf_domain: E2E_OPRF_DOMAIN, pay_with: 'cdp', pay_on: 'base-sepolia', max_payment: formatUnits(price, 6),
         approved_payment: { network: offer.network, scheme: offer.raw.scheme, amount: offer.amount, asset: offer.asset, payTo: offer.payTo,
           extra: { name: terms.name, version: terms.version, verifyingContract: offer.asset } },
       } }, undefined, { timeout: 180_000 }), 'generate_proof');
       expect(typeof result.proof === 'string' && /^0x[0-9a-f]+$/i.test(result.proof)).toBe(true);
       expect(before - await balance(), 'The existing CDP payer must be charged exactly the quoted USDC amount').toBe(price);
-      const sdkVerification = await verifyProof(result);
+      const sdkVerification = await verifyProof({ baseUrl }, result);
       expect(sdkVerification.valid, 'SDK on-chain verification failed').toBe(true);
       const mcpVerification = parseResult(await client.callTool({ name: 'verify_proof', arguments: { result } }, undefined, { timeout: 60_000 }), 'verify_proof');
       expect(mcpVerification.valid, 'MCP on-chain verification failed').toBe(true);
@@ -90,7 +91,7 @@ describe.sequential('published MCP CDP payment and step-flow boundary', () => {
       expect(challengeTool?.description).toContain('generate_proof');
       const before = await balance();
       const prepared = parseResult(await client.callTool({ name: 'prepare_inputs', arguments: {
-        circuit: 'coinbase_kyc', scope: 'e2e:mcp:unpaid-step-flow',
+        circuit: 'coinbase_kyc', scope: 'e2e:mcp:unpaid-step-flow', oprf_domain: E2E_OPRF_DOMAIN,
       } }, undefined, { timeout: 90_000 }), 'prepare_inputs');
       expect(Object.keys(prepared).length > 0).toBe(true);
       const challenge = parseResult(await client.callTool({ name: 'request_challenge', arguments: { circuit: 'coinbase_kyc', inputs: {} } }), 'request_challenge');

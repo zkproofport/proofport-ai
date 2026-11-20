@@ -36,8 +36,9 @@ describe('Contract Addresses', () => {
   describe('FALLBACK_VERIFIERS', () => {
     it('should contain Base Sepolia (84532) verifiers', () => {
       expect(FALLBACK_VERIFIERS['84532']).toBeDefined();
-      expect(FALLBACK_VERIFIERS['84532'].coinbase_attestation).toBe('0x1885aA2283DB21ad0fc63A2Df98efe92F31908E6'); // v2
-      expect(FALLBACK_VERIFIERS['84532'].coinbase_country_attestation).toBe('0xC5363d7587bd580148373D0d8b7909Be423242CB'); // v2
+      // v2, bb 6.0.0 (circuits broadcast records at the pinned commit).
+      expect(FALLBACK_VERIFIERS['84532'].coinbase_attestation).toBe('0xe78fCDc7562ce3afCEadaF29f4b8B96DC997C01A');
+      expect(FALLBACK_VERIFIERS['84532'].coinbase_country_attestation).toBe('0xe88033179576869c8730160EcBfaa7e5b2c1A4a9');
     });
 
     it('should have valid checksummed addresses for verifiers', () => {

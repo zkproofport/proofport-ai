@@ -4,12 +4,19 @@
  *
  *   signal_hash = keccak256(abi.encodePacked(string scope, string circuitId, string requestId))
  *
- * MIRROR of `computeSignalHash` in `@zkproofport-app/core`
- * (proofport-app-sdk packages/core/src/signalHash.ts). The published core this
- * repository pins (0.4.0-beta.8) does not ship it yet; once a later core
- * release does, delete this file and import it from core. Until then
- * tests/signalHash.test.ts holds this copy to the shared vectors
- * (tests/fixtures/signal-hash-vectors.json, byte-identical to core's).
+ * The rule, its validation and its circuit list are `@zkproofport-app/core`'s
+ * (`computeSignalHash`, `signalHashScopeError`, `signalHashRequestIdError`,
+ * `SIGNAL_HASH_CIRCUIT_IDS`). tests/signalHash.test.ts holds them to the
+ * shared vectors (tests/fixtures/signal-hash-vectors.json, byte-identical to
+ * core's).
+ *
+ * What this module adds:
+ * - `computeSignalHash` returns the 32 BYTES. Core returns them as 0x-hex. The
+ *   wallet personal_signs the bytes; handing a hex string to `signMessage`
+ *   would sign its 66 UTF-8 characters instead, a different message the
+ *   circuit refuses. So the SDK keeps the byte form under the name its callers
+ *   and README use.
+ * - the request id this SDK and the MCP mint when the caller has none.
  *
  * The wallet address left the preimage on 2026-11-17: signal_hash is public,
  * and with the address in it anyone could try every attested address and
@@ -17,100 +24,29 @@
  * reads this preimage. `requestId` makes the hash fresh per request, and lets
  * the relying party that issued the request recompute and check it.
  *
- * This is the ONLY implementation in proofport-ai. The server does not compute
- * signal_hash; its input builder takes the value its caller computed here.
+ * The server does not compute signal_hash; its input builder takes the value
+ * its caller computed here.
  */
 import { ethers } from 'ethers';
-import { ALL_CIRCUIT_IDS, isCanonicalCircuitId, type CanonicalCircuitId } from './circuits.js';
+import { computeSignalHash as coreComputeSignalHash, signalHashRequestIdError } from '@zkproofport-app/core';
 
-/** Scope cap in UTF-8 bytes (core's SIGNAL_HASH_MAX_SCOPE_BYTES). */
-export const SIGNAL_HASH_MAX_SCOPE_BYTES = 4096;
-
-/** Request id cap in characters (core's SIGNAL_HASH_MAX_REQUEST_ID_LENGTH). */
-export const SIGNAL_HASH_MAX_REQUEST_ID_LENGTH = 128;
-
-const REQUEST_ID = /^[A-Za-z0-9-]+$/;
-
-/** Which circuits carry a signal_hash. OIDC binds its request through the ID token's nonce instead. */
-const HAS_SIGNAL_HASH: Readonly<Record<CanonicalCircuitId, boolean>> = Object.freeze({
-  coinbase_attestation: true,
-  coinbase_country_attestation: true,
-  oidc_domain_attestation: false,
-  giwa_attestation: true,
-  dojang_playground: true,
-  human_passport_score: true,
-});
-
-export const SIGNAL_HASH_CIRCUIT_IDS: readonly CanonicalCircuitId[] = Object.freeze(
-  ALL_CIRCUIT_IDS.filter(id => HAS_SIGNAL_HASH[id]),
-);
-
-function loneSurrogateAt(value: string): number {
-  for (let i = 0; i < value.length; i++) {
-    const c = value.charCodeAt(i);
-    if (c >= 0xd800 && c <= 0xdbff) {
-      const next = value.charCodeAt(i + 1);
-      if (next >= 0xdc00 && next <= 0xdfff) {
-        i++;
-        continue;
-      }
-      return i;
-    }
-    if (c >= 0xdc00 && c <= 0xdfff) return i;
-  }
-  return -1;
-}
-
-/** Why this scope cannot be hashed, or null. */
-export function signalHashScopeError(scope: unknown): string | null {
-  if (typeof scope !== 'string') return `scope must be a string, got ${scope === null ? 'null' : typeof scope}.`;
-  if (scope.trim() === '') return 'scope is empty.';
-  const at = loneSurrogateAt(scope);
-  if (at >= 0) return `scope is not valid Unicode text: unpaired surrogate at index ${at}.`;
-  const bytes = new TextEncoder().encode(scope).length;
-  if (bytes > SIGNAL_HASH_MAX_SCOPE_BYTES) return `scope is ${bytes} bytes; the limit is ${SIGNAL_HASH_MAX_SCOPE_BYTES}.`;
-  return null;
-}
-
-/** Why this request id cannot be hashed, or null. */
-export function signalHashRequestIdError(requestId: unknown): string | null {
-  if (typeof requestId !== 'string') {
-    return `requestId must be a string, got ${requestId === null ? 'null' : typeof requestId}.`;
-  }
-  if (requestId.length === 0) return 'requestId is empty.';
-  if (requestId.length > SIGNAL_HASH_MAX_REQUEST_ID_LENGTH) {
-    return `requestId is ${requestId.length} characters; the limit is ${SIGNAL_HASH_MAX_REQUEST_ID_LENGTH}.`;
-  }
-  if (!REQUEST_ID.test(requestId)) {
-    return `requestId may hold only ASCII letters, digits and '-', got ${JSON.stringify(requestId)}.`;
-  }
-  return null;
-}
+export {
+  SIGNAL_HASH_CIRCUIT_IDS,
+  SIGNAL_HASH_MAX_REQUEST_ID_LENGTH,
+  SIGNAL_HASH_MAX_SCOPE_BYTES,
+  signalHashRequestIdError,
+  signalHashScopeError,
+} from '@zkproofport-app/core';
 
 /**
- * The signal_hash a proof without an action carries for this request (32 bytes).
+ * The signal_hash a proof without an action carries for this request, as the
+ * 32 bytes the wallet signs.
  *
- * @throws Error naming the problem: an unknown circuit id, a circuit with no
- *   signal_hash, or a scope / requestId outside the rules above.
+ * @throws Error naming the problem (core's): an unknown circuit id, a circuit
+ *   with no signal_hash, or a scope / requestId outside the rules.
  */
 export function computeSignalHash(request: { scope: string; circuitId: string; requestId: string }): Uint8Array {
-  const { circuitId } = request;
-  if (!isCanonicalCircuitId(circuitId)) {
-    throw new Error(`Unknown circuit '${String(circuitId)}'. Known: ${ALL_CIRCUIT_IDS.join(', ')}.`);
-  }
-  if (!HAS_SIGNAL_HASH[circuitId]) {
-    throw new Error(`${circuitId} has no signal_hash. Circuits that do: ${SIGNAL_HASH_CIRCUIT_IDS.join(', ')}.`);
-  }
-  const scopeError = signalHashScopeError(request.scope);
-  if (scopeError) throw new Error(scopeError);
-  const idError = signalHashRequestIdError(request.requestId);
-  if (idError) throw new Error(idError);
-  const packed = ethers.concat([
-    ethers.toUtf8Bytes(request.scope),
-    ethers.toUtf8Bytes(circuitId),
-    ethers.toUtf8Bytes(request.requestId),
-  ]);
-  return ethers.getBytes(ethers.keccak256(packed));
+  return ethers.getBytes(coreComputeSignalHash(request));
 }
 
 /**
@@ -133,4 +69,3 @@ export function resolveRequestId(requestId: unknown): string {
   if (error) throw new Error(error);
   return requestId as string;
 }
-

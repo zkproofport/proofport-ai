@@ -67,7 +67,7 @@ if (!result.verification) {
 }
 
 console.log('\n── what the SDK says ──');
-const verdict = await verifyProof(result);
+const verdict = await verifyProof(createConfig({ baseUrl }), result);
 console.log(`  ${JSON.stringify(verdict)}`);
 
 // The SDK collapses every failure into valid:false. Call the contract directly

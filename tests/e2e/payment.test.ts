@@ -41,6 +41,7 @@ import {
   createConfig, generateProof, fromPrivateKey, verifyProof,
 } from '@zkproofport-ai/sdk';
 import type { PaymentWallet } from '@zkproofport-ai/sdk';
+import { E2E_OPRF_DOMAIN } from './oprf.js';
 
 const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:4002';
 const CIRCUIT = 'coinbase_kyc';
@@ -151,9 +152,9 @@ async function paysAndProves(wallet: PaymentWallet, network: string) {
   if (!attestationKey) throw new Error('ATTESTATION_KEY required: payment verification must produce a real proof');
   const result = await generateProof(createConfig({ baseUrl: BASE_URL }), {
     attestation: fromPrivateKey(attestationKey), payment: wallet,
-  }, { circuit: CIRCUIT, scope: `e2e:payment:${network}`, payOn: network });
+  }, { circuit: CIRCUIT, scope: `e2e:payment:${network}`, oprfDomain: E2E_OPRF_DOMAIN, payOn: network });
   expect(result.proof).toMatch(/^0x[0-9a-f]+$/i);
-  const verified = await verifyProof(result);
+  const verified = await verifyProof(createConfig({ baseUrl: BASE_URL }), result);
   expect(verified.valid, verified.error).toBe(true);
   return result;
 }

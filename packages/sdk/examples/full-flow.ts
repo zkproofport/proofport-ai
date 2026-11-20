@@ -69,7 +69,7 @@ async function main() {
     // Optional: verify on-chain
     console.log('');
     console.log('Verifying on-chain...');
-    const verification = await verifyProof(result);
+    const verification = await verifyProof(config, result);
     console.log(`On-chain: ${verification.valid ? 'VALID' : `INVALID - ${verification.error}`}`);
 
   } catch (error) {

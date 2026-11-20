@@ -118,7 +118,7 @@ const result = await generateProof(
   { circuit: 'coinbase_kyc', oprfDomain: 'my-app.example.com', scope: 'my-app' }
 );
 
-const verification = await verifyProof(result);
+const verification = await verifyProof(config, result);
 console.log('Valid:', verification.valid);
 ```
 
@@ -405,9 +405,9 @@ if (result.attestation) {
 ### Automatic Verification
 
 ```typescript
-import { verifyProof } from '@zkproofport-ai/sdk';
+import { createConfig, verifyProof } from '@zkproofport-ai/sdk';
 
-const verification = await verifyProof(result);
+const verification = await verifyProof(createConfig(), result);
 
 if (verification.valid) {
   console.log('Proof is valid on-chain');
@@ -422,7 +422,10 @@ refuses a result that names a different contract, and reads the chain through
 its own public RPC rather than one the result names. Before the contract call
 it also checks the proof's issuer: for Google/Microsoft proofs, that the signing
 key is one the provider currently publishes; for Coinbase and GIWA proofs, that
-the signer list is the official one. Any failed check returns
+the signer list is the official one. For wallet proofs it also checks the
+nullifier against the key of the proving service your `config` points at, the
+same one `generateProof` uses; a result is never trusted to choose that key,
+and one naming another is refused. Any failed check returns
 `{ valid: false, error }`.
 
 ## Step-by-Step API

@@ -81,10 +81,17 @@ export const ATTESTATION_SOURCES: Record<
  * holds the two together. (Ethereum Sepolia was still on the pre-2026-10-22
  * deployments here until 2026-10-27; the live staging server had synced past it.)
  *
- * coinbase_attestation is v2 (circuits coinbase-attestation-v2), deployed on
- * Base Sepolia, Base and Ethereum (circuits
- * deployments/<chain>/CoinbaseAttestationV2.json); core pins the same rows
- * since 0.4.0-beta.1, so it is held to core like every other circuit.
+ * The rows are the bb 6.0.0 verifiers recorded at the pinned circuits commit
+ * (src/config/circuitsPin.ts, broadcast/<script>/<chain>/run-latest.json),
+ * which core 0.4.0-beta.9 pins: Base Sepolia, Ethereum Sepolia and GIWA
+ * Sepolia. coinbase_attestation and coinbase_country_attestation are v2
+ * (circuits coinbase-attestation-v2 / coinbase-country-attestation-v2).
+ *
+ * Ethereum (1) and Base (8453) are `null` for every circuit: their records at
+ * the pinned commit still name the bb 4.2 verifiers, which refuse a bb 6.0.0
+ * proof, and core lists them in AWAITING_REDEPLOY and pins nothing there. They
+ * become addresses when the mainnet verifiers are redeployed, recorded in a
+ * circuits commit this server pins, and pinned by a core release.
  *
  * `null` means NOT DEPLOYED on that chain, and is different from a missing
  * key, which would be a circuit somebody forgot. An empty string was used here
@@ -92,62 +99,44 @@ export const ATTESTATION_SOURCES: Record<
  * load, and it satisfies a `string` type while failing every address check.
  */
 export const FALLBACK_VERIFIERS: Record<string, Record<CircuitId, string | null>> = {
+  // Ethereum and Base: awaiting the bb 6.0.0 redeploy (core AWAITING_REDEPLOY).
   '1': {
-    // coinbase_attestation v2 (circuits deployments/1/CoinbaseAttestationV2.json).
-    [CIRCUIT_IDS.COINBASE_ATTESTATION]: '0x0e458610BD79893a0855C8F90CEDed70cF7553b6',
-    // coinbase_country_attestation v2 (circuits deployments/1/CoinbaseCountryAttestationV2.json).
-    [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: '0xCD23a61D194D3B00906C49457774cB7E207ccC7B',
-    // The provider-key statement circuit.
-    [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: '0xb07e18566Db63bb0b4cb72896699E94Faa078fcd',
-    // Deployed on GIWA Sepolia (91342) and nowhere else.
+    [CIRCUIT_IDS.COINBASE_ATTESTATION]: null,
+    [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: null,
+    [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: null,
     [CIRCUIT_IDS.GIWA_ATTESTATION]: null,
-    // circuits deployments/1/HumanPassportScore.json.
-    [CIRCUIT_IDS.HUMAN_PASSPORT_SCORE]: '0xbb8a7e058F86680dDCfe0Df00E8F729EBCf27605',
+    [CIRCUIT_IDS.HUMAN_PASSPORT_SCORE]: null,
   },
   '8453': {
-    // coinbase_attestation v2 (circuits deployments/8453/CoinbaseAttestationV2.json).
-    [CIRCUIT_IDS.COINBASE_ATTESTATION]: '0x6FC22d3576FB70457d1529B3F70f711A3cBA7A7F',
-    // coinbase_country_attestation v2 (circuits deployments/8453/CoinbaseCountryAttestationV2.json).
-    [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: '0x509DEE10cc1578361b450fED7475EA3BD69c6e8d',
-    // The provider-key statement circuit.
-    [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: '0xF1AA88aD844bFd1dc552526a67f5980aAd4E7f35',
-    // Deployed on GIWA Sepolia (91342) and nowhere else.
+    [CIRCUIT_IDS.COINBASE_ATTESTATION]: null,
+    [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: null,
+    [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: null,
     [CIRCUIT_IDS.GIWA_ATTESTATION]: null,
-    // circuits deployments/8453/HumanPassportScore.json.
-    [CIRCUIT_IDS.HUMAN_PASSPORT_SCORE]: '0x2d055c42a2B0c1024aC4aa83b4995fc8fD45662e',
+    [CIRCUIT_IDS.HUMAN_PASSPORT_SCORE]: null,
   },
   '11155111': {
-    // coinbase_attestation v2: deployed on Base Sepolia, Base and Ethereum,
-    // not on Ethereum Sepolia.
-    [CIRCUIT_IDS.COINBASE_ATTESTATION]: null,
-    // coinbase_country_attestation v2 (circuits deployments/11155111/CoinbaseCountryAttestationV2.json).
-    [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: '0x99489796751B4939879dcAF5dB35eB4964c58F6c',
-    // The provider-key statement circuit.
-    [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: '0x8E8F481D98149F13fB756Cab69376814fa854180',
+    [CIRCUIT_IDS.COINBASE_ATTESTATION]: '0x42972771718ef5096f884Da45e53dD7fa54d4180',
+    [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: '0xBcC01EfCE38CDa8f4fFED8Eb5260810545ab0206',
+    [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: '0x4253eef617eE2d1fc4E551f448FbfdaaaeB9FC90',
     // Deployed on GIWA Sepolia (91342) and nowhere else.
     [CIRCUIT_IDS.GIWA_ATTESTATION]: null,
-    // circuits deployments/11155111/HumanPassportScore.json.
-    [CIRCUIT_IDS.HUMAN_PASSPORT_SCORE]: '0xc78585718Fd27D428d7A90970d09A2121BE36066',
+    [CIRCUIT_IDS.HUMAN_PASSPORT_SCORE]: '0x9904a8d852dDEAbf7d9c8Cf7116609DA8e39c2EB',
   },
   // GIWA Sepolia. The only chain giwa_attestation is deployed on.
   '91342': {
     [CIRCUIT_IDS.COINBASE_ATTESTATION]: null,
     [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: null,
     [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: null,
-    [CIRCUIT_IDS.GIWA_ATTESTATION]: '0xF6Edb9d6114B2546B6E559997fdDE08CAeEA83b3',
+    [CIRCUIT_IDS.GIWA_ATTESTATION]: '0xA272056866453F0182426A29B9Ca6382d6C6a060',
     [CIRCUIT_IDS.HUMAN_PASSPORT_SCORE]: null,
   },
   '84532': {
-    // coinbase_attestation v2 (circuits e498841).
-    [CIRCUIT_IDS.COINBASE_ATTESTATION]: '0x1885aA2283DB21ad0fc63A2Df98efe92F31908E6',
-    // coinbase_country_attestation v2 (circuits deployments/84532/CoinbaseCountryAttestationV2.json).
-    [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: '0xC5363d7587bd580148373D0d8b7909Be423242CB',
-    // The provider-key statement circuit.
-    [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: '0xeA5933ABc598401c89F63B3f13AE56A7E78984e8',
+    [CIRCUIT_IDS.COINBASE_ATTESTATION]: '0xe78fCDc7562ce3afCEadaF29f4b8B96DC997C01A',
+    [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: '0xe88033179576869c8730160EcBfaa7e5b2c1A4a9',
+    [CIRCUIT_IDS.OIDC_DOMAIN_ATTESTATION]: '0x14a2241B0A24679825BeFAaa562d4A204262D84f',
     // Deployed on GIWA Sepolia (91342) and nowhere else.
     [CIRCUIT_IDS.GIWA_ATTESTATION]: null,
-    // circuits deployments/84532/HumanPassportScore.json.
-    [CIRCUIT_IDS.HUMAN_PASSPORT_SCORE]: '0x39df92D9C603Fe6d229c7b00272A1E874a628acE',
+    [CIRCUIT_IDS.HUMAN_PASSPORT_SCORE]: '0x223e372553739678365486a3Ded05310B5BCbc0C',
   },
 };
 

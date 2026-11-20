@@ -1,7 +1,9 @@
 import { ethers } from 'ethers';
 import { RPC_ENDPOINTS, verifyProofOnChain } from '@zkproofport-app/core';
 import { isCanonicalCircuitId } from './circuits.js';
-import type { VerifyResult, ProveResponse } from './types.js';
+import { fetchOprfEnvironment } from './oprf/index.js';
+import { isOprfCircuitId } from './oprf/keyHashes.js';
+import type { ClientConfig, VerifyResult, ProveResponse } from './types.js';
 
 /**
  * Public RPC per chain this SDK verifies on: core's endpoints plus the two
@@ -40,15 +42,20 @@ export function verifyRpcUrl(chainId: number): string {
 export interface VerifyOptions {
   minScore?: number;
   /**
-   * The request the proof answers: `{ scope, requestId }`, as returned on the
-   * ProofResult. Passed to core's verify options. Core checks an OIDC proof's
-   * nonce against it today; the check that a wallet proof without an action
-   * carries keccak256(scope ++ circuitId ++ requestId) as its signal_hash runs
-   * once this package depends on a core release later than 0.4.0-beta.8
-   * (core's `checkSignalHash`). Until then, compare it yourself:
-   * `computeSignalHash({ scope, circuitId, requestId })` against public inputs 0-31.
+   * Which pinned OPRF key a wallet credential proof must carry. Leave it out:
+   * `verifyProof` asks the proving service `config.baseUrl` names, the same
+   * question `generateProof` asks. Never taken from the result being checked.
    */
-  request?: { scope: string; requestId: string };
+  oprfEnvironment?: string;
+  /**
+   * The request the proof answers: `{ scope, requestId, oprfDomain }`, as
+   * returned on the ProofResult. Passed to core's verify options. Core checks
+   * an OIDC proof's nonce against it; for a wallet proof without an action it
+   * checks signal_hash = keccak256(scope ++ circuitId ++ requestId), and for
+   * every wallet proof that its OPRF domain and scope are the ones named here
+   * (so `oprfDomain` is required with a wallet proof's request).
+   */
+  request?: { scope: string; requestId: string; oprfDomain?: string };
 }
 
 /**
@@ -111,6 +118,7 @@ export async function verifyOnChain(
   const claimed = { verifierAddress: claim.verifierAddress, chainId };
   const checks = {
     ...(options.minScore !== undefined && { minScore: options.minScore }),
+    ...(options.oprfEnvironment !== undefined && { oprfEnvironment: options.oprfEnvironment }),
     ...(options.request !== undefined && { request: options.request }),
   };
   const result = Object.keys(checks).length === 0
@@ -126,19 +134,51 @@ export async function verifyOnChain(
  * Verify a proof from a ProveResponse against the pinned verifier for its
  * circuit and chain. See {@link verifyOnChain} for what is and is not trusted.
  *
+ * `config` is the client configuration `generateProof` takes. For a wallet
+ * proof, the OPRF key the proof must carry is decided on the verifier's side:
+ * `options.oprfEnvironment` when given, otherwise the one the proving service
+ * at `config.baseUrl` names. A result is never trusted to say which key it
+ * should be checked against; when it names a different one it is refused.
+ *
+ * @param config - Client configuration (`createConfig()`)
  * @param result - The full ProveResponse from generateProof()
  * @returns VerifyResult
  *
  * @example
  * ```typescript
+ * const config = createConfig();
  * const result = await generateProof(config, signers, params);
- * const verified = await verifyProof(result);
+ * const verified = await verifyProof(config, result);
  * console.log(verified.valid); // true
  * ```
  */
-export async function verifyProof(result: ProveResponse, options: VerifyOptions = {}): Promise<VerifyResult> {
+export async function verifyProof(
+  config: ClientConfig,
+  result: ProveResponse & { oprfEnvironment?: string },
+  options: VerifyOptions = {},
+): Promise<VerifyResult> {
   if (!result.verification) {
     return { valid: false, error: 'No verification info in response (verifier not deployed on this network)' };
   }
-  return verifyOnChain(result.circuit, result.verification, result.proof, result.publicInputs, options);
+  let oprfEnvironment = options.oprfEnvironment;
+  if (oprfEnvironment === undefined && isOprfCircuitId(result.circuit)) {
+    try {
+      oprfEnvironment = await fetchOprfEnvironment(config);
+    } catch (error) {
+      return {
+        valid: false,
+        error: `Cannot check a ${result.circuit} proof without the verifying service's OPRF environment: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+  }
+  // What the result says about its own environment is a claim, never the answer.
+  const claimed = result.oprfEnvironment;
+  if (claimed !== undefined && claimed !== oprfEnvironment) {
+    return {
+      valid: false,
+      error: `The result names the '${claimed}' OPRF environment, but this verifier checks against ${oprfEnvironment === undefined ? 'none' : `'${oprfEnvironment}'`}; refusing it.`,
+    };
+  }
+  const checks: VerifyOptions = { ...options, ...(oprfEnvironment !== undefined && { oprfEnvironment }) };
+  return verifyOnChain(result.circuit, result.verification, result.proof, result.publicInputs, checks);
 }

@@ -79,7 +79,7 @@ const passesPolicy: { name: string; inputs: OidcV2InputOverrides; keyHost: strin
 describe('AI SDK / MCP verifyProof on OIDC v2 proofs', () => {
   for (const c of refusedByPolicy) {
     it(`refuses ${c.name} before any key fetch`, async () => {
-      const result = await verifyProof(response(c.inputs));
+      const result = await verifyProof({ baseUrl: 'https://prover.test' }, response(c.inputs));
       expect(result.valid).toBe(false);
       expect(result.error).toMatch(c.error);
       expect(fetchMock).not.toHaveBeenCalled();
@@ -88,7 +88,7 @@ describe('AI SDK / MCP verifyProof on OIDC v2 proofs', () => {
 
   for (const c of passesPolicy) {
     it(`passes policy for ${c.name} and reaches the ${c.keyHost} key check`, async () => {
-      const result = await verifyProof(response(c.inputs));
+      const result = await verifyProof({ baseUrl: 'https://prover.test' }, response(c.inputs));
       expect(result.valid).toBe(false);
       expect(fetchMock).toHaveBeenCalled();
       expect(String(fetchMock.mock.calls[0][0])).toContain(c.keyHost);
@@ -96,7 +96,7 @@ describe('AI SDK / MCP verifyProof on OIDC v2 proofs', () => {
   }
 
   it('verifies against the v2 verifier pinned on Base Sepolia too', async () => {
-    const result = await verifyProof(response({}, BASE_SEPOLIA));
+    const result = await verifyProof({ baseUrl: 'https://prover.test' }, response({}, BASE_SEPOLIA));
     expect(result.valid).toBe(false);
     expect(fetchMock).toHaveBeenCalled();
   });
@@ -114,11 +114,15 @@ describe('server verifyOnChain on OIDC v2 proofs', () => {
   // Read from core rather than written out: these rows moved twice in two
   // days (v2, then the provider-key statement circuit) and a literal here
   // only ever measured the previous deployment.
-  it('looks up the verifier core pins, on both testnets and both mainnets', () => {
-    for (const chain of [84532, 11155111, 8453, 1]) {
+  it('looks up the verifier core pins on both testnets, and none on the mainnets awaiting the bb 6.0.0 redeploy', () => {
+    for (const chain of [84532, 11155111]) {
       const pinned = PINNED_VERIFIERS.oidc_domain_attestation[chain];
       expect(pinned, `core pins no OIDC verifier on ${chain}`).toBeDefined();
       expect(FALLBACK_VERIFIERS[String(chain)].oidc_domain_attestation?.toLowerCase(), String(chain)).toBe(pinned.address.toLowerCase());
+    }
+    for (const chain of [8453, 1]) {
+      expect(PINNED_VERIFIERS.oidc_domain_attestation[chain], `core pins an OIDC verifier on ${chain}`).toBeUndefined();
+      expect(FALLBACK_VERIFIERS[String(chain)].oidc_domain_attestation, String(chain)).toBeNull();
     }
   });
 
