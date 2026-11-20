@@ -92,10 +92,14 @@ export interface GetSupportedCircuitsResult {
  */
 export function handleGetSupportedCircuits(
   params: GetSupportedCircuitsParams,
-  paymentMode: 'disabled' | 'testnet' | 'mainnet' = 'testnet',
+  serverChainId: string,
 ): GetSupportedCircuitsResult {
-  const defaultChainId = paymentMode === 'testnet' ? '11155111' : '1';
-  const chainId = params.chainId || defaultChainId;
+  // The caller names this server's verification chain (getChainId(config)); a
+  // payment mode is not a chain, and "disabled" used to fall through to mainnet.
+  if (!/^[1-9][0-9]*$/.test(serverChainId)) {
+    throw new Error(`handleGetSupportedCircuits needs the server's chain id; got '${serverChainId}'.`);
+  }
+  const chainId = params.chainId || serverChainId;
   const chainVerifiers = getChainVerifiers(chainId);
 
   const circuits: CircuitInfo[] = Object.values(CIRCUITS).map(circuit => ({

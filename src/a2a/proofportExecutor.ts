@@ -30,6 +30,7 @@ import { getTaskOutcome } from '../skills/flowGuidance.js';
 import type { LLMProvider } from '../chat/llmProvider.js';
 import type { LLMTool } from '../chat/llmProvider.js';
 import type { Config } from '../config/index.js';
+import { getChainId } from '../config/index.js';
 
 /** Tool definitions for LLM-based skill routing in A2A text inference. */
 export const A2A_TOOLS: LLMTool[] = [
@@ -260,7 +261,7 @@ export class ProofportExecutor implements AgentExecutor {
           break;
         }
         case 'get_supported_circuits': {
-          const circuitsResult = handleGetSupportedCircuits(skillParams as any, this.deps.config.paymentMode);
+          const circuitsResult = handleGetSupportedCircuits(skillParams as any, String(getChainId(this.deps.config)));
           const aliasMap: Record<string, string> = {
             [CIRCUIT_IDS.COINBASE_ATTESTATION]: 'coinbase_kyc',
             [CIRCUIT_IDS.COINBASE_COUNTRY_ATTESTATION]: 'coinbase_country',

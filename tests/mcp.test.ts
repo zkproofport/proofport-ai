@@ -103,7 +103,7 @@ describe('verifyOnChain', () => {
 
 describe('handleGetSupportedCircuits', () => {
   it('should return all circuits from CIRCUITS config', () => {
-    const result = handleGetSupportedCircuits({});
+    const result = handleGetSupportedCircuits({}, '11155111');
 
     expect(result.circuits).toHaveLength(Object.keys(CIRCUITS).length);
     // Four after arc_eligibility was removed on 2026-10-13, five since
@@ -115,7 +115,7 @@ describe('handleGetSupportedCircuits', () => {
   });
 
   it('should include coinbase_attestation with correct metadata', () => {
-    const result = handleGetSupportedCircuits({});
+    const result = handleGetSupportedCircuits({}, '11155111');
     const kyc = result.circuits.find(c => c.id === 'coinbase_attestation');
 
     expect(kyc).toBeDefined();
@@ -125,7 +125,7 @@ describe('handleGetSupportedCircuits', () => {
   });
 
   it('should include coinbase_country_attestation with correct metadata', () => {
-    const result = handleGetSupportedCircuits({});
+    const result = handleGetSupportedCircuits({}, '11155111');
     const country = result.circuits.find(c => c.id === 'coinbase_country_attestation');
 
     expect(country).toBeDefined();
@@ -135,7 +135,7 @@ describe('handleGetSupportedCircuits', () => {
   });
 
   it('should return circuit id, displayName, description, and requiredInputs for each circuit', () => {
-    const result = handleGetSupportedCircuits({});
+    const result = handleGetSupportedCircuits({}, '11155111');
 
     for (const circuit of result.circuits) {
       expect(circuit).toHaveProperty('id');
@@ -150,7 +150,7 @@ describe('handleGetSupportedCircuits', () => {
   });
 
   it('should use canonical circuit names (underscore format)', () => {
-    const result = handleGetSupportedCircuits({});
+    const result = handleGetSupportedCircuits({}, '11155111');
     const ids = result.circuits.map(c => c.id);
 
     // Canonical underscore format
@@ -166,7 +166,7 @@ describe('handleGetSupportedCircuits', () => {
   // Verification happens on Ethereum; Base is the payment chain only. See
   // getChainId() vs getPaymentChainId() in src/config/index.ts.
   it('should default to chainId 11155111 (Ethereum Sepolia) when paymentMode is testnet (default)', () => {
-    const result = handleGetSupportedCircuits({});
+    const result = handleGetSupportedCircuits({}, '11155111');
 
     expect(result.chainId).toBe('11155111');
     // The default must be a chain we actually have verifiers on — a default
@@ -176,8 +176,8 @@ describe('handleGetSupportedCircuits', () => {
     }
   });
 
-  it('should default to chainId 1 (Ethereum Mainnet) when paymentMode is mainnet', () => {
-    const result = handleGetSupportedCircuits({}, 'mainnet');
+  it('should default to the server chain the caller names (Ethereum mainnet)', () => {
+    const result = handleGetSupportedCircuits({}, '1');
     expect(result.chainId).toBe('1');
     for (const circuit of result.circuits) {
       expect(circuit.verifierAddress).toBe(FALLBACK_VERIFIERS['1'][circuit.id]);
@@ -186,18 +186,24 @@ describe('handleGetSupportedCircuits', () => {
 
   // The payment chain must NOT leak into the verification chain — merging the
   // two is exactly the mistake the getChainId/getPaymentChainId split corrected.
+  it('refuses a missing or malformed server chain instead of picking one', () => {
+    for (const bad of ['', 'mainnet', 'disabled', '0', '-1', '1.5', ' 1']) {
+      expect(() => handleGetSupportedCircuits({}, bad)).toThrow(/server's chain id/);
+    }
+  });
+
   it('should never default to a Base chain id', () => {
-    expect(handleGetSupportedCircuits({}).chainId).not.toBe('84532');
-    expect(handleGetSupportedCircuits({}, 'mainnet').chainId).not.toBe('8453');
+    expect(handleGetSupportedCircuits({}, '11155111').chainId).not.toBe('84532');
+    expect(handleGetSupportedCircuits({}, '1').chainId).not.toBe('8453');
   });
 
   it('should use explicit chainId over paymentMode default', () => {
-    const result = handleGetSupportedCircuits({ chainId: '84532' }, 'mainnet');
+    const result = handleGetSupportedCircuits({ chainId: '84532' }, '1');
     expect(result.chainId).toBe('84532');
   });
 
   it('should include verifier address for chain 84532', () => {
-    const result = handleGetSupportedCircuits({ chainId: '84532' });
+    const result = handleGetSupportedCircuits({ chainId: '84532' }, '11155111');
     const kyc = result.circuits.find(c => c.id === 'coinbase_attestation');
 
     expect(kyc!.verifierAddress).toBe(FALLBACK_VERIFIERS['84532']['coinbase_attestation']);
@@ -207,7 +213,7 @@ describe('handleGetSupportedCircuits', () => {
     // `null`, not an absent field. An agent cannot tell an omitted field apart
     // from one this server forgot to send, and the two call for opposite
     // responses -- try another chain, versus report a bug.
-    const result = handleGetSupportedCircuits({ chainId: '99999' });
+    const result = handleGetSupportedCircuits({ chainId: '99999' }, '11155111');
 
     expect(result.circuits.length).toBeGreaterThan(0);
     for (const circuit of result.circuits) {
@@ -216,7 +222,7 @@ describe('handleGetSupportedCircuits', () => {
   });
 
   it('should return the specified chainId in the result', () => {
-    const result = handleGetSupportedCircuits({ chainId: '84532' });
+    const result = handleGetSupportedCircuits({ chainId: '84532' }, '11155111');
 
     expect(result.chainId).toBe('84532');
   });

@@ -27,6 +27,7 @@ import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { E2E_OPRF_DOMAIN } from './oprf.js';
+import { PROVABLE_CIRCUIT_IDS } from '../../src/config/circuitIds.js';
 
 const BASE_URL = (process.env.E2E_BASE_URL || 'http://localhost:4002').replace(/\/$/, '');
 // Expectations come from the selected deployment, never from the server's response.
@@ -49,7 +50,11 @@ const expectedIdentities = deploymentEnvironment === 'production'
   ? [{ chainId: 1, agentId: 31921 }, { chainId: 8453, agentId: 25331 }]
   : [{ chainId: 11155111, agentId: 3288 }, { chainId: 84532, agentId: 592 }];
 const primaryIdentity = expectedIdentities[0];
-const canonicalCircuits = ['coinbase_attestation', 'coinbase_country_attestation', 'oidc_domain_attestation', 'giwa_attestation'];
+// The server's own provable list, not a hand-kept copy: a copy of four missed
+// human_passport_score for weeks after the server started proving it.
+const canonicalCircuits: readonly string[] = PROVABLE_CIRCUIT_IDS;
+// Verified on their own chain, so the default Ethereum chain lists no verifier.
+const DEDICATED_CHAIN_CIRCUITS = new Set<string>(['giwa_attestation']);
 
 function assertCompleteRegistrations(registrations: any[]) {
   expect(Array.isArray(registrations)).toBe(true);
@@ -291,7 +296,7 @@ describe.runIf(identityTarget)('Deployment Identity & Verification', () => {
     expect(JSON.stringify(json)).toMatch(new RegExp(`chainId=${primaryIdentity.chainId}(?![0-9])`));
   });
 
-  it('get_supported_circuits requires all four circuits and the selected Ethereum chain', async () => {
+  it('get_supported_circuits requires every provable circuit and the selected Ethereum chain', async () => {
     const task = await a2aClient.sendMessage({
       message: makeDataPartMessage({ skill: 'get_supported_circuits' }).message,
     }) as Task;
@@ -301,12 +306,14 @@ describe.runIf(identityTarget)('Deployment Identity & Verification', () => {
     const circuits = data.circuits as any[];
     expect(Array.isArray(circuits)).toBe(true);
     expect(circuits.map(circuit => circuit.id).sort()).toEqual([...canonicalCircuits].sort());
-    for (const id of canonicalCircuits.slice(0, 3)) {
-      expect(circuits.find(circuit => circuit.id === id).verifierAddress).toMatch(/^0x[0-9a-fA-F]{40}$/);
-    }
-    // GIWA uses a dedicated network, not the default Ethereum verifier map.
-    for (const id of canonicalCircuits.slice(3)) {
-      expect(circuits.find(circuit => circuit.id === id).guide_url).toBe(`${BASE_URL}/api/v1/guide/${id}`);
+    for (const id of canonicalCircuits) {
+      const circuit = circuits.find(c => c.id === id);
+      if (DEDICATED_CHAIN_CIRCUITS.has(id)) {
+        // Uses a dedicated network, not the default Ethereum verifier map.
+        expect(circuit.guide_url).toBe(`${BASE_URL}/api/v1/guide/${id}`);
+      } else {
+        expect(circuit.verifierAddress, id).toMatch(/^0x[0-9a-fA-F]{40}$/);
+      }
     }
   });
 });

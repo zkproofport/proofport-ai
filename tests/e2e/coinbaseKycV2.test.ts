@@ -9,8 +9,10 @@
  *     OPRF key hash, domain, scope and nullifier as one field each, then
  *     attested_at. The four OPRF values are exactly the ones the SDK's OPRF
  *     evaluation produced for this wallet, (oprfDomain, scope);
- *   - the proof verifies on the v2 verifier on Base Sepolia, and a proof with
- *     one public input changed does not;
+ *   - the proof verifies on the v2 verifier of the chain the server names, and
+ *     a proof with one public input changed does not. Which chain is the
+ *     server's choice (chooseVerificationTarget: Ethereum Sepolia when it has
+ *     ETHEREUM_RPC_URL, as staging does; Base Sepolia otherwise);
  *   - refusals happen before any payment: a pre-OPRF request (keccak
  *     nullifier, no OPRF values), an OPRF answer under another key, a value
  *     at the field modulus, and a wallet with no Coinbase attestation.
@@ -21,9 +23,9 @@
  * deployment (scripts/run-published-e2e.mjs).
  *
  * On-chain verification calls the verifier contract directly, at an address
- * PINNED HERE from circuits' deployment record at the pinned commit
- * (broadcast/DeployCoinbaseAttestationV2.s.sol/84532, bb 6.0.0), not the one
- * the response names.
+ * PINNED HERE per chain from circuits' deployment records at the pinned commit
+ * (broadcast/DeployCoinbaseAttestationV2.s.sol/<chain>, bb 6.0.0), not the
+ * one the response names. A chain not in that table fails the test.
  *
  * Needs ATTESTATION_KEY (the Coinbase-attested E2E wallet), the server's
  * OPRF network reachable, and, when the server charges, E2E_PAYER_WALLET_KEY.
@@ -41,8 +43,21 @@ const ATTESTATION_KEY = process.env.ATTESTATION_KEY;
 const PAYER_KEY = process.env.E2E_PAYER_WALLET_KEY;
 
 const ID = 'coinbase_attestation';
-const V2_VERIFIER_BASE_SEPOLIA = '0xe78fcdc7562ce3afceadaf29f4b8b96dc997c01a';
-const BASE_SEPOLIA_RPC = process.env.E2E_BASE_SEPOLIA_RPC_URL || 'https://base-sepolia.gateway.tenderly.co';
+const V2_VERIFIERS: Record<number, { address: string; rpc: string }> = {
+  84532: {
+    address: '0xe78fcdc7562ce3afceadaf29f4b8b96dc997c01a',
+    rpc: process.env.E2E_BASE_SEPOLIA_RPC_URL || 'https://base-sepolia.gateway.tenderly.co',
+  },
+  11155111: {
+    address: '0x42972771718ef5096f884da45e53dd7fa54d4180',
+    rpc: process.env.ETHEREUM_RPC_URL || 'https://ethereum-sepolia-rpc.publicnode.com',
+  },
+};
+function pinnedVerifier(chainId: number | undefined) {
+  const row = chainId === undefined ? undefined : V2_VERIFIERS[chainId];
+  if (!row) throw new Error(`No pinned ${ID} v2 verifier for chain ${chainId}. Known: ${Object.keys(V2_VERIFIERS).join(', ')}.`);
+  return row;
+}
 const VERIFIER_ABI = ['function verify(bytes calldata _proof, bytes32[] calldata _publicInputs) view returns (bool)'];
 
 describe('coinbase_attestation v2 (server statement signed with Cloud KMS)', () => {
@@ -103,10 +118,11 @@ describe('coinbase_attestation v2 (server statement signed with Cloud KMS)', () 
     expect(attestedAt).toBeGreaterThanOrEqual(before - 5);
     expect(attestedAt).toBeLessThanOrEqual(after + 5);
 
-    expect(result.verification?.chainId).toBe(84532);
-    expect(result.verification?.verifierAddress?.toLowerCase()).toBe(V2_VERIFIER_BASE_SEPOLIA.toLowerCase());
+    const chainId = result.verification?.chainId;
+    const pinned = pinnedVerifier(chainId);
+    expect(result.verification?.verifierAddress?.toLowerCase()).toBe(pinned.address);
 
-    const verifier = new ethers.Contract(V2_VERIFIER_BASE_SEPOLIA, VERIFIER_ABI, new ethers.JsonRpcProvider(BASE_SEPOLIA_RPC, 84532, { staticNetwork: true }));
+    const verifier = new ethers.Contract(pinned.address, VERIFIER_ABI, new ethers.JsonRpcProvider(pinned.rpc, chainId, { staticNetwork: true }));
     expect(await verifier.verify(result.proof, f)).toBe(true);
     const tampered = [...f];
     tampered[LAYOUT.ATTESTED_AT] = ethers.toBeHex(BigInt(f[LAYOUT.ATTESTED_AT]) + 1n, 32);
@@ -114,7 +130,7 @@ describe('coinbase_attestation v2 (server statement signed with Cloud KMS)', () 
     expect(tamperedOk).toBe(false);
 
     // eslint-disable-next-line no-console
-    console.log(JSON.stringify({ e2e: 'coinbase_attestation_v2', baseUrl: BASE_URL, wallet, scope, oprfDomain: E2E_OPRF_DOMAIN, oprfEnvironment: environment, attestedAt, paidOn: paid?.paidOn ?? null, verifier: V2_VERIFIER_BASE_SEPOLIA, onChain: true, tamperedRejected: true, proofBytes: (result.proof.length - 2) / 2 }));
+    console.log(JSON.stringify({ e2e: 'coinbase_attestation_v2', baseUrl: BASE_URL, wallet, scope, oprfDomain: E2E_OPRF_DOMAIN, oprfEnvironment: environment, attestedAt, paidOn: paid?.paidOn ?? null, verifierChainId: chainId, verifier: pinned.address, onChain: true, tamperedRejected: true, proofBytes: (result.proof.length - 2) / 2 }));
     if (process.env.E2E_V2_PROOF_OUT) {
       const { writeFileSync } = await import('node:fs');
       writeFileSync(process.env.E2E_V2_PROOF_OUT, JSON.stringify({ proof: result.proof, publicInputs: result.publicInputs, verification: result.verification, scope, wallet }));

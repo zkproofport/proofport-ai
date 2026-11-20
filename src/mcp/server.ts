@@ -85,7 +85,7 @@ ${guideLinks}`,
     `List every supported circuit and canonical guide URL. Hosted tools: get_supported_circuits, get_guide, prove. Read each guide for its attestation source, input schema and verification chain; payment networks are independent of circuit verification.
 ${guideLinks}`,
     async () => {
-      const result = handleGetSupportedCircuits({ chainId: String(getChainId(resolvedConfig)) });
+      const result = handleGetSupportedCircuits({}, String(getChainId(resolvedConfig)));
       const resultWithGuideUrls = { ...result, circuits: result.circuits.map(circuit => ({
         ...circuit, guide_url: guideUrl(canonicalCircuit(circuit.id)),
       })) };

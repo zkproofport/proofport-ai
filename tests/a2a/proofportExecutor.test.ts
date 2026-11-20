@@ -463,7 +463,8 @@ describe('ProofportExecutor', () => {
       expect(mockHandleGetSupportedCircuits).toHaveBeenCalledOnce();
       expect(mockHandleGetSupportedCircuits).toHaveBeenCalledWith(
         expect.objectContaining({ chainId: '84532' }),
-        'disabled',
+        // The server's verification chain (getChainId of the test config), never the payment mode.
+        '11155111',
       );
     });
 
