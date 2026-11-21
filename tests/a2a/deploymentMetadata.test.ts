@@ -7,7 +7,7 @@ import { buildAgentCard, buildMcpDiscovery, buildOasfAgent, buildSkillMd, getAge
 const config = {
   teeMode: 'local', teeAttestationEnabled: true, paymentNetworks: 'base-sepolia,ethereum-sepolia',
   paymentMode: 'testnet', paymentProofPrice: '$0.07', a2aBaseUrl: 'https://proof.example.com',
-  websiteUrl: 'https://example.com', chainRpcUrl: 'https://sepolia.base.org',
+  websiteUrl: 'https://example.com', chainRpcUrl: 'https://sepolia.base.org', chainNetwork: 'testnet',
   erc8004IdentityAddress: '0x0000000000000000000000000000000000000011',
   ethereumRpcUrl: 'https://eth.example.com',
   proverPrivateKey: '0x' + '11'.repeat(32), agentVersion: '1.0.0',
@@ -110,7 +110,7 @@ describe('complete circuit discovery and deployment isolation', () => {
 
   it.each([
     ['staging', config, [11155111, 84532], 'proveragent.sepolia', 3288n],
-    ['production', { ...config, chainRpcUrl: 'https://mainnet.base.org', ethereumRpcUrl: 'https://ethereum.example.com', a2aBaseUrl: 'https://ai.zkproofport.app', paymentNetworks: 'base', erc8004IdentityAddress: '0x0000000000000000000000000000000000000033' }, [1, 8453], 'proveragent.eth', 99n],
+    ['production', { ...config, chainRpcUrl: 'https://mainnet.base.org', chainNetwork: 'mainnet', ethereumRpcUrl: 'https://ethereum.example.com', a2aBaseUrl: 'https://ai.zkproofport.app', paymentNetworks: 'base', erc8004IdentityAddress: '0x0000000000000000000000000000000000000033' }, [1, 8453], 'proveragent.eth', 99n],
   ] as const)('%s publishes only its configured names, registries and tokens', async (_name, current, chainIds, agentName, tokenId) => {
     const { getChainIdentities } = await import('../../src/config/index.js');
     expect(getChainIdentities(current).map(chain => chain.chainId)).toEqual(chainIds);
@@ -135,7 +135,7 @@ describe('complete circuit discovery and deployment isolation', () => {
   });
 
   it('refuses to publish a staging token map under production configuration', () => {
-    const production = { ...config, chainRpcUrl: 'https://mainnet.base.org' };
+    const production = { ...config, chainRpcUrl: 'https://mainnet.base.org', chainNetwork: 'mainnet' };
     const handler = getAgentRegistrationHandler(production, { chains: new Map([[84532, 592n]]) });
     expect(() => handler({} as never, {} as never)).toThrow('Unknown registered chain 84532');
   });

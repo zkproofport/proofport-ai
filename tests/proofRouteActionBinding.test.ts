@@ -9,7 +9,7 @@ const prove = vi.hoisted(() => vi.fn(async () => ({ proof: '0x11', publicInputs:
 vi.mock('../src/prover/bbProver.js', () => ({ BbProver: class { prove = prove; } }));
 const config = {
   paymentMode: 'disabled', paymentNetworks: 'base-sepolia', paymentProofPrice: '$0', paymentPayTo: '0x' + '11'.repeat(20),
-  teeMode: 'local', chainRpcUrl: 'https://sepolia.base.org', a2aBaseUrl: 'https://proof.example.com',
+  teeMode: 'local', chainRpcUrl: 'https://sepolia.base.org', chainNetwork: 'testnet', a2aBaseUrl: 'https://proof.example.com',
   oprfEnvironment: 'staging',
 } as Config;
 const inputs = {

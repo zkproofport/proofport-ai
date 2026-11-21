@@ -31,17 +31,16 @@ async function freshDeployments() {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('verifier records follow the pinned circuits commit', () => {
-  for (const [label, mode, rpc] of [
-    ['staging (testnet)', 'testnet', 'https://sepolia.base.org'],
-    ['production (mainnet)', 'mainnet', 'https://mainnet.base.org'],
-    ['payment disabled on a mainnet RPC', 'disabled', 'https://mainnet.base.org'],
+  for (const [label, network] of [
+    ['staging (testnet)', 'testnet'],
+    ['production (mainnet)', 'mainnet'],
   ] as const) {
     it(`${label}: every broadcast URL is under the pinned commit, never main or a release`, async () => {
       const { syncDeployments } = await freshDeployments();
       const fetchMock = broadcastFetch();
       vi.stubGlobal('fetch', fetchMock);
 
-      await syncDeployments(mode, rpc);
+      await syncDeployments(network);
 
       const urls = fetchMock.mock.calls.map(([u]) => String(u));
       expect(urls.length).toBeGreaterThan(0);
@@ -72,7 +71,7 @@ describe('verifier records follow the pinned circuits commit', () => {
       if (!fallback) return { ok: false, status: 404, json: async () => ({}) };
       return { ok: true, status: 200, json: async () => ({ transactions: [{ contractName: 'HonkVerifier', contractAddress: fallback.toLowerCase() }] }) };
     }));
-    await expect(syncDeployments('testnet', 'https://sepolia.base.org')).resolves.toBe(false);
+    await expect(syncDeployments('testnet')).resolves.toBe(false);
   });
 
   it('syncs GIWA Sepolia, the only chain giwa_attestation lives on', async () => {
@@ -80,7 +79,7 @@ describe('verifier records follow the pinned circuits commit', () => {
     const fetchMock = broadcastFetch();
     vi.stubGlobal('fetch', fetchMock);
 
-    await syncDeployments('testnet', 'https://sepolia.base.org');
+    await syncDeployments('testnet');
 
     const urls = fetchMock.mock.calls.map(([u]) => String(u));
     expect(urls).toContain(`${PINNED}/broadcast/DeployGiwaAttestation.s.sol/91342/run-latest.json`);
@@ -118,7 +117,7 @@ describe('production keeps a core-pinned verifier over an unpinned record', () =
     const fetchMock = unpinnedFetch();
     vi.stubGlobal('fetch', fetchMock);
 
-    await fresh.syncDeployments('mainnet', 'https://mainnet.base.org');
+    await fresh.syncDeployments('mainnet');
 
     expect(fetchMock.mock.calls.map(([u]) => String(u))).toContain(
       `${PINNED}/broadcast/DeployOidcDomainAttestation.s.sol/8453/run-latest.json`,
@@ -135,7 +134,7 @@ describe('production keeps a core-pinned verifier over an unpinned record', () =
     const fresh = await freshDeployments();
     vi.stubGlobal('fetch', broadcastFetch());
 
-    await fresh.syncDeployments('testnet', 'https://sepolia.base.org');
+    await fresh.syncDeployments('testnet');
 
     expect(fresh.getVerifierAddress('oidc_domain_attestation', '84532')).toBe(ADDR);
   });

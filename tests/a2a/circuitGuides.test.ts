@@ -6,7 +6,7 @@ import type { Config } from '../../src/config/index.js';
 const config = {
   teeMode: 'local', teeAttestationEnabled: false, paymentNetworks: 'base-sepolia', paymentMode: 'testnet',
   paymentProofPrice: '$0.001', paymentPayTo: '0x' + '12'.repeat(20), a2aBaseUrl: 'https://stg-ai.zkproofport.app',
-  chainRpcUrl: 'https://sepolia.base.org', baseRpcUrl: 'https://mainnet.base.org', easGraphqlEndpoint: 'https://base.easscan.org/graphql',
+  chainRpcUrl: 'https://sepolia.base.org', chainNetwork: 'testnet', baseRpcUrl: 'https://mainnet.base.org', easGraphqlEndpoint: 'https://base.easscan.org/graphql',
   giwaRpcUrl: 'https://sepolia-rpc.giwa.io', giwaExplorerUrl: 'https://sepolia-explorer.giwa.io',
 } as Config;
 

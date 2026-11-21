@@ -48,7 +48,7 @@ function reader(b = buildIssuance(), over: { none?: boolean; down?: boolean } = 
 
 const baseConfig = {
   paymentMode: 'testnet', paymentNetworks: 'base-sepolia', paymentProofPrice: '$0.10', paymentPayTo: '0x' + '11'.repeat(20),
-  teeMode: 'local', chainRpcUrl: 'https://sepolia.base.org', a2aBaseUrl: 'https://proof.example.com',
+  teeMode: 'local', chainRpcUrl: 'https://sepolia.base.org', chainNetwork: 'testnet', a2aBaseUrl: 'https://proof.example.com',
   oprfEnvironment: 'staging',
 } as Config;
 

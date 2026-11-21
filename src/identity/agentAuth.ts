@@ -14,7 +14,7 @@
 
 import { ethers } from 'ethers';
 import type { Request, Response, NextFunction } from 'express';
-import type { Config } from '../config/index.js';
+import { type Config, isTestnet as isTestnetConfig } from '../config/index.js';
 import { ERC8004_ADDRESSES } from '../config/contracts.js';
 import { createLogger } from '../logger.js';
 
@@ -56,7 +56,7 @@ declare global {
  * - NEVER blocks requests — verification failure logs a warning but continues
  */
 export function createAgentAuthMiddleware(config: Config) {
-  const isTestnet = config.chainRpcUrl.includes('sepolia');
+  const isTestnet = isTestnetConfig(config);
   const identityAddress = isTestnet
     ? ERC8004_ADDRESSES.sepolia.identity
     : ERC8004_ADDRESSES.mainnet.identity;

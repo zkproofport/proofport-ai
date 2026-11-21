@@ -232,6 +232,8 @@ AI_IMAGE=${AI_IMAGE}
 BASE_RPC_URL=REPLACE_ME
 EAS_GRAPHQL_ENDPOINT=https://base.easscan.org/graphql
 CHAIN_RPC_URL=REPLACE_ME
+# testnet | mainnet -- REPLACE on deploy; must match PAYMENT_MODE
+CHAIN_NETWORK=REPLACE_ME
 PROVER_PRIVATE_KEY=REPLACE_ME
 
 # Payment — REPLACE on deploy

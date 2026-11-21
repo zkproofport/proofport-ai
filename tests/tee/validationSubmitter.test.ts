@@ -59,7 +59,7 @@ describe('ensureAgentValidated', () => {
     erc8004IdentityAddress: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
     erc8004ReputationAddress: '0x8004B663056A597Dffe9eCcC1965A193B7388713',
     erc8004ValidationAddress: '0x8004C269D0A5647E51E121FeB226200ECE932d55',
-    chainRpcUrl: 'https://sepolia.base.org',
+    chainRpcUrl: 'https://sepolia.base.org', chainNetwork: 'testnet',
     proverPrivateKey: '0x1234567890123456789012345678901234567890123456789012345678901234',
     teeMode: 'local' as const,
   } as any;

@@ -134,6 +134,7 @@ jobs:
                 echo "MAX_INSTANCES=3"
                 echo "CHAIN_RPC_URL=https://base-sepolia.gateway.tenderly.co"
                 echo "PAYMENT_MODE=testnet"
+                echo "CHAIN_NETWORK=testnet"
                 echo "PAYMENT_NETWORKS=base-sepolia,ethereum-sepolia"
                 echo "PAYMENT_PROOF_PRICE=\$0.001"
                 echo "ERC8004_IDENTITY=0x8004A818BFB912233c491871b3d84c89A494BD9e"
@@ -151,6 +152,7 @@ jobs:
                 echo "MAX_INSTANCES=10"
                 echo "CHAIN_RPC_URL=https://base.gateway.tenderly.co"
                 echo "PAYMENT_MODE=mainnet"
+                echo "CHAIN_NETWORK=mainnet"
                 echo "PAYMENT_NETWORKS=base,ethereum"
                 echo "PAYMENT_PROOF_PRICE=\$0.10"
                 echo "ERC8004_IDENTITY=0x8004A169FB4a3325136EB29fA0ceB6D2e539a432"
@@ -319,6 +321,7 @@ jobs:
           RUNTIME_SERVICE_ACCOUNT: ${{ steps.env.outputs.RUNTIME_SERVICE_ACCOUNT }}
           CHAIN_RPC_URL: ${{ steps.env.outputs.CHAIN_RPC_URL }}
           PAYMENT_MODE: ${{ steps.env.outputs.PAYMENT_MODE }}
+          CHAIN_NETWORK: ${{ steps.env.outputs.CHAIN_NETWORK }}
           PAYMENT_NETWORKS: ${{ steps.env.outputs.PAYMENT_NETWORKS }}
           PAYMENT_PROOF_PRICE: ${{ steps.env.outputs.PAYMENT_PROOF_PRICE }}
           GIWA_RPC_URL: ${{ steps.env.outputs.GIWA_RPC_URL }}
@@ -335,6 +338,7 @@ jobs:
           VARS="$VARS;;EAS_GRAPHQL_ENDPOINT=https://base.easscan.org/graphql"
           VARS="$VARS;;CHAIN_RPC_URL=${CHAIN_RPC_URL}"
           VARS="$VARS;;PAYMENT_MODE=${PAYMENT_MODE}"
+          VARS="$VARS;;CHAIN_NETWORK=${CHAIN_NETWORK}"
           VARS="$VARS;;PAYMENT_NETWORKS=${PAYMENT_NETWORKS}"
           VARS="$VARS;;X402_FACILITATOR_URL=https://x402.dexter.cash"
           VARS="$VARS;;X402_FALLBACK_FACILITATOR_URL=https://facilitator.payai.network"

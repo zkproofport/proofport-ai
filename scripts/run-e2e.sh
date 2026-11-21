@@ -109,7 +109,8 @@ fi
 
 # docker-compose.kms.yml: the container needs the Cloud KMS statement key and
 # credentials for it (coinbase_attestation v2); it refuses to start without them.
-# Redis-only use (the Mac-native path) does not need them, so it stays off there.
+# The Mac-native path starts only Redis from compose and passes the same two
+# settings to the server process itself (start_mac_server).
 KMS_COMPOSE=""
 [ "$CONTAINER" = true ] && KMS_COMPOSE="-f docker-compose.kms.yml"
 COMPOSE_FREE="docker compose -f docker-compose.yml -f docker-compose.e2e-free.yml $KMS_COMPOSE"
@@ -305,6 +306,10 @@ start_mac_server() {
   set +a
   PAYMENT_PROOF_PRICE='$0.10'
   PAYMENT_MODE=disabled
+  CHAIN_NETWORK=testnet
+  # docker-compose.yml sets this for the container; without it the server
+  # refuses every wallet credential proof ("did not name an OPRF environment").
+  OPRF_ENVIRONMENT=local
   BB_PATH="$bb"
   CIRCUITS_DIR="$PWD/circuits"
   # The artifacts scripts/ai-dev.sh copied and pinned, never main's over them.
@@ -313,7 +318,29 @@ start_mac_server() {
   # docker-compose supplies these two; .env.development does not.
   A2A_BASE_URL="http://localhost:4002"
   SIGN_PAGE_URL="http://localhost:4002/sign"
-  export PAYMENT_PROOF_PRICE PAYMENT_MODE BB_PATH CIRCUITS_DIR CIRCUITS_AUTO_UPDATE REDIS_URL A2A_BASE_URL SIGN_PAGE_URL
+  export PAYMENT_PROOF_PRICE PAYMENT_MODE CHAIN_NETWORK OPRF_ENVIRONMENT BB_PATH CIRCUITS_DIR CIRCUITS_AUTO_UPDATE REDIS_URL A2A_BASE_URL SIGN_PAGE_URL
+
+  # The server refuses to start without the Cloud KMS statement key (Coinbase v2
+  # and OIDC statements), here exactly as in the container. Same two settings as
+  # docker-compose.kms.yml; the credentials file becomes
+  # GOOGLE_APPLICATION_CREDENTIALS unless that is already set. Asked for here,
+  # by name, instead of letting the server die 90 s later behind a /health wait.
+  if [ -z "${COINBASE_STATEMENT_KMS_KEY:-}" ]; then
+    err "COINBASE_STATEMENT_KMS_KEY is not set: export the key version the circuits pin (see docker-compose.kms.yml)"
+    return 1
+  fi
+  if [ -z "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]; then
+    if [ -z "${PROOFPORT_AI_GCP_ADC:-}" ]; then
+      err "Neither GOOGLE_APPLICATION_CREDENTIALS nor PROOFPORT_AI_GCP_ADC is set: point one at a gcloud credentials file allowed to sign with the key (see docker-compose.kms.yml)"
+      return 1
+    fi
+    GOOGLE_APPLICATION_CREDENTIALS="$PROOFPORT_AI_GCP_ADC"
+  fi
+  if [ ! -f "$GOOGLE_APPLICATION_CREDENTIALS" ]; then
+    err "No credentials file at $GOOGLE_APPLICATION_CREDENTIALS"
+    return 1
+  fi
+  export COINBASE_STATEMENT_KMS_KEY GOOGLE_APPLICATION_CREDENTIALS
 
   MAC_SERVER_LOG="${TMPDIR:-/tmp}/proofport-ai-mac-server.log"
   log "Starting the server on this Mac, log: $MAC_SERVER_LOG"

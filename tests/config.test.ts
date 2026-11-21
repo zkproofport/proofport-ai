@@ -30,6 +30,7 @@ describe('Config', () => {
     process.env.PROVER_PRIVATE_KEY = '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890';
     process.env.A2A_BASE_URL = 'http://localhost:4002';
     process.env.PAYMENT_MODE = 'disabled';
+    process.env.CHAIN_NETWORK = 'testnet';
     process.env.PAYMENT_NETWORKS = 'base-sepolia';
   }
 
@@ -42,6 +43,7 @@ describe('Config', () => {
       process.env.CHAIN_RPC_URL = 'https://sepolia.base.org';
       process.env.PROVER_PRIVATE_KEY = '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890';
       process.env.PAYMENT_MODE = 'disabled';
+      process.env.CHAIN_NETWORK = 'testnet';
       process.env.PAYMENT_NETWORKS = 'base-sepolia';
       process.env.A2A_BASE_URL = 'http://localhost:4002';
 
@@ -51,6 +53,7 @@ describe('Config', () => {
 
     it('should throw if REDIS_URL is missing', () => {
       process.env.PAYMENT_MODE = 'disabled';
+      process.env.CHAIN_NETWORK = 'testnet';
       process.env.PAYMENT_NETWORKS = 'base-sepolia';
       delete process.env.REDIS_URL;
 
@@ -59,6 +62,7 @@ describe('Config', () => {
 
     it('should throw if BASE_RPC_URL is missing', () => {
       process.env.PAYMENT_MODE = 'disabled';
+      process.env.CHAIN_NETWORK = 'testnet';
       process.env.PAYMENT_NETWORKS = 'base-sepolia';
       process.env.REDIS_URL = 'redis://redis:6379';
       delete process.env.BASE_RPC_URL;
@@ -68,6 +72,7 @@ describe('Config', () => {
 
     it('should throw if EAS_GRAPHQL_ENDPOINT is missing', () => {
       process.env.PAYMENT_MODE = 'disabled';
+      process.env.CHAIN_NETWORK = 'testnet';
       process.env.PAYMENT_NETWORKS = 'base-sepolia';
       process.env.REDIS_URL = 'redis://redis:6379';
       process.env.BASE_RPC_URL = 'https://mainnet.base.org';
@@ -83,6 +88,7 @@ describe('Config', () => {
       process.env.CHAIN_RPC_URL = 'https://sepolia.base.org';
       process.env.PROVER_PRIVATE_KEY = '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890';
       process.env.PAYMENT_MODE = 'disabled';
+      process.env.CHAIN_NETWORK = 'testnet';
       process.env.PAYMENT_NETWORKS = 'base-sepolia';
       delete process.env.A2A_BASE_URL;
 
@@ -111,6 +117,7 @@ describe('Config', () => {
     it('should keep the chains PAYMENT_NETWORKS names, in order', () => {
       setAllRequired();
       process.env.PAYMENT_MODE = 'testnet';
+      process.env.CHAIN_NETWORK = 'testnet';
       process.env.PAYMENT_PAY_TO = '0x5A3E649208Ae15ec52496c1Ae23b2Ff89Ac02f0c';
       process.env.PAYMENT_NETWORKS = 'ethereum-sepolia,base-sepolia';
 
@@ -121,6 +128,7 @@ describe('Config', () => {
       'refuses the removed Arc payment network in PAYMENT_NETWORKS=%s before serving offers', async (networks) => {
         setAllRequired();
         process.env.PAYMENT_MODE = 'testnet';
+        process.env.CHAIN_NETWORK = 'testnet';
         process.env.PAYMENT_PAY_TO = '0x5A3E649208Ae15ec52496c1Ae23b2Ff89Ac02f0c';
         process.env.PAYMENT_NETWORKS = networks;
         const { validateSettlementConfig } = await import('../src/payment/settlementAccount.js');
@@ -153,6 +161,7 @@ describe('Config', () => {
       process.env.CHAIN_RPC_URL = 'https://sepolia.base.org';
       process.env.PROVER_PRIVATE_KEY = '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890';
       process.env.PAYMENT_MODE = 'disabled';
+      process.env.CHAIN_NETWORK = 'testnet';
       process.env.PAYMENT_NETWORKS = 'base-sepolia';
       process.env.A2A_BASE_URL = 'http://localhost:4002';
       process.env.TEE_MODE = 'invalid';
@@ -168,6 +177,7 @@ describe('Config', () => {
       process.env.CHAIN_RPC_URL = 'https://sepolia.base.org';
       process.env.PROVER_PRIVATE_KEY = '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890';
       process.env.PAYMENT_MODE = 'disabled';
+      process.env.CHAIN_NETWORK = 'testnet';
       process.env.PAYMENT_NETWORKS = 'base-sepolia';
       process.env.A2A_BASE_URL = 'http://localhost:4002';
 
@@ -207,6 +217,7 @@ describe('Config', () => {
       process.env.CHAIN_RPC_URL = 'https://sepolia.base.org';
       process.env.PROVER_PRIVATE_KEY = '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890';
       process.env.PAYMENT_MODE = 'disabled';
+      process.env.CHAIN_NETWORK = 'testnet';
       process.env.PAYMENT_NETWORKS = 'base-sepolia';
       process.env.A2A_BASE_URL = 'http://localhost:4002';
       delete process.env.AGENT_VERSION;
@@ -222,6 +233,7 @@ describe('Config', () => {
       process.env.CHAIN_RPC_URL = 'https://sepolia.base.org';
       process.env.PROVER_PRIVATE_KEY = '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890';
       process.env.PAYMENT_MODE = 'disabled';
+      process.env.CHAIN_NETWORK = 'testnet';
       process.env.PAYMENT_NETWORKS = 'base-sepolia';
       process.env.A2A_BASE_URL = 'http://localhost:4002';
       process.env.AGENT_VERSION = '2.5.3';
@@ -239,6 +251,7 @@ describe('Config', () => {
       process.env.CHAIN_RPC_URL = 'https://sepolia.base.org';
       process.env.PROVER_PRIVATE_KEY = '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890';
       process.env.PAYMENT_MODE = 'disabled';
+      process.env.CHAIN_NETWORK = 'testnet';
       process.env.PAYMENT_NETWORKS = 'base-sepolia';
       process.env.A2A_BASE_URL = 'http://localhost:4002';
       delete process.env.TEE_MODE;
@@ -257,6 +270,7 @@ describe('Config', () => {
         process.env.CHAIN_RPC_URL = 'https://sepolia.base.org';
           process.env.PROVER_PRIVATE_KEY = '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890';
         process.env.PAYMENT_MODE = 'disabled';
+        process.env.CHAIN_NETWORK = 'testnet';
       process.env.PAYMENT_NETWORKS = 'base-sepolia';
         process.env.A2A_BASE_URL = 'http://localhost:4002';
         process.env.TEE_MODE = mode;
@@ -273,6 +287,7 @@ describe('Config', () => {
       process.env.CHAIN_RPC_URL = 'https://sepolia.base.org';
       process.env.PROVER_PRIVATE_KEY = '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890';
       process.env.PAYMENT_MODE = 'disabled';
+      process.env.CHAIN_NETWORK = 'testnet';
       process.env.PAYMENT_NETWORKS = 'base-sepolia';
       process.env.A2A_BASE_URL = 'http://localhost:4002';
       process.env.TEE_MODE = 'nitro';
@@ -289,6 +304,7 @@ describe('Config', () => {
       process.env.CHAIN_RPC_URL = 'https://sepolia.base.org';
       process.env.PROVER_PRIVATE_KEY = '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890';
       process.env.PAYMENT_MODE = 'disabled';
+      process.env.CHAIN_NETWORK = 'testnet';
       process.env.PAYMENT_NETWORKS = 'base-sepolia';
       process.env.A2A_BASE_URL = 'http://localhost:4002';
       process.env.TEE_MODE = 'disabled';
@@ -305,6 +321,7 @@ describe('Config', () => {
       process.env.CHAIN_RPC_URL = 'https://sepolia.base.org';
       process.env.PROVER_PRIVATE_KEY = '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890';
       process.env.PAYMENT_MODE = 'disabled';
+      process.env.CHAIN_NETWORK = 'testnet';
       process.env.PAYMENT_NETWORKS = 'base-sepolia';
       process.env.A2A_BASE_URL = 'http://localhost:4002';
       process.env.TEE_MODE = 'disabled';
@@ -321,6 +338,7 @@ describe('Config', () => {
       process.env.CHAIN_RPC_URL = 'https://sepolia.base.org';
       process.env.PROVER_PRIVATE_KEY = '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890';
       process.env.PAYMENT_MODE = 'disabled';
+      process.env.CHAIN_NETWORK = 'testnet';
       process.env.PAYMENT_NETWORKS = 'base-sepolia';
       process.env.A2A_BASE_URL = 'http://localhost:4002';
       process.env.TEE_MODE = 'disabled';
@@ -337,6 +355,7 @@ describe('Config', () => {
       process.env.CHAIN_RPC_URL = 'https://sepolia.base.org';
       process.env.PROVER_PRIVATE_KEY = '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890';
       process.env.PAYMENT_MODE = 'disabled';
+      process.env.CHAIN_NETWORK = 'testnet';
       process.env.PAYMENT_NETWORKS = 'base-sepolia';
       process.env.A2A_BASE_URL = 'http://localhost:4002';
       process.env.TEE_MODE = 'disabled';
@@ -355,6 +374,7 @@ describe('Config', () => {
       process.env.CHAIN_RPC_URL = 'https://sepolia.base.org';
       process.env.PROVER_PRIVATE_KEY = '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890';
       process.env.PAYMENT_MODE = 'disabled';
+      process.env.CHAIN_NETWORK = 'testnet';
       process.env.PAYMENT_NETWORKS = 'base-sepolia';
       process.env.A2A_BASE_URL = 'http://localhost:4002';
       delete process.env.ERC8004_IDENTITY_ADDRESS;
@@ -370,6 +390,7 @@ describe('Config', () => {
       process.env.CHAIN_RPC_URL = 'https://sepolia.base.org';
       process.env.PROVER_PRIVATE_KEY = '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890';
       process.env.PAYMENT_MODE = 'disabled';
+      process.env.CHAIN_NETWORK = 'testnet';
       process.env.PAYMENT_NETWORKS = 'base-sepolia';
       process.env.A2A_BASE_URL = 'http://localhost:4002';
       delete process.env.ERC8004_REPUTATION_ADDRESS;
@@ -385,6 +406,7 @@ describe('Config', () => {
       process.env.CHAIN_RPC_URL = 'https://sepolia.base.org';
       process.env.PROVER_PRIVATE_KEY = '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890';
       process.env.PAYMENT_MODE = 'disabled';
+      process.env.CHAIN_NETWORK = 'testnet';
       process.env.PAYMENT_NETWORKS = 'base-sepolia';
       process.env.A2A_BASE_URL = 'http://localhost:4002';
       process.env.ERC8004_IDENTITY_ADDRESS = '0x8004A818BFB912233c491871b3d84c89A494BD9e';
@@ -400,6 +422,7 @@ describe('Config', () => {
       process.env.CHAIN_RPC_URL = 'https://sepolia.base.org';
       process.env.PROVER_PRIVATE_KEY = '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890';
       process.env.PAYMENT_MODE = 'disabled';
+      process.env.CHAIN_NETWORK = 'testnet';
       process.env.PAYMENT_NETWORKS = 'base-sepolia';
       process.env.A2A_BASE_URL = 'http://localhost:4002';
       process.env.ERC8004_REPUTATION_ADDRESS = '0x8004B663056A597Dffe9eCcC1965A193B7388713';

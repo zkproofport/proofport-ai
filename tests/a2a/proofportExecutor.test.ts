@@ -85,7 +85,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     redisUrl: 'redis://localhost:6379',
     baseRpcUrl: 'https://mainnet.base.org',
     easGraphqlEndpoint: 'https://base.easscan.org/graphql',
-    chainRpcUrl: 'https://sepolia.base.org',
+    chainRpcUrl: 'https://sepolia.base.org', chainNetwork: 'testnet',
     proverPrivateKey: '0xdeadbeef',
     paymentMode: 'disabled',
     paymentNetworks: 'base-sepolia',
@@ -795,7 +795,7 @@ describe('ProofportExecutor', () => {
     it('calls handleProofCompleted after prove success when erc8004ReputationAddress is set', async () => {
       const configWithReputation = makeConfig({
         erc8004ReputationAddress: '0xReputationContract',
-        chainRpcUrl: 'https://sepolia.base.org',
+        chainRpcUrl: 'https://sepolia.base.org', chainNetwork: 'testnet',
         proverPrivateKey: '0xprivkey',
       });
 

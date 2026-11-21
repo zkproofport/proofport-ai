@@ -43,7 +43,7 @@ import { getChainIdentities } from '../../src/config/index.js';
 
 const registry = '0x8004A818BFB912233c491871b3d84c89A494BD9e';
 const config = {
-  erc8004IdentityAddress: registry, erc8004ReputationAddress: '', chainRpcUrl: 'https://sepolia.base.org',
+  erc8004IdentityAddress: registry, erc8004ReputationAddress: '', chainRpcUrl: 'https://sepolia.base.org', chainNetwork: 'testnet',
   ethereumRpcUrl: 'https://ethereum-sepolia.example', agentTokenId: '', agentTokenIdEthereum: '', teeMode: 'local',
   proverPrivateKey: '0x' + '12'.repeat(32), a2aBaseUrl: 'https://stg-ai.zkproofport.app',
 } as Config;

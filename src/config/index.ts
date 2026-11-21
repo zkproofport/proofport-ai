@@ -1,5 +1,6 @@
 import { createRequire } from 'node:module';
 import { parseOprfEnvironment } from './oprfKeyHashes.js';
+import { type ChainNetwork, assertPaymentModeMatchesNetwork, parseChainNetwork } from './chainNetwork.js';
 
 const serverVersion: string = createRequire(import.meta.url)('../../package.json').version;
 
@@ -36,6 +37,8 @@ export function parseApprovalTrustProxyHops(value: string | undefined): number |
 
 export function loadConfig() {
   const paymentMode = validatePaymentMode(getRequiredEnv('PAYMENT_MODE'));
+  const chainNetwork = parseChainNetwork(process.env.CHAIN_NETWORK);
+  assertPaymentModeMatchesNetwork(paymentMode, chainNetwork);
 
   const config = {
     port: parseInt(process.env.PORT || '4002', 10),
@@ -49,6 +52,8 @@ export function loadConfig() {
     baseRpcUrl: getRequiredEnv('BASE_RPC_URL'),
     easGraphqlEndpoint: getRequiredEnv('EAS_GRAPHQL_ENDPOINT'),
     chainRpcUrl: getRequiredEnv('CHAIN_RPC_URL'),
+    /** testnet | mainnet, from CHAIN_NETWORK. Never inferred from an RPC URL. */
+    chainNetwork,
     proverPrivateKey: getRequiredEnv('PROVER_PRIVATE_KEY'),
     paymentMode,
     a2aBaseUrl: getRequiredEnv('A2A_BASE_URL'),
@@ -153,9 +158,24 @@ export interface ChainIdentity {
   cachedTokenId: string;
 }
 
-/** Whether the environment is testnet (Base Sepolia) */
+/** Chain ids each network uses. Keyed by CHAIN_NETWORK; an unknown key throws. */
+const NETWORK_CHAINS: Record<ChainNetwork, { primaryChainId: number; paymentChainId: number }> = {
+  testnet: { primaryChainId: 11155111, paymentChainId: 84532 },
+  mainnet: { primaryChainId: 1, paymentChainId: 8453 },
+};
+
+function networkChains(config: Config) {
+  const network = config.chainNetwork;
+  if (!Object.hasOwn(NETWORK_CHAINS, network)) {
+    throw new Error(`Unknown chainNetwork ${JSON.stringify(network)}. Known: ${Object.keys(NETWORK_CHAINS).join(', ')}.`);
+  }
+  return NETWORK_CHAINS[network];
+}
+
+/** Whether the deployment serves testnets (Ethereum Sepolia + Base Sepolia). */
 export function isTestnet(config: Config): boolean {
-  return config.chainRpcUrl.includes('sepolia');
+  networkChains(config);
+  return config.chainNetwork === 'testnet';
 }
 
 /**
@@ -163,7 +183,7 @@ export function isTestnet(config: Config): boolean {
  * Production: Ethereum mainnet (1). Testnet: Ethereum Sepolia (11155111).
  */
 export function getChainId(config: Config): number {
-  return isTestnet(config) ? 11155111 : 1;
+  return networkChains(config).primaryChainId;
 }
 
 /**
@@ -171,7 +191,7 @@ export function getChainId(config: Config): number {
  * Production: Base mainnet (8453). Testnet: Base Sepolia (84532).
  */
 export function getPaymentChainId(config: Config): number {
-  return isTestnet(config) ? 84532 : 8453;
+  return networkChains(config).paymentChainId;
 }
 
 export function isProductionChain(config: Config): boolean {

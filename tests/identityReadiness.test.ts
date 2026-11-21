@@ -18,7 +18,7 @@ vi.mock('../src/identity/autoRegister.js', async (importOriginal) => ({
 const config = {
   paymentMode: 'disabled', paymentNetworks: 'base-sepolia', paymentProofPrice: '$0.1',
   teeMode: 'local', teeAttestationEnabled: false, a2aBaseUrl: 'https://proof.example.com',
-  websiteUrl: 'https://example.com', chainRpcUrl: 'https://sepolia.base.org',
+  websiteUrl: 'https://example.com', chainRpcUrl: 'https://sepolia.base.org', chainNetwork: 'testnet',
   erc8004IdentityAddress: '0x0000000000000000000000000000000000000011',
   proverPrivateKey: '0x' + '11'.repeat(32), agentVersion: '1.0.0', redisUrl: 'redis://example.invalid',
   circuitsDir: 'circuits', bbPath: 'bb',

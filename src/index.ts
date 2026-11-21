@@ -327,7 +327,7 @@ async function startServer() {
 
     // Sync verifier addresses from the pinned circuits commit's broadcast JSON
     try {
-      const deploymentsUpdated = await syncDeployments(config.paymentMode, config.chainRpcUrl);
+      const deploymentsUpdated = await syncDeployments(config.chainNetwork);
       log.info({ action: 'server.deployments.synced', updated: deploymentsUpdated }, 'Deployment addresses synced');
     } catch (err) {
       log.warn({ action: 'server.deployments.failed', err }, 'Deployment sync failed, using fallback addresses');

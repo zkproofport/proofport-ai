@@ -127,7 +127,7 @@ vi.mock('../../src/config/index.js', async (importOriginal) => ({
     redisUrl: 'redis://localhost:6379',
     baseRpcUrl: 'https://base-rpc.example.com',
     easGraphqlEndpoint: 'https://eas.example.com',
-    chainRpcUrl: 'https://chain.example.com',
+    chainRpcUrl: 'https://chain.example.com', chainNetwork: 'mainnet',
     proverPrivateKey: '0x' + 'ab'.repeat(32),
     paymentMode: 'disabled',
     paymentNetworks: 'base-sepolia',
@@ -236,7 +236,7 @@ describe('MCP Endpoint E2E', () => {
       redisUrl: 'redis://localhost:6379',
       baseRpcUrl: 'https://base-rpc.example.com',
       easGraphqlEndpoint: 'https://eas.example.com',
-      chainRpcUrl: 'https://chain.example.com',
+      chainRpcUrl: 'https://chain.example.com', chainNetwork: 'mainnet',
       proverPrivateKey: '0x' + 'ab'.repeat(32),
       paymentMode: 'disabled' as const,
       paymentNetworks: 'base-sepolia',
@@ -422,8 +422,8 @@ describe('MCP Endpoint E2E', () => {
     // advertised the real chain. An agent following the payload would have
     // verified production proofs against a testnet contract.
     //
-    // testConfig.chainRpcUrl is not a sepolia URL, so this environment is a
-    // production one and getChainId() is 1 (Ethereum Mainnet).
+    // testConfig.chainNetwork is 'mainnet', so getChainId() is 1 (Ethereum
+    // Mainnet).
     it('should report the config chain in get_supported_circuits, not a testnet default', async () => {
       const response = await request(server)
         .post('/mcp')

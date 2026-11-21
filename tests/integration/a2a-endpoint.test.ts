@@ -189,7 +189,7 @@ describe('A2A Endpoint E2E', () => {
       // A sepolia RPC makes this a coherent testnet fixture: it is what selects
       // the sepolia ERC-8004 registry named just below, and the identity chain
       // that follows from it is Ethereum Sepolia (11155111).
-      chainRpcUrl: 'https://sepolia.base.org',
+      chainRpcUrl: 'https://sepolia.base.org', chainNetwork: 'testnet',
       proverPrivateKey: '0x' + 'ab'.repeat(32),
       paymentMode: 'disabled' as const,
       paymentNetworks: 'base-sepolia',

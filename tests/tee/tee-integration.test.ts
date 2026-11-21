@@ -67,7 +67,7 @@ function makeTestConfig(overrides: Partial<Config> = {}): Config {
     redisUrl: 'redis://localhost:6379',
     baseRpcUrl: 'https://mainnet.base.org',
     easGraphqlEndpoint: 'https://base.easscan.org/graphql',
-    chainRpcUrl: 'https://sepolia.base.org',
+    chainRpcUrl: 'https://sepolia.base.org', chainNetwork: 'testnet',
     proverPrivateKey: '0x5c8eb0e0dcdcdabdc87f1fae3e992132e8a06b83188dfba625ca95036876bb0a',
     paymentMode: 'disabled' as const,
     paymentNetworks: 'base-sepolia',

@@ -5,7 +5,7 @@ import { createMcpServer } from '../src/mcp/server.js';
 import { PROVABLE_CIRCUIT_IDS } from '../src/config/circuitIds.js';
 import type { Config } from '../src/config/index.js';
 const config = { paymentMode: 'testnet', paymentNetworks: 'base-sepolia', paymentProofPrice: '$0.01',
-  chainRpcUrl: 'https://sepolia.base.org', ethereumRpcUrl: 'https://ethereum-sepolia-rpc.publicnode.com',
+  chainRpcUrl: 'https://sepolia.base.org', chainNetwork: 'testnet', ethereumRpcUrl: 'https://ethereum-sepolia-rpc.publicnode.com',
   a2aBaseUrl: 'https://custom.example.com', teeMode: 'local', agentVersion: '0.2.9',
   arcRpcUrl: 'https://rpc.testnet.arc.network', arcChainId: 5042002, giwaRpcUrl: 'https://sepolia-rpc.giwa.io',
   proverPrivateKey: '0x' + '11'.repeat(32), paymentPayTo: '0x' + '22'.repeat(20),

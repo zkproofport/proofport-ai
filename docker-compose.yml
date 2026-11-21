@@ -37,6 +37,10 @@ services:
       # and never downloads circuits; `true` is refused at boot.
       CIRCUITS_AUTO_UPDATE: "false"
       A2A_BASE_URL: http://${HOST_IP:-localhost}:4002
+      # The local stack serves testnets only (Base Sepolia RPC, Sepolia
+      # identities, testnet payment). Required by the server; never inferred
+      # from CHAIN_RPC_URL.
+      CHAIN_NETWORK: testnet
       # Wallet credential proofs use the test OPRF network's pinned key here
       # (src/config/oprfKeyHashes.ts). Unset, those requests are refused.
       OPRF_ENVIRONMENT: local

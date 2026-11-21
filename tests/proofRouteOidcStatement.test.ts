@@ -99,7 +99,7 @@ function deps(opts: { published?: boolean | 'fetch-failed'; signWith?: Uint8Arra
 
 const baseConfig = {
   paymentMode: 'disabled', paymentNetworks: 'base-sepolia', paymentProofPrice: '$0.10', paymentPayTo: '0x' + '11'.repeat(20),
-  teeMode: 'local', chainRpcUrl: 'https://sepolia.base.org', a2aBaseUrl: 'https://proof.example.com',
+  teeMode: 'local', chainRpcUrl: 'https://sepolia.base.org', chainNetwork: 'testnet', a2aBaseUrl: 'https://proof.example.com',
 } as Config;
 
 function app(config: Config, statement?: ReturnType<typeof deps>) {

@@ -47,7 +47,7 @@ describe('A2A Integration Tests', () => {
       redisUrl: 'redis://localhost:6379',
       baseRpcUrl: 'https://base.example.com',
       easGraphqlEndpoint: 'https://eas.example.com',
-      chainRpcUrl: 'https://chain.example.com',
+      chainRpcUrl: 'https://chain.example.com', chainNetwork: 'mainnet',
       proverPrivateKey: '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
       paymentMode: 'disabled',
       paymentNetworks: 'base-sepolia',

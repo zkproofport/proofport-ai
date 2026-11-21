@@ -24,6 +24,7 @@ import { FALLBACK_VERIFIERS } from './contracts.js';
 import { CIRCUIT_IDS, PROVABLE_CIRCUIT_IDS } from './circuitIds.js';
 import { pinnedCircuitsRawBase } from './circuitsPin.js';
 import type { CircuitId } from './circuitIds.js';
+import type { ChainNetwork } from './chainNetwork.js';
 
 const log = createLogger('Deployments');
 
@@ -201,40 +202,32 @@ async function syncChain(chainId: number, isProduction: boolean): Promise<boolea
   return updated;
 }
 
+const SYNC_PLAN: Record<ChainNetwork, { chainIds: number[]; isProduction: boolean }> = {
+  mainnet: { chainIds: [1, 8453], isProduction: true },
+  testnet: { chainIds: [11155111, 84532, 91342], isProduction: false },
+};
+
 /**
  * Fetch latest verifier addresses from GitHub broadcast JSON.
  * Updates the in-memory cache for all deployed chains. Call at server startup.
  *
- * Syncs: Ethereum mainnet (1), Base mainnet (8453), and Base Sepolia (84532) for testnet.
+ * Syncs, per CHAIN_NETWORK (src/config/chainNetwork.ts):
+ *   mainnet -- Ethereum mainnet (1) and Base mainnet (8453), production records.
+ *   testnet -- Ethereum Sepolia (11155111), Base Sepolia (84532) and GIWA
+ *              Sepolia (91342), the only chain giwa_attestation is deployed on,
+ *              which was never synced and so stayed on its fallback address
+ *              after every redeploy.
  *
  * Records are read from the pinned circuits commit (src/config/circuitsPin.ts).
  *
- * @param paymentMode - 'testnet' | 'mainnet' | 'disabled'
+ * @param chainNetwork - the deployment's CHAIN_NETWORK; never inferred from an RPC URL
  * @returns true if any address was updated
  */
-export async function syncDeployments(
-  paymentMode: string,
-  chainRpcUrl: string | undefined,
-): Promise<boolean> {
-  const isTestnetRpc = chainRpcUrl?.includes('sepolia') ?? false;
-  const isProduction = paymentMode === 'mainnet' || (paymentMode === 'disabled' && !isTestnetRpc);
-
-  if (isProduction) {
-    // Sync both Ethereum mainnet and Base mainnet
-    const [ethUpdated, baseUpdated] = await Promise.all([
-      syncChain(1, true),
-      syncChain(8453, true),
-    ]);
-    return ethUpdated || baseUpdated;
-  } else {
-    // Testnet: Ethereum Sepolia, Base Sepolia, and GIWA Sepolia -- the only
-    // chain giwa_attestation is deployed on, which was never synced and so
-    // stayed on its fallback address after every redeploy.
-    const results = await Promise.all([
-      syncChain(11155111, false),
-      syncChain(84532, false),
-      syncChain(91342, false),
-    ]);
-    return results.some(Boolean);
+export async function syncDeployments(chainNetwork: ChainNetwork): Promise<boolean> {
+  if (!Object.hasOwn(SYNC_PLAN, chainNetwork)) {
+    throw new Error(`Unknown chainNetwork ${JSON.stringify(chainNetwork)}. Known: ${Object.keys(SYNC_PLAN).join(', ')}.`);
   }
+  const { chainIds, isProduction } = SYNC_PLAN[chainNetwork];
+  const results = await Promise.all(chainIds.map((chainId) => syncChain(chainId, isProduction)));
+  return results.some(Boolean);
 }
