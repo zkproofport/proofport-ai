@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.0](https://github.com/zkproofport/proofport-ai/compare/server-v0.7.0...server-v0.8.0) (2026-11-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* name the chain network explicitly instead of reading it from the RPC URL
+
+### Bug Fixes
+
+* name the chain network explicitly instead of reading it from the RPC URL ([7d70d0b](https://github.com/zkproofport/proofport-ai/commit/7d70d0b615937fa47015b04e59664448a3e13ed1))
+* supported circuits use the server's verification chain ([97bbce1](https://github.com/zkproofport/proofport-ai/commit/97bbce10c2f6ab8a6e180aae3a20d14df9621081))
+
 ## [0.7.0](https://github.com/zkproofport/proofport-ai/compare/server-v0.6.8...server-v0.7.0) (2026-11-20)
 
 
